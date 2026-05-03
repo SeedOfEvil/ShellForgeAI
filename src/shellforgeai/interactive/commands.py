@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -7,6 +8,32 @@ from dataclasses import dataclass
 class RoutedCommand:
     name: str
     args: str = ""
+
+
+def _normalize_intent_text(text: str) -> str:
+    lowered = re.sub(r"[^a-z0-9/\s]", " ", text.lower())
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    fillers = (
+        "hey ",
+        "hi ",
+        "hello ",
+        "yo ",
+        "please ",
+        "can you ",
+        "could you ",
+        "i think ",
+        "so ",
+        "uh ",
+        "um ",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for prefix in fillers:
+            if lowered.startswith(prefix):
+                lowered = lowered[len(prefix) :].strip()
+                changed = True
+    return lowered
 
 
 def route_input(text: str) -> RoutedCommand:
@@ -17,7 +44,7 @@ def route_input(text: str) -> RoutedCommand:
         head, _, tail = raw.partition(" ")
         return RoutedCommand(name=head.lower(), args=tail.strip())
 
-    lowered = raw.lower()
+    lowered = _normalize_intent_text(raw)
     perf_intents = [
         "my machine is running slow",
         "my computer is slow",
