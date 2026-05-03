@@ -67,6 +67,12 @@ def test_filler_prefixed_intents_still_route() -> None:
     assert route_input("Uh, could you tell me how much disk space do we have left?").args == "disk"
 
 
+def test_tool_first_ops_hints_prevent_generic_ask_fallthrough() -> None:
+    assert route_input("can you check cpu pressure quickly").args == "performance"
+    assert route_input("what ports are exposed right now").args == "services"
+    assert route_input("is docker healthy").args == "docker"
+
+
 def test_prompt_includes_collected_evidence_instruction() -> None:
     prompt = build_model_prompt(
         "how much disk space left",

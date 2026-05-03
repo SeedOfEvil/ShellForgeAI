@@ -213,4 +213,25 @@ def route_input(text: str) -> RoutedCommand:
     ]:
         if lowered.startswith(prefix):
             return RoutedCommand(name=cmd, args=raw[len(prefix) :].strip())
+    tool_first_ops_hints = [
+        ("cpu", "performance"),
+        ("memory", "performance"),
+        ("load", "performance"),
+        ("slow", "performance"),
+        ("disk", "disk"),
+        ("storage", "disk"),
+        ("inode", "disk"),
+        ("firewall", "firewall"),
+        ("service", "services"),
+        ("listening", "services"),
+        ("port", "services"),
+        ("nginx", "nginx"),
+        ("docker", "docker"),
+        ("ssh", "ssh"),
+        ("host health", "health"),
+        ("machine health", "health"),
+    ]
+    for token, target in tool_first_ops_hints:
+        if token in lowered:
+            return RoutedCommand(name="diagnose", args=target)
     return RoutedCommand(name="ask", args=raw)
