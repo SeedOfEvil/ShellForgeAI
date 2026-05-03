@@ -113,3 +113,25 @@ def test_health_prompt_never_silent_on_empty_stream(monkeypatch):
     assert res.exit_code == 0
     assert "Collected 0 evidence item(s)" in res.stdout
     assert "## Assessment" in res.stdout
+
+
+def test_health_prompt_fallback_on_heading_only_model_response(monkeypatch):
+    class Provider:
+        def complete(self, req):
+            return type("R", (), {"text": "## Assessment\n"})()
+
+    class FakeRes:
+        session_id = "s1"
+        target_type = type("T", (), {"value": "host"})()
+        findings = []
+        evidence = type("E", (), {"items": []})()
+        proposed_plan = type("P", (), {"model_dump_json": lambda self, indent=2: "{}"})()
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", lambda *_: Provider())
+    monkeypatch.setattr("shellforgeai.interactive.repl.diagnose_target", lambda *a, **k: FakeRes())
+    res = runner.invoke(
+        app, ["interactive", "--no-trust-cache"], input="y\nIs my computer okay?\n/exit\n"
+    )
+    assert res.exit_code == 0
+    assert "## Assessment" in res.stdout
+    assert "No critical issue seen from current read-only context." in res.stdout

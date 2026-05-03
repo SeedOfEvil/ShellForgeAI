@@ -53,6 +53,16 @@ def route_input(text: str) -> RoutedCommand:
         "out of space",
         "inode usage",
         "are inodes full",
+        "disk is dying",
+        "drive is dying",
+        "disk failing",
+        "drive failing",
+        "disk health",
+        "storage health",
+        "disk errors",
+        "hard drive issue",
+        "nvme issue",
+        "ssd issue",
     ]
     if any(p in lowered for p in disk_intents):
         return RoutedCommand(name="diagnose", args="disk")

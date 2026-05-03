@@ -98,8 +98,9 @@ def _evidence_table(console: Console, checks: list[dict[str, str]]) -> None:
 def _run_model_synthesis(
     console: Console, provider, request: ModelRequest, raw: bool
 ) -> tuple[str, bool]:
+    streaming_enabled = os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
     final_text = ""
-    if hasattr(provider, "stream_complete"):
+    if streaming_enabled and hasattr(provider, "stream_complete"):
         with console.status("Synthesizing operator summary..."):
             pass
         for event in provider.stream_complete(request):
@@ -118,6 +119,13 @@ def _run_model_synthesis(
     with console.status("Asking model..."):
         resp = provider.complete(request)
     return resp.text, False
+
+
+def _has_substantive_response(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return stripped.lower() not in {"## assessment", "# assessment"}
 
 
 def _confirm_workspace(console: Console, runtime: RuntimeContext, no_trust_cache: bool) -> bool:
@@ -502,7 +510,7 @@ Commands:
                         mresp_text, encoding="utf-8"
                     )
                     console.print("\n## Assessment")
-                    if not mresp_text.strip():
+                    if not _has_substantive_response(mresp_text):
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)
@@ -694,11 +702,11 @@ No command was executed.""")
             (runtime.session.artifact_dir / "model-response.md").write_text(
                 resp_text, encoding="utf-8"
             )
-        if not resp_text.strip() and kind == "diagnose":
+        if not _has_substantive_response(resp_text) and kind == "diagnose":
             console.print(
                 _deterministic_operator_summary("health", context.get("machine_health", []))
             )
-        elif not resp_text.strip():
+        elif not _has_substantive_response(resp_text):
             console.print(
                 "ShellForgeAI did not produce a response for that input. No action was taken."
             )
