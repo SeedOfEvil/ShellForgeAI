@@ -41,6 +41,39 @@ def route_input(text: str) -> RoutedCommand:
     ]
     if any(p in lowered for p in perf_intents):
         return RoutedCommand(name="diagnose", args="performance")
+    storage_perf_intents = [
+        "i think my disk is slow",
+        "disk is slow",
+        "disk feels slow",
+        "storage is slow",
+        "drive is slow",
+        "filesystem is slow",
+        "io is slow",
+        "i/o is slow",
+        "high io",
+        "high disk io",
+        "disk performance",
+        "storage performance",
+        "disk latency",
+        "disk lag",
+        "writes are slow",
+        "reads are slow",
+        "disk is dying",
+        "drive is dying",
+        "disk failing",
+        "drive failing",
+        "disk health",
+        "storage health",
+        "nvme issue",
+        "ssd issue",
+        "hard drive issue",
+        "filesystem issue",
+        "storage issue",
+        "disk slow",
+        "disk dying",
+    ]
+    if any(p in lowered for p in storage_perf_intents):
+        return RoutedCommand(name="diagnose", args="storage_performance")
     disk_intents = [
         "how much disk space do we have left",
         "disk space left",

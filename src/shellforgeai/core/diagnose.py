@@ -69,6 +69,9 @@ def diagnose_target(
     if canonical_target in {"services", "service-discovery", "listening", "ports"}:
         canonical_target = "service-discovery"
         target = "service-discovery"
+    if canonical_target in {"storage_performance", "disk-performance", "io", "iowait"}:
+        canonical_target = "storage-performance"
+        target = "storage-performance"
     if canonical_target in {"performance", "slow", "slowness"}:
         canonical_target = "host"
     if target in {"health"} or canonical_target == "host":
@@ -77,6 +80,11 @@ def diagnose_target(
         k in target.lower() for k in ["slow", "performance", "high cpu", "high memory", "high load"]
     ):
         items.extend(collect_performance_evidence(context))
+    if canonical_target == "storage-performance":
+        items.extend(collect_health_evidence(context))
+        items.extend(collect_performance_evidence(context))
+        items.extend(collect_disk_evidence(context))
+        items.extend(collect_local_knowledge_evidence(context, "disk"))
     elif ttype == TargetType.service or canonical_target == "service-discovery":
         items.extend(collect_service_evidence(context, target, since=since))
         if target.lower() == "nginx":

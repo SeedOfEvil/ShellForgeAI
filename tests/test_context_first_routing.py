@@ -41,6 +41,20 @@ def test_service_intents_route_to_service_discovery() -> None:
         assert routed.args == "services"
 
 
+def test_storage_performance_intents_route_to_diagnose_storage_performance() -> None:
+    for phrase in [
+        "I think my disk is slow",
+        "disk is slow",
+        "storage is slow",
+        "high IO",
+        "disk is dying",
+        "NVMe issue",
+    ]:
+        routed = route_input(phrase)
+        assert routed.name == "diagnose"
+        assert routed.args == "storage_performance"
+
+
 def test_prompt_includes_collected_evidence_instruction() -> None:
     prompt = build_model_prompt(
         "how much disk space left",

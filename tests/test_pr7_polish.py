@@ -135,3 +135,26 @@ def test_health_prompt_fallback_on_heading_only_model_response(monkeypatch):
     assert res.exit_code == 0
     assert "## Assessment" in res.stdout
     assert "No critical issue seen from current read-only context." in res.stdout
+
+
+def test_health_prompt_fallback_on_collector_request_boilerplate(monkeypatch):
+    class Provider:
+        def complete(self, req):
+            return type("R", (), {"text": "I only have host/mode context so far."})()
+
+    class FakeRes:
+        session_id = "s1"
+        target_type = type("T", (), {"value": "host"})()
+        findings = []
+        evidence = type("E", (), {"items": []})()
+        proposed_plan = type("P", (), {"model_dump_json": lambda self, indent=2: "{}"})()
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", lambda *_: Provider())
+    monkeypatch.setattr("shellforgeai.interactive.repl.diagnose_target", lambda *a, **k: FakeRes())
+    res = runner.invoke(
+        app,
+        ["interactive", "--no-trust-cache"],
+        input="y\nAnything wrong with my computer?\n/exit\n",
+    )
+    assert res.exit_code == 0
+    assert "No critical issue seen from current read-only context." in res.stdout

@@ -125,7 +125,18 @@ def _has_substantive_response(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
         return False
-    return stripped.lower() not in {"## assessment", "# assessment"}
+    lowered = stripped.lower()
+    banned = [
+        "please collect these",
+        "please run disk.usage",
+        "please run host.resources",
+        "i only have host/mode context",
+        "i don’t have evidence yet",
+        "i don't have evidence yet",
+    ]
+    if any(b in lowered for b in banned):
+        return False
+    return lowered not in {"## assessment", "# assessment"}
 
 
 def _confirm_workspace(console: Console, runtime: RuntimeContext, no_trust_cache: bool) -> bool:
