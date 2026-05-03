@@ -55,6 +55,12 @@ def test_storage_performance_intents_route_to_diagnose_storage_performance() -> 
         assert routed.args == "storage_performance"
 
 
+def test_plain_english_slow_phrase_routes_to_diagnose_performance() -> None:
+    routed = route_input("Hey my computer feels slow")
+    assert routed.name == "diagnose"
+    assert routed.args in {"performance", "storage_performance"}
+
+
 def test_prompt_includes_collected_evidence_instruction() -> None:
     prompt = build_model_prompt(
         "how much disk space left",
