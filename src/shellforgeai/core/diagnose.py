@@ -80,6 +80,9 @@ def diagnose_target(
         k in target.lower() for k in ["slow", "performance", "high cpu", "high memory", "high load"]
     ):
         items.extend(collect_performance_evidence(context))
+        items.extend(collect_disk_evidence(context))
+        items.extend(collect_network_evidence(context))
+        items.extend(collect_local_knowledge_evidence(context, "performance"))
     if canonical_target == "storage-performance":
         items.extend(collect_health_evidence(context))
         items.extend(collect_performance_evidence(context))
