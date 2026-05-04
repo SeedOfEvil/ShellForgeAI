@@ -34,15 +34,28 @@ def _summarize(result) -> str:
             if result.stdout.strip()
             else f"{cmd}: not found"
         )
+    if result.tool == "system.os_release" and result.stdout.strip().startswith("{"):
+        data = literal_eval(result.stdout)
+        name = data.get("name", "Unknown")
+        ver = data.get("version", "").strip()
+        pretty = f"{name} {ver}".strip()
+        return pretty if pretty else "os release unavailable"
     if result.tool == "host.info" and "hostname" in result.stdout:
         return result.stdout.replace("'", "").replace("{", "").replace("}", "")[:120]
     if result.tool == "system.cpu_memory" and result.stdout.strip().startswith("{"):
         data = literal_eval(result.stdout)
-        return (
-            f"cpus={data.get('cpus', '?')} "
-            f"mem_used={data.get('mem_used_mb', '?')}/{data.get('mem_total_mb', '?')}MB "
-            f"swap_used={data.get('swap_used_mb', '?')}/{data.get('swap_total_mb', '?')}MB"
-        )
+        mem_used = float(data.get("mem_used_mb", 0)) / 1024
+        mem_total = float(data.get("mem_total_mb", 0)) / 1024
+        swap_used = float(data.get("swap_used_mb", 0))
+        swap_total = float(data.get("swap_total_mb", 0)) / 1024
+        swap_text = "swap=0B/0B"
+        if swap_total > 0:
+            swap_text = (
+                f"swap=0B/{swap_total:.1f}GiB"
+                if swap_used <= 0.01
+                else f"swap={swap_used / 1024:.1f}GiB/{swap_total:.1f}GiB"
+            )
+        return f"cpus={data.get('cpus', '?')} mem={mem_used:.1f}GiB/{mem_total:.1f}GiB {swap_text}"
     if result.tool == "system.container_detect":
         val = (result.stdout or "").strip().replace("\n", " ")
         return f"container={val}" if val else "container=unknown"
@@ -62,7 +75,10 @@ def _summarize(result) -> str:
             return f"found {target} pid={pid}"
         return f"no matching {target} process"
     if result.tool == "host.resources":
-        return first.replace("{'loadavg': ", "loadavg=").replace("}", "")
+        if "loadavg" in first:
+            val = first.split("loadavg", 1)[-1]
+            return val.replace(":", "=").replace("(", "").replace(")", "").replace(" ", "")
+        return first
     if result.tool == "network.listeners":
         rows = max(0, len((result.stdout or "").splitlines()) - 1)
         return "no listening sockets" if rows == 0 else f"{rows} listening sockets"

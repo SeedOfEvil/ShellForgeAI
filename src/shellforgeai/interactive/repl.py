@@ -327,6 +327,16 @@ def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, str] | None:
     q = question.lower()
+    is_disk_capacity_intent = any(
+        k in q
+        for k in (
+            "disk full",
+            "disk getting full",
+            "running out of space",
+            "disk space",
+            "inodes",
+        )
+    ) or intent in {"disk"}
     if any(w in q for w in ("service", "services", "nginx", "ssh", "docker", "port")):
         return {
             "intent": "service_health_deep_dive",
@@ -341,6 +351,29 @@ def select_followup_investigation(
             "description": "routes, DNS, listeners, and firewall context",
             "bundle": "network",
         }
+    disk_summary = next((c.get("summary", "") for c in checks if c.get("tool") == "disk.usage"), "")
+    inode_summary = next(
+        (c.get("summary", "") for c in checks if c.get("tool") == "disk.inodes"), ""
+    )
+    if is_disk_capacity_intent:
+        joined = f"{disk_summary} {inode_summary}"
+        if not joined.strip() or "unavailable" in joined.lower():
+            return {
+                "intent": "disk_capacity_deep_dive",
+                "label": "disk capacity angle",
+                "description": "disk growth and inode pressure details",
+                "bundle": "disk",
+                "reason": "disk/inode evidence is unavailable or incomplete",
+            }
+        if any(x in joined for x in (" 8", " 9", "100%")):
+            return {
+                "intent": "disk_capacity_deep_dive",
+                "label": "disk capacity angle",
+                "description": "disk growth and inode pressure details",
+                "bundle": "disk",
+                "reason": "disk or inode usage is elevated",
+            }
+        return None
     for c in checks:
         tool = c.get("tool", "")
         summary = c.get("summary", "").lower()
@@ -356,6 +389,7 @@ def select_followup_investigation(
         "label": "broader read-only health pass",
         "description": "missing context, pressure signals, and recent error clues",
         "bundle": "health",
+        "reason": "no single stronger angle was detected",
     }
 
 
@@ -420,8 +454,15 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                 }
                 for i in res.evidence.items
             ]
-            console.print(f"Deeper investigation complete: {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
+            console.print(
+                f"Deeper investigation complete: {len(checks)} read-only evidence item(s)."
+            )
+            if evidence_mode == "full":
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
             console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
             completed_followups.append(pending_followup["intent"])
             pending_followup = None
@@ -711,6 +752,18 @@ Commands:
                             _operator_followup_text(
                                 pending_followup["label"], pending_followup["description"]
                             )
+                        )
+                    elif not pending_followup and (
+                        routed.args == "disk"
+                        and any(
+                            k in user_input.lower()
+                            for k in ("disk full", "disk getting full", "running out of space")
+                        )
+                    ):
+                        console.print(
+                            "Disk capacity looks healthy from this context. I don’t see a "
+                            "disk-capacity reason to dig deeper. If the concern is slowness "
+                            "rather than fullness, I can investigate performance/I/O next."
                         )
                 except Exception as exc:
                     provider_error = str(exc)
