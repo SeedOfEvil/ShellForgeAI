@@ -66,13 +66,19 @@ def diagnose_target(
     if online and not context.session.online_enabled:
         warnings.append("Online research requested but blocked by active profile/policy.")
     canonical_target = target.lower().strip()
-    if canonical_target in {"services", "service-discovery", "listening", "ports"}:
+    if canonical_target in {
+        "services",
+        "service-discovery",
+        "listening",
+        "ports",
+        "service_deep_dive",
+    }:
         canonical_target = "service-discovery"
         target = "service-discovery"
     if canonical_target in {"storage_performance", "disk-performance", "io", "iowait"}:
         canonical_target = "storage-performance"
         target = "storage-performance"
-    if canonical_target in {"performance", "slow", "slowness", "host"}:
+    if canonical_target in {"performance", "slow", "slowness", "host", "performance_deep_dive"}:
         canonical_target = "host"
     if target in {"health"} or canonical_target == "host":
         items.extend(collect_health_evidence(context))
@@ -83,7 +89,7 @@ def diagnose_target(
         items.extend(collect_disk_evidence(context))
         items.extend(collect_network_evidence(context))
         items.extend(collect_local_knowledge_evidence(context, "performance"))
-    if canonical_target == "storage-performance":
+    if canonical_target in {"storage-performance", "disk_storage_deep_dive"}:
         items.extend(collect_health_evidence(context))
         items.extend(collect_performance_evidence(context))
         items.extend(collect_disk_evidence(context))
@@ -99,7 +105,7 @@ def diagnose_target(
         items.extend(collect_local_knowledge_evidence(context, target))
     elif ttype == TargetType.disk:
         items.extend(collect_disk_evidence(context))
-    elif ttype == TargetType.network:
+    elif ttype == TargetType.network or canonical_target == "network_deep_dive":
         items.extend(collect_network_evidence(context))
         if "firewall" in target.lower():
             items.extend(collect_firewall_evidence(context))
@@ -163,7 +169,7 @@ def diagnose_target(
                 ),
             ),
         ]
-    elif ttype == TargetType.network:
+    elif ttype == TargetType.network or canonical_target == "network_deep_dive":
         steps = [
             PlanStep(
                 step_id="1", title="Review routes", description="Validate routing table evidence."

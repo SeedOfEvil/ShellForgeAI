@@ -256,12 +256,45 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
             if clues
             else "- No strong clues yet; continue with read-only evidence."
         )
-        + "\n\n## Missing evidence\n"
-        "- Host-level visibility may be incomplete in containerized contexts.\n\n"
-        "## Safe next steps\n"
-        f"- Run `diagnose {intent}` again after context changes.\n"
-        "- Prefer additional read-only collectors before considering any changes.\n"
+        + "\n\n## What I can check next\n"
+        "- I can continue with a deeper read-only pass over process activity and error clues.\n"
+        "- I can compare storage/container pressure signals from this context.\n"
+        "- I can inspect targeted workload paths in read-only mode if you point me to one.\n\n"
+        "Proceed with deeper read-only investigation?\n\n"
+        "## Safety\n"
+        "Next steps are read-only. No restart, install, cleanup, or file changes.\n"
     )
+
+
+_FOLLOWUP_CONFIRM = {
+    "yes",
+    "proceed",
+    "continue",
+    "go ahead",
+    "dig deeper",
+    "do it",
+    "make it so",
+    "check deeper",
+    "investigate more",
+}
+
+
+def _contains_internal_collector_language(text: str) -> bool:
+    low = text.lower()
+    blocked = [
+        "please run",
+        "please collect",
+        "useful next shellforgeai read-only checks",
+        "shellforgeai collectors",
+        "collector:",
+        "process.top",
+        "logs.search_errors",
+        "disk.usage",
+        "disk.inodes",
+        "firewall.detect",
+        "network.listeners",
+    ]
+    return any(b in low for b in blocked)
 
 
 def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> None:
@@ -275,10 +308,27 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
     paste_guard_remaining_lines = 0
     paste_guard_non_shell_lines = 0
     paste_guard_first_notice = False
+    pending_followup: str | None = None
     while True:
         user_input = input("sfai> ").strip()
         routed = route_input(user_input)
         if routed.name == "noop":
+            continue
+        if pending_followup and user_input.strip().lower() in _FOLLOWUP_CONFIRM:
+            with console.status("Running deeper read-only investigation..."):
+                res = diagnose_target(runtime, pending_followup, online=False, since="30m")
+            checks = [
+                {
+                    "tool": i.source,
+                    "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+                    "summary": i.summary,
+                }
+                for i in res.evidence.items
+            ]
+            console.print(f"Deeper investigation complete: {len(checks)} evidence item(s)")
+            _evidence_table(console, checks)
+            console.print(_deterministic_operator_summary(pending_followup, checks))
+            pending_followup = None
             continue
         if routed.name in {"/exit", "/quit"}:
             console.print("Goodbye.")
@@ -491,6 +541,7 @@ Commands:
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
             )
             if natural_language_diagnose:
+                pending_followup = f"{routed.args}_deep_dive"
                 provider_error = None
                 try:
                     provider = build_provider(runtime.settings)
@@ -521,7 +572,9 @@ Commands:
                         mresp_text, encoding="utf-8"
                     )
                     console.print("\n## Assessment")
-                    if not _has_substantive_response(mresp_text):
+                    if (
+                        not _has_substantive_response(mresp_text)
+                    ) or _contains_internal_collector_language(mresp_text):
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)
@@ -669,6 +722,13 @@ No command was executed.""")
             )
             continue
 
+        if user_input.strip().lower() in {"what did you check?", "what did you check"}:
+            console.print(
+                "I checked host/resources, storage, network, and process signals "
+                "in read-only mode.\n"
+                "Technical details are in artifacts (evidence.json / summary.md)."
+            )
+            continue
         provider = build_provider(runtime.settings)
         kind = "ask"
         context = {
