@@ -32,3 +32,4 @@ PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadat
 - Arbitrary shell remains blocked in interactive mode.
 - Mutating/service-impacting actions remain blocked or approval-required/operator-run.
 - apply remains validation-only in this alpha.
+## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n

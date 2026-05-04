@@ -95,6 +95,50 @@ def _evidence_table(console: Console, checks: list[dict[str, str]]) -> None:
     console.print(t)
 
 
+def _run_model_synthesis(
+    console: Console, provider, request: ModelRequest, raw: bool
+) -> tuple[str, bool]:
+    streaming_enabled = os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
+    final_text = ""
+    if streaming_enabled and hasattr(provider, "stream_complete"):
+        with console.status("Synthesizing operator summary..."):
+            pass
+        for event in provider.stream_complete(request):
+            etype = event.get("type")
+            if etype == "text":
+                console.print(event.get("text", ""), end="")
+            elif etype == "raw" and raw:
+                console.print(event.get("raw", ""))
+            elif etype == "final":
+                resp = event.get("response")
+                if resp is not None:
+                    final_text = resp.text
+                break
+        console.print("")
+        return final_text, True
+    with console.status("Asking model..."):
+        resp = provider.complete(request)
+    return resp.text, False
+
+
+def _has_substantive_response(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    lowered = stripped.lower()
+    banned = [
+        "please collect these",
+        "please run disk.usage",
+        "please run host.resources",
+        "i only have host/mode context",
+        "i don’t have evidence yet",
+        "i don't have evidence yet",
+    ]
+    if any(b in lowered for b in banned):
+        return False
+    return lowered not in {"## assessment", "# assessment"}
+
+
 def _confirm_workspace(console: Console, runtime: RuntimeContext, no_trust_cache: bool) -> bool:
     store = WorkspaceTrustStore(runtime.session.data_dir)
     workspace = Path.cwd()
@@ -218,6 +262,8 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
         f"- Run `diagnose {intent}` again after context changes.\n"
         "- Prefer additional read-only collectors before considering any changes.\n"
     )
+
+
 def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> None:
     console = Console()
     trusted = WorkspaceTrustStore(runtime.session.data_dir).is_trusted(Path.cwd())
@@ -459,17 +505,26 @@ Commands:
                         },
                         mode="standard",
                     )
-                    mresp = provider.complete(
+                    mresp_text, mresp_streamed = _run_model_synthesis(
+                        console,
+                        provider,
                         ModelRequest(
                             prompt=prompt,
                             model=runtime.settings.model.model,
                             provider=runtime.settings.model.provider,
                             timeout_seconds=runtime.settings.model.timeout_seconds,
                             metadata={"command_kind": "diagnose", "intent": routed.args},
-                        )
+                        ),
+                        raw=False,
+                    )
+                    (runtime.session.artifact_dir / "model-response.md").write_text(
+                        mresp_text, encoding="utf-8"
                     )
                     console.print("\n## Assessment")
-                    renderer.render(_sanitize_provider_error(mresp.text), None)
+                    if not _has_substantive_response(mresp_text):
+                        console.print(_deterministic_operator_summary(routed.args, checks))
+                    elif not mresp_streamed:
+                        renderer.render(_sanitize_provider_error(mresp_text), None)
                 except Exception as exc:
                     provider_error = str(exc)
                 if provider_error:
@@ -634,26 +689,37 @@ No command was executed.""")
                 user_input if routed.name != "ask" else routed.args, context, mode="standard"
             )
         try:
-            with console.status("Asking model..."):
-                resp = provider.complete(
-                    ModelRequest(
-                        prompt=prompt,
-                        model=runtime.settings.model.model,
-                        provider=runtime.settings.model.provider,
-                        timeout_seconds=runtime.settings.model.timeout_seconds,
-                        metadata={
-                            "command_kind": kind,
-                            "profile": runtime.profile.name,
-                            "mode": runtime.session.mode,
-                        },
-                    )
-                )
+            resp_text, resp_streamed = _run_model_synthesis(
+                console,
+                provider,
+                ModelRequest(
+                    prompt=prompt,
+                    model=runtime.settings.model.model,
+                    provider=runtime.settings.model.provider,
+                    timeout_seconds=runtime.settings.model.timeout_seconds,
+                    metadata={
+                        "command_kind": kind,
+                        "profile": runtime.profile.name,
+                        "mode": runtime.session.mode,
+                    },
+                ),
+                raw=False,
+            )
         except Exception as exc:
             console.print(_sanitize_provider_error(str(exc)))
             continue
         with console.status("Writing artifacts..."):
             _ensure_artifact_dir(runtime)
             (runtime.session.artifact_dir / "model-response.md").write_text(
-                resp.text, encoding="utf-8"
+                resp_text, encoding="utf-8"
             )
-        renderer.render(_sanitize_provider_error(resp.text), None)
+        if not _has_substantive_response(resp_text) and kind == "diagnose":
+            console.print(
+                _deterministic_operator_summary("health", context.get("machine_health", []))
+            )
+        elif not _has_substantive_response(resp_text):
+            console.print(
+                "ShellForgeAI did not produce a response for that input. No action was taken."
+            )
+        elif not resp_streamed:
+            renderer.render(_sanitize_provider_error(resp_text), None)

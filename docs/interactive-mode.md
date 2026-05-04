@@ -29,3 +29,4 @@ PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadat
 - apply remains validation-only in this alpha.
 
 - Natural-language diagnostic questions now collect evidence and then produce a human-readable assessment (facts, clues, missing evidence, safe next steps), while explicit `diagnose <target>` remains artifact-oriented.
+## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n

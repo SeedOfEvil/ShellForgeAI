@@ -64,9 +64,25 @@ def classify_target(target: str) -> TargetType:
         ]
     ):
         return TargetType.host
-    if t in {"nginx", "ssh", "sshd", "docker", "cron"} or ".service" in t:
+    if (
+        t
+        in {
+            "nginx",
+            "ssh",
+            "sshd",
+            "docker",
+            "cron",
+            "services",
+            "service-discovery",
+            "listening",
+            "ports",
+        }
+        or ".service" in t
+    ):
         return TargetType.service
     if any(k in t for k in ["disk", "storage", "filesystem", "space"]):
+        return TargetType.disk
+    if t in {"storage_performance", "disk-performance", "io", "iowait"}:
         return TargetType.disk
     if any(k in t for k in ["network", "dns", "route", "latency"]):
         return TargetType.network

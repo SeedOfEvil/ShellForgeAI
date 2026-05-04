@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
@@ -71,6 +72,79 @@ class CodexProvider:
         cmd.append(prompt)
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return p.returncode, p.stdout, p.stderr
+
+    def stream_complete(self, request: ModelRequest):
+        cmd = [
+            self.binary,
+            "exec",
+            "-m",
+            request.model or self.default_model,
+            "--sandbox",
+            self.sandbox,
+        ]
+        if self.use_json:
+            cmd.append("--json")
+        if self.skip_git_repo_check:
+            cmd.append("--skip-git-repo-check")
+        cmd.append(request.prompt)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        assert p.stdout is not None
+        chunks: list[str] = []
+        raw_lines: list[str] = []
+        for line in p.stdout:
+            raw_lines.append(line.rstrip("\n"))
+            if not self.use_json:
+                chunks.append(line)
+                yield {"type": "text", "text": line}
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg = event.get("msg") or {}
+            if msg.get("type") == "agent_message_delta":
+                delta = msg.get("delta") or ""
+                if delta:
+                    chunks.append(delta)
+                    yield {"type": "text", "text": delta}
+            yield {"type": "raw", "raw": line.rstrip("\n")}
+        rc = p.wait(timeout=request.timeout_seconds)
+        stderr = (p.stderr.read() if p.stderr else "").strip()
+        final_text = "".join(chunks).strip()
+        parsed_usage = None
+        parsed_meta: dict[str, str] = {}
+        warnings: list[str] = []
+        if self.use_json:
+            parsed = parse_codex_jsonl(
+                "\n".join(raw_lines), keep_raw=bool(request.metadata.get("raw"))
+            )
+            warnings = parsed.warnings
+            if parsed.final_text:
+                final_text = parsed.final_text
+            parsed_usage = {
+                "input_tokens": parsed.usage.input_tokens,
+                "cached_input_tokens": parsed.usage.cached_input_tokens,
+                "output_tokens": parsed.usage.output_tokens,
+                "reasoning_output_tokens": parsed.usage.reasoning_output_tokens,
+            }
+            if parsed.thread_id:
+                parsed_meta["thread_id"] = parsed.thread_id
+        yield {
+            "type": "final",
+            "response": ModelResponse(
+                provider=self.name,
+                model=request.model or self.default_model,
+                text=final_text or stderr,
+                raw={"stderr": stderr, "stdout_jsonl": "\n".join(raw_lines)}
+                if request.metadata.get("raw")
+                else {"stderr": stderr},
+                ok=rc == 0,
+                error=None if rc == 0 else f"codex exit {rc}",
+                usage=parsed_usage,
+                warnings=warnings,
+                metadata=parsed_meta,
+            ),
+        }
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         started = time.monotonic()
