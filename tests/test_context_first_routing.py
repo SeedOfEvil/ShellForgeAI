@@ -73,6 +73,13 @@ def test_tool_first_ops_hints_prevent_generic_ask_fallthrough() -> None:
     assert route_input("is docker healthy").args == "docker"
 
 
+def test_system_ok_phrasing_routes_to_health() -> None:
+    for phrase in ["Is the system ok?", "is system okay", "is everything okay?"]:
+        routed = route_input(phrase)
+        assert routed.name == "diagnose"
+        assert routed.args == "health"
+
+
 def test_prompt_includes_collected_evidence_instruction() -> None:
     prompt = build_model_prompt(
         "how much disk space left",
