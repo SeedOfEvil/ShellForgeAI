@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 from ast import literal_eval
 from pathlib import Path
 
@@ -101,7 +102,7 @@ def _evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
     if "system.cpu_memory" in by_tool:
         out.append(f"- CPU/memory: {by_tool['system.cpu_memory']['summary']}.")
     if "host.resources" in by_tool:
-        out.append(f"- Load: {by_tool['host.resources']['summary']}.")
+        out.append(f"- Load: {_human_load(by_tool['host.resources']['summary'])}.")
     if "disk.usage" in by_tool or "disk.inodes" in by_tool:
         disk_sum = by_tool.get("disk.usage", {}).get("summary", "unknown")
         inode_sum = by_tool.get("disk.inodes", {}).get("summary", "unknown")
@@ -109,10 +110,27 @@ def _evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
     if "storage.pressure" in by_tool:
         out.append(f"- Storage/I/O: {by_tool['storage.pressure']['summary']}.")
     if "system.container_detect" in by_tool:
-        out.append(f"- Context: {by_tool['system.container_detect']['summary']}.")
+        out.append(f"- Context: {_human_container(by_tool['system.container_detect']['summary'])}.")
     if "process.top" in by_tool:
         out.append(f"- Process: {by_tool['process.top']['summary']}.")
     return out[:7]
+
+
+def _human_load(raw: str) -> str:
+    nums = re.findall(r"\d+\.\d+|\d+", raw)
+    if len(nums) >= 3:
+        a, b, c = [float(n) for n in nums[:3]]
+        return f"{a:.2f} / {b:.2f} / {c:.2f}"
+    return "unavailable from this context"
+
+
+def _human_container(raw: str) -> str:
+    low = raw.lower()
+    if "docker" in low:
+        return "Docker/container view"
+    if "container=no" in low:
+        return "container=no"
+    return "container=unknown"
 
 
 def _run_model_synthesis(
@@ -185,7 +203,7 @@ def _summary_for_check(c) -> str:
             f"arch={payload.get('arch', 'unknown')}"
         )
     if c.tool == "host.resources":
-        return (c.stdout or "").replace("{'loadavg': ", "loadavg=").replace("}", "")
+        return f"loadavg={_human_load(c.stdout or c.stderr or first).replace(' / ', ',')}"
     if c.tool == "host.uptime":
         return first or "uptime unavailable"
     if c.tool in {"disk.usage", "disk.inodes"}:
@@ -202,11 +220,7 @@ def _summary_for_check(c) -> str:
     if c.tool == "network.routes":
         return first or "route summary unavailable"
     if c.tool == "process.top":
-        return (
-            "top process summary available"
-            if c.ok
-            else f"unavailable — {first or 'command failed'}"
-        )
+        return first or "process details unavailable from this context"
     if c.tool.startswith("systemd") and not c.ok:
         return f"unavailable — {first or 'systemctl not found'}"
     return first[:120] if first else ("ok" if c.ok else "unavailable")
@@ -256,7 +270,7 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     if cpu_mem_row:
         facts.append(f"- CPU/memory: {cpu_mem_row['summary']}.")
     if load_row:
-        facts.append(f"- Load: {load_row['summary']}.")
+        facts.append(f"- Load: about {_human_load(load_row['summary'])}.")
     if disk_row:
         facts.append(f"- Disk: {disk_row['summary']}.")
     if inode_row:
@@ -295,10 +309,15 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
             if clues
             else "- No strong clues yet; continue with read-only evidence."
         )
-        + "\n\n## What I can check next\n"
-        "- I can continue with a deeper read-only pass over process activity and error clues.\n\n"
-        "## Safety\n"
-        "Next steps are read-only. No restart, install, cleanup, or file changes.\n"
+        + (
+            "\n\n## What I can check next\n"
+            "- The remaining blind spot is host-level storage visibility "
+            "outside this container.\n\n"
+            if intent == "storage_io_deep_dive"
+            else "\n\n"
+        )
+        + "## Safety\n"
+        + "Next steps are read-only. No restart, install, cleanup, or file changes.\n"
     )
 
 
@@ -320,7 +339,10 @@ _FOLLOWUP_CONFIRM = {
 
 
 def _operator_followup_text(label: str, description: str) -> str:
-    return f"I can dig deeper into {label} next — {description}. Proceed?"
+    return (
+        f"I can check that next with a deeper read-only {label} pass — {description}. "
+        "Say `proceed` or `dig deeper` and I’ll continue."
+    )
 
 
 def select_followup_investigation(
@@ -380,9 +402,13 @@ def select_followup_investigation(
         if tool == "storage.pressure" and ("io_some" in summary or "non-zero" in summary):
             return {
                 "intent": "storage_io_deep_dive",
-                "label": "storage/I/O",
-                "description": "process activity, storage pressure, and recent error clues",
+                "label": "the storage/I/O angle",
+                "description": (
+                    "storage pressure, current process activity, recent error clues, "
+                    "and container storage context"
+                ),
                 "bundle": "performance",
+                "reason": "storage pressure is non-zero",
             }
     return {
         "intent": "general_missing_context_deep_dive",
@@ -412,6 +438,10 @@ def _contains_internal_collector_language(text: str) -> bool:
         "system.cpu_memory:",
         "process.top:",
         "shellforgeai should first collect",
+        'container={"is_container"',
+        "loadavg=(",
+        "mem_used=",
+        "'=",
     ]
     return any(b in low for b in blocked)
 
