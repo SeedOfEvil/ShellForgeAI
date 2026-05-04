@@ -268,6 +268,7 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
 
 _FOLLOWUP_CONFIRM = {
     "yes",
+    "y",
     "proceed",
     "continue",
     "go ahead",
@@ -276,7 +277,50 @@ _FOLLOWUP_CONFIRM = {
     "make it so",
     "check deeper",
     "investigate more",
+    "run it",
+    "please continue",
+    "sure",
 }
+
+
+def _operator_followup_text(label: str, description: str) -> str:
+    return f"I can dig deeper into {label} next — {description}. Proceed?"
+
+
+def select_followup_investigation(
+    intent: str, checks: list[dict[str, str]], question: str
+) -> dict[str, str] | None:
+    q = question.lower()
+    if any(w in q for w in ("service", "services", "nginx", "ssh", "docker", "port")):
+        return {
+            "intent": "service_health_deep_dive",
+            "label": "service health",
+            "description": "listening ports, service detectors, and recent service clues",
+            "bundle": "services",
+        }
+    if any(w in q for w in ("network", "dns", "route", "firewall")):
+        return {
+            "intent": "network_dns_firewall_deep_dive",
+            "label": "network/DNS",
+            "description": "routes, DNS, listeners, and firewall context",
+            "bundle": "network",
+        }
+    for c in checks:
+        tool = c.get("tool", "")
+        summary = c.get("summary", "").lower()
+        if tool == "storage.pressure" and ("io_some" in summary or "non-zero" in summary):
+            return {
+                "intent": "storage_io_deep_dive",
+                "label": "storage/I/O",
+                "description": "process activity, storage pressure, and recent error clues",
+                "bundle": "performance",
+            }
+    return {
+        "intent": "general_missing_context_deep_dive",
+        "label": "broader read-only health pass",
+        "description": "missing context, pressure signals, and recent error clues",
+        "bundle": "health",
+    }
 
 
 def _contains_internal_collector_language(text: str) -> bool:
@@ -308,15 +352,20 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
     paste_guard_remaining_lines = 0
     paste_guard_non_shell_lines = 0
     paste_guard_first_notice = False
-    pending_followup: str | None = None
+    pending_followup: dict[str, str] | None = None
     while True:
         user_input = input("sfai> ").strip()
         routed = route_input(user_input)
         if routed.name == "noop":
             continue
-        if pending_followup and user_input.strip().lower() in _FOLLOWUP_CONFIRM:
+        if user_input.strip().lower() in _FOLLOWUP_CONFIRM:
+            if not pending_followup:
+                console.print("I don’t have a pending investigation. What should I check?")
+                continue
             with console.status("Running deeper read-only investigation..."):
-                res = diagnose_target(runtime, pending_followup, online=False, since="30m")
+                res = diagnose_target(
+                    runtime, pending_followup["bundle"], online=False, since="30m"
+                )
             checks = [
                 {
                     "tool": i.source,
@@ -327,7 +376,7 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
             ]
             console.print(f"Deeper investigation complete: {len(checks)} evidence item(s)")
             _evidence_table(console, checks)
-            console.print(_deterministic_operator_summary(pending_followup, checks))
+            console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
             pending_followup = None
             continue
         if routed.name in {"/exit", "/quit"}:
@@ -541,7 +590,7 @@ Commands:
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
             )
             if natural_language_diagnose:
-                pending_followup = f"{routed.args}_deep_dive"
+                pending_followup = select_followup_investigation(routed.args, checks, user_input)
                 provider_error = None
                 try:
                     provider = build_provider(runtime.settings)
@@ -578,6 +627,12 @@ Commands:
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)
+                    if pending_followup:
+                        console.print(
+                            _operator_followup_text(
+                                pending_followup["label"], pending_followup["description"]
+                            )
+                        )
                 except Exception as exc:
                     provider_error = str(exc)
                 if provider_error:

@@ -18,3 +18,9 @@ PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadat
 ## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
 
 - New diagnose aliases: performance|slow|slowness|host, storage|disk-performance|io|iowait, services|service-discovery|ports.
+
+## PR8 adaptive follow-ups
+- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
+- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
+- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
+- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.

@@ -27,3 +27,9 @@ Proposed read-only MCP tools:
 - `shellforgeai_audit_recent`
 
 Mutating tools are explicitly excluded from the initial MCP surface.
+
+## PR8 adaptive follow-ups
+- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
+- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
+- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
+- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.

@@ -80,3 +80,9 @@ Run `shellforgeai`, then `/doctor`, `/model`, `/tools`, `diagnose disk`, and `/e
 - Mutating/service-impacting actions remain blocked or approval-required/operator-run.
 - apply remains validation-only in this alpha.
 ## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
+
+## PR8 adaptive follow-ups
+- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
+- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
+- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
+- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.
