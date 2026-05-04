@@ -22,6 +22,12 @@ def os_release() -> ToolResult:
     return ToolResult(tool="system.os_release", stdout=json.dumps(out))
 
 
+def _kb_to_mb(v: str | None) -> float:
+    if not v:
+        return 0.0
+    return round(float(v.split()[0]) / 1024.0, 1)
+
+
 def cpu_memory() -> ToolResult:
     mem = {}
     meminfo = Path("/proc/meminfo")
@@ -33,14 +39,23 @@ def cpu_memory() -> ToolResult:
     loadavg = (
         Path("/proc/loadavg").read_text().split()[:3] if Path("/proc/loadavg").exists() else []
     )
+    mem_total = _kb_to_mb(mem.get("MemTotal"))
+    mem_avail = _kb_to_mb(mem.get("MemAvailable"))
+    swap_total = _kb_to_mb(mem.get("SwapTotal"))
+    swap_free = _kb_to_mb(mem.get("SwapFree"))
     out = {
-        "cpu_count": os.cpu_count(),
+        "cpus": os.cpu_count(),
+        "effective_cpus": os.cpu_count(),
         "loadavg": loadavg,
-        "mem_total": mem.get("MemTotal"),
-        "mem_free": mem.get("MemFree"),
-        "mem_available": mem.get("MemAvailable"),
-        "swap_total": mem.get("SwapTotal"),
-        "swap_free": mem.get("SwapFree"),
+        "mem_total_mb": mem_total,
+        "mem_available_mb": mem_avail,
+        "mem_used_mb": round(max(mem_total - mem_avail, 0), 1),
+        "mem_percent": round(((mem_total - mem_avail) / mem_total) * 100, 1) if mem_total else None,
+        "swap_total_mb": swap_total,
+        "swap_used_mb": round(max(swap_total - swap_free, 0), 1),
+        "swap_percent": round(((swap_total - swap_free) / swap_total) * 100, 1)
+        if swap_total
+        else 0.0,
     }
     return ToolResult(tool="system.cpu_memory", stdout=json.dumps(out))
 
@@ -77,3 +92,15 @@ def kernel_messages_tail() -> ToolResult:
         duration_ms=r.duration_ms,
         ok=ok,
     )
+
+
+def pressure() -> ToolResult:
+    out = {}
+    for n in ["cpu", "memory", "io"]:
+        p = Path(f"/proc/pressure/{n}")
+        if not p.exists():
+            continue
+        out[n] = p.read_text(errors="ignore").strip()
+    if not out:
+        return ToolResult(tool="system.pressure", ok=False, exit_code=1, stderr="unavailable")
+    return ToolResult(tool="system.pressure", stdout=json.dumps(out))

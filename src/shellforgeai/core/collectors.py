@@ -13,6 +13,7 @@ from shellforgeai.tools import (
     journal,
     network,
     process,
+    storage,
     system,
     systemd,
 )
@@ -73,6 +74,18 @@ def _summarize(result) -> str:
         return f"{path}: {'exists' if result.ok else 'missing'}"
     if result.tool == "process.top":
         return "top process summary available" if result.ok else "top process unavailable"
+    if result.tool == "process.snapshot":
+        return (result.stdout or "process snapshot unavailable").strip()
+    if result.tool == "storage.context":
+        return (result.stderr or "storage context available").strip()
+    if result.tool == "storage.pressure":
+        return result.stdout.splitlines()[0] if result.stdout else "storage pressure unavailable"
+    if result.tool == "storage.error_summary":
+        return (
+            result.stdout.splitlines()[0] if result.stdout else "storage error summary unavailable"
+        )
+    if result.tool == "system.pressure":
+        return "pressure samples collected" if result.ok else "pressure unavailable"
     if result.tool == "network.dns" and "nameserver" in (result.stdout or ""):
         ns = [ln.split()[1] for ln in result.stdout.splitlines() if ln.startswith("nameserver")]
         return (
@@ -240,6 +253,8 @@ def collect_health_evidence(context) -> list[EvidenceItem]:
         + collect_disk_evidence(context)
         + collect_network_evidence(context)
         + [_to_item(process.top(), EvidenceCategory.host, "Top processes")]
+        + [_to_item(process.snapshot(), EvidenceCategory.host, "Process snapshot")]
+        + collect_storage_evidence(context)
         + [_to_item(systemd.list_failed(), EvidenceCategory.service, "Failed systemd units")]
     )
     for hit in search_recent_audits(context.session.data_dir, query="health glitch slow", limit=5):
@@ -307,3 +322,11 @@ def collect_firewall_evidence(context) -> list[EvidenceItem]:
     return _dedupe_items(
         [_to_item(r, EvidenceCategory.network, "firewall collector") for r in firewall.detect()]
     )
+
+
+def collect_storage_evidence(context) -> list[EvidenceItem]:
+    return [
+        _to_item(storage.context(), EvidenceCategory.host, "Storage context"),
+        _to_item(storage.pressure(), EvidenceCategory.host, "Storage pressure"),
+        _to_item(storage.error_summary(), EvidenceCategory.logs, "Storage errors"),
+    ]

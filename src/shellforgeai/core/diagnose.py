@@ -72,7 +72,7 @@ def diagnose_target(
     if canonical_target in {"storage_performance", "disk-performance", "io", "iowait"}:
         canonical_target = "storage-performance"
         target = "storage-performance"
-    if canonical_target in {"performance", "slow", "slowness"}:
+    if canonical_target in {"performance", "slow", "slowness", "host"}:
         canonical_target = "host"
     if target in {"health"} or canonical_target == "host":
         items.extend(collect_health_evidence(context))
