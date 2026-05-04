@@ -95,6 +95,26 @@ def _evidence_table(console: Console, checks: list[dict[str, str]]) -> None:
     console.print(t)
 
 
+def _evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
+    by_tool = {c["tool"]: c for c in checks}
+    out = []
+    if "system.cpu_memory" in by_tool:
+        out.append(f"- CPU/memory: {by_tool['system.cpu_memory']['summary']}.")
+    if "host.resources" in by_tool:
+        out.append(f"- Load: {by_tool['host.resources']['summary']}.")
+    if "disk.usage" in by_tool or "disk.inodes" in by_tool:
+        disk_sum = by_tool.get("disk.usage", {}).get("summary", "unknown")
+        inode_sum = by_tool.get("disk.inodes", {}).get("summary", "unknown")
+        out.append(f"- Disk/inodes: {disk_sum}; {inode_sum}.")
+    if "storage.pressure" in by_tool:
+        out.append(f"- Storage/I/O: {by_tool['storage.pressure']['summary']}.")
+    if "system.container_detect" in by_tool:
+        out.append(f"- Context: {by_tool['system.container_detect']['summary']}.")
+    if "process.top" in by_tool:
+        out.append(f"- Process: {by_tool['process.top']['summary']}.")
+    return out[:7]
+
+
 def _run_model_synthesis(
     console: Console, provider, request: ModelRequest, raw: bool
 ) -> tuple[str, bool]:
@@ -374,6 +394,8 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
     paste_guard_non_shell_lines = 0
     paste_guard_first_notice = False
     pending_followup: dict[str, str] | None = None
+    completed_followups: list[str] = []
+    evidence_mode = "compact"
     while True:
         user_input = input("sfai> ").strip()
         routed = route_input(user_input)
@@ -401,6 +423,7 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
             console.print(f"Deeper investigation complete: {len(checks)} evidence item(s)")
             _evidence_table(console, checks)
             console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
+            completed_followups.append(pending_followup["intent"])
             pending_followup = None
             continue
         if routed.name in {"/exit", "/quit"}:
@@ -467,7 +490,16 @@ Safety:
 Commands:
   /health
   /audit latest
-  /pending""")
+  /pending
+  /evidence compact|full""")
+            continue
+        if routed.name == "/evidence":
+            arg = routed.args.strip().lower()
+            if arg in {"compact", "full"}:
+                evidence_mode = arg
+                console.print(f"Evidence view set to: {evidence_mode}")
+            else:
+                console.print(f"Evidence view: {evidence_mode}")
             continue
         if routed.name == "/pending":
             if not pending_followup:
@@ -588,8 +620,14 @@ Commands:
                 }
                 for i in res.evidence.items
             ]
-            console.print(f"Collected {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
+            if show_full:
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
             natural_language_diagnose = not user_input.lower().startswith("diagnose ")
             with console.status("Building findings..."):
                 pass
@@ -668,7 +706,7 @@ Commands:
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)
-                    if pending_followup:
+                    if pending_followup and pending_followup["intent"] not in completed_followups:
                         console.print(
                             _operator_followup_text(
                                 pending_followup["label"], pending_followup["description"]
@@ -745,8 +783,14 @@ Commands:
                 }
                 for i in res.evidence.items
             ]
-            console.print(f"Collected {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
+            if show_full:
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
             missing = [
                 c
                 for c in checks
@@ -840,8 +884,14 @@ No command was executed.""")
         if _is_machine_health_question(user_input):
             with console.status("Collecting evidence..."):
                 checks = _collect_machine_health()
-            console.print(f"Collected {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
+            if show_full:
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
             context["machine_health"] = checks
             context["evidence_label"] = "general health evidence"
             kind = "diagnose"
