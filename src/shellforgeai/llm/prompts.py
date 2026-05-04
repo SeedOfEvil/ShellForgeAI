@@ -42,7 +42,8 @@ Services:
 Knowledge:
 - knowledge.search_local
 
-When more evidence is needed, request ShellForgeAI collectors by name before raw shell commands."""
+In normal operator answers, do not expose internal collector names
+or ask the operator to run collectors manually."""
     evidence_rows = context.get("evidence") or context.get("machine_health") or []
     evidence_label = context.get("evidence_label", "evidence")
     evidence_block = ""

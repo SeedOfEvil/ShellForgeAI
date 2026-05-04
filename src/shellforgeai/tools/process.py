@@ -17,7 +17,7 @@ def top(limit: int = 10) -> ToolResult:
     )
 
 
-def find(name: str) -> ToolResult:
+def find(name: str, exact: bool = False) -> ToolResult:
     r = run_command(["ps", "-eo", "pid,comm,args"])
     if r.exit_code != 0:
         return ToolResult(
@@ -35,7 +35,9 @@ def find(name: str) -> ToolResult:
         low = ln.lower()
         if "shellforgeai" in low:
             continue
-        if any(n in low for n in needles):
+        comm = low.split()[1] if len(low.split()) > 1 else ""
+        matched = any((comm == n if exact else n in low) for n in needles)
+        if matched:
             lines.append(ln)
     return ToolResult(
         tool=f"process.find {name}",
@@ -44,4 +46,32 @@ def find(name: str) -> ToolResult:
         stderr="not found" if not lines else "",
         exit_code=0,
         ok=bool(lines),
+    )
+
+
+def snapshot() -> ToolResult:
+    r = run_command(["ps", "-eo", "stat="])
+    if r.exit_code != 0:
+        return ToolResult(
+            tool="process.snapshot",
+            command=r.command,
+            exit_code=r.exit_code,
+            stderr=r.stderr,
+            ok=False,
+        )
+    total = running = sleeping = zombies = 0
+    for st in r.stdout.splitlines():
+        st = st.strip()
+        if not st:
+            continue
+        total += 1
+        c = st[0]
+        running += c == "R"
+        sleeping += c in {"S", "D", "I"}
+        zombies += c == "Z"
+    return ToolResult(
+        tool="process.snapshot",
+        command=r.command,
+        stdout=f"processes={total} running={running} sleeping={sleeping} zombies={zombies}",
+        ok=True,
     )
