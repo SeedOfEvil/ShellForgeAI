@@ -226,8 +226,27 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     assessment = "No critical issue seen from current read-only context."
     clues = []
     facts = []
-    for c in checks[:14]:
-        facts.append(f"- {c['tool']}: {c['status']} — {c['summary']}")
+    os_row = _find("system.os_release")
+    cpu_mem_row = _find("system.cpu_memory")
+    route_row = _find("network.routes")
+    dns_row = _find("network.dns")
+    process_row = _find("process.snapshot")
+    if os_row:
+        facts.append(f"- Host context: {os_row['summary']}.")
+    if cpu_mem_row:
+        facts.append(f"- CPU/memory: {cpu_mem_row['summary']}.")
+    if load_row:
+        facts.append(f"- Load: {load_row['summary']}.")
+    if disk_row:
+        facts.append(f"- Disk: {disk_row['summary']}.")
+    if inode_row:
+        facts.append(f"- Inodes: {inode_row['summary']}.")
+    if route_row:
+        facts.append(f"- Network route: {route_row['summary']}.")
+    if dns_row:
+        facts.append(f"- DNS: {dns_row['summary']}.")
+    if process_row:
+        facts.append(f"- Process view: {process_row['summary']}.")
     if disk_row and "% used" in disk_row["summary"]:
         if " 9" in disk_row["summary"] or "100%" in disk_row["summary"]:
             assessment = "Filesystem pressure looks critical."
@@ -257,10 +276,7 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
             else "- No strong clues yet; continue with read-only evidence."
         )
         + "\n\n## What I can check next\n"
-        "- I can continue with a deeper read-only pass over process activity and error clues.\n"
-        "- I can compare storage/container pressure signals from this context.\n"
-        "- I can inspect targeted workload paths in read-only mode if you point me to one.\n\n"
-        "Proceed with deeper read-only investigation?\n\n"
+        "- I can continue with a deeper read-only pass over process activity and error clues.\n\n"
         "## Safety\n"
         "Next steps are read-only. No restart, install, cleanup, or file changes.\n"
     )
@@ -337,6 +353,11 @@ def _contains_internal_collector_language(text: str) -> bool:
         "disk.inodes",
         "firewall.detect",
         "network.listeners",
+        "host.info:",
+        "host.resources:",
+        "system.cpu_memory:",
+        "process.top:",
+        "shellforgeai should first collect",
     ]
     return any(b in low for b in blocked)
 
@@ -360,7 +381,10 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
             continue
         if user_input.strip().lower() in _FOLLOWUP_CONFIRM:
             if not pending_followup:
-                console.print("I don’t have a pending investigation. What should I check?")
+                console.print(
+                    "I don’t have a pending investigation. Tell me what symptom to check, "
+                    "such as slow system, disk issue, network issue, or service issue."
+                )
                 continue
             with console.status("Running deeper read-only investigation..."):
                 res = diagnose_target(
@@ -442,7 +466,19 @@ Safety:
   What would you check before restarting nginx?
 Commands:
   /health
-  /audit latest""")
+  /audit latest
+  /pending""")
+            continue
+        if routed.name == "/pending":
+            if not pending_followup:
+                console.print("No pending investigation.")
+            else:
+                console.print(
+                    f"Pending investigation: {pending_followup['label']}\n"
+                    f"Reason: {pending_followup.get('reason', 'not specified')}\n"
+                    f"From: {pending_followup.get('created_from_question', 'unknown')}\n"
+                    f"Session: {pending_followup.get('created_from_session', 'unknown')}"
+                )
             continue
         if routed.name in {"/doctor", "/status", "/health"}:
             b = get_build_info()
@@ -590,7 +626,12 @@ Commands:
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
             )
             if natural_language_diagnose:
+                pending_followup = None
                 pending_followup = select_followup_investigation(routed.args, checks, user_input)
+                if pending_followup:
+                    pending_followup["created_from_session"] = runtime.session.session_id
+                    pending_followup["created_from_question"] = user_input
+                    pending_followup["created_from_intent"] = routed.args
                 provider_error = None
                 try:
                     provider = build_provider(runtime.settings)
@@ -644,6 +685,11 @@ Commands:
                             "\nNote: model synthesis unavailable "
                             f"({_sanitize_provider_error(provider_error)})."
                         )
+                    )
+                if (not pending_followup) and "proceed?" in mresp_text.lower():
+                    console.print(
+                        "I do not see a specific deeper read-only investigation to queue "
+                        "from this evidence."
                     )
             continue
         if routed.name in {"plan", "/plan"}:

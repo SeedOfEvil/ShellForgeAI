@@ -73,3 +73,10 @@ PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadat
 - Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
 - Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
 - Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.
+
+## PR9 follow-up reliability fixes
+- Sluggish/laggy natural-language symptoms now route to performance diagnostics instead of generic ask.
+- Added `/pending` to inspect queued deeper read-only investigation state.
+- Confirmation phrases run pending follow-up when queued; otherwise a helpful no-pending message is shown.
+- Normal synthesized answers hide collector names and keep technical names in evidence/debug surfaces.
+- Safety unchanged: read-only follow-ups only, no arbitrary shell execution, apply remains validation-only.

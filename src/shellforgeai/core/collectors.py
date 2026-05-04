@@ -73,7 +73,15 @@ def _summarize(result) -> str:
         path = result.command[-1] if result.command else "path"
         return f"{path}: {'exists' if result.ok else 'missing'}"
     if result.tool == "process.top":
-        return "top process summary available" if result.ok else "top process unavailable"
+        if not result.ok or not result.stdout.strip():
+            return "process details unavailable from this context"
+        lines = result.stdout.splitlines()
+        if len(lines) < 2:
+            return "process details unavailable from this context"
+        top = lines[1].split()
+        if len(top) >= 5:
+            return f"top_cpu={top[4]} pid={top[0]} cpu={top[2]}%"
+        return "process details unavailable from this context"
     if result.tool == "process.snapshot":
         return (result.stdout or "process snapshot unavailable").strip()
     if result.tool == "storage.context":
