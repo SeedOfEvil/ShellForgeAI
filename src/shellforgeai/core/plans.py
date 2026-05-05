@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -24,7 +24,7 @@ class PlanStep(BaseModel):
 class Plan(BaseModel):
     plan_id: str
     goal: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     session_id: str
     risk: str = "read"
     steps: list[PlanStep]

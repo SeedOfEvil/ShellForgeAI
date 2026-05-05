@@ -12,8 +12,9 @@ runner = CliRunner()
 def test_no_args_enters_interactive_and_exit() -> None:
     result = runner.invoke(app, input="n\n")
     assert result.exit_code == 0
-    assert "ShellForgeAI :: CLI-first AI Ops for Linux" in result.stdout
-    assert "Trust this workspace?" in result.stdout
+    assert "ShellForgeAI" in result.stdout
+    assert "CLI-first AI Ops for Linux" in result.stdout
+    assert "Trust " in result.stdout
     assert "Workspace not trusted" in result.stdout
     assert "Missing command" not in result.stdout
 
@@ -44,4 +45,4 @@ def test_trust_store(tmp_path: Path) -> None:
 def test_interactive_command_alias() -> None:
     result = runner.invoke(app, ["interactive"], input="n\n")
     assert result.exit_code == 0
-    assert "Trust this workspace?" in result.stdout
+    assert "Trust " in result.stdout

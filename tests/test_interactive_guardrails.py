@@ -55,11 +55,12 @@ def test_explicit_ask_shell_explain_calls_model(monkeypatch) -> None:
     assert called["v"]
 
 
-def test_audit_latest_no_model(monkeypatch) -> None:
+def test_audit_latest_no_model(monkeypatch, tmp_path) -> None:
     def boom(*args, **kwargs):
         raise AssertionError("model should not be called")
 
     monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", boom)
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
     res = runner.invoke(app, ["interactive", "--no-trust-cache"], input="y\n/audit latest\n/exit\n")
     assert res.exit_code == 0
     assert "No audit sessions found." in res.stdout

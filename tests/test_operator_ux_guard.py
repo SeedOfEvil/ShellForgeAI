@@ -9,7 +9,7 @@ def test_internal_collector_language_detected() -> None:
 
 
 def test_operator_followup_text_hides_collectors() -> None:
-    txt = _operator_followup_text("performance")
+    txt = _operator_followup_text("performance", "read-only pressure signals")
     assert "process.top" not in txt
     assert "logs.search_errors" not in txt
-    assert "Proceed with deeper read-only investigation?" in txt
+    assert "Say `proceed` or `dig deeper`" in txt

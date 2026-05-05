@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import getpass
 import socket
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -31,7 +31,7 @@ class SessionContext(BaseModel):
 def build_session_context(
     settings: Settings, profile: Profile, mode: str, cwd: Path
 ) -> SessionContext:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     sid = f"sf_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:6]}"
     data_dir = Path(settings.app.data_dir).expanduser()
     artifact_dir = data_dir / "artifacts" / sid
