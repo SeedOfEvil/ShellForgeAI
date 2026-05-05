@@ -1,1 +1,7 @@
-placeholder
+name: prod-readonly
+description: Production read-only profile. Denies any change/service/system/danger.
+allow_risks: [read]
+ask_risks: []
+deny_risks: [change, service, system, danger]
+allow_shell_raw: false
+online_allowed: false

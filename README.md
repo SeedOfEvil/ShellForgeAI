@@ -1,82 +1,151 @@
 # ShellForgeAI
 
-ShellForgeAI is a lean, CLI-first AI ops harness for Linux systems.
+A lean, CLI-first AI ops harness for Linux systems. ShellForgeAI collects
+evidence with typed, read-only tools, proposes conservative plans, writes
+auditable artifacts, and uses an LLM (default: OpenAI Codex CLI) only for
+advisory synthesis.
 
-## PR2 status
+> Status: alpha. `apply` is intentionally validation-only — ShellForgeAI
+> never executes mutating commands automatically. Model output is advisory.
 
-Deterministic core ops runtime is now wired: diagnose collects evidence, proposes conservative plans, and writes audits/artifacts.
+## Highlights
 
-Examples:
-- `shellforgeai diagnose nginx`
-- `shellforgeai diagnose disk --save-plan`
-- `shellforgeai research "nginx permission denied"`
-- `shellforgeai plan "investigate high disk usage"`
-- `shellforgeai audit list`
+- **Read-only by default.** No arbitrary shell, no package install, no service
+  restart, no destructive actions.
+- **Evidence-first.** Recognized intents (disk, performance, health, firewall,
+  service) auto-run typed read-only collectors before any model call.
+- **Auditable.** Every session writes JSONL audit records and artifacts under
+  the data dir.
+- **Profiles.** `inspect`, `assisted`, `lab-direct`, `prod-readonly` gate which
+  risk classes are allowed, asked, or denied.
+- **Pluggable models.** Codex CLI (default), Ollama, vLLM, and any
+  OpenAI-compatible endpoint (e.g. OpenRouter).
+- **Interactive operator loop.** Run `shellforgeai` with no subcommand for a
+  REPL with slash commands, workspace trust, and streaming synthesis.
+
+## Install
+
+Requires Python 3.12+.
+
+```bash
+git clone https://github.com/SeedOfEvil/ShellForceAI.git
+cd ShellForceAI
+make dev          # creates .venv and installs in editable mode with dev extras
+# or:
+pip install -e .
+```
+
+The CLI is exposed as both `shellforgeai` and `sfai`.
+
+## Quick start
+
+```bash
+shellforgeai doctor                       # runtime health
+shellforgeai inspect host                 # host snapshot
+shellforgeai diagnose nginx               # evidence + conservative plan
+shellforgeai diagnose disk --save-plan
+shellforgeai research "nginx permission denied"
+shellforgeai plan "investigate high disk usage"
+shellforgeai audit list
+shellforgeai ask "what is this machine doing?"
+```
 
 ## Using OpenAI Codex / ChatGPT sign-in
 
-1. Install Codex CLI:
-   - `npm install -g @openai/codex`
-   - or `brew install --cask codex`
-2. Sign in:
-   - `codex login`
-   - headless: `codex login --device-auth`
-3. Configure:
-   - `export SHELLFORGEAI_MODEL_PROVIDER=openai-codex`
-   - `export SHELLFORGEAI_MODEL_NAME=gpt-5.5`
-   - `export SHELLFORGEAI_MODEL_FALLBACK=gpt-5.4`
-   - `export SHELLFORGEAI_CODEX_TIMEOUT_SECONDS=180`
+ShellForgeAI does not read or manage ChatGPT credentials; authentication is
+handled entirely by the Codex CLI.
+
+1. Install Codex CLI: `npm install -g @openai/codex` (or `brew install --cask codex`).
+2. Sign in: `codex login` (or `codex login --device-auth` for headless hosts).
+3. Configure ShellForgeAI:
+   ```bash
+   export SHELLFORGEAI_MODEL_PROVIDER=openai-codex
+   export SHELLFORGEAI_MODEL_NAME=gpt-5.5
+   export SHELLFORGEAI_MODEL_FALLBACK=gpt-5.4
+   export SHELLFORGEAI_CODEX_TIMEOUT_SECONDS=180
+   ```
 4. Verify: `shellforgeai model doctor`
-5. Test: `shellforgeai ask "What is this machine doing?"`
+5. Test: `shellforgeai ask "what is this machine doing?"`
 
-ShellForgeAI does not read or manage ChatGPT credentials; authentication is handled by Codex CLI.
-Model-backed analysis is advisory only. `apply` remains validation-only.
-
-
-- Container smoke test: `docs/container-smoke-test.md`
+See `docs/model-providers.md` for other providers.
 
 ## Interactive mode
 
-Run `shellforgeai` (no subcommand) to start the interactive operator loop.
-
-Example:
+Run `shellforgeai` (no subcommand) to start the operator loop:
 
 ```text
-shellforgeai
-/help
-diagnose disk
-ask what can you see about this machine?
-research nginx address already in use
-plan investigate high disk usage
-/exit
+$ shellforgeai
+sfai> /help
+sfai> diagnose disk
+sfai> ask what services are listening on this host?
+sfai> /pending
+sfai> /exit
 ```
 
-PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadata env vars SHELLFORGEAI_BUILD_PR/SHELLFORGEAI_BUILD_COMMIT/SHELLFORGEAI_BUILD_BRANCH/SHELLFORGEAI_BUILD_DATE supported; /status and /examples added; artifacts are created on write only; apply remains validation-only; workspace trust does not bypass policy; canonical ShellForgeAI system prompt is required for model-backed flows.
+Slash commands include `/help`, `/status`, `/doctor`, `/health`, `/model`,
+`/tools`, `/audit`, `/workspace`, `/mode`, `/profile`, `/evidence`, `/pending`,
+`/examples`, `/clear`, `/raw on|off`, `/context minimal|standard|full`,
+`/exit`. See `docs/interactive-mode.md`.
 
-- Note: In restricted containers, Codex may emit bwrap/namespace errors; treat as provider sandbox limitation, not host failure. ShellForgeAI still collects evidence via typed read-only tools.
-\n## Interactive guardrails update\n- Interactive mode is not a shell; shell-looking pasted input is blocked unless explicitly prefixed with ask explain/review.
-- Multiline shell paste recovery uses a short-lived quarantine: subsequent shell fragments are blocked without model calls, while /help and /exit still work.\n- Slash commands are deterministic and unknown slash commands do not call the model.\n- Added /health and /audit latest interactive commands.\n- Apply remains validation-only; workspace trust does not bypass mutation policy.\n- Service-impacting commands must be described as approval-required/operator-run.\n
+Natural-language diagnostic questions auto-collect evidence and stream a
+synthesized operator answer (facts, clues, missing evidence, safe next
+steps). When a deeper read-only follow-up makes sense, ShellForgeAI queues it
+and runs it when you confirm with `yes` / `proceed` / `dig deeper`.
 
-## Context-first + Codex provider note (PR)
-- ShellForgeAI runtime auto-runs approved typed read-only collectors for recognized ops intents (disk/performance/health/firewall/service).
-- In current architecture, Codex is used as a model/provider for synthesis; ShellForgeAI tools are executed by the ShellForgeAI runtime.
-- Runtime context bundles are the immediate solution; optional MCP exposure of read-only tools is a future path.
-- Arbitrary shell remains blocked in interactive mode.
-- Mutating/service-impacting actions remain blocked or approval-required/operator-run.
-- apply remains validation-only in this alpha.
+Interactive mode is *not* a shell: pasted shell-looking input is blocked
+unless explicitly prefixed with `ask explain ...` or `ask review ...`.
 
-- Interactive natural-language diagnostics now return synthesized operator guidance after evidence collection; they no longer stop at collector tables/artifact paths.
-## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
+## Project layout
 
-## PR8 adaptive follow-ups
-- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
-- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
-- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
-- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.
+```
+src/shellforgeai/
+  cli.py              Typer entry points
+  core/               session, config, profiles, diagnose, evidence, plans
+  tools/              typed read-only tools (host, journal, systemd, network, ...)
+  llm/                provider abstraction (codex, ollama, vllm, openai-compatible, openrouter)
+  interactive/        REPL, slash commands, workspace trust, streaming synthesis
+  policy/             risk classes, rules, approvals
+  knowledge/          local docs and audit search
+  audit/              JSONL audit logger and artifact storage
+  render/             rich console rendering
+config/               default.yaml, profiles/, tools/
+docs/                 architecture, cli, interactive-mode, model-providers, safety, tools, ...
+tests/                pytest suite
+```
 
-## PR9 follow-up reliability fixes
-- Sluggish/laggy natural-language symptoms now route to performance diagnostics instead of generic ask.
-- Added `/pending` to inspect queued deeper read-only investigation state.
-- Confirmation phrases run pending follow-up when queued; otherwise a helpful no-pending message is shown.
-- Normal synthesized answers hide collector names and keep technical names in evidence/debug surfaces.
-- Safety unchanged: read-only follow-ups only, no arbitrary shell execution, apply remains validation-only.
+## Configuration
+
+Defaults live in `config/default.yaml`. Override with a YAML file via
+`shellforgeai --config path/to/config.yaml`, or with `SHELLFORGEAI_*`
+environment variables (see `docs/model-providers.md`).
+
+Profiles in `config/profiles/` decide which risk classes are allowed, asked,
+or denied. The active profile is selected with `--profile` or via
+`app.default_profile` in config.
+
+## Safety
+
+- `apply` is validation-only in this alpha (it parses and validates plans,
+  never executes them).
+- Workspace trust grants doc reads and artifact writes — it never lifts
+  policy or enables mutation.
+- Service-impacting commands are described as approval-required and
+  operator-run; ShellForgeAI does not run them.
+- In restricted containers, the Codex CLI may emit `bwrap`/namespace errors;
+  treat as a provider sandbox limitation, not a host failure. ShellForgeAI's
+  typed read-only collectors keep working.
+
+See `docs/safety.md`.
+
+## Development
+
+```bash
+make dev      # editable install with dev extras
+make lint     # ruff + mypy
+make test     # pytest
+make check    # format + lint + type + tests
+```
+
+## License
+
+MIT. See `LICENSE`.

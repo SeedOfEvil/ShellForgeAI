@@ -1,1 +1,3 @@
-placeholder
+# packages tools (scaffold; not yet loaded by the runtime).
+# Custom tool registration is planned; this file reserves the namespace.
+tools: []

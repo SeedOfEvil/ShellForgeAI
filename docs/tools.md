@@ -1,27 +1,58 @@
-placeholder
+# Tools
 
-## Context-first + Codex provider note (PR)
-- ShellForgeAI runtime auto-runs approved typed read-only collectors for recognized ops intents (disk/performance/health/firewall/service).
-- In current architecture, Codex is used as a model/provider for synthesis; ShellForgeAI tools are executed by the ShellForgeAI runtime.
-- Runtime context bundles are the immediate solution; optional MCP exposure of read-only tools is a future path.
-- Arbitrary shell remains blocked in interactive mode.
-- Mutating/service-impacting actions remain blocked or approval-required/operator-run.
-- apply remains validation-only in this alpha.
-## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
+ShellForgeAI tools are typed Python wrappers in `src/shellforgeai/tools/`.
+Each tool runs a specific command with bounded arguments and returns a
+structured result. The runtime — not the model — decides which tools run.
 
-## Investigation package (read-only)
-- Added collectors: system.pressure, process.snapshot, storage.context, storage.pressure, storage.error_summary.
-- Diagnose aliases include slow/slowness/host and storage io targets; apply remains validation-only.
+List tools at runtime:
 
-## PR8 adaptive follow-ups
-- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
-- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
-- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
-- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.
+```bash
+shellforgeai tools list
+shellforgeai tools describe <name>
+```
 
-## PR9 follow-up reliability fixes
-- Sluggish/laggy natural-language symptoms now route to performance diagnostics instead of generic ask.
-- Added `/pending` to inspect queued deeper read-only investigation state.
-- Confirmation phrases run pending follow-up when queued; otherwise a helpful no-pending message is shown.
-- Normal synthesized answers hide collector names and keep technical names in evidence/debug surfaces.
-- Safety unchanged: read-only follow-ups only, no arbitrary shell execution, apply remains validation-only.
+## Tool modules
+
+| Module | Purpose |
+| --- | --- |
+| `host` | Host info, resources, uptime. |
+| `journal` | `journalctl --no-pager` for units, with `--since`. |
+| `systemd` | Unit `status`, `is-active`, `is-enabled`. |
+| `disk` | Block devices, free space, mounts. |
+| `storage` | Storage context, pressure, error summary. |
+| `network` | Interfaces, routes, listening sockets, DNS. |
+| `firewall` | Read-only firewall view. |
+| `packages` | Installed packages and versions. |
+| `services` | Service-discovery and listening-port summaries. |
+| `process` | Process snapshot. |
+| `containers` | Container introspection (read-only). |
+| `logs` | Log fan-out around an intent. |
+| `system` | Pressure (`/proc/pressure/*`), kernel/version. |
+| `files` | Bounded file reads (no writes from tools). |
+| `executor` | Internal: dispatch + risk gating. |
+| `registry` | Tool catalog and metadata. |
+| `schemas` | Pydantic result models. |
+| `shell` | Internal helper used by typed tools — never exposes raw shell. |
+
+## Investigation collectors
+
+For ops intents the runtime composes collectors that call several tools:
+
+- `system.pressure` — CPU/IO/memory pressure stalls.
+- `process.snapshot` — top processes by CPU/RSS.
+- `storage.context` / `storage.pressure` / `storage.error_summary` —
+  capacity, throughput, dmesg/journal hints.
+- Disk, performance, health, firewall, service, and service-discovery
+  bundles are wired into `diagnose <target>` and the interactive natural-
+  language router.
+
+`diagnose` aliases include `performance|slow|slowness|host`,
+`storage|disk-performance|io|iowait`, `services|service-discovery|ports`.
+
+## Adaptive follow-ups
+
+Natural-language diagnostics may queue an evidence-driven deeper read-only
+follow-up (CPU/process, memory/swap, storage/IO, network/DNS, service
+health, or a general context pass). Confirm with `yes`, `proceed`, `dig
+deeper`, `y`, or `run it`. Inspect the queue with `/pending`. Follow-ups
+remain read-only.

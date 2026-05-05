@@ -1,34 +1,35 @@
 # AGENTS
 
-- Interactive UX changes must preserve:
-  - no-command launch behavior
-  - --help behavior
-  - --version behavior
-  - non-interactive command behavior
-  - safety boundary
-  - docs updates
+Conventions for any agent (human or LLM) modifying ShellForgeAI.
 
-PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadata env vars SHELLFORGEAI_BUILD_PR/SHELLFORGEAI_BUILD_COMMIT/SHELLFORGEAI_BUILD_BRANCH/SHELLFORGEAI_BUILD_DATE supported; /status and /examples added; artifacts are created on write only; apply remains validation-only; workspace trust does not bypass policy; canonical ShellForgeAI system prompt is required for model-backed flows.
-\n## Interactive guardrails update\n- Interactive mode is not a shell; shell-looking pasted input is blocked unless explicitly prefixed with ask explain/review.\n- Slash commands are deterministic and unknown slash commands do not call the model.\n- Added /health and /audit latest interactive commands.\n- Apply remains validation-only; workspace trust does not bypass mutation policy.\n- Service-impacting commands must be described as approval-required/operator-run.\n
+## Invariants — must be preserved
 
-## Context-first + Codex provider note (PR)
-- ShellForgeAI runtime auto-runs approved typed read-only collectors for recognized ops intents (disk/performance/health/firewall/service).
-- In current architecture, Codex is used as a model/provider for synthesis; ShellForgeAI tools are executed by the ShellForgeAI runtime.
-- Runtime context bundles are the immediate solution; optional MCP exposure of read-only tools is a future path.
-- Arbitrary shell remains blocked in interactive mode.
-- Mutating/service-impacting actions remain blocked or approval-required/operator-run.
-- apply remains validation-only in this alpha.
-## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
+- **Safety boundary.** No arbitrary shell execution from interactive mode, no
+  destructive execution anywhere, no package installs, no service restarts.
+  `apply` remains validation-only in this alpha. Workspace trust never lifts
+  policy.
+- **CLI surface.** Do not break:
+  - launching with no subcommand (interactive mode)
+  - `--help` and `--version`
+  - existing non-interactive subcommands (`doctor`, `diagnose`, `research`,
+    `plan`, `apply`, `ask`, `audit`, `tools`, `inspect`, `model`)
+- **Evidence-first routing.** Recognized ops intents (disk, performance,
+  health, firewall, service) must run typed read-only collectors before any
+  model call. Slash commands are deterministic; unknown slash commands must
+  not call the model.
+- **UX.** Normal synthesized answers hide internal collector names; technical
+  names stay in `/tools`, `/evidence`, debug, and raw views.
 
-## PR8 adaptive follow-ups
-- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
-- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
-- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
-- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.
+## Documentation
 
-## PR9 follow-up reliability fixes
-- Sluggish/laggy natural-language symptoms now route to performance diagnostics instead of generic ask.
-- Added `/pending` to inspect queued deeper read-only investigation state.
-- Confirmation phrases run pending follow-up when queued; otherwise a helpful no-pending message is shown.
-- Normal synthesized answers hide collector names and keep technical names in evidence/debug surfaces.
-- Safety unchanged: read-only follow-ups only, no arbitrary shell execution, apply remains validation-only.
+- Update relevant `docs/*.md` and `README.md` when changing user-visible
+  behavior.
+- Do not append PR-numbered changelog blobs to docs. Document the current
+  behavior; use git history / PR descriptions for what-changed-when.
+
+## Codex provider note
+
+In the current architecture, Codex is used as a model/provider for synthesis
+only. ShellForgeAI's typed tools are executed by the ShellForgeAI runtime,
+not by Codex. Runtime context bundles are the immediate solution; an optional
+read-only MCP surface is a future path (see `docs/codex-integration.md`).
