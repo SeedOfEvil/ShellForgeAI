@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 from ast import literal_eval
 from pathlib import Path
 
@@ -95,6 +96,70 @@ def _evidence_table(console: Console, checks: list[dict[str, str]]) -> None:
     console.print(t)
 
 
+def _evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
+    by_tool = {c["tool"]: c for c in checks}
+    out = []
+    if "system.cpu_memory" in by_tool:
+        out.append(f"- CPU/memory: {_human_cpu_mem(by_tool['system.cpu_memory']['summary'])}.")
+    if "host.resources" in by_tool:
+        out.append(f"- Load: {_human_load(by_tool['host.resources']['summary'])}.")
+    if "disk.usage" in by_tool or "disk.inodes" in by_tool:
+        disk_sum = by_tool.get("disk.usage", {}).get("summary", "unknown")
+        inode_sum = by_tool.get("disk.inodes", {}).get("summary", "unknown")
+        out.append(f"- Disk/inodes: {disk_sum}; {inode_sum}.")
+    if "storage.pressure" in by_tool:
+        out.append(
+            f"- Storage/I/O: {_human_storage_pressure(by_tool['storage.pressure']['summary'])}."
+        )
+    if "system.container_detect" in by_tool:
+        out.append(f"- Context: {_human_container(by_tool['system.container_detect']['summary'])}.")
+    if "process.top" in by_tool:
+        out.append(f"- Process: {by_tool['process.top']['summary']}.")
+    return out[:7]
+
+
+def _human_load(raw: str) -> str:
+    nums = re.findall(r"\d+\.\d+|\d+", raw)
+    if len(nums) >= 3:
+        a, b, c = [float(n) for n in nums[:3]]
+        return f"{a:.2f} / {b:.2f} / {c:.2f}"
+    return "unavailable from this context"
+
+
+def _human_container(raw: str) -> str:
+    low = raw.lower()
+    if "docker" in low:
+        return "Docker/container view"
+    if "container=no" in low:
+        return "container=no"
+    return "container=unknown"
+
+
+def _human_cpu_mem(raw: str) -> str:
+    m = re.search(r"cpus=(\d+).*mem=(\d+\.\d+)GiB/(\d+\.\d+)GiB.*swap=([^ ]+)", raw)
+    if not m:
+        return raw
+    cpus, used, total, swap = m.groups()
+    swap_txt = "swap unused" if swap.startswith("0B/") else f"{swap} swap used"
+    return f"{cpus} CPUs visible, {used} GiB / {total} GiB used, {swap_txt}"
+
+
+def _human_storage_pressure(raw: str) -> str:
+    vals = dict(
+        re.findall(
+            r"(avg10|avg60|avg300|io_some_avg10|io_some_avg60|io_some_avg300)=([0-9.]+)", raw
+        )
+    )
+    a10 = vals.get("avg10") or vals.get("io_some_avg10")
+    a60 = vals.get("avg60") or vals.get("io_some_avg60")
+    a300 = vals.get("avg300") or vals.get("io_some_avg300")
+    if a10 and a60 and a300:
+        if float(a10) == 0 and float(a60) == 0 and float(a300) == 0:
+            return "no pressure reported"
+        return f"non-zero pressure, avg10 {a10} / avg60 {a60} / avg300 {a300}"
+    return raw
+
+
 def _run_model_synthesis(
     console: Console, provider, request: ModelRequest, raw: bool
 ) -> tuple[str, bool]:
@@ -165,7 +230,7 @@ def _summary_for_check(c) -> str:
             f"arch={payload.get('arch', 'unknown')}"
         )
     if c.tool == "host.resources":
-        return (c.stdout or "").replace("{'loadavg': ", "loadavg=").replace("}", "")
+        return f"loadavg={_human_load(c.stdout or c.stderr or first).replace(' / ', ',')}"
     if c.tool == "host.uptime":
         return first or "uptime unavailable"
     if c.tool in {"disk.usage", "disk.inodes"}:
@@ -182,11 +247,7 @@ def _summary_for_check(c) -> str:
     if c.tool == "network.routes":
         return first or "route summary unavailable"
     if c.tool == "process.top":
-        return (
-            "top process summary available"
-            if c.ok
-            else f"unavailable — {first or 'command failed'}"
-        )
+        return first or "process details unavailable from this context"
     if c.tool.startswith("systemd") and not c.ok:
         return f"unavailable — {first or 'systemctl not found'}"
     return first[:120] if first else ("ok" if c.ok else "unavailable")
@@ -226,8 +287,27 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     assessment = "No critical issue seen from current read-only context."
     clues = []
     facts = []
-    for c in checks[:14]:
-        facts.append(f"- {c['tool']}: {c['status']} — {c['summary']}")
+    os_row = _find("system.os_release")
+    cpu_mem_row = _find("system.cpu_memory")
+    route_row = _find("network.routes")
+    dns_row = _find("network.dns")
+    process_row = _find("process.snapshot")
+    if os_row:
+        facts.append(f"- Host context: {os_row['summary']}.")
+    if cpu_mem_row:
+        facts.append(f"- CPU/memory: {cpu_mem_row['summary']}.")
+    if load_row:
+        facts.append(f"- Load: about {_human_load(load_row['summary'])}.")
+    if disk_row:
+        facts.append(f"- Disk: {disk_row['summary']}.")
+    if inode_row:
+        facts.append(f"- Inodes: {inode_row['summary']}.")
+    if route_row:
+        facts.append(f"- Network route: {route_row['summary']}.")
+    if dns_row:
+        facts.append(f"- DNS: {dns_row['summary']}.")
+    if process_row:
+        facts.append(f"- Process view: {process_row['summary']}.")
     if disk_row and "% used" in disk_row["summary"]:
         if " 9" in disk_row["summary"] or "100%" in disk_row["summary"]:
             assessment = "Filesystem pressure looks critical."
@@ -245,6 +325,31 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
         clues.append(f"- Low confidence: load snapshot is {load_row['summary']}.")
     if inode_row and "% used" in inode_row["summary"]:
         clues.append(f"- Medium confidence: inode usage snapshot is {inode_row['summary']}.")
+    if intent == "storage_io_deep_dive":
+        sp = _find("storage.pressure")
+        proc = _find("process.top")
+        return (
+            "## Assessment\n"
+            "The deeper pass still points more toward mild storage/I/O or "
+            "container-overlay pressure than CPU or memory saturation.\n\n"
+            "## What changed / deeper clues\n"
+            f"- Storage pressure snapshot: {(sp or {}).get('summary', 'unavailable')}.\n"
+            "- Top process snapshot: "
+            f"{(proc or {}).get('summary', 'process details unavailable from this context')}.\n"
+            f"- Load remains {_human_load((load_row or {}).get('summary', ''))} for visible CPUs.\n"
+            "- Disk/inodes remain healthy "
+            f"({(disk_row or {}).get('summary', 'unknown')}; "
+            f"{(inode_row or {}).get('summary', 'unknown')}).\n\n"
+            "## Likely angle\n"
+            "Mild container storage/I/O pressure remains the strongest clue "
+            "from this container view.\n\n"
+            "## Remaining blind spots\n"
+            "Host-level backing storage latency and per-process I/O attribution "
+            "are limited from inside this container.\n\n"
+            "## Safe conclusion\n"
+            "No restart, cleanup, repair, install, or service change is "
+            "indicated by this evidence.\n"
+        )
     return (
         "## Assessment\n"
         f"{assessment}\n\n"
@@ -256,18 +361,21 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
             if clues
             else "- No strong clues yet; continue with read-only evidence."
         )
-        + "\n\n## What I can check next\n"
-        "- I can continue with a deeper read-only pass over process activity and error clues.\n"
-        "- I can compare storage/container pressure signals from this context.\n"
-        "- I can inspect targeted workload paths in read-only mode if you point me to one.\n\n"
-        "Proceed with deeper read-only investigation?\n\n"
-        "## Safety\n"
-        "Next steps are read-only. No restart, install, cleanup, or file changes.\n"
+        + (
+            "\n\n## What I can check next\n"
+            "- The remaining blind spot is host-level storage visibility "
+            "outside this container.\n\n"
+            if intent == "storage_io_deep_dive"
+            else "\n\n"
+        )
+        + "## Safety\n"
+        + "Next steps are read-only. No restart, install, cleanup, or file changes.\n"
     )
 
 
 _FOLLOWUP_CONFIRM = {
     "yes",
+    "y",
     "proceed",
     "continue",
     "go ahead",
@@ -276,7 +384,95 @@ _FOLLOWUP_CONFIRM = {
     "make it so",
     "check deeper",
     "investigate more",
+    "run it",
+    "please continue",
+    "sure",
 }
+
+
+def _operator_followup_text(label: str, description: str) -> str:
+    label = label.replace("broader read-only ", "").replace(" pass pass", " pass")
+    label = label.replace("read-only read-only", "read-only")
+    if not label.endswith("pass"):
+        label = f"{label} pass"
+    return (
+        f"I can check that next with a deeper read-only {label} — {description}. "
+        "Say `proceed` or `dig deeper` and I’ll continue."
+    )
+
+
+def select_followup_investigation(
+    intent: str, checks: list[dict[str, str]], question: str
+) -> dict[str, str] | None:
+    q = question.lower()
+    is_disk_capacity_intent = any(
+        k in q
+        for k in (
+            "disk full",
+            "disk getting full",
+            "running out of space",
+            "disk space",
+            "inodes",
+        )
+    ) or intent in {"disk"}
+    if any(w in q for w in ("service", "services", "nginx", "ssh", "docker", "port")):
+        return {
+            "intent": "service_health_deep_dive",
+            "label": "service health",
+            "description": "listening ports, service detectors, and recent service clues",
+            "bundle": "services",
+        }
+    if any(w in q for w in ("network", "dns", "route", "firewall")):
+        return {
+            "intent": "network_dns_firewall_deep_dive",
+            "label": "network/DNS",
+            "description": "routes, DNS, listeners, and firewall context",
+            "bundle": "network",
+        }
+    disk_summary = next((c.get("summary", "") for c in checks if c.get("tool") == "disk.usage"), "")
+    inode_summary = next(
+        (c.get("summary", "") for c in checks if c.get("tool") == "disk.inodes"), ""
+    )
+    if is_disk_capacity_intent:
+        joined = f"{disk_summary} {inode_summary}"
+        if not joined.strip() or "unavailable" in joined.lower():
+            return {
+                "intent": "disk_capacity_deep_dive",
+                "label": "disk capacity angle",
+                "description": "disk growth and inode pressure details",
+                "bundle": "disk",
+                "reason": "disk/inode evidence is unavailable or incomplete",
+            }
+        if any(x in joined for x in (" 8", " 9", "100%")):
+            return {
+                "intent": "disk_capacity_deep_dive",
+                "label": "disk capacity angle",
+                "description": "disk growth and inode pressure details",
+                "bundle": "disk",
+                "reason": "disk or inode usage is elevated",
+            }
+        return None
+    for c in checks:
+        tool = c.get("tool", "")
+        summary = c.get("summary", "").lower()
+        if tool == "storage.pressure" and ("io_some" in summary or "non-zero" in summary):
+            return {
+                "intent": "storage_io_deep_dive",
+                "label": "storage/I/O",
+                "description": (
+                    "storage pressure, active processes, recent error clues, "
+                    "and container storage context"
+                ),
+                "bundle": "performance",
+                "reason": "storage pressure is non-zero",
+            }
+    return {
+        "intent": "general_missing_context_deep_dive",
+        "label": "broader read-only health pass",
+        "description": "missing context, pressure signals, and recent error clues",
+        "bundle": "health",
+        "reason": "no single stronger angle was detected",
+    }
 
 
 def _contains_internal_collector_language(text: str) -> bool:
@@ -293,6 +489,15 @@ def _contains_internal_collector_language(text: str) -> bool:
         "disk.inodes",
         "firewall.detect",
         "network.listeners",
+        "host.info:",
+        "host.resources:",
+        "system.cpu_memory:",
+        "process.top:",
+        "shellforgeai should first collect",
+        'container={"is_container"',
+        "loadavg=(",
+        "mem_used=",
+        "'=",
     ]
     return any(b in low for b in blocked)
 
@@ -308,15 +513,25 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
     paste_guard_remaining_lines = 0
     paste_guard_non_shell_lines = 0
     paste_guard_first_notice = False
-    pending_followup: str | None = None
+    pending_followup: dict[str, str] | None = None
+    completed_followups: list[str] = []
+    evidence_mode = "compact"
     while True:
         user_input = input("sfai> ").strip()
         routed = route_input(user_input)
         if routed.name == "noop":
             continue
-        if pending_followup and user_input.strip().lower() in _FOLLOWUP_CONFIRM:
+        if user_input.strip().lower() in _FOLLOWUP_CONFIRM:
+            if not pending_followup:
+                console.print(
+                    "I don’t have a pending investigation. Tell me what symptom to check, "
+                    "such as slow system, disk issue, network issue, or service issue."
+                )
+                continue
             with console.status("Running deeper read-only investigation..."):
-                res = diagnose_target(runtime, pending_followup, online=False, since="30m")
+                res = diagnose_target(
+                    runtime, pending_followup["bundle"], online=False, since="30m"
+                )
             checks = [
                 {
                     "tool": i.source,
@@ -325,9 +540,17 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                 }
                 for i in res.evidence.items
             ]
-            console.print(f"Deeper investigation complete: {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
-            console.print(_deterministic_operator_summary(pending_followup, checks))
+            console.print(
+                f"Deeper investigation complete: {len(checks)} read-only evidence item(s)."
+            )
+            if evidence_mode == "full":
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
+            console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
+            completed_followups.append(pending_followup["intent"])
             pending_followup = None
             continue
         if routed.name in {"/exit", "/quit"}:
@@ -393,7 +616,28 @@ Safety:
   What would you check before restarting nginx?
 Commands:
   /health
-  /audit latest""")
+  /audit latest
+  /pending
+  /evidence compact|full""")
+            continue
+        if routed.name == "/evidence":
+            arg = routed.args.strip().lower()
+            if arg in {"compact", "full"}:
+                evidence_mode = arg
+                console.print(f"Evidence view set to: {evidence_mode}")
+            else:
+                console.print(f"Evidence view: {evidence_mode}")
+            continue
+        if routed.name == "/pending":
+            if not pending_followup:
+                console.print("No pending investigation.")
+            else:
+                console.print(
+                    f"Pending investigation: {pending_followup['label']}\n"
+                    f"Reason: {pending_followup.get('reason', 'not specified')}\n"
+                    f"From: {pending_followup.get('created_from_question', 'unknown')}\n"
+                    f"Session: {pending_followup.get('created_from_session', 'unknown')}"
+                )
             continue
         if routed.name in {"/doctor", "/status", "/health"}:
             b = get_build_info()
@@ -503,8 +747,14 @@ Commands:
                 }
                 for i in res.evidence.items
             ]
-            console.print(f"Collected {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
+            if show_full:
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
             natural_language_diagnose = not user_input.lower().startswith("diagnose ")
             with console.status("Building findings..."):
                 pass
@@ -541,7 +791,12 @@ Commands:
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
             )
             if natural_language_diagnose:
-                pending_followup = f"{routed.args}_deep_dive"
+                pending_followup = None
+                pending_followup = select_followup_investigation(routed.args, checks, user_input)
+                if pending_followup:
+                    pending_followup["created_from_session"] = runtime.session.session_id
+                    pending_followup["created_from_question"] = user_input
+                    pending_followup["created_from_intent"] = routed.args
                 provider_error = None
                 try:
                     provider = build_provider(runtime.settings)
@@ -578,6 +833,24 @@ Commands:
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)
+                    if pending_followup and pending_followup["intent"] not in completed_followups:
+                        console.print(
+                            _operator_followup_text(
+                                pending_followup["label"], pending_followup["description"]
+                            )
+                        )
+                    elif not pending_followup and (
+                        routed.args == "disk"
+                        and any(
+                            k in user_input.lower()
+                            for k in ("disk full", "disk getting full", "running out of space")
+                        )
+                    ):
+                        console.print(
+                            "Disk capacity looks healthy from this context. I don’t see a "
+                            "disk-capacity reason to dig deeper. If the concern is slowness "
+                            "rather than fullness, I can investigate performance/I/O next."
+                        )
                 except Exception as exc:
                     provider_error = str(exc)
                 if provider_error:
@@ -589,6 +862,11 @@ Commands:
                             "\nNote: model synthesis unavailable "
                             f"({_sanitize_provider_error(provider_error)})."
                         )
+                    )
+                if (not pending_followup) and "proceed?" in mresp_text.lower():
+                    console.print(
+                        "I do not see a specific deeper read-only investigation to queue "
+                        "from this evidence."
                     )
             continue
         if routed.name in {"plan", "/plan"}:
@@ -644,8 +922,14 @@ Commands:
                 }
                 for i in res.evidence.items
             ]
-            console.print(f"Collected {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
+            if show_full:
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
             missing = [
                 c
                 for c in checks
@@ -739,8 +1023,14 @@ No command was executed.""")
         if _is_machine_health_question(user_input):
             with console.status("Collecting evidence..."):
                 checks = _collect_machine_health()
-            console.print(f"Collected {len(checks)} evidence item(s)")
-            _evidence_table(console, checks)
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
+            if show_full:
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
             context["machine_health"] = checks
             context["evidence_label"] = "general health evidence"
             kind = "diagnose"
