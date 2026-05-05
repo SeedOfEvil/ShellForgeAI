@@ -143,7 +143,7 @@ def model_doctor(ctx: typer.Context) -> None:
 @model_app.command("test")
 def model_test(
     ctx: typer.Context,
-    prompt: str = "Reply with: Hello.",
+    prompt: Annotated[str, typer.Argument()] = "Reply with: Hello.",
     raw: bool = typer.Option(False, "--raw"),
     timeout: int | None = typer.Option(None, "--timeout"),
     model: str | None = typer.Option(None, "--model"),

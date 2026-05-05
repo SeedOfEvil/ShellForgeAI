@@ -53,7 +53,7 @@ def command_exists(command: str) -> ToolResult:
             duration_ms=r.duration_ms,
             ok=True,
         )
-    if r.exit_code == 127 or "not found" in (r.stderr or "").lower():
+    if r.exit_code in {1, 127} or "not found" in (r.stderr or "").lower():
         return ToolResult(
             tool="command.exists",
             command=r.command,

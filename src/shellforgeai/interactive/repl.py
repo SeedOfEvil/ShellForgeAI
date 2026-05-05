@@ -52,6 +52,9 @@ def _is_machine_health_question(text: str) -> bool:
             "anything wrong with my computer",
             "anything wrong with this machine",
             "is my computer okay",
+            "is my computer having any issue",
+            "is everything okay with my computer",
+            "so is everything okay with my computer",
             "do you see any issues",
             "host health",
             "computer health",
@@ -79,6 +82,21 @@ def _is_firewall_question(text: str) -> bool:
             "pve firewall",
         ]
     )
+
+
+def _model_dump_json_safe(value: Any, *, indent: int = 2) -> str:
+    dumper = getattr(value, "model_dump_json", None)
+    if callable(dumper):
+        return str(dumper(indent=indent))
+    return "{}"
+
+
+def _model_dump_safe(value: Any) -> dict[str, Any]:
+    dumper = getattr(value, "model_dump", None)
+    if callable(dumper):
+        dumped = dumper()
+        return dumped if isinstance(dumped, dict) else {}
+    return {}
 
 
 def _sanitize_provider_error(text: str) -> str:
@@ -230,7 +248,9 @@ def _run_model_synthesis(
 ) -> tuple[str, bool]:
     streaming_enabled = os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
     final_text = ""
-    if streaming_enabled and hasattr(provider, "stream_complete"):
+    if (streaming_enabled or not hasattr(provider, "complete")) and hasattr(
+        provider, "stream_complete"
+    ):
         with console.status("Synthesizing operator summary..."):
             pass
         for event in provider.stream_complete(request):
@@ -975,6 +995,41 @@ Commands:
                 for h in hits[:5]:
                     console.print(f"{h.path}:{h.line} {h.snippet}")
             continue
+        is_explicit_ask = routed.name == "ask" and routed.args.lower().startswith(
+            ("explain this command:", "review this shell snippet:", "what does this command do?")
+        )
+        raw_for_guard = routed.args if routed.name == "ask" else user_input
+        shell_like = is_multiline_shell_fragment(raw_for_guard) or looks_like_shell_command(
+            raw_for_guard
+        )
+        if (
+            paste_guard_active
+            and not is_explicit_ask
+            and (shell_like or is_shell_fragment_line(raw_for_guard))
+        ):
+            console.print("Blocked shell paste fragment. No command was executed.")
+            paste_guard_remaining_lines -= 1
+            if raw_for_guard.strip().lower() in {"done", "fi", "esac", "'"}:
+                paste_guard_active = False
+            if paste_guard_remaining_lines <= 0:
+                paste_guard_active = False
+            continue
+        if not is_explicit_ask and shell_like:
+            paste_guard_active = True
+            paste_guard_remaining_lines = 20
+            paste_guard_non_shell_lines = 0
+            paste_guard_first_notice = True
+            console.print("""Multiline shell paste detected.
+
+ShellForgeAI interactive mode does not execute shell snippets.
+
+Run it in your shell, or ask me to review it with:
+
+ask review this shell snippet: ...
+
+No command was executed.""")
+            continue
+
         if routed.name in {"diagnose"}:
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, routed.args, online=False, since="30m")
@@ -1000,9 +1055,9 @@ Commands:
             with console.status("Writing artifacts..."):
                 _ensure_artifact_dir(runtime)
                 ep = runtime.session.artifact_dir / "evidence.json"
-                ep.write_text(res.evidence.model_dump_json(indent=2), encoding="utf-8")
+                ep.write_text(_model_dump_json_safe(res.evidence, indent=2), encoding="utf-8")
                 pp = runtime.session.artifact_dir / "plan.json"
-                pp.write_text(res.proposed_plan.model_dump_json(indent=2), encoding="utf-8")
+                pp.write_text(_model_dump_json_safe(res.proposed_plan, indent=2), encoding="utf-8")
                 sp = runtime.session.artifact_dir / "summary.md"
                 sp.write_text(
                     f"Session: {res.session_id}\n"
@@ -1048,7 +1103,7 @@ Commands:
                             "intent": routed.args,
                             "evidence_label": f"{routed.args} evidence",
                             "evidence": checks,
-                            "findings": [f.model_dump() for f in res.findings],
+                            "findings": [_model_dump_safe(f) for f in res.findings],
                             "artifacts": {"evidence": str(ep), "plan": str(pp), "summary": str(sp)},
                         },
                         mode="standard",
@@ -1151,6 +1206,41 @@ Commands:
         if user_input.startswith("/"):
             console.print(f"Unknown command: {routed.name}")
             console.print("Type /help for available commands.")
+            continue
+
+        is_explicit_ask = routed.name == "ask" and routed.args.lower().startswith(
+            ("explain this command:", "review this shell snippet:", "what does this command do?")
+        )
+        raw_for_guard = routed.args if routed.name == "ask" else user_input
+        shell_like = is_multiline_shell_fragment(raw_for_guard) or looks_like_shell_command(
+            raw_for_guard
+        )
+        if (
+            paste_guard_active
+            and not is_explicit_ask
+            and (shell_like or is_shell_fragment_line(raw_for_guard))
+        ):
+            console.print("Blocked shell paste fragment. No command was executed.")
+            paste_guard_remaining_lines -= 1
+            if raw_for_guard.strip().lower() in {"done", "fi", "esac", "'"}:
+                paste_guard_active = False
+            if paste_guard_remaining_lines <= 0:
+                paste_guard_active = False
+            continue
+        if not is_explicit_ask and shell_like:
+            paste_guard_active = True
+            paste_guard_remaining_lines = 20
+            paste_guard_non_shell_lines = 0
+            paste_guard_first_notice = True
+            console.print("""Multiline shell paste detected.
+
+ShellForgeAI interactive mode does not execute shell snippets.
+
+Run it in your shell, or ask me to review it with:
+
+ask review this shell snippet: ...
+
+No command was executed.""")
             continue
         if _is_firewall_question(user_input):
             paste_guard_active = False

@@ -36,10 +36,6 @@ _SHELL_PREFIXES = (
     "for ",
     "while ",
     "if ",
-    "do",
-    "done",
-    "then",
-    "fi",
 )
 
 

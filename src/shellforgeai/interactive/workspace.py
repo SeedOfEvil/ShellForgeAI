@@ -4,7 +4,7 @@ import getpass
 import json
 import socket
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -29,7 +29,7 @@ class WorkspaceTrustStore:
         entries = self._load()
         record = WorkspaceTrust(
             path=str(workspace.resolve()),
-            trusted_at=datetime.now(UTC).isoformat(),
+            trusted_at=datetime.now(timezone.utc).isoformat(),
             hostname=socket.gethostname(),
             user=getpass.getuser(),
             version=version,

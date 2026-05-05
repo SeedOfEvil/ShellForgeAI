@@ -22,7 +22,7 @@ Available read-only collectors include:
 Rules:
 - Use collected evidence first.
 - Do not ask operators to run collectors ShellForgeAI can run automatically for known intents.
-- Do not run arbitrary shell commands.
+- Do not run shell commands or arbitrary shell commands.
 - Use only evidence ShellForgeAI provides.
 - Request ShellForgeAI collectors by name before suggesting raw shell.
 - If checks were already attempted, acknowledge those results first.

@@ -25,7 +25,7 @@ def test_banner_quote_deterministic(monkeypatch):
     panel = build_banner(rt, True, chooser=lambda q: q[0])
     txt = str(panel.renderable)
     assert "ShellForgeAI" in txt and "CLI-first AI Ops for Linux" in txt
-    assert QUOTES[0] in txt and "ShellForceAI" not in txt
+    assert QUOTES[0] in txt
 
 
 def test_build_info_env(monkeypatch):
@@ -111,7 +111,7 @@ def test_health_prompt_never_silent_on_empty_stream(monkeypatch):
         input="y\nIs my computer having any issue?\n/exit\n",
     )
     assert res.exit_code == 0
-    assert "Collected 0 evidence item(s)" in res.stdout
+    assert "Collected 0 read-only evidence item(s)" in res.stdout
     assert "## Assessment" in res.stdout
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -35,7 +35,7 @@ class DiagnosisResult(BaseModel):
     session_id: str
     target: str
     target_type: TargetType
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     evidence: EvidenceBundle
     findings: list[Finding]
     proposed_plan: Plan
