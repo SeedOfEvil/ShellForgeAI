@@ -11,17 +11,30 @@ shellforgeai
 Inside the REPL:
 
 ```text
-/doctor
-/health
-/model
+/help
 /tools
-/audit
-diagnose disk
-diagnose network
-ask what services are listening on this host?
+/pending
+my device feels a bit sluggish today
+/pending
+dig deeper
 /pending
 /exit
 ```
+
+Expected outcomes:
+- Sluggish phrasing routes to performance diagnostics before synthesis.
+- Evidence highlights stay compact in normal UX while `/tools` and debug
+  views preserve technical names.
+- `/pending` shows queued read-only follow-ups (or explicit none queued).
+
+## Apply safety check
+
+```bash
+shellforgeai apply <valid-plan-file>
+```
+
+Expected outcome: apply execution is intentionally disabled in this alpha
+(validation-only parse/validate path).
 
 ## Non-interactive smoke test
 
