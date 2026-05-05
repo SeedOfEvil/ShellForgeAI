@@ -88,6 +88,15 @@ def route_input(text: str) -> RoutedCommand:
         "hanging",
         "system is crawling",
         "everything is slow",
+        "device feels slow",
+        "device feels sluggish",
+        "device feels a bit sluggish",
+        "device is slow",
+        "device is sluggish",
+        "device is laggy",
+        "device feels laggy",
+        "device feels a bit slow",
+        "device feels a bit laggy",
     ]
     if any(p in lowered for p in perf_intents):
         return RoutedCommand(name="diagnose", args="performance")

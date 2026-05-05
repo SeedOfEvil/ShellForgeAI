@@ -5,6 +5,7 @@ import platform
 import re
 from ast import literal_eval
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -145,19 +146,83 @@ def _human_cpu_mem(raw: str) -> str:
 
 
 def _human_storage_pressure(raw: str) -> str:
+    vals = _parse_storage_pressure(raw)
+    if not vals:
+        return "no pressure reported" if "unavailable" not in raw.lower() else raw
+    a10, a60, a300 = vals
+    if a10 == 0 and a60 == 0 and a300 == 0:
+        return "no pressure reported"
+    return f"non-zero pressure, avg10 {a10:g} / avg60 {a60:g} / avg300 {a300:g}"
+
+
+def _parse_storage_pressure(raw: str) -> tuple[float, float, float] | None:
     vals = dict(
         re.findall(
-            r"(avg10|avg60|avg300|io_some_avg10|io_some_avg60|io_some_avg300)=([0-9.]+)", raw
+            r"(io_some_avg10|io_some_avg60|io_some_avg300|avg10|avg60|avg300)=([0-9.]+)", raw
         )
     )
     a10 = vals.get("avg10") or vals.get("io_some_avg10")
     a60 = vals.get("avg60") or vals.get("io_some_avg60")
     a300 = vals.get("avg300") or vals.get("io_some_avg300")
-    if a10 and a60 and a300:
-        if float(a10) == 0 and float(a60) == 0 and float(a300) == 0:
-            return "no pressure reported"
-        return f"non-zero pressure, avg10 {a10} / avg60 {a60} / avg300 {a300}"
-    return raw
+    if a10 is None or a60 is None or a300 is None:
+        return None
+    return (float(a10), float(a60), float(a300))
+
+
+def _parse_load_values(raw: str) -> tuple[float, float, float] | None:
+    nums = re.findall(r"\d+\.\d+|\d+", raw)
+    if len(nums) < 3:
+        return None
+    return (float(nums[0]), float(nums[1]), float(nums[2]))
+
+
+def _parse_cpu_mem(raw: str) -> dict[str, Any] | None:
+    m = re.search(r"cpus=(\d+).*mem=(\d+\.\d+)GiB/(\d+\.\d+)GiB.*swap=([^ ]+)", raw)
+    if not m:
+        return None
+    cpus, used, total, swap = m.groups()
+    return {
+        "cpus": int(cpus),
+        "mem_used_gib": float(used),
+        "mem_total_gib": float(total),
+        "swap_unused": swap.startswith("0B/"),
+        "swap_raw": swap,
+    }
+
+
+def _parse_disk_pct(raw: str) -> int:
+    pcts = [int(n) for n in re.findall(r"(\d+)%", raw)]
+    return max(pcts) if pcts else 0
+
+
+def _is_container_context(raw: str) -> bool:
+    return "docker" in raw.lower() or "overlay" in raw.lower() or "container=yes" in raw.lower()
+
+
+def _summarize_facts(checks: list[dict[str, str]]) -> dict[str, Any]:
+    by_tool = {c["tool"]: c.get("summary", "") for c in checks}
+    facts: dict[str, Any] = {}
+    if "host.resources" in by_tool:
+        facts["load"] = _parse_load_values(by_tool["host.resources"])
+    if "system.cpu_memory" in by_tool:
+        facts["cpu_mem"] = _parse_cpu_mem(by_tool["system.cpu_memory"])
+    if "disk.usage" in by_tool:
+        facts["disk_pct"] = _parse_disk_pct(by_tool["disk.usage"])
+        facts["disk_summary"] = by_tool["disk.usage"]
+    if "disk.inodes" in by_tool:
+        facts["inode_pct"] = _parse_disk_pct(by_tool["disk.inodes"])
+        facts["inode_summary"] = by_tool["disk.inodes"]
+    if "storage.pressure" in by_tool:
+        facts["storage_pressure"] = _parse_storage_pressure(by_tool["storage.pressure"])
+        facts["storage_pressure_raw"] = by_tool["storage.pressure"]
+    if "system.container_detect" in by_tool:
+        facts["container"] = _is_container_context(by_tool["system.container_detect"])
+        facts["container_label"] = _human_container(by_tool["system.container_detect"])
+    if "process.top" in by_tool:
+        facts["top_process"] = by_tool["process.top"]
+    if "storage.error_summary" in by_tool:
+        facts["storage_errors"] = by_tool["storage.error_summary"]
+    return facts
 
 
 def _run_model_synthesis(
@@ -275,6 +340,142 @@ def _collect_machine_health() -> list[dict[str, str]]:
     ]
 
 
+def _format_load(load: tuple[float, float, float] | None) -> str:
+    if not load:
+        return "unavailable from this context"
+    return f"{load[0]:.2f} / {load[1]:.2f} / {load[2]:.2f}"
+
+
+def _format_storage_pressure(sp: tuple[float, float, float] | None) -> str:
+    if sp is None:
+        return "unavailable from this context"
+    a10, a60, a300 = sp
+    if a10 == 0 and a60 == 0 and a300 == 0:
+        return "no pressure reported"
+    return f"non-zero pressure (avg10 {a10:g} / avg60 {a60:g} / avg300 {a300:g})"
+
+
+def _format_cpu_mem(cpu_mem: dict[str, Any] | None) -> str:
+    if not cpu_mem:
+        return "unavailable from this context"
+    swap_txt = "swap unused" if cpu_mem.get("swap_unused") else "swap in use"
+    return (
+        f"{cpu_mem['cpus']} CPUs visible, "
+        f"{cpu_mem['mem_used_gib']:.1f} GiB / {cpu_mem['mem_total_gib']:.1f} GiB used, "
+        f"{swap_txt}"
+    )
+
+
+def _format_disk(facts: dict[str, Any]) -> str:
+    summary = facts.get("disk_summary", "")
+    return str(summary) if summary else "unavailable from this context"
+
+
+def _format_inode(facts: dict[str, Any]) -> str:
+    summary = facts.get("inode_summary", "")
+    return str(summary) if summary else "unavailable from this context"
+
+
+def _compare_storage_pressure(
+    before: tuple[float, float, float] | None,
+    after: tuple[float, float, float] | None,
+) -> str:
+    if before is None or after is None:
+        if after is not None:
+            return f"second pass: {_format_storage_pressure(after)}"
+        return "storage pressure unavailable in either pass"
+    if before == after:
+        return f"unchanged ({_format_storage_pressure(after)})"
+    return (
+        f"first pass {_format_storage_pressure(before)}; "
+        f"second pass {_format_storage_pressure(after)}"
+    )
+
+
+def _storage_io_deep_dive_synthesis(
+    first_pass: list[dict[str, str]] | None, second_pass: list[dict[str, str]]
+) -> str:
+    f1 = _summarize_facts(first_pass or [])
+    f2 = _summarize_facts(second_pass)
+    sp1 = f1.get("storage_pressure")
+    sp2 = f2.get("storage_pressure")
+    load1 = f1.get("load")
+    load2 = f2.get("load")
+    cpus2 = (f2.get("cpu_mem") or {}).get("cpus") or 0
+    if sp2 is None or all(v == 0 for v in sp2):
+        if sp1 and any(v > 0 for v in sp1):
+            assessment = (
+                "The deeper pass weakens the first-pass storage/I/O suspicion: "
+                "pressure is no longer non-zero."
+            )
+        else:
+            assessment = (
+                "The deeper pass did not strengthen the storage/I/O suspicion. "
+                "No pressure reported in either pass."
+            )
+    elif sp1 and sp2 and sp2[0] > sp1[0]:
+        assessment = "The deeper pass confirms and slightly strengthens the storage/I/O suspicion."
+    else:
+        assessment = (
+            "The deeper pass confirms the first-pass storage/I/O suspicion at similar levels."
+        )
+    top_proc1 = (f1.get("top_process") or "").strip() or "unavailable"
+    top_proc2 = (f2.get("top_process") or "").strip() or "unavailable"
+    storage_errors = (f2.get("storage_errors") or "").strip()
+    cpu_mem_line = _format_cpu_mem(f2.get("cpu_mem"))
+    load_line = f"about {_format_load(load2)}" + (
+        f", low for {cpus2} visible CPUs" if cpus2 and load2 and load2[0] < cpus2 else ""
+    )
+    swap_healthy = bool((f2.get("cpu_mem") or {}).get("swap_unused"))
+    mem_healthy = (f2.get("cpu_mem") or {}).get("mem_total_gib", 0) > 0 and (
+        (
+            (f2["cpu_mem"]["mem_total_gib"] - f2["cpu_mem"]["mem_used_gib"])
+            / f2["cpu_mem"]["mem_total_gib"]
+        )
+        > 0.15
+    )
+    disk_pct2 = f2.get("disk_pct", 0)
+    inode_pct2 = f2.get("inode_pct", 0)
+    disk_healthy = disk_pct2 < 80 and inode_pct2 < 80
+    storage_errors_present = (
+        bool(storage_errors) and "no recent storage error patterns" not in storage_errors.lower()
+    )
+    container_ctx = bool(f2.get("container"))
+    blind_spot = (
+        "Host-level backing-storage latency and per-process I/O attribution "
+        "remain limited from inside this container."
+        if container_ctx
+        else "Host-level backing storage latency is partly opaque from this context."
+    )
+    likely_angle = (
+        "Mild container storage/I/O pressure is the strongest remaining angle from this view."
+        if container_ctx
+        else "Storage/I/O pressure remains the strongest remaining angle from this view."
+    )
+    return (
+        "## Assessment\n"
+        f"{assessment}\n\n"
+        "## What changed / deeper clues\n"
+        f"- Storage pressure: {_compare_storage_pressure(sp1, sp2)}.\n"
+        f"- Top CPU process: first pass {top_proc1}; second pass {top_proc2}.\n"
+        f"- Load: first pass {_format_load(load1)}; second pass {load_line}.\n"
+        f"- Memory/swap: still {'healthy' if mem_healthy and swap_healthy else 'noted'} "
+        f"({cpu_mem_line}).\n"
+        f"- Disk/inodes: still {'healthy' if disk_healthy else 'elevated'} "
+        f"({_format_disk(f2)}; {_format_inode(f2)}).\n"
+        f"- Storage errors: {('present — ' + storage_errors) if storage_errors_present else 'none in scanned logs'}.\n\n"  # noqa: E501
+        "## Likely angle\n"
+        f"{likely_angle}\n\n"
+        "## Remaining blind spots\n"
+        f"{blind_spot}\n\n"
+        "## Safe conclusion\n"
+        "No restart, cleanup, repair, install, delete, or service change is "
+        "indicated by this evidence.\n"
+        "The remaining blind spot is host-level backing-storage visibility "
+        "outside this container.\n"
+    )
+
+
 def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -> str:
     def _find(tool: str) -> dict[str, str] | None:
         return next((c for c in checks if c["tool"] == tool), None)
@@ -295,7 +496,7 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     if os_row:
         facts.append(f"- Host context: {os_row['summary']}.")
     if cpu_mem_row:
-        facts.append(f"- CPU/memory: {cpu_mem_row['summary']}.")
+        facts.append(f"- CPU/memory: {_human_cpu_mem(cpu_mem_row['summary'])}.")
     if load_row:
         facts.append(f"- Load: about {_human_load(load_row['summary'])}.")
     if disk_row:
@@ -322,34 +523,11 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     if systemd_row and systemd_row["status"] != "ok":
         clues.append("- High confidence: systemd checks are unavailable in this environment.")
     if load_row:
-        clues.append(f"- Low confidence: load snapshot is {load_row['summary']}.")
+        clues.append(f"- Low confidence: load snapshot is {_human_load(load_row['summary'])}.")
     if inode_row and "% used" in inode_row["summary"]:
         clues.append(f"- Medium confidence: inode usage snapshot is {inode_row['summary']}.")
     if intent == "storage_io_deep_dive":
-        sp = _find("storage.pressure")
-        proc = _find("process.top")
-        return (
-            "## Assessment\n"
-            "The deeper pass still points more toward mild storage/I/O or "
-            "container-overlay pressure than CPU or memory saturation.\n\n"
-            "## What changed / deeper clues\n"
-            f"- Storage pressure snapshot: {(sp or {}).get('summary', 'unavailable')}.\n"
-            "- Top process snapshot: "
-            f"{(proc or {}).get('summary', 'process details unavailable from this context')}.\n"
-            f"- Load remains {_human_load((load_row or {}).get('summary', ''))} for visible CPUs.\n"
-            "- Disk/inodes remain healthy "
-            f"({(disk_row or {}).get('summary', 'unknown')}; "
-            f"{(inode_row or {}).get('summary', 'unknown')}).\n\n"
-            "## Likely angle\n"
-            "Mild container storage/I/O pressure remains the strongest clue "
-            "from this container view.\n\n"
-            "## Remaining blind spots\n"
-            "Host-level backing storage latency and per-process I/O attribution "
-            "are limited from inside this container.\n\n"
-            "## Safe conclusion\n"
-            "No restart, cleanup, repair, install, or service change is "
-            "indicated by this evidence.\n"
-        )
+        return _storage_io_deep_dive_synthesis(None, checks)
     return (
         "## Assessment\n"
         f"{assessment}\n\n"
@@ -403,7 +581,7 @@ def _operator_followup_text(label: str, description: str) -> str:
 
 def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
-) -> dict[str, str] | None:
+) -> dict[str, Any] | None:
     q = question.lower()
     is_disk_capacity_intent = any(
         k in q
@@ -452,6 +630,60 @@ def select_followup_investigation(
                 "reason": "disk or inode usage is elevated",
             }
         return None
+    facts = _summarize_facts(checks)
+    sp = facts.get("storage_pressure")
+    storage_pressure_nonzero = bool(sp and any(v > 0 for v in sp))
+    cpu_mem = facts.get("cpu_mem") or {}
+    load = facts.get("load")
+    cpus = cpu_mem.get("cpus") or 0
+    cpu_saturated = bool(load and cpus and load[0] > cpus * 1.5)
+    mem_total = cpu_mem.get("mem_total_gib") or 0.0
+    mem_used = cpu_mem.get("mem_used_gib") or 0.0
+    mem_headroom = mem_total > 0 and (mem_total - mem_used) / mem_total > 0.15
+    swap_unused = bool(cpu_mem.get("swap_unused", True))
+    disk_healthy = facts.get("disk_pct", 0) < 80
+    inode_healthy = facts.get("inode_pct", 0) < 80
+    container_ctx = bool(facts.get("container"))
+    is_perf_intent = intent in {
+        "performance",
+        "host",
+        "slow",
+        "slowness",
+        "storage_performance",
+    } or any(
+        p in q for p in ("slow", "sluggish", "laggy", "performance", "feels slow", "high load")
+    )
+    if (
+        is_perf_intent
+        and storage_pressure_nonzero
+        and not cpu_saturated
+        and mem_headroom
+        and swap_unused
+        and disk_healthy
+        and inode_healthy
+        and container_ctx
+    ):
+        return {
+            "intent": "storage_io_deep_dive",
+            "label": "storage/I/O",
+            "description": (
+                "storage pressure, active processes, recent error clues, "
+                "and container storage context"
+            ),
+            "bundle": "performance",
+            "reason": "storage pressure is non-zero with healthy CPU/memory/disk",
+        }
+    if is_perf_intent and storage_pressure_nonzero:
+        return {
+            "intent": "storage_io_deep_dive",
+            "label": "storage/I/O",
+            "description": (
+                "storage pressure, active processes, recent error clues, "
+                "and container storage context"
+            ),
+            "bundle": "performance",
+            "reason": "storage pressure is non-zero",
+        }
     for c in checks:
         tool = c.get("tool", "")
         summary = c.get("summary", "").lower()
@@ -513,7 +745,7 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
     paste_guard_remaining_lines = 0
     paste_guard_non_shell_lines = 0
     paste_guard_first_notice = False
-    pending_followup: dict[str, str] | None = None
+    pending_followup: dict[str, Any] | None = None
     completed_followups: list[str] = []
     evidence_mode = "compact"
     while True:
@@ -549,7 +781,14 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                 console.print("Highlights:")
                 for line in _evidence_highlights(checks):
                     console.print(line)
-            console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
+            if pending_followup["intent"] == "storage_io_deep_dive":
+                console.print(
+                    _storage_io_deep_dive_synthesis(
+                        pending_followup.get("first_pass_checks"), checks
+                    )
+                )
+            else:
+                console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
             completed_followups.append(pending_followup["intent"])
             pending_followup = None
             continue
@@ -793,10 +1032,13 @@ Commands:
             if natural_language_diagnose:
                 pending_followup = None
                 pending_followup = select_followup_investigation(routed.args, checks, user_input)
+                if pending_followup and pending_followup["intent"] in completed_followups:
+                    pending_followup = None
                 if pending_followup:
                     pending_followup["created_from_session"] = runtime.session.session_id
                     pending_followup["created_from_question"] = user_input
                     pending_followup["created_from_intent"] = routed.args
+                    pending_followup["first_pass_checks"] = list(checks)
                 provider_error = None
                 try:
                     provider = build_provider(runtime.settings)
