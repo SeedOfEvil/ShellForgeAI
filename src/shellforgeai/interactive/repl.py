@@ -100,7 +100,7 @@ def _evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
     by_tool = {c["tool"]: c for c in checks}
     out = []
     if "system.cpu_memory" in by_tool:
-        out.append(f"- CPU/memory: {by_tool['system.cpu_memory']['summary']}.")
+        out.append(f"- CPU/memory: {_human_cpu_mem(by_tool['system.cpu_memory']['summary'])}.")
     if "host.resources" in by_tool:
         out.append(f"- Load: {_human_load(by_tool['host.resources']['summary'])}.")
     if "disk.usage" in by_tool or "disk.inodes" in by_tool:
@@ -108,7 +108,9 @@ def _evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
         inode_sum = by_tool.get("disk.inodes", {}).get("summary", "unknown")
         out.append(f"- Disk/inodes: {disk_sum}; {inode_sum}.")
     if "storage.pressure" in by_tool:
-        out.append(f"- Storage/I/O: {by_tool['storage.pressure']['summary']}.")
+        out.append(
+            f"- Storage/I/O: {_human_storage_pressure(by_tool['storage.pressure']['summary'])}."
+        )
     if "system.container_detect" in by_tool:
         out.append(f"- Context: {_human_container(by_tool['system.container_detect']['summary'])}.")
     if "process.top" in by_tool:
@@ -131,6 +133,31 @@ def _human_container(raw: str) -> str:
     if "container=no" in low:
         return "container=no"
     return "container=unknown"
+
+
+def _human_cpu_mem(raw: str) -> str:
+    m = re.search(r"cpus=(\d+).*mem=(\d+\.\d+)GiB/(\d+\.\d+)GiB.*swap=([^ ]+)", raw)
+    if not m:
+        return raw
+    cpus, used, total, swap = m.groups()
+    swap_txt = "swap unused" if swap.startswith("0B/") else f"{swap} swap used"
+    return f"{cpus} CPUs visible, {used} GiB / {total} GiB used, {swap_txt}"
+
+
+def _human_storage_pressure(raw: str) -> str:
+    vals = dict(
+        re.findall(
+            r"(avg10|avg60|avg300|io_some_avg10|io_some_avg60|io_some_avg300)=([0-9.]+)", raw
+        )
+    )
+    a10 = vals.get("avg10") or vals.get("io_some_avg10")
+    a60 = vals.get("avg60") or vals.get("io_some_avg60")
+    a300 = vals.get("avg300") or vals.get("io_some_avg300")
+    if a10 and a60 and a300:
+        if float(a10) == 0 and float(a60) == 0 and float(a300) == 0:
+            return "no pressure reported"
+        return f"non-zero pressure, avg10 {a10} / avg60 {a60} / avg300 {a300}"
+    return raw
 
 
 def _run_model_synthesis(
@@ -298,6 +325,31 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
         clues.append(f"- Low confidence: load snapshot is {load_row['summary']}.")
     if inode_row and "% used" in inode_row["summary"]:
         clues.append(f"- Medium confidence: inode usage snapshot is {inode_row['summary']}.")
+    if intent == "storage_io_deep_dive":
+        sp = _find("storage.pressure")
+        proc = _find("process.top")
+        return (
+            "## Assessment\n"
+            "The deeper pass still points more toward mild storage/I/O or "
+            "container-overlay pressure than CPU or memory saturation.\n\n"
+            "## What changed / deeper clues\n"
+            f"- Storage pressure snapshot: {(sp or {}).get('summary', 'unavailable')}.\n"
+            "- Top process snapshot: "
+            f"{(proc or {}).get('summary', 'process details unavailable from this context')}.\n"
+            f"- Load remains {_human_load((load_row or {}).get('summary', ''))} for visible CPUs.\n"
+            "- Disk/inodes remain healthy "
+            f"({(disk_row or {}).get('summary', 'unknown')}; "
+            f"{(inode_row or {}).get('summary', 'unknown')}).\n\n"
+            "## Likely angle\n"
+            "Mild container storage/I/O pressure remains the strongest clue "
+            "from this container view.\n\n"
+            "## Remaining blind spots\n"
+            "Host-level backing storage latency and per-process I/O attribution "
+            "are limited from inside this container.\n\n"
+            "## Safe conclusion\n"
+            "No restart, cleanup, repair, install, or service change is "
+            "indicated by this evidence.\n"
+        )
     return (
         "## Assessment\n"
         f"{assessment}\n\n"
@@ -339,8 +391,12 @@ _FOLLOWUP_CONFIRM = {
 
 
 def _operator_followup_text(label: str, description: str) -> str:
+    label = label.replace("broader read-only ", "").replace(" pass pass", " pass")
+    label = label.replace("read-only read-only", "read-only")
+    if not label.endswith("pass"):
+        label = f"{label} pass"
     return (
-        f"I can check that next with a deeper read-only {label} pass — {description}. "
+        f"I can check that next with a deeper read-only {label} — {description}. "
         "Say `proceed` or `dig deeper` and I’ll continue."
     )
 
@@ -402,9 +458,9 @@ def select_followup_investigation(
         if tool == "storage.pressure" and ("io_some" in summary or "non-zero" in summary):
             return {
                 "intent": "storage_io_deep_dive",
-                "label": "the storage/I/O angle",
+                "label": "storage/I/O",
                 "description": (
-                    "storage pressure, current process activity, recent error clues, "
+                    "storage pressure, active processes, recent error clues, "
                     "and container storage context"
                 ),
                 "bundle": "performance",
