@@ -1,21 +1,35 @@
 # Model providers
 
-## openai-codex
-Uses local `codex` CLI with ChatGPT sign-in (`codex login` or `codex login --device-auth`).
-ShellForgeAI does not read `~/.codex/auth.json`; it only checks whether the file exists.
+ShellForgeAI uses a single provider abstraction. The provider is selected
+by `model.provider` in config or `SHELLFORGEAI_MODEL_PROVIDER`.
 
-Config keys:
-- `model.provider`: `openai-codex`
-- `model.model`: default `gpt-5.5`
-- `model.fallback_model`: default `gpt-5.4`
-- `model.timeout_seconds`
-- `model.codex_binary`
-- `model.codex_sandbox` (`read-only`)
-- `model.codex_json`
-- `model.codex_skip_git_repo_check`
-- `model.allow_model_fallback`
+Available providers: `openai-codex` (default), `ollama`, `vllm`,
+`openai-compatible`, `openrouter`.
+
+## openai-codex (default)
+
+Uses the local `codex` CLI with ChatGPT sign-in (`codex login` or
+`codex login --device-auth`). ShellForgeAI does not read or parse
+`~/.codex/auth.json`; it only checks whether the file is present.
+ShellForgeAI invokes the local `codex` subprocess in read-only sandbox
+mode.
+
+Config keys (under `model:`):
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `provider` | `openai-codex` | |
+| `model` | `gpt-5.5` | |
+| `fallback_model` | `gpt-5.4` | Used if `allow_model_fallback`. |
+| `timeout_seconds` | `180` | |
+| `codex_binary` | `codex` | |
+| `codex_sandbox` | `read-only` | |
+| `codex_json` | `true` | Parse JSON event stream. |
+| `codex_skip_git_repo_check` | `true` | |
+| `allow_model_fallback` | `true` | |
 
 Env overrides:
+
 - `SHELLFORGEAI_MODEL_PROVIDER`
 - `SHELLFORGEAI_MODEL_NAME`
 - `SHELLFORGEAI_MODEL_FALLBACK`
@@ -23,17 +37,32 @@ Env overrides:
 - `SHELLFORGEAI_CODEX_TIMEOUT_SECONDS`
 - `SHELLFORGEAI_CODEX_SKIP_GIT_REPO_CHECK`
 
+Headless installs should use `codex login --device-auth`. In restricted
+containers the Codex CLI may emit `bwrap`/namespace errors — that is a
+provider sandbox limitation, not a host failure.
 
-## OpenAI Codex CLI notes
-- Codex CLI must be installed separately (or baked into image).
-- Use `codex login --device-auth` for headless containers.
-- ShellForgeAI does not manage auth and does not parse `~/.codex/auth.json`.
-- ShellForgeAI invokes local Codex subprocess in read-only sandbox mode.
+## ollama
 
-## Interactive model behavior
+Local Ollama daemon. Configure `model.base_url` (e.g.
+`http://localhost:11434`) and `model.model` (e.g. `llama3.1`).
 
-Interactive mode uses the same provider abstraction. If model is unavailable, it shows setup guidance (`shellforgeai model doctor`) and does not crash.
+## vllm
 
-PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadata env vars SHELLFORGEAI_BUILD_PR/SHELLFORGEAI_BUILD_COMMIT/SHELLFORGEAI_BUILD_BRANCH/SHELLFORGEAI_BUILD_DATE supported; /status and /examples added; artifacts are created on write only; apply remains validation-only; workspace trust does not bypass policy; canonical ShellForgeAI system prompt is required for model-backed flows.
+OpenAI-compatible vLLM endpoint. Set `model.base_url`, `model.model`, and
+the API key env via `model.api_key_env` (default `SHELLFORGEAI_API_KEY`).
 
-- Note: In restricted containers, Codex may emit bwrap/namespace errors; treat as provider sandbox limitation, not host failure. ShellForgeAI still collects evidence via typed read-only tools.
+## openai-compatible
+
+Any OpenAI-Chat-Completions-compatible endpoint. Same keys as vLLM.
+
+## openrouter
+
+OpenRouter OpenAI-compatible endpoint. Set `model.base_url` to
+`https://openrouter.ai/api/v1`, choose a `model.model`, and provide the API
+key via `model.api_key_env`.
+
+## Interactive behavior
+
+Interactive mode uses the same provider abstraction. If the model is
+unavailable, the REPL shows setup guidance (`shellforgeai model doctor`)
+instead of crashing.

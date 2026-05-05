@@ -1,33 +1,39 @@
-placeholder
+# Safety
 
-## Interactive trust boundary
+ShellForgeAI is built to be safe by construction. The runtime does not run
+arbitrary shell, does not mutate the host without policy approval, and
+treats model output as advisory.
 
-Workspace trust allows reading workspace docs and writing artifacts/audit under data dir. It does not enable destructive actions, arbitrary shell, service restarts, package installs, or auto-apply.
+## Boundaries
 
-PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadata env vars SHELLFORGEAI_BUILD_PR/SHELLFORGEAI_BUILD_COMMIT/SHELLFORGEAI_BUILD_BRANCH/SHELLFORGEAI_BUILD_DATE supported; /status and /examples added; artifacts are created on write only; apply remains validation-only; workspace trust does not bypass policy; canonical ShellForgeAI system prompt is required for model-backed flows.
+- **No arbitrary shell.** Tools are typed wrappers around specific binaries
+  with bounded arguments. The interactive REPL is not a shell; pasted
+  shell-looking input is blocked unless explicitly prefixed with
+  `ask explain ...` or `ask review ...`. A short-lived quarantine blocks
+  follow-on shell fragments after a multi-line paste; `/help` and `/exit`
+  still work.
+- **`apply` is validation-only.** It parses and validates plan JSON and
+  exits. It never executes plan steps in this alpha.
+- **No package installs, no service restarts** initiated by the runtime.
+  Service-impacting commands are described as approval-required and
+  operator-run.
+- **Workspace trust is scoped.** Trusting a workspace allows reading
+  workspace docs and writing artifacts/audit under the data dir. It does
+  not lift policy, enable mutation, or bypass approval gates.
+- **Slash commands are deterministic.** Unknown slash commands never call
+  the model.
+- **Read-only follow-ups only.** Adaptive follow-ups (CPU/process,
+  memory/swap, storage/IO, network/DNS, service health, general context)
+  use the same typed read-only collectors as the initial pass.
 
-- Note: In restricted containers, Codex may emit bwrap/namespace errors; treat as provider sandbox limitation, not host failure. ShellForgeAI still collects evidence via typed read-only tools.
-\n## Interactive guardrails update\n- Interactive mode is not a shell; shell-looking pasted input is blocked unless explicitly prefixed with ask explain/review.
-- Multiline shell paste recovery uses a short-lived quarantine: subsequent shell fragments are blocked without model calls, while /help and /exit still work.\n- Slash commands are deterministic and unknown slash commands do not call the model.\n- Added /health and /audit latest interactive commands.\n- Apply remains validation-only; workspace trust does not bypass mutation policy.\n- Service-impacting commands must be described as approval-required/operator-run.\n
+## Profiles and risk classes
 
-## Context-first + Codex provider note (PR)
-- ShellForgeAI runtime auto-runs approved typed read-only collectors for recognized ops intents (disk/performance/health/firewall/service).
-- In current architecture, Codex is used as a model/provider for synthesis; ShellForgeAI tools are executed by the ShellForgeAI runtime.
-- Runtime context bundles are the immediate solution; optional MCP exposure of read-only tools is a future path.
-- Arbitrary shell remains blocked in interactive mode.
-- Mutating/service-impacting actions remain blocked or approval-required/operator-run.
-- apply remains validation-only in this alpha.
-## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
+See `docs/profiles.md`. Risk classes are `read`, `change`, `service`,
+`system`, `danger`. Profiles map each class to `allow`, `ask`, or `deny`.
 
-## PR8 adaptive follow-ups
-- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
-- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
-- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
-- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.
+## Containers
 
-## PR9 follow-up reliability fixes
-- Sluggish/laggy natural-language symptoms now route to performance diagnostics instead of generic ask.
-- Added `/pending` to inspect queued deeper read-only investigation state.
-- Confirmation phrases run pending follow-up when queued; otherwise a helpful no-pending message is shown.
-- Normal synthesized answers hide collector names and keep technical names in evidence/debug surfaces.
-- Safety unchanged: read-only follow-ups only, no arbitrary shell execution, apply remains validation-only.
+In restricted containers, the Codex CLI may emit `bwrap`/namespace errors.
+Treat that as a provider sandbox limitation, not a host failure.
+ShellForgeAI's typed read-only collectors continue to work; only model
+synthesis is affected.

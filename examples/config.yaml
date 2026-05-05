@@ -1,1 +1,32 @@
-placeholder
+app:
+  name: ShellForgeAI
+  data_dir: ~/.local/share/shellforgeai
+  default_profile: inspect
+
+model:
+  provider: openai-codex
+  model: gpt-5.5
+  fallback_model: gpt-5.4
+  timeout_seconds: 180
+  codex_binary: codex
+  codex_sandbox: read-only
+  codex_json: true
+  codex_skip_git_repo_check: true
+  allow_model_fallback: true
+
+knowledge:
+  local_paths:
+    - ./SHELLFORGE.md
+    - ./docs
+    - /opt/runbooks
+    - /usr/share/doc
+  online_enabled: false
+
+audit:
+  enabled: true
+  jsonl: sessions/audit.jsonl
+  artifact_output: artifacts
+
+policy:
+  default_action: ask
+  deny_danger_without_breakglass: true

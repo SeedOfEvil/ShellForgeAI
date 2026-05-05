@@ -1,1 +1,12 @@
-placeholder
+# Example custom tool descriptor.
+# Custom tool registration is not yet wired into the runtime; this file
+# illustrates the intended shape so workspaces can prepare for it.
+name: my_custom_check
+category: host
+risk: read
+description: |
+  Reports a custom site-specific health signal. Read-only.
+command:
+  binary: /usr/local/bin/my-check
+  args: ["--quiet"]
+  timeout_seconds: 10

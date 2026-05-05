@@ -1,45 +1,100 @@
 # Interactive mode
 
-Running `shellforgeai` with no subcommand launches interactive mode.
+Running `shellforgeai` (or `sfai`) with no subcommand launches the operator
+REPL. The same loop is available explicitly as `shellforgeai interactive`.
 
-- Banner shows version, mode/profile, model provider/model, workspace.
-- Workspace trust prompt is required unless previously trusted in data-dir cache.
-- Slash commands: `/help`, `/exit`, `/quit`, `/doctor`, `/model`, `/tools`, `/audit`, `/workspace`, `/mode`, `/profile`, `/clear`, `/raw on|off`, `/context minimal|standard|full`.
-- Natural routing: `diagnose ...`, `research ...`, `plan ...`, otherwise `ask`.
-- Spinner/status is shown while processing model-backed and evidence-backed requests.
+## Banner
 
-Safety:
+The banner shows version + build line, mode/profile, model provider/model,
+and workspace path. Build metadata env vars: `SHELLFORGEAI_BUILD_PR`,
+`SHELLFORGEAI_BUILD_COMMIT`, `SHELLFORGEAI_BUILD_BRANCH`,
+`SHELLFORGEAI_BUILD_DATE`.
+
+## Workspace trust
+
+On first run in a workspace you are asked to trust it. Trust is cached under
+the data dir; pass `--no-trust-cache` to re-prompt. Trust grants reads of
+workspace docs and writes to the audit/artifact dir under the data dir. It
+does **not** lift policy or enable mutation.
+
+## Slash commands
+
+Deterministic. Unknown slash commands never call the model.
+
+```
+Session
+  /help              Show help
+  /exit, /quit       Exit
+  /clear             Clear screen
+
+Status
+  /status            Runtime summary
+  /doctor            ShellForgeAI health
+  /health            Machine health checks
+  /model             Model provider status
+  /workspace         Workspace trust/status
+  /mode              Current mode
+  /profile           Active profile
+
+Evidence
+  /tools             List typed tools (technical names)
+  /audit             Latest audit entries
+  /evidence          Latest evidence bundle
+  /pending           Inspect queued read-only follow-up
+
+Ops
+  diagnose <target>  Collect evidence and diagnose
+  research <query>   Search local knowledge
+  plan <goal>        Conservative read-only plan
+  ask <question>     Ask the configured model
+
+Debug
+  /raw on|off        Toggle raw provider events
+  /context <mode>    Set context mode: minimal | standard | full
+  /examples          Example queries
+```
+
+## Routing
+
+- Slash commands are deterministic.
+- `diagnose ...`, `research ...`, `plan ...`, `ask ...` are explicit.
+- Free-form text is classified. Recognized ops intents (disk, performance,
+  health, firewall, service, service-discovery) auto-run typed read-only
+  collectors before any model call.
+- Sluggish/laggy symptoms route to performance diagnostics rather than a
+  generic ask.
+- Service-discovery questions (services / listening / ports / nginx / ssh /
+  docker) route to read-only evidence collection before synthesis.
+
+## Streaming synthesis
+
+After collection, the REPL shows a synthesis status and streams the model
+answer when the provider supports it. Normal answers hide internal
+collector names; technical names remain in `/tools`, `/evidence`, and
+debug/raw output.
+
+## Adaptive read-only follow-ups
+
+When the evidence suggests a deeper read-only pass is useful (CPU/process,
+memory/swap, storage/IO, network/DNS, service health, or a general context
+pass), the REPL queues it. Confirm with `yes`, `proceed`, `dig deeper`,
+`y`, or `run it`. Inspect the queue with `/pending`. If nothing is queued,
+a confirmation phrase prints a helpful "no pending" message instead of
+calling the model. Follow-ups are read-only.
+
+## Paste guard
+
+The REPL is not a shell. Pasted shell-looking input is blocked unless
+prefixed with `ask explain ...` or `ask review ...`. After a multi-line
+shell paste, a short-lived quarantine blocks follow-on shell fragments
+without calling the model; `/help` and `/exit` continue to work.
+
+## Safety
+
 - No destructive execution.
 - No package install or service restart.
-- Apply remains validation-only.
+- `apply` is validation-only.
 - Model output is advisory.
-
-PR7: ShellForgeAI interactive banner now includes rotating quotes; build metadata env vars SHELLFORGEAI_BUILD_PR/SHELLFORGEAI_BUILD_COMMIT/SHELLFORGEAI_BUILD_BRANCH/SHELLFORGEAI_BUILD_DATE supported; /status and /examples added; artifacts are created on write only; apply remains validation-only; workspace trust does not bypass policy; canonical ShellForgeAI system prompt is required for model-backed flows.
-
-- Note: In restricted containers, Codex may emit bwrap/namespace errors; treat as provider sandbox limitation, not host failure. ShellForgeAI still collects evidence via typed read-only tools.
-\n## Interactive guardrails update\n- Interactive mode is not a shell; shell-looking pasted input is blocked unless explicitly prefixed with ask explain/review.
-- Multiline shell paste recovery uses a short-lived quarantine: subsequent shell fragments are blocked without model calls, while /help and /exit still work.\n- Slash commands are deterministic and unknown slash commands do not call the model.\n- Added /health and /audit latest interactive commands.\n- Apply remains validation-only; workspace trust does not bypass mutation policy.\n- Service-impacting commands must be described as approval-required/operator-run.\n
-
-## Context-first + Codex provider note (PR)
-- ShellForgeAI runtime auto-runs approved typed read-only collectors for recognized ops intents (disk/performance/health/firewall/service).
-- In current architecture, Codex is used as a model/provider for synthesis; ShellForgeAI tools are executed by the ShellForgeAI runtime.
-- Runtime context bundles are the immediate solution; optional MCP exposure of read-only tools is a future path.
-- Arbitrary shell remains blocked in interactive mode.
-- Mutating/service-impacting actions remain blocked or approval-required/operator-run.
-- apply remains validation-only in this alpha.
-
-- Natural-language diagnostic questions now collect evidence and then produce a human-readable assessment (facts, clues, missing evidence, safe next steps), while explicit `diagnose <target>` remains artifact-oriented.
-## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
-
-## PR8 adaptive follow-ups
-- Natural-language diagnostics now offer an evidence-driven deeper read-only follow-up (CPU/process, memory/swap, storage/I-O, network/DNS, service health, or general context pass).
-- Interactive confirmations (`yes`, `proceed`, `dig deeper`, `y`, `run it`) execute the pending read-only follow-up and clear it.
-- Normal UX avoids internal collector names; `/tools` and debug/raw remain technical views.
-- Safety unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.
-
-## PR9 follow-up reliability fixes
-- Sluggish/laggy natural-language symptoms now route to performance diagnostics instead of generic ask.
-- Added `/pending` to inspect queued deeper read-only investigation state.
-- Confirmation phrases run pending follow-up when queued; otherwise a helpful no-pending message is shown.
-- Normal synthesized answers hide collector names and keep technical names in evidence/debug surfaces.
-- Safety unchanged: read-only follow-ups only, no arbitrary shell execution, apply remains validation-only.
+- In restricted containers the Codex CLI may emit `bwrap`/namespace
+  errors; that is a provider sandbox limitation, not a host failure, and
+  the typed read-only tools keep working.
