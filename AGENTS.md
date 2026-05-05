@@ -26,6 +26,8 @@ Conventions for any agent (human or LLM) modifying ShellForgeAI.
   behavior.
 - Do not append PR-numbered changelog blobs to docs. Document the current
   behavior; use git history / PR descriptions for what-changed-when.
+- Before opening a PR, complete the documentation-impact checklist in
+  `.github/PULL_REQUEST_TEMPLATE.md`.
 
 ## Codex provider note
 
