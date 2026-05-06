@@ -123,6 +123,34 @@ TOOLS = [
         examples=["diagnose host"],
     ),
     ToolDefinition(
+        name="process.io",
+        description="Process I/O snapshot",
+        risk=RiskTier.read,
+        category="process",
+        examples=["diagnose performance"],
+    ),
+    ToolDefinition(
+        name="system.cgroup_limits",
+        description="Container cgroup limits",
+        risk=RiskTier.read,
+        category="system",
+        examples=["diagnose performance"],
+    ),
+    ToolDefinition(
+        name="disk.top_dirs",
+        description="Bounded top-level disk usage",
+        risk=RiskTier.read,
+        category="disk",
+        examples=["diagnose disk"],
+    ),
+    ToolDefinition(
+        name="storage.mounts",
+        description="Mount and filesystem context",
+        risk=RiskTier.read,
+        category="storage",
+        examples=["diagnose performance"],
+    ),
+    ToolDefinition(
         name="system.os_release",
         description="OS release metadata",
         risk=RiskTier.read,
@@ -250,7 +278,7 @@ TOOLS = [
     ),
     ToolDefinition(
         name="audit.recent",
-        description="Recent ShellForgeAI audit summary context",
+        description="Recent ShellForgeAI session trends",
         risk=RiskTier.read,
         category="audit",
         examples=["diagnose performance"],

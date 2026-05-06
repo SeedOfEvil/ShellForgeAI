@@ -56,3 +56,9 @@ follow-up (CPU/process, memory/swap, storage/IO, network/DNS, service
 health, or a general context pass). Confirm with `yes`, `proceed`, `dig
 deeper`, `y`, or `run it`. Inspect the queue with `/pending`. Follow-ups
 remain read-only.
+
+- `process.io` — Process I/O snapshot.
+- `system.cgroup_limits` — Container cgroup limits.
+- `disk.top_dirs` — Bounded top-level disk usage.
+- `storage.mounts` — Mount and filesystem context.
+- `audit.recent` — Recent ShellForgeAI session trends.
