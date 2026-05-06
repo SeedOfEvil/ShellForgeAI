@@ -11,7 +11,7 @@ from rich.console import Console
 from shellforgeai.audit.storage import AuditStorage
 from shellforgeai.core.config import load_settings
 from shellforgeai.core.context import RuntimeContext
-from shellforgeai.core.diagnose import diagnose_target
+from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import classify_target
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
@@ -358,7 +358,7 @@ def diagnose(
             f"Target: {target}\n"
             f"Type: {result.target_type.value}\n"
             f"Evidence: {len(result.evidence.items)} item(s)\n"
-            f"Findings: {len(result.findings)}\n"
+            f"{findings_summary_line(result.findings)}\n"
             "Artifacts:\n"
             f"- evidence: {ev_path}\n"
             f"- plan: {plan_path if save_plan else 'not-saved'}\n"

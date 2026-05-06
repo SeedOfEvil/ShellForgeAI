@@ -50,3 +50,5 @@ Running with no `<command>` enters interactive mode (see
 `apply` does not execute. Workspace trust does not lift policy.
 Service-impacting commands are described as approval-required and
 operator-run; ShellForgeAI does not run them.
+
+`diagnose` now reports findings by severity in the terminal summary so informational limitations are not overstated as incidents.

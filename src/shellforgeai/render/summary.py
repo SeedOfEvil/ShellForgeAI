@@ -11,6 +11,8 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+from shellforgeai.core.diagnose import finding_severity_counts
+
 _ARTIFACT_LABELS = {
     "evidence.json": "evidence.json",
     "plan.json": "plan.json",
@@ -153,14 +155,19 @@ def write_diagnosis_summary_md(
     """
     evidence_count = len(evidence_items)
     findings_count = len(findings)
+    sev = finding_severity_counts(findings)
     assessment = _short_assessment(evidence_items, findings_count)
     key_lines = _key_evidence_lines(evidence_items)
     artifacts = _existing_artifacts(artifact_dir, artifact_candidates, assume_present={path.name})
     findings_block: list[str]
-    if findings_count == 0:
-        findings_block = ["No findings were raised by the deterministic checks."]
+    actionable = sev.get("critical", 0) + sev.get("warning", 0)
+    if actionable == 0:
+        findings_block = ["No actionable findings were raised by deterministic checks."]
     else:
-        findings_block = [f"- {getattr(f, 'title', 'finding')}" for f in findings[:8]]
+        findings_block = [
+            f"- {str(getattr(f, 'severity', 'warning')).title()}: {getattr(f, 'title', 'finding')}"
+            for f in findings[:8]
+        ]
         if findings_count > 8:
             findings_block.append(f"- ...and {findings_count - 8} more.")
 
@@ -173,6 +180,11 @@ def write_diagnosis_summary_md(
         f"- Created: {created_at}",
         f"- Evidence count: {evidence_count}",
         f"- Findings count: {findings_count}",
+        (
+            "- Findings severity: "
+            f"{sev.get('critical', 0)} critical, {sev.get('warning', 0)} warning, "
+            f"{sev.get('info', 0) + sev.get('limitation', 0)} info/limitations"
+        ),
         "",
         "## Assessment",
         assessment,
