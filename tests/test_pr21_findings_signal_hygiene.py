@@ -23,7 +23,14 @@ def _item(source: str, summary: str, content: str = "", ok: bool = True) -> Evid
     )
 
 
+def _patch_knowledge(monkeypatch):
+    monkeypatch.setattr(
+        "shellforgeai.core.diagnose.collect_local_knowledge_evidence", lambda c, q: []
+    )
+
+
 def test_no_storage_error_patterns_do_not_create_warning(monkeypatch):
+    _patch_knowledge(monkeypatch)
     monkeypatch.setattr("shellforgeai.core.diagnose.collect_host_evidence", lambda c: [])
     monkeypatch.setattr(
         "shellforgeai.core.diagnose.collect_disk_evidence",
@@ -34,6 +41,7 @@ def test_no_storage_error_patterns_do_not_create_warning(monkeypatch):
 
 
 def test_systemctl_missing_in_container_is_limitation(monkeypatch):
+    _patch_knowledge(monkeypatch)
     monkeypatch.setattr(
         "shellforgeai.core.diagnose.collect_host_evidence",
         lambda c: [_item("system.container_detect", "container=docker")],
@@ -46,7 +54,27 @@ def test_systemctl_missing_in_container_is_limitation(monkeypatch):
     assert any(f.severity == "limitation" and "systemd" in f.title.lower() for f in res.findings)
 
 
+def test_nginx_not_found_rolls_up_without_raw_probe_limitations(monkeypatch):
+    _patch_knowledge(monkeypatch)
+    monkeypatch.setattr("shellforgeai.core.diagnose.collect_host_evidence", lambda c: [])
+    monkeypatch.setattr(
+        "shellforgeai.core.diagnose.collect_service_evidence",
+        lambda c, t, since="30m": [
+            _item("process.find nginx", "no matching process", ok=False),
+            _item("logs.file_tail", "not found", ok=False),
+            _item("systemd.status", "not found", ok=False),
+        ],
+    )
+    monkeypatch.setattr("shellforgeai.core.diagnose.collect_nginx_evidence", lambda c: [])
+    res = diagnose_target(_ctx(), "nginx")
+    assert (
+        sum("nginx was not found in this environment" in f.title.lower() for f in res.findings) == 1
+    )
+    assert not any("process.find" in f.title for f in res.findings)
+
+
 def test_nginx_not_found_wording(monkeypatch):
+    _patch_knowledge(monkeypatch)
     monkeypatch.setattr("shellforgeai.core.diagnose.collect_host_evidence", lambda c: [])
     monkeypatch.setattr(
         "shellforgeai.core.diagnose.collect_service_evidence",
@@ -72,3 +100,33 @@ def test_summary_uses_no_actionable_message(tmp_path):
     t = p.read_text()
     assert "No actionable findings were raised" in t
     assert "Potential issues in storage.error_summary" not in t
+
+
+def test_summary_humanizes_limitations_and_assessment(tmp_path):
+    p = tmp_path / "summary.md"
+    write_diagnosis_summary_md(
+        path=p,
+        session_id="s1",
+        target="nginx",
+        target_type="service",
+        created_at="2026-05-06T00:00:00+00:00",
+        evidence_items=[_item("system.container_detect", "container=docker")],
+        findings=[
+            Finding(
+                severity="limitation", title="systemd is unavailable in this container", detail="x"
+            ),
+            Finding(
+                severity="limitation",
+                title="journalctl is unavailable in this container",
+                detail="x",
+            ),
+            Finding(
+                severity="warning", title="nginx was not found in this environment", detail="x"
+            ),
+        ],
+        artifact_dir=tmp_path,
+    )
+    t = p.read_text()
+    assert "1 warning and 2 context limitations" in t
+    assert "systemd.status" not in t
+    assert "journal.unit" not in t

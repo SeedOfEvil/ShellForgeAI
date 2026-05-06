@@ -77,6 +77,10 @@ def _is_benign_storage_error_summary(item) -> bool:
     return any(s in txt for s in ["no recent storage error patterns found", "0 hits", "none found"])
 
 
+def _looks_like_not_found(text: str) -> bool:
+    return any(s in text for s in ["not found", "no such file", "no matching process"])
+
+
 def _dedupe(items):
     seen = set()
     out = []
@@ -149,6 +153,12 @@ def diagnose_target(
             items.extend(collect_local_knowledge_evidence(context, target))
     items = _dedupe(items)
     in_container = _is_container(items)
+    service_missing_signal = False
+    if ttype == TargetType.service and target.lower() in {"nginx", "ssh", "sshd", "docker"}:
+        service_missing_signal = any(
+            _looks_like_not_found(f"{i.summary} {i.content}".lower()) for i in items
+        )
+
     for i in items:
         if not i.ok:
             txt = f"{i.summary} {i.content}".lower()
@@ -174,6 +184,21 @@ def diagnose_target(
                         detail="Host-level journal logs are not visible from this environment.",
                         evidence_refs=[i.source],
                         confidence="high",
+                    )
+                )
+                continue
+            if service_missing_signal and (
+                i.source.startswith("process.find") or i.source == "logs.file_tail"
+            ):
+                continue
+            if i.source == "logs.file_tail" and target.lower() == "nginx":
+                findings.append(
+                    Finding(
+                        severity="limitation",
+                        title="nginx log files were not available from this environment",
+                        detail="Nginx log paths could not be read from this environment.",
+                        evidence_refs=[i.source],
+                        confidence="medium",
                     )
                 )
                 continue

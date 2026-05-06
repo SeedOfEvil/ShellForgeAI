@@ -105,10 +105,23 @@ def _key_evidence_lines(items: Iterable) -> list[str]:
     return lines[:8]
 
 
-def _short_assessment(items: Iterable, findings_count: int) -> str:
+def _short_assessment(items: Iterable, findings: list) -> str:
+    sev = finding_severity_counts(findings)
+    actionable = sev.get("critical", 0) + sev.get("warning", 0)
+    if actionable == 0 and (sev.get("info", 0) + sev.get("limitation", 0)) > 0:
+        return (
+            "Read-only checks found no actionable issue, but some host-level checks "
+            "are limited from this container."
+        )
+    if actionable == 0:
+        return "No actionable findings were raised by deterministic checks."
     by = _by_source(items)
-    if findings_count == 0:
-        return "No critical issue surfaced from the read-only checks."
+    if sev.get("critical", 0) == 0:
+        return (
+            "Read-only checks found "
+            f"{sev.get('warning', 0)} warning and {sev.get('limitation', 0)} context limitations. "
+            "No critical issues were found."
+        )
     high_disk = False
     disk_item = by.get("disk.usage")
     if disk_item:
@@ -117,7 +130,30 @@ def _short_assessment(items: Iterable, findings_count: int) -> str:
                 high_disk = True
     if high_disk:
         return "Filesystem usage looks critical and should be reviewed first."
-    return f"Read-only checks raised {findings_count} finding(s) worth a closer look."
+    return "Read-only checks found critical issues that should be reviewed immediately."
+
+
+def _humanize_findings(findings: list) -> list[str]:
+    out: list[str] = []
+    has_system_lim = any(
+        "systemd is unavailable in this container" in getattr(f, "title", "").lower()
+        or "journalctl is unavailable in this container" in getattr(f, "title", "").lower()
+        for f in findings
+    )
+    if has_system_lim:
+        out.append(
+            "- Limitation: systemd and journal checks are unavailable in this container, so "
+            "host-level service state could not be inspected from here."
+        )
+    for f in findings:
+        sev = str(getattr(f, "severity", "warning")).title()
+        title = str(getattr(f, "title", "finding"))
+        if has_system_lim and ("systemd" in title.lower() or "journalctl" in title.lower()):
+            continue
+        if "process.find" in title or "logs.file_tail reported error" in title:
+            continue
+        out.append(f"- {sev}: {title}")
+    return out
 
 
 def _existing_artifacts(
@@ -156,7 +192,7 @@ def write_diagnosis_summary_md(
     evidence_count = len(evidence_items)
     findings_count = len(findings)
     sev = finding_severity_counts(findings)
-    assessment = _short_assessment(evidence_items, findings_count)
+    assessment = _short_assessment(evidence_items, findings)
     key_lines = _key_evidence_lines(evidence_items)
     artifacts = _existing_artifacts(artifact_dir, artifact_candidates, assume_present={path.name})
     findings_block: list[str]
@@ -164,10 +200,7 @@ def write_diagnosis_summary_md(
     if actionable == 0:
         findings_block = ["No actionable findings were raised by deterministic checks."]
     else:
-        findings_block = [
-            f"- {str(getattr(f, 'severity', 'warning')).title()}: {getattr(f, 'title', 'finding')}"
-            for f in findings[:8]
-        ]
+        findings_block = _humanize_findings(findings[:8])
         if findings_count > 8:
             findings_block.append(f"- ...and {findings_count - 8} more.")
 
