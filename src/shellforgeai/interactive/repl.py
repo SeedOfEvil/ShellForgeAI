@@ -12,15 +12,17 @@ from rich.console import Console
 from rich.table import Table
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target
-from shellforgeai.core.evidence import classify_target
+from shellforgeai.core.evidence import EvidenceCategory, classify_target
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.interactive.banner import build_banner
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.manager import build_provider
 from shellforgeai.llm.prompts import build_contextual_prompt
 from shellforgeai.llm.schemas import ModelRequest
+from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import disk, host, network, process, registry, storage, systemd
 from shellforgeai.version import get_build_info
 
@@ -591,11 +593,10 @@ _FOLLOWUP_CONFIRM = {
 def _operator_followup_text(label: str, description: str) -> str:
     label = label.replace("broader read-only ", "").replace(" pass pass", " pass")
     label = label.replace("read-only read-only", "read-only")
-    if not label.endswith("pass"):
-        label = f"{label} pass"
+    label = label.removesuffix(" pass").strip()
     return (
-        f"I can check that next with a deeper read-only {label} — {description}. "
-        "Say `proceed` or `dig deeper` and I’ll continue."
+        f"I can dig into the {label} angle next — {description}. "
+        "Say `proceed` or `dig deeper` and I’ll keep it read-only."
     )
 
 
@@ -754,6 +755,76 @@ def select_followup_investigation(
         "bundle": "health",
         "reason": "no single stronger angle was detected",
     }
+
+
+_ACTION_VERBS = (
+    "restart",
+    "reload",
+    "stop",
+    "start",
+    "kill",
+    "install",
+    "uninstall",
+    "remove",
+    "delete",
+    "purge",
+    "upgrade",
+    "downgrade",
+    "reboot",
+    "shutdown",
+    "format",
+    "wipe",
+    "drop",
+)
+
+
+def _detect_action_request(text: str) -> str | None:
+    low = text.lower().strip()
+    if not low:
+        return None
+    request_modal = any(
+        p in low
+        for p in (
+            "can you ",
+            "could you ",
+            "please ",
+            "would you ",
+            "will you ",
+            "go ahead and ",
+            "i need you to ",
+        )
+    )
+    starts_imperative = any(re.match(rf"^{re.escape(v)}\b", low) for v in _ACTION_VERBS)
+    if not (request_modal or starts_imperative):
+        return None
+    if not any(re.search(rf"\b{re.escape(v)}\b", low) for v in _ACTION_VERBS):
+        return None
+    if any(
+        phrase in low
+        for phrase in (
+            "what would you check before",
+            "before restarting",
+            "explain",
+            "review",
+            "describe",
+            "what does",
+        )
+    ):
+        return None
+    target_match = re.search(
+        r"\b(?:restart|reload|stop|start|kill|install|uninstall|remove|delete|"
+        r"purge|upgrade|downgrade|reboot|shutdown|format|wipe|drop)\b\s+([\w\-./]+)",
+        low,
+    )
+    target = target_match.group(1) if target_match else None
+    target_phrase = f" {target}" if target else ""
+    return (
+        f"I can't run that action from inspect mode — apply remains validation-only "
+        f"in this alpha, and changes like this need explicit operator approval.\n"
+        f"If you'd like, I can take a read-only look at{target_phrase or ' the relevant service'} "
+        "first (process state, listeners, recent log clues) so you have evidence in hand "
+        "before deciding."
+    )
 
 
 def _contains_internal_collector_language(text: str) -> bool:
@@ -1062,6 +1133,17 @@ No command was executed.""")
         if routed.name in {"diagnose"}:
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, routed.args, online=False, since="30m")
+            if _is_disk_usage_breakdown_intent(user_input):
+                top_dirs = disk.top_dirs("/")
+                res.evidence.items.append(
+                    _evidence_item_from_result(
+                        top_dirs, EvidenceCategory.files, "Top-level directory usage"
+                    )
+                )
+                mounts = storage.mounts()
+                res.evidence.items.append(
+                    _evidence_item_from_result(mounts, EvidenceCategory.files, "Mount layout")
+                )
             checks = [
                 {
                     "tool": i.source,
@@ -1070,24 +1152,8 @@ No command was executed.""")
                 }
                 for i in res.evidence.items
             ]
-            if _is_disk_usage_breakdown_intent(user_input):
-                top_dirs = disk.top_dirs("/")
-                checks.append(
-                    {
-                        "tool": top_dirs.tool,
-                        "status": "ok" if top_dirs.ok else "unavailable",
-                        "summary": _summary_for_check(top_dirs),
-                    }
-                )
-                mounts = storage.mounts()
-                checks.append(
-                    {
-                        "tool": mounts.tool,
-                        "status": "ok" if mounts.ok else "unavailable",
-                        "summary": _summary_for_check(mounts),
-                    }
-                )
-            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            evidence_count = len(res.evidence.items)
+            console.print(f"Collected {evidence_count} read-only evidence item(s).")
             show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
             if show_full:
                 _evidence_table(console, checks)
@@ -1096,8 +1162,6 @@ No command was executed.""")
                 for line in _evidence_highlights(checks):
                     console.print(line)
             natural_language_diagnose = not user_input.lower().startswith("diagnose ")
-            with console.status("Building findings..."):
-                pass
             with console.status("Writing artifacts..."):
                 _ensure_artifact_dir(runtime)
                 ep = runtime.session.artifact_dir / "evidence.json"
@@ -1105,28 +1169,25 @@ No command was executed.""")
                 pp = runtime.session.artifact_dir / "plan.json"
                 pp.write_text(_model_dump_json_safe(res.proposed_plan, indent=2), encoding="utf-8")
                 sp = runtime.session.artifact_dir / "summary.md"
-                sp.write_text(
-                    f"Session: {res.session_id}\n"
-                    f"Target: {routed.args}\n"
-                    f"Type: {res.target_type.value}\n"
-                    f"Mode: {runtime.session.mode}\n"
-                    f"Profile: {runtime.profile.name}\n"
-                    "Collectors:\n"
-                    + "\n".join([f"- {c['tool']}: {c['status']} ({c['summary']})" for c in checks])
-                    + "\nDeterministic findings:\n"
-                    + "\n".join([f"- {f.title}" for f in res.findings])
-                    + (
-                        f"\nArtifacts:\n- evidence: {ep}\n"
-                        f"- plan: {pp}\n- summary: {sp}\n"
-                        "Safety: apply remains validation-only."
-                    ),
-                    encoding="utf-8",
+                created_at_obj: Any = getattr(res, "created_at", None)
+                created_at_str = (
+                    created_at_obj.isoformat() if hasattr(created_at_obj, "isoformat") else ""
+                )
+                write_diagnosis_summary_md(
+                    path=sp,
+                    session_id=res.session_id,
+                    target=routed.args,
+                    target_type=res.target_type.value,
+                    created_at=created_at_str,
+                    evidence_items=list(res.evidence.items),
+                    findings=list(res.findings),
+                    artifact_dir=runtime.session.artifact_dir,
                 )
             console.print(
                 f"Diagnose {routed.args}\n"
                 f"Session: {res.session_id}\nTarget: {routed.args}\n"
                 f"Type: {res.target_type.value}\n"
-                f"Evidence: {len(res.evidence.items)} item(s)\n"
+                f"Evidence: {evidence_count} item(s)\n"
                 f"Findings: {len(res.findings)}\n"
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
             )
@@ -1391,13 +1452,42 @@ No command was executed.""")
                 for name in ("evidence.json", "plan.json", "summary.md", "model-response.md")
                 if (artifact_dir / name).exists()
             ]
+            pass_kind = (
+                "deeper follow-up pass" if completed_followups else "first-pass read-only check"
+            )
             console.print(
-                "I checked CPU/memory/load, disk and inode usage, storage pressure, "
-                "process activity, process I/O, container/cgroup limits, mount context, "
-                "recent trend clues, and network/DNS context in read-only mode.\n"
-                "Detailed artifact files available for this session: "
+                f"That was a {pass_kind}. I looked at CPU/memory/load, disk and inode usage, "
+                "storage pressure, process activity, container and mount context, recent "
+                "trend clues, and network/DNS context.\n"
+                "Saved artifacts for this session: "
                 f"{', '.join(files) if files else 'none yet'}."
             )
+            continue
+        if user_input.strip().lower() in {"what tools did you use?", "what tools did you use"}:
+            artifact_dir = runtime.session.artifact_dir
+            ev_path = artifact_dir / "evidence.json"
+            tool_names: list[str] = []
+            if ev_path.exists():
+                import json as _json
+
+                try:
+                    data = _json.loads(ev_path.read_text(encoding="utf-8"))
+                    seen_tools: set[str] = set()
+                    for it in data.get("items", []):
+                        src = (it or {}).get("source")
+                        if src and src not in seen_tools:
+                            seen_tools.add(src)
+                            tool_names.append(src)
+                except Exception:
+                    tool_names = []
+            console.print(
+                "Collectors used in the most recent run: "
+                f"{', '.join(tool_names) if tool_names else 'none recorded yet'}."
+            )
+            continue
+        action_response = _detect_action_request(user_input)
+        if action_response is not None:
+            console.print(action_response)
             continue
         provider = build_provider(runtime.settings)
         kind = "ask"

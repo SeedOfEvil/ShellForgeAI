@@ -21,7 +21,7 @@ Running with no `<command>` enters interactive mode (see
 | `interactive` | Same as launching with no subcommand. `--no-trust-cache` forces re-prompt of workspace trust. |
 | `version` | Print version + build line if available. |
 | `doctor` | Show ShellForgeAI runtime health (version, profile, data dir, tool count, model provider). |
-| `diagnose <target>` | Collect evidence and propose a conservative plan. Options: `--online`, `--since 30m`, `--save-plan`, `--json`, `--model`, `--raw`, `--full-context`. Aliases for target include `performance\|slow\|slowness\|host`, `storage\|disk-performance\|io\|iowait`, `services\|service-discovery\|ports`. |
+| `diagnose <target>` | Collect evidence and propose a conservative plan. Options: `--online`, `--since 30m`, `--save-plan`, `--json`, `--model`, `--raw`, `--full-context`. Writes `evidence.json`, `summary.md` (a friendly mini-report whose evidence count matches `evidence.json`), and `plan.json` when `--save-plan`. The CLI footer only references `model-response.md` when `--model` actually wrote it. Aliases for target include `performance\|slow\|slowness\|host`, `storage\|disk-performance\|io\|iowait`, `services\|service-discovery\|ports`. |
 | `research <query>` | Search local knowledge (`SHELLFORGE.md`, `knowledge.local_paths`). With `--model`, ask the provider to synthesize from hits. |
 | `plan <goal>` | Emit a deterministic conservative plan JSON. With `--model`, attach a model review. |
 | `apply <plan.json>` | Validation-only in this alpha — parses and exits. |

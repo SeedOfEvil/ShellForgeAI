@@ -73,6 +73,23 @@ answer when the provider supports it. Normal answers hide internal
 collector names; technical names remain in `/tools`, `/evidence`, and
 debug/raw output.
 
+## Friendly mini-report style
+
+Natural-language answers favor short calm sections (`## Assessment`,
+`## What I found`, `## Best read`, `## Safe next step`) over bullet dumps
+or repeated safety boilerplate. The on-disk `summary.md` mirrors that
+shape — verdict, key evidence, findings, and an artifacts list that only
+references files actually written.
+
+The "Collected N read-only evidence item(s)" line, the `Evidence: N` line
+in the diagnose footer, and the `Evidence count` line inside `summary.md`
+are taken from the same persisted `evidence.json` so the numbers always
+agree.
+
+The polite `what did you check?` answer mentions the categories inspected
+and only the artifact files that exist on disk for the current session.
+Use `what tools did you use?` to see the raw collector names.
+
 ## Adaptive read-only follow-ups
 
 When the evidence suggests a deeper read-only pass is useful (CPU/process,

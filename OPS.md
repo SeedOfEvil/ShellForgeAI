@@ -26,6 +26,12 @@ Expected outcomes:
 - Evidence highlights stay compact in normal UX while `/tools` and debug
   views preserve technical names.
 - `/pending` shows queued read-only follow-ups (or explicit none queued).
+- The "Collected N read-only evidence item(s)" line, the diagnose footer
+  `Evidence:` line, and `Evidence count` in `summary.md` all show the
+  same number (sourced from `evidence.json`).
+- `summary.md` reads as a friendly mini-report (Assessment / Key evidence
+  / Findings / Artifacts / Safety note) and only references artifact
+  files that actually exist on disk.
 
 ## Apply safety check
 

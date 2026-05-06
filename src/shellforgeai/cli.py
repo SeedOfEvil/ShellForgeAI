@@ -20,6 +20,7 @@ from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.manager import build_provider
 from shellforgeai.llm.prompts import build_contextual_prompt, build_model_prompt
 from shellforgeai.llm.schemas import ModelRequest
+from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import host, journal, registry, systemd
 from shellforgeai.version import get_build_info
 
@@ -59,20 +60,26 @@ def _write_summary_md(
     session_id: str,
     target: str,
     target_type: str,
-    evidence_count: int,
-    findings_count: int,
-    artifacts: list[str],
+    created_at: str,
+    evidence_items: list,
+    findings: list,
+    artifact_dir: Path,
+    include_model_response: bool,
 ) -> None:
-    lines = [
-        f"Session: {session_id}",
-        f"Target: {target}",
-        f"Type: {target_type}",
-        f"Evidence count: {evidence_count}",
-        f"Findings count: {findings_count}",
-        "Artifacts:",
-    ]
-    lines.extend(f"- {a}" for a in artifacts)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    candidates = ["evidence.json", "plan.json", "summary.md"]
+    if include_model_response:
+        candidates.append("model-response.md")
+    write_diagnosis_summary_md(
+        path=path,
+        session_id=session_id,
+        target=target,
+        target_type=target_type,
+        created_at=created_at,
+        evidence_items=evidence_items,
+        findings=findings,
+        artifact_dir=artifact_dir,
+        artifact_candidates=candidates,
+    )
 
 
 @app.callback(invoke_without_command=True)
@@ -267,15 +274,16 @@ def diagnose(
     if save_plan:
         plan_path.write_text(result.proposed_plan.model_dump_json(indent=2), encoding="utf-8")
     summary_path = runtime.session.artifact_dir / "summary.md"
-    artifact_paths = [str(ev_path)] + ([str(plan_path)] if save_plan else [])
     _write_summary_md(
         summary_path,
         result.session_id,
         target,
         result.target_type.value,
-        len(result.evidence.items),
-        len(result.findings),
-        artifact_paths,
+        result.created_at.isoformat(),
+        list(result.evidence.items),
+        list(result.findings),
+        runtime.session.artifact_dir,
+        include_model_response=False,
     )
     rec = {
         "session_id": runtime.session.session_id,
@@ -320,13 +328,16 @@ def diagnose(
             encoding="utf-8",
         )
         spath = runtime.session.artifact_dir / "summary.md"
-        spath.write_text(
-            f"Session: {result.session_id}\n"
-            f"Target: {target}\n"
-            f"Type: {result.target_type.value}\n"
-            f"Evidence: {len(result.evidence.items)}\n"
-            f"Findings: {len(result.findings)}\n",
-            encoding="utf-8",
+        _write_summary_md(
+            spath,
+            result.session_id,
+            target,
+            result.target_type.value,
+            result.created_at.isoformat(),
+            list(result.evidence.items),
+            list(result.findings),
+            runtime.session.artifact_dir,
+            include_model_response=True,
         )
         if raw and mresp.raw and mresp.raw.get("stdout_jsonl"):
             (runtime.session.artifact_dir / "raw-model-events.jsonl").write_text(
@@ -337,7 +348,11 @@ def diagnose(
     if json_output:
         console.print(result.model_dump_json(indent=2))
     else:
-        model_response_path = runtime.session.artifact_dir / "model-response.md" if model else "n/a"
+        model_response_artifact = runtime.session.artifact_dir / "model-response.md"
+        if model and model_response_artifact.exists():
+            model_response_display: Path | str = model_response_artifact
+        else:
+            model_response_display = "n/a"
         summary = (
             f"Session: {result.session_id}\n"
             f"Target: {target}\n"
@@ -347,7 +362,7 @@ def diagnose(
             "Artifacts:\n"
             f"- evidence: {ev_path}\n"
             f"- plan: {plan_path if save_plan else 'not-saved'}\n"
-            f"- model response: {model_response_path}\n"
+            f"- model response: {model_response_display}\n"
             f"- summary: {summary_path if summary_path.exists() else 'n/a'}"
         )
         console.print(summary)
