@@ -6,6 +6,7 @@ from shellforgeai.core.evidence import EvidenceCategory, EvidenceItem
 from shellforgeai.knowledge.audits import search_recent_audits
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.tools import (
+    audit_recent,
     disk,
     files,
     firewall,
@@ -308,6 +309,14 @@ def collect_performance_evidence(context) -> list[EvidenceItem]:
         _to_item(disk.usage(), EvidenceCategory.host, "Disk usage"),
         _to_item(disk.inodes(), EvidenceCategory.host, "Inode usage"),
         _to_item(process.top(), EvidenceCategory.host, "Top processes"),
+        _to_item(process.io(), EvidenceCategory.host, "Process I/O"),
+        _to_item(system.pressure(), EvidenceCategory.host, "Pressure"),
+        _to_item(system.cgroup_limits(), EvidenceCategory.host, "Cgroup limits"),
+        _to_item(process.io(), EvidenceCategory.host, "Process I/O"),
+        _to_item(system.pressure(), EvidenceCategory.host, "Pressure"),
+        _to_item(system.cgroup_limits(), EvidenceCategory.host, "Cgroup limits"),
+        _to_item(storage.mounts(), EvidenceCategory.host, "Storage mounts"),
+        _to_item(audit_recent.recent(), EvidenceCategory.knowledge, "Recent audit trend"),
         _to_item(systemd.list_failed(), EvidenceCategory.service, "Failed systemd units"),
     ]
     for hit in search_recent_audits(

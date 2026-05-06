@@ -37,3 +37,5 @@ In restricted containers, the Codex CLI may emit `bwrap`/namespace errors.
 Treat that as a provider sandbox limitation, not a host failure.
 ShellForgeAI's typed read-only collectors continue to work; only model
 synthesis is affected.
+
+- `disk.top_dirs` is bounded read-only (`du -x -d 1`) and never deletes or modifies files.
