@@ -130,3 +130,31 @@ def test_summary_humanizes_limitations_and_assessment(tmp_path):
     assert "1 warning and 2 context limitations" in t
     assert "systemd.status" not in t
     assert "journal.unit" not in t
+
+
+def test_summary_rolls_up_raw_systemd_journal_collector_errors(tmp_path):
+    p = tmp_path / "summary.md"
+    write_diagnosis_summary_md(
+        path=p,
+        session_id="s1",
+        target="nginx",
+        target_type="service",
+        created_at="2026-05-06T00:00:00+00:00",
+        evidence_items=[_item("system.container_detect", "container=docker")],
+        findings=[
+            Finding(severity="limitation", title="systemd.status reported error", detail="x"),
+            Finding(severity="limitation", title="journal.unit reported error", detail="x"),
+            Finding(severity="limitation", title="systemd.list_failed reported error", detail="x"),
+            Finding(
+                severity="warning", title="nginx was not found in this environment", detail="x"
+            ),
+        ],
+        artifact_dir=tmp_path,
+    )
+    t = p.read_text()
+    assert "systemd.status reported error" not in t
+    assert "journal.unit reported error" not in t
+    assert "systemd.list_failed reported error" not in t
+    assert t.count("systemd and journal checks are unavailable in this container") == 1
+    assert "Findings count: 2" in t
+    assert "Findings severity: 0 critical, 1 warning, 1 info/limitations" in t

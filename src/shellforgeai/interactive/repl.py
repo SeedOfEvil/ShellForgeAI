@@ -1230,6 +1230,16 @@ No command was executed.""")
                     (runtime.session.artifact_dir / "model-response.md").write_text(
                         mresp_text, encoding="utf-8"
                     )
+                    write_diagnosis_summary_md(
+                        path=sp,
+                        session_id=res.session_id,
+                        target=routed.args,
+                        target_type=res.target_type.value,
+                        created_at=created_at_str,
+                        evidence_items=list(res.evidence.items),
+                        findings=list(res.findings),
+                        artifact_dir=runtime.session.artifact_dir,
+                    )
                     console.print("\n## Assessment")
                     if (
                         not _has_substantive_response(mresp_text)

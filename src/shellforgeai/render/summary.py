@@ -135,10 +135,9 @@ def _short_assessment(items: Iterable, findings: list) -> str:
 
 def _humanize_findings(findings: list) -> list[str]:
     out: list[str] = []
+    system_tokens = ("systemd.", "journal.", "systemd is unavailable", "journalctl is unavailable")
     has_system_lim = any(
-        "systemd is unavailable in this container" in getattr(f, "title", "").lower()
-        or "journalctl is unavailable in this container" in getattr(f, "title", "").lower()
-        for f in findings
+        any(tok in getattr(f, "title", "").lower() for tok in system_tokens) for f in findings
     )
     if has_system_lim:
         out.append(
@@ -148,7 +147,11 @@ def _humanize_findings(findings: list) -> list[str]:
     for f in findings:
         sev = str(getattr(f, "severity", "warning")).title()
         title = str(getattr(f, "title", "finding"))
-        if has_system_lim and ("systemd" in title.lower() or "journalctl" in title.lower()):
+        if has_system_lim and (
+            "systemd" in title.lower()
+            or "journalctl" in title.lower()
+            or "journal." in title.lower()
+        ):
             continue
         if "process.find" in title or "logs.file_tail reported error" in title:
             continue
@@ -199,10 +202,24 @@ def write_diagnosis_summary_md(
     actionable = sev.get("critical", 0) + sev.get("warning", 0)
     if actionable == 0:
         findings_block = ["No actionable findings were raised by deterministic checks."]
+        displayed_count = 0
+        displayed_sev = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
     else:
         findings_block = _humanize_findings(findings[:8])
         if findings_count > 8:
             findings_block.append(f"- ...and {findings_count - 8} more.")
+        displayed_count = len([line for line in findings_block if line.startswith("-")])
+        displayed_sev = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
+        for line in findings_block:
+            low = line.lower()
+            if low.startswith("- critical"):
+                displayed_sev["critical"] += 1
+            elif low.startswith("- warning"):
+                displayed_sev["warning"] += 1
+            elif low.startswith("- limitation"):
+                displayed_sev["limitation"] += 1
+            elif low.startswith("- info"):
+                displayed_sev["info"] += 1
 
     lines: list[str] = [
         "# ShellForgeAI Diagnosis Summary",
@@ -212,11 +229,12 @@ def write_diagnosis_summary_md(
         f"- Type: {target_type}",
         f"- Created: {created_at}",
         f"- Evidence count: {evidence_count}",
-        f"- Findings count: {findings_count}",
+        f"- Findings count: {displayed_count}",
         (
             "- Findings severity: "
-            f"{sev.get('critical', 0)} critical, {sev.get('warning', 0)} warning, "
-            f"{sev.get('info', 0) + sev.get('limitation', 0)} info/limitations"
+            f"{displayed_sev.get('critical', 0)} critical, "
+            f"{displayed_sev.get('warning', 0)} warning, "
+            f"{displayed_sev.get('info', 0) + displayed_sev.get('limitation', 0)} info/limitations"
         ),
         "",
         "## Assessment",
