@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class PlanStepStatus(str, Enum):
+class PlanStepStatus(StrEnum):
     planned = "planned"
 
 

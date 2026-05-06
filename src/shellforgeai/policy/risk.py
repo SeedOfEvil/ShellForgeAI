@@ -1,7 +1,7 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class RiskTier(str, Enum):
+class RiskTier(StrEnum):
     read = "read"
     change = "change"
     service = "service"
@@ -9,7 +9,7 @@ class RiskTier(str, Enum):
     danger = "danger"
 
 
-class PolicyAction(str, Enum):
+class PolicyAction(StrEnum):
     allow = "allow"
     ask = "ask"
     deny = "deny"

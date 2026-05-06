@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class EvidenceCategory(str, Enum):
+class EvidenceCategory(StrEnum):
     host = "host"
     service = "service"
     logs = "logs"
@@ -17,7 +17,7 @@ class EvidenceCategory(str, Enum):
     policy = "policy"
 
 
-class TargetType(str, Enum):
+class TargetType(StrEnum):
     host = "host"
     service = "service"
     disk = "disk"
