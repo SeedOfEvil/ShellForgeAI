@@ -126,7 +126,7 @@ def test_validated_storage_io_followup_flow(monkeypatch: Any, tmp_path: Any) -> 
     assert "Storage/I/O: non-zero pressure" in out
     assert "top CPU process shellforgeai" in out
     assert "Pending investigation: storage/I/O" in out
-    assert "deeper read-only storage/I/O pass" in out
+    assert "dig into the storage/I/O angle next" in out
     assert "Deeper investigation complete: 7 read-only evidence item(s)." in out
     assert "## What changed / deeper clues" in out
     assert "first pass non-zero pressure (avg10 1.83" in out
@@ -138,7 +138,7 @@ def test_validated_storage_io_followup_flow(monkeypatch: Any, tmp_path: Any) -> 
     assert "Memory/swap: still healthy" in out
     assert "Storage errors: none" in out
     assert "No pending investigation." in out
-    assert out.count("deeper read-only storage/I/O pass") == 1
+    assert out.count("dig into the storage/I/O angle next") == 1
     for leaked in [
         '{"name":',
         'container={"is_container":',
