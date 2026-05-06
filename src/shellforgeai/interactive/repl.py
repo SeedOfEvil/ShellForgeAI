@@ -21,7 +21,7 @@ from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.manager import build_provider
 from shellforgeai.llm.prompts import build_contextual_prompt
 from shellforgeai.llm.schemas import ModelRequest
-from shellforgeai.tools import disk, host, network, process, registry, systemd
+from shellforgeai.tools import disk, host, network, process, registry, storage, systemd
 from shellforgeai.version import get_build_info
 
 from .commands import route_input
@@ -599,20 +599,41 @@ def _operator_followup_text(label: str, description: str) -> str:
     )
 
 
+def _is_disk_usage_breakdown_intent(question: str) -> bool:
+    q = question.lower()
+    phrases = (
+        "what is using disk space",
+        "what is taking disk space",
+        "what is taking up space",
+        "what is filling my disk",
+        "where is my disk space going",
+        "largest folders",
+        "biggest directories",
+        "disk hogs",
+        "what is eating space",
+        "why is my disk filling",
+    )
+    return any(p in q for p in phrases)
+
+
 def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
     q = question.lower()
-    is_disk_capacity_intent = any(
-        k in q
-        for k in (
-            "disk full",
-            "disk getting full",
-            "running out of space",
-            "disk space",
-            "inodes",
+    is_disk_capacity_intent = (
+        any(
+            k in q
+            for k in (
+                "disk full",
+                "disk getting full",
+                "running out of space",
+                "disk space",
+                "inodes",
+            )
         )
-    ) or intent in {"disk"}
+        or intent in {"disk"}
+        or _is_disk_usage_breakdown_intent(q)
+    )
     if any(w in q for w in ("service", "services", "nginx", "ssh", "docker", "port")):
         return {
             "intent": "service_health_deep_dive",
@@ -632,6 +653,14 @@ def select_followup_investigation(
         (c.get("summary", "") for c in checks if c.get("tool") == "disk.inodes"), ""
     )
     if is_disk_capacity_intent:
+        if _is_disk_usage_breakdown_intent(q):
+            return {
+                "intent": "disk_capacity_deep_dive",
+                "label": "disk usage breakdown",
+                "description": "bounded top-level directory usage plus disk/inode context",
+                "bundle": "disk",
+                "reason": "user asked what is consuming disk space",
+            }
         joined = f"{disk_summary} {inode_summary}"
         if not joined.strip() or "unavailable" in joined.lower():
             return {
@@ -1041,6 +1070,23 @@ No command was executed.""")
                 }
                 for i in res.evidence.items
             ]
+            if _is_disk_usage_breakdown_intent(user_input):
+                top_dirs = disk.top_dirs("/")
+                checks.append(
+                    {
+                        "tool": top_dirs.tool,
+                        "status": "ok" if top_dirs.ok else "unavailable",
+                        "summary": _summary_for_check(top_dirs),
+                    }
+                )
+                mounts = storage.mounts()
+                checks.append(
+                    {
+                        "tool": mounts.tool,
+                        "status": "ok" if mounts.ok else "unavailable",
+                        "summary": _summary_for_check(mounts),
+                    }
+                )
             console.print(f"Collected {len(checks)} read-only evidence item(s).")
             show_full = user_input.lower().startswith("diagnose ") or evidence_mode == "full"
             if show_full:
@@ -1339,10 +1385,18 @@ No command was executed.""")
             continue
 
         if user_input.strip().lower() in {"what did you check?", "what did you check"}:
+            artifact_dir = runtime.session.artifact_dir
+            files = [
+                name
+                for name in ("evidence.json", "plan.json", "summary.md", "model-response.md")
+                if (artifact_dir / name).exists()
+            ]
             console.print(
-                "I checked host/resources, storage, network, and process signals "
-                "in read-only mode.\n"
-                "Technical details are in artifacts (evidence.json / summary.md)."
+                "I checked CPU/memory/load, disk and inode usage, storage pressure, "
+                "process activity, process I/O, container/cgroup limits, mount context, "
+                "recent trend clues, and network/DNS context in read-only mode.\n"
+                "Detailed artifact files available for this session: "
+                f"{', '.join(files) if files else 'none yet'}."
             )
             continue
         provider = build_provider(runtime.settings)

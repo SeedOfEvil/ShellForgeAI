@@ -98,3 +98,5 @@ without calling the model; `/help` and `/exit` continue to work.
 - In restricted containers the Codex CLI may emit `bwrap`/namespace
   errors; that is a provider sandbox limitation, not a host failure, and
   the typed read-only tools keep working.
+
+- Disk-space breakdown queries (e.g., "what is using disk space?") trigger bounded `disk.top_dirs` read-only collection.

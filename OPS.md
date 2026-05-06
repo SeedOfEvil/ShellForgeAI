@@ -59,3 +59,5 @@ will report whether `codex` is reachable.
 - Service-impacting actions are described as approval-required / operator-run.
   ShellForgeAI does not execute them.
 - Mutation is blocked or asks regardless of workspace trust.
+
+- For "what is using disk space?", expect bounded top-level directory breakdown (`disk.top_dirs`) in addition to usage/inodes.

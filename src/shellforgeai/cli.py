@@ -54,6 +54,27 @@ def _ensure_artifact_dir(runtime: RuntimeContext) -> None:
     runtime.session.artifact_dir.mkdir(parents=True, exist_ok=True)
 
 
+def _write_summary_md(
+    path: Path,
+    session_id: str,
+    target: str,
+    target_type: str,
+    evidence_count: int,
+    findings_count: int,
+    artifacts: list[str],
+) -> None:
+    lines = [
+        f"Session: {session_id}",
+        f"Target: {target}",
+        f"Type: {target_type}",
+        f"Evidence count: {evidence_count}",
+        f"Findings count: {findings_count}",
+        "Artifacts:",
+    ]
+    lines.extend(f"- {a}" for a in artifacts)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -245,6 +266,17 @@ def diagnose(
     plan_path = runtime.session.artifact_dir / "plan.json"
     if save_plan:
         plan_path.write_text(result.proposed_plan.model_dump_json(indent=2), encoding="utf-8")
+    summary_path = runtime.session.artifact_dir / "summary.md"
+    artifact_paths = [str(ev_path)] + ([str(plan_path)] if save_plan else [])
+    _write_summary_md(
+        summary_path,
+        result.session_id,
+        target,
+        result.target_type.value,
+        len(result.evidence.items),
+        len(result.findings),
+        artifact_paths,
+    )
     rec = {
         "session_id": runtime.session.session_id,
         "command": "diagnose",
@@ -316,7 +348,7 @@ def diagnose(
             f"- evidence: {ev_path}\n"
             f"- plan: {plan_path if save_plan else 'not-saved'}\n"
             f"- model response: {model_response_path}\n"
-            f"- summary: {runtime.session.artifact_dir / 'summary.md'}"
+            f"- summary: {summary_path if summary_path.exists() else 'n/a'}"
         )
         console.print(summary)
 
