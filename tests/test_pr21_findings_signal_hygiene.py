@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from shellforgeai.core.diagnose import Finding, diagnose_target
+from shellforgeai.core.diagnose import Finding, diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, EvidenceItem
 from shellforgeai.render.summary import write_diagnosis_summary_md
 
@@ -127,7 +127,7 @@ def test_summary_humanizes_limitations_and_assessment(tmp_path):
         artifact_dir=tmp_path,
     )
     t = p.read_text()
-    assert "1 warning and 2 context limitations" in t
+    assert "1 warning and 1 context limitation" in t
     assert "systemd.status" not in t
     assert "journal.unit" not in t
 
@@ -158,3 +158,17 @@ def test_summary_rolls_up_raw_systemd_journal_collector_errors(tmp_path):
     assert t.count("systemd and journal checks are unavailable in this container") == 1
     assert "Findings count: 2" in t
     assert "Findings severity: 0 critical, 1 warning, 1 info/limitations" in t
+
+
+def test_cli_footer_severity_matches_deduped_summary_counts() -> None:
+    line = findings_summary_line(
+        [
+            Finding(severity="limitation", title="systemd.status reported error", detail="x"),
+            Finding(severity="limitation", title="journal.unit reported error", detail="x"),
+            Finding(severity="limitation", title="systemd.list_failed reported error", detail="x"),
+            Finding(
+                severity="warning", title="nginx was not found in this environment", detail="x"
+            ),
+        ]
+    )
+    assert line == "Findings: 0 critical, 1 warning, 1 info/limitations"

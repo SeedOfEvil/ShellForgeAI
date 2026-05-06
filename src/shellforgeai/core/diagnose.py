@@ -53,12 +53,39 @@ def finding_severity_counts(findings: list[Finding]) -> dict[str, int]:
 
 
 def findings_summary_line(findings: list[Finding]) -> str:
-    counts = finding_severity_counts(findings)
+    counts = displayed_finding_severity_counts(findings)
     parts = [f"{counts['critical']} critical", f"{counts['warning']} warning"]
     tail = counts["info"] + counts["limitation"]
     if tail:
         parts.append(f"{tail} info/limitations")
     return "Findings: " + ", ".join(parts)
+
+
+def displayed_finding_severity_counts(findings: list[Finding]) -> dict[str, int]:
+    counts: dict[str, int] = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
+    has_system_lim = any(
+        any(
+            tok in str(getattr(f, "title", "")).lower()
+            for tok in (
+                "systemd.",
+                "journal.",
+                "systemd is unavailable",
+                "journalctl is unavailable",
+            )
+        )
+        for f in findings
+    )
+    if has_system_lim:
+        counts["limitation"] += 1
+    for f in findings:
+        sev = str(getattr(f, "severity", "warning"))
+        title = str(getattr(f, "title", "")).lower()
+        if has_system_lim and ("systemd" in title or "journalctl" in title or "journal." in title):
+            continue
+        if "process.find" in title or "logs.file_tail reported error" in title:
+            continue
+        counts[sev] = counts.get(sev, 0) + 1
+    return counts
 
 
 def _is_container(items) -> bool:

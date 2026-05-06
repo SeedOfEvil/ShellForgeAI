@@ -11,7 +11,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-from shellforgeai.core.diagnose import finding_severity_counts
+from shellforgeai.core.diagnose import displayed_finding_severity_counts, finding_severity_counts
 
 _ARTIFACT_LABELS = {
     "evidence.json": "evidence.json",
@@ -105,8 +105,8 @@ def _key_evidence_lines(items: Iterable) -> list[str]:
     return lines[:8]
 
 
-def _short_assessment(items: Iterable, findings: list) -> str:
-    sev = finding_severity_counts(findings)
+def _short_assessment(items: Iterable, displayed_sev: dict[str, int]) -> str:
+    sev = displayed_sev
     actionable = sev.get("critical", 0) + sev.get("warning", 0)
     if actionable == 0 and (sev.get("info", 0) + sev.get("limitation", 0)) > 0:
         return (
@@ -117,9 +117,11 @@ def _short_assessment(items: Iterable, findings: list) -> str:
         return "No actionable findings were raised by deterministic checks."
     by = _by_source(items)
     if sev.get("critical", 0) == 0:
+        lim = sev.get("limitation", 0)
+        lim_word = "limitation" if lim == 1 else "limitations"
         return (
             "Read-only checks found "
-            f"{sev.get('warning', 0)} warning and {sev.get('limitation', 0)} context limitations. "
+            f"{sev.get('warning', 0)} warning and {lim} context {lim_word}. "
             "No critical issues were found."
         )
     high_disk = False
@@ -195,7 +197,8 @@ def write_diagnosis_summary_md(
     evidence_count = len(evidence_items)
     findings_count = len(findings)
     sev = finding_severity_counts(findings)
-    assessment = _short_assessment(evidence_items, findings)
+    displayed_sev = displayed_finding_severity_counts(findings)
+    assessment = _short_assessment(evidence_items, displayed_sev)
     key_lines = _key_evidence_lines(evidence_items)
     artifacts = _existing_artifacts(artifact_dir, artifact_candidates, assume_present={path.name})
     findings_block: list[str]
