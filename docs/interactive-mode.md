@@ -63,8 +63,7 @@ Debug
   collectors before any model call.
 - Sluggish/laggy symptoms route to performance diagnostics rather than a
   generic ask.
-- Service-discovery questions (services / listening / ports / nginx / ssh /
-  docker) route to read-only evidence collection before synthesis.
+- Service and service-health questions (e.g., nginx/ssh/docker status, restart requests, listening ports) route to read-only service investigation evidence before synthesis.
 
 ## Streaming synthesis
 
