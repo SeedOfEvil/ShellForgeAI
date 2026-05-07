@@ -617,6 +617,26 @@ def _is_disk_usage_breakdown_intent(question: str) -> bool:
     return any(p in q for p in phrases)
 
 
+def _extract_service_target(question: str) -> str:
+    q = question.lower()
+    aliases = [
+        "nginx",
+        "ssh",
+        "sshd",
+        "docker",
+        "postgres",
+        "postgresql",
+        "mysql",
+        "mariadb",
+        "redis",
+        "caddy",
+    ]
+    for a in aliases:
+        if a in q:
+            return a
+    return "service-discovery"
+
+
 def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
@@ -635,12 +655,27 @@ def select_followup_investigation(
         or intent in {"disk"}
         or _is_disk_usage_breakdown_intent(q)
     )
-    if any(w in q for w in ("service", "services", "nginx", "ssh", "docker", "port")):
+    if intent in {"nginx", "ssh", "sshd", "docker", "service", "services"} or any(
+        w in q
+        for w in (
+            "service",
+            "services",
+            "nginx",
+            "ssh",
+            "docker",
+            "port",
+            "restart",
+            "restarat",
+            "reeestart",
+            "ngnix",
+        )
+    ):
         return {
             "intent": "service_health_deep_dive",
             "label": "service health",
             "description": "listening ports, service detectors, and recent service clues",
             "bundle": "services",
+            "target": _extract_service_target(question),
         }
     if any(w in q for w in ("network", "dns", "route", "firewall")):
         return {
@@ -881,9 +916,13 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                 )
                 continue
             with console.status("Running deeper read-only investigation..."):
-                res = diagnose_target(
-                    runtime, pending_followup["bundle"], online=False, since="30m"
-                )
+                followup_target = pending_followup.get("target") or pending_followup["bundle"]
+                if (
+                    pending_followup.get("intent") == "service_health_deep_dive"
+                    and followup_target == "service-discovery"
+                ):
+                    followup_target = "services"
+                res = diagnose_target(runtime, followup_target, online=False, since="30m")
             checks = [
                 {
                     "tool": i.source,
