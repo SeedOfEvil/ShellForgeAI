@@ -11,6 +11,8 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+from shellforgeai.core.diagnose import displayed_finding_severity_counts, finding_severity_counts
+
 _ARTIFACT_LABELS = {
     "evidence.json": "evidence.json",
     "plan.json": "plan.json",
@@ -103,10 +105,25 @@ def _key_evidence_lines(items: Iterable) -> list[str]:
     return lines[:8]
 
 
-def _short_assessment(items: Iterable, findings_count: int) -> str:
+def _short_assessment(items: Iterable, displayed_sev: dict[str, int]) -> str:
+    sev = displayed_sev
+    actionable = sev.get("critical", 0) + sev.get("warning", 0)
+    if actionable == 0 and (sev.get("info", 0) + sev.get("limitation", 0)) > 0:
+        return (
+            "Read-only checks found no actionable issue, but some host-level checks "
+            "are limited from this container."
+        )
+    if actionable == 0:
+        return "No actionable findings were raised by deterministic checks."
     by = _by_source(items)
-    if findings_count == 0:
-        return "No critical issue surfaced from the read-only checks."
+    if sev.get("critical", 0) == 0:
+        lim = sev.get("limitation", 0)
+        lim_word = "limitation" if lim == 1 else "limitations"
+        return (
+            "Read-only checks found "
+            f"{sev.get('warning', 0)} warning and {lim} context {lim_word}. "
+            "No critical issues were found."
+        )
     high_disk = False
     disk_item = by.get("disk.usage")
     if disk_item:
@@ -115,7 +132,33 @@ def _short_assessment(items: Iterable, findings_count: int) -> str:
                 high_disk = True
     if high_disk:
         return "Filesystem usage looks critical and should be reviewed first."
-    return f"Read-only checks raised {findings_count} finding(s) worth a closer look."
+    return "Read-only checks found critical issues that should be reviewed immediately."
+
+
+def _humanize_findings(findings: list) -> list[str]:
+    out: list[str] = []
+    system_tokens = ("systemd.", "journal.", "systemd is unavailable", "journalctl is unavailable")
+    has_system_lim = any(
+        any(tok in getattr(f, "title", "").lower() for tok in system_tokens) for f in findings
+    )
+    if has_system_lim:
+        out.append(
+            "- Limitation: systemd and journal checks are unavailable in this container, so "
+            "host-level service state could not be inspected from here."
+        )
+    for f in findings:
+        sev = str(getattr(f, "severity", "warning")).title()
+        title = str(getattr(f, "title", "finding"))
+        if has_system_lim and (
+            "systemd" in title.lower()
+            or "journalctl" in title.lower()
+            or "journal." in title.lower()
+        ):
+            continue
+        if "process.find" in title or "logs.file_tail reported error" in title:
+            continue
+        out.append(f"- {sev}: {title}")
+    return out
 
 
 def _existing_artifacts(
@@ -153,16 +196,33 @@ def write_diagnosis_summary_md(
     """
     evidence_count = len(evidence_items)
     findings_count = len(findings)
-    assessment = _short_assessment(evidence_items, findings_count)
+    sev = finding_severity_counts(findings)
+    displayed_sev = displayed_finding_severity_counts(findings)
+    assessment = _short_assessment(evidence_items, displayed_sev)
     key_lines = _key_evidence_lines(evidence_items)
     artifacts = _existing_artifacts(artifact_dir, artifact_candidates, assume_present={path.name})
     findings_block: list[str]
-    if findings_count == 0:
-        findings_block = ["No findings were raised by the deterministic checks."]
+    actionable = sev.get("critical", 0) + sev.get("warning", 0)
+    if actionable == 0:
+        findings_block = ["No actionable findings were raised by deterministic checks."]
+        displayed_count = 0
+        displayed_sev = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
     else:
-        findings_block = [f"- {getattr(f, 'title', 'finding')}" for f in findings[:8]]
+        findings_block = _humanize_findings(findings[:8])
         if findings_count > 8:
             findings_block.append(f"- ...and {findings_count - 8} more.")
+        displayed_count = len([line for line in findings_block if line.startswith("-")])
+        displayed_sev = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
+        for line in findings_block:
+            low = line.lower()
+            if low.startswith("- critical"):
+                displayed_sev["critical"] += 1
+            elif low.startswith("- warning"):
+                displayed_sev["warning"] += 1
+            elif low.startswith("- limitation"):
+                displayed_sev["limitation"] += 1
+            elif low.startswith("- info"):
+                displayed_sev["info"] += 1
 
     lines: list[str] = [
         "# ShellForgeAI Diagnosis Summary",
@@ -172,7 +232,13 @@ def write_diagnosis_summary_md(
         f"- Type: {target_type}",
         f"- Created: {created_at}",
         f"- Evidence count: {evidence_count}",
-        f"- Findings count: {findings_count}",
+        f"- Findings count: {displayed_count}",
+        (
+            "- Findings severity: "
+            f"{displayed_sev.get('critical', 0)} critical, "
+            f"{displayed_sev.get('warning', 0)} warning, "
+            f"{displayed_sev.get('info', 0) + displayed_sev.get('limitation', 0)} info/limitations"
+        ),
         "",
         "## Assessment",
         assessment,

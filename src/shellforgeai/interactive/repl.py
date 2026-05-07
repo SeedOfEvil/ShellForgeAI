@@ -14,7 +14,7 @@ from rich.table import Table
 from shellforgeai.audit.storage import AuditStorage
 from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
 from shellforgeai.core.context import RuntimeContext
-from shellforgeai.core.diagnose import diagnose_target
+from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, classify_target
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.interactive.banner import build_banner
@@ -1188,7 +1188,7 @@ No command was executed.""")
                 f"Session: {res.session_id}\nTarget: {routed.args}\n"
                 f"Type: {res.target_type.value}\n"
                 f"Evidence: {evidence_count} item(s)\n"
-                f"Findings: {len(res.findings)}\n"
+                f"{findings_summary_line(res.findings)}\n"
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
             )
             if natural_language_diagnose:
@@ -1229,6 +1229,16 @@ No command was executed.""")
                     )
                     (runtime.session.artifact_dir / "model-response.md").write_text(
                         mresp_text, encoding="utf-8"
+                    )
+                    write_diagnosis_summary_md(
+                        path=sp,
+                        session_id=res.session_id,
+                        target=routed.args,
+                        target_type=res.target_type.value,
+                        created_at=created_at_str,
+                        evidence_items=list(res.evidence.items),
+                        findings=list(res.findings),
+                        artifact_dir=runtime.session.artifact_dir,
                     )
                     console.print("\n## Assessment")
                     if (

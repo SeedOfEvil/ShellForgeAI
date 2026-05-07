@@ -84,7 +84,7 @@ def test_summary_md_required_sections(tmp_path: Path) -> None:
 
 def test_summary_md_no_findings_message(tmp_path: Path) -> None:
     summary_path = _write(tmp_path, [_Item("disk.usage", "/ 10% used")], [])
-    assert "No findings were raised" in summary_path.read_text(encoding="utf-8")
+    assert "No actionable findings were raised" in summary_path.read_text(encoding="utf-8")
 
 
 def test_summary_md_lists_only_existing_artifacts(tmp_path: Path) -> None:
@@ -94,6 +94,13 @@ def test_summary_md_lists_only_existing_artifacts(tmp_path: Path) -> None:
     assert "plan.json" in text
     assert "summary.md" in text
     assert "model-response.md" not in text
+
+
+def test_summary_md_lists_model_response_when_present(tmp_path: Path) -> None:
+    (tmp_path / "model-response.md").write_text("ok", encoding="utf-8")
+    summary_path = _write(tmp_path, [_Item("disk.usage", "/ 10% used")], [])
+    text = summary_path.read_text(encoding="utf-8")
+    assert "model-response.md" in text
 
 
 def test_summary_md_no_raw_json_dumps(tmp_path: Path) -> None:

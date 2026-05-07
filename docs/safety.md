@@ -39,3 +39,5 @@ ShellForgeAI's typed read-only collectors continue to work; only model
 synthesis is affected.
 
 - `disk.top_dirs` is bounded read-only (`du -x -d 1`) and never deletes or modifies files.
+
+When ShellForgeAI is running inside a container, unavailable host-only tools/checks are treated as visibility limitations rather than failures.

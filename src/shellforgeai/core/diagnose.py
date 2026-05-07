@@ -44,6 +44,70 @@ class DiagnosisResult(BaseModel):
     audit_path: str | None = None
 
 
+def finding_severity_counts(findings: list[Finding]) -> dict[str, int]:
+    counts: dict[str, int] = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
+    for f in findings:
+        sev = str(getattr(f, "severity", "warning"))
+        counts[sev] = counts.get(sev, 0) + 1
+    return counts
+
+
+def findings_summary_line(findings: list[Finding]) -> str:
+    counts = displayed_finding_severity_counts(findings)
+    parts = [f"{counts['critical']} critical", f"{counts['warning']} warning"]
+    tail = counts["info"] + counts["limitation"]
+    if tail:
+        parts.append(f"{tail} info/limitations")
+    return "Findings: " + ", ".join(parts)
+
+
+def displayed_finding_severity_counts(findings: list[Finding]) -> dict[str, int]:
+    counts: dict[str, int] = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
+    has_system_lim = any(
+        any(
+            tok in str(getattr(f, "title", "")).lower()
+            for tok in (
+                "systemd.",
+                "journal.",
+                "systemd is unavailable",
+                "journalctl is unavailable",
+            )
+        )
+        for f in findings
+    )
+    if has_system_lim:
+        counts["limitation"] += 1
+    for f in findings:
+        sev = str(getattr(f, "severity", "warning"))
+        title = str(getattr(f, "title", "")).lower()
+        if has_system_lim and ("systemd" in title or "journalctl" in title or "journal." in title):
+            continue
+        if "process.find" in title or "logs.file_tail reported error" in title:
+            continue
+        counts[sev] = counts.get(sev, 0) + 1
+    return counts
+
+
+def _is_container(items) -> bool:
+    for i in items:
+        if i.source == "system.container_detect":
+            text = f"{i.summary} {i.content}".lower()
+            if "docker" in text or "container" in text:
+                return True
+    return False
+
+
+def _is_benign_storage_error_summary(item) -> bool:
+    if item.source != "storage.error_summary":
+        return False
+    txt = f"{item.summary} {item.content}".lower()
+    return any(s in txt for s in ["no recent storage error patterns found", "0 hits", "none found"])
+
+
+def _looks_like_not_found(text: str) -> bool:
+    return any(s in text for s in ["not found", "no such file", "no matching process"])
+
+
 def _dedupe(items):
     seen = set()
     out = []
@@ -115,17 +179,68 @@ def diagnose_target(
         else:
             items.extend(collect_local_knowledge_evidence(context, target))
     items = _dedupe(items)
+    in_container = _is_container(items)
+    service_missing_signal = False
+    if ttype == TargetType.service and target.lower() in {"nginx", "ssh", "sshd", "docker"}:
+        service_missing_signal = any(
+            _looks_like_not_found(f"{i.summary} {i.content}".lower()) for i in items
+        )
+
     for i in items:
         if not i.ok:
+            txt = f"{i.summary} {i.content}".lower()
+            if i.source.startswith("systemd.") and "not found" in txt and in_container:
+                findings.append(
+                    Finding(
+                        severity="limitation",
+                        title="systemd is unavailable in this container",
+                        detail=(
+                            "Host-level systemd service state could not be checked "
+                            "from this environment."
+                        ),
+                        evidence_refs=[i.source],
+                        confidence="high",
+                    )
+                )
+                continue
+            if i.source.startswith("journal.") and "not found" in txt and in_container:
+                findings.append(
+                    Finding(
+                        severity="limitation",
+                        title="journalctl is unavailable in this container",
+                        detail="Host-level journal logs are not visible from this environment.",
+                        evidence_refs=[i.source],
+                        confidence="high",
+                    )
+                )
+                continue
+            if service_missing_signal and (
+                i.source.startswith("process.find") or i.source == "logs.file_tail"
+            ):
+                continue
+            if i.source == "logs.file_tail" and target.lower() == "nginx":
+                findings.append(
+                    Finding(
+                        severity="limitation",
+                        title="nginx log files were not available from this environment",
+                        detail="Nginx log paths could not be read from this environment.",
+                        evidence_refs=[i.source],
+                        confidence="medium",
+                    )
+                )
+                continue
             findings.append(
                 Finding(
-                    severity="warning",
+                    severity="limitation",
                     title=f"{i.source} reported error",
                     detail=i.summary,
                     evidence_refs=[i.source],
                     confidence="high",
                 )
             )
+            continue
+        if _is_benign_storage_error_summary(i):
+            continue
         matches = extract_lines_matching(
             i.content,
             [
@@ -139,15 +254,40 @@ def diagnose_target(
             5,
         )
         if matches:
+            if i.source == "storage.error_summary":
+                severity = "warning"
+                title = "Storage error patterns were detected"
+            else:
+                severity = "warning"
+                title = f"Potential issues in {i.source}"
             findings.append(
                 Finding(
-                    severity="warning",
-                    title=f"Potential issues in {i.source}",
+                    severity=severity,
+                    title=title,
                     detail="; ".join(matches),
                     evidence_refs=[i.source],
                     confidence="medium",
                 )
             )
+    if ttype == TargetType.service and target.lower() in {"nginx", "ssh", "sshd", "docker"}:
+        for i in items:
+            txt = f"{i.summary} {i.content}".lower()
+            if i.source.endswith(".status") and any(
+                s in txt for s in ["not found", "no such file", "no matching process"]
+            ):
+                findings.append(
+                    Finding(
+                        severity="warning",
+                        title=f"{target.lower()} was not found in this environment",
+                        detail=(
+                            f"{target.lower()} was not found in this container; "
+                            f"if {target.lower()} is expected, verify the correct host/container."
+                        ),
+                        evidence_refs=[i.source],
+                        confidence="medium",
+                    )
+                )
+                break
     if ttype == TargetType.disk:
         steps = [
             PlanStep(
