@@ -288,6 +288,27 @@ def diagnose_target(
                     )
                 )
                 break
+    if ttype == TargetType.service and target.lower() == "nginx":
+        proc_missing = any(
+            i.source == "service.processes" and ("not found" in i.summary.lower() or not i.ok)
+            for i in items
+        )
+        listener_missing = any(
+            i.source == "service.ports" and "listeners=none" in i.summary.lower() for i in items
+        )
+        if proc_missing and listener_missing:
+            findings.append(
+                Finding(
+                    severity="warning",
+                    title="nginx was not found running in this environment",
+                    detail=(
+                        "No nginx process or expected listener was visible from this runtime; "
+                        "confirm whether nginx should run on the host or another container."
+                    ),
+                    evidence_refs=["service.processes", "service.ports"],
+                    confidence="high",
+                )
+            )
     if ttype == TargetType.disk:
         steps = [
             PlanStep(
