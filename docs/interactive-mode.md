@@ -121,3 +121,6 @@ Deterministic findings are severity-aware (`critical`, `warning`, `info`, `limit
 
 
 Service inventory follow-ups (`proceed`/`dig deeper` after service-discovery questions) run listener/process/service-manager evidence collection, not a generic health-only pass.
+
+
+Action-style service requests (for example `restart <service>`) trigger an immediate read-only service check first, then return a safety boundary response (no mutation execution).

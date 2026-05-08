@@ -894,6 +894,18 @@ def _detect_action_request(text: str) -> str | None:
     )
 
 
+def _extract_service_action_target(text: str) -> str | None:
+    low = text.lower().strip()
+    m = re.search(
+        r"\b(?:restart|reload|stop|start|bounce)\b\s+([\w\-./]+)",
+        low,
+    )
+    if not m:
+        return None
+    target = m.group(1).strip("?.!,")
+    return target or None
+
+
 def _contains_internal_collector_language(text: str) -> bool:
     low = text.lower()
     blocked = [
@@ -1564,6 +1576,45 @@ No command was executed.""")
             console.print(
                 "Collectors used in the most recent run: "
                 f"{', '.join(tool_names) if tool_names else 'none recorded yet'}."
+            )
+            continue
+        service_action_target = _extract_service_action_target(user_input)
+        if service_action_target:
+            with console.status("Collecting read-only service evidence..."):
+                res = diagnose_target(runtime, service_action_target, online=False, since="30m")
+            checks = [
+                {
+                    "tool": i.source,
+                    "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+                    "summary": i.summary,
+                }
+                for i in res.evidence.items
+            ]
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            if evidence_mode == "full":
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
+            pending_followup = {
+                "intent": "service_health_deep_dive",
+                "label": "service health",
+                "description": "service manager context, processes, listeners, and logs",
+                "bundle": "services",
+                "target": service_action_target,
+                "created_from_session": runtime.session.session_id,
+                "created_from_question": user_input,
+                "created_from_intent": service_action_target,
+                "first_pass_checks": list(checks),
+            }
+            console.print(
+                f"I can’t execute restart/reload/start/stop from inspect mode. "
+                f"I checked {service_action_target} first with read-only evidence. "
+                "Service-impacting actions remain operator-run, and apply stays validation-only."
+            )
+            console.print(
+                _operator_followup_text(pending_followup["label"], pending_followup["description"])
             )
             continue
         action_response = _detect_action_request(user_input)

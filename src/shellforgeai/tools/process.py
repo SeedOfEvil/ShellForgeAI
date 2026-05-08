@@ -41,7 +41,7 @@ def find(name: str, exact: bool = False) -> ToolResult:
     lines = []
     for ln in r.stdout.splitlines():
         low = ln.lower()
-        if "shellforgeai" in low:
+        if "shellforgeai" in low and name.lower() != "shellforgeai":
             continue
         comm = low.split()[1] if len(low.split()) > 1 else ""
         matched = any((comm == n if exact else n in low) for n in needles)

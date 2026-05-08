@@ -81,3 +81,6 @@ JSON smoke:
 `shellforgeai diagnose nginx --json | python -m json.tool >/dev/null`
 `shellforgeai diagnose performance --json | python -m json.tool >/dev/null`
 `shellforgeai diagnose disk --json | python -m json.tool >/dev/null`
+
+
+Additional service-action smoke: `can you restart shellforgeai?` should collect read-only service evidence immediately, queue pending service health, and refuse mutation execution.
