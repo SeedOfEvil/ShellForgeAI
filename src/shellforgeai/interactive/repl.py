@@ -515,6 +515,34 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     route_row = _find("network.routes")
     dns_row = _find("network.dns")
     process_row = _find("process.snapshot")
+    listeners_row = _find("network.listeners")
+    manager_row = _find("service.manager_detect")
+    if intent in {"service_health_deep_dive", "service_inventory_deep_dive"}:
+        listener_line = "listener evidence unavailable"
+        if listeners_row:
+            lsum = listeners_row["summary"]
+            if "ports=" in lsum:
+                listener_line = f"listening ports: {lsum.split('ports=', 1)[-1].strip()}"
+            elif "no listening sockets" in lsum.lower():
+                listener_line = "no listeners found"
+            else:
+                listener_line = lsum
+        mgr = manager_row["summary"] if manager_row else "service manager context unavailable"
+        proc = process_row["summary"] if process_row else "process evidence unavailable"
+        return (
+            "## Assessment\n"
+            "Deeper service inventory completed from current runtime view.\n\n"
+            "## What I found\n"
+            f"- Service manager context: {mgr}.\n"
+            f"- Listener view: {listener_line}.\n"
+            f"- Process view: {proc}.\n\n"
+            "## Best read\n"
+            "This reflects container-visible services/listeners only; "
+            "host-level service managers may be out of scope here.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No restart/reload/start/stop/install/delete "
+            "actions were performed.\n"
+        )
     if os_row:
         facts.append(f"- Host context: {os_row['summary']}.")
     if cpu_mem_row:
@@ -671,7 +699,11 @@ def select_followup_investigation(
         )
     ):
         return {
-            "intent": "service_health_deep_dive",
+            "intent": (
+                "service_inventory_deep_dive"
+                if any(w in q for w in ("what services", "services are running", "what ports"))
+                else "service_health_deep_dive"
+            ),
             "label": "service health",
             "description": "listening ports, service detectors, and recent service clues",
             "bundle": "services",

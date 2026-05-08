@@ -343,10 +343,11 @@ def diagnose(
             (runtime.session.artifact_dir / "raw-model-events.jsonl").write_text(
                 mresp.raw["stdout_jsonl"], encoding="utf-8"
             )
-        console.print("Model-assisted analysis:\n" + mresp.text)
-        console.print(f"Provider: {mresp.provider}\nModel: {mresp.model}\n{_usage_line(mresp)}")
+        if not json_output:
+            console.print("Model-assisted analysis:\n" + mresp.text)
+            console.print(f"Provider: {mresp.provider}\nModel: {mresp.model}\n{_usage_line(mresp)}")
     if json_output:
-        console.print(result.model_dump_json(indent=2))
+        typer.echo(result.model_dump_json(indent=2))
     else:
         model_response_artifact = runtime.session.artifact_dir / "model-response.md"
         if model and model_response_artifact.exists():

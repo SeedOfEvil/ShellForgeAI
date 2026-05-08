@@ -80,8 +80,24 @@ def _summarize(result) -> str:
             return val.replace(":", "=").replace("(", "").replace(")", "").replace(" ", "")
         return first
     if result.tool == "network.listeners":
-        rows = max(0, len((result.stdout or "").splitlines()) - 1)
-        return "no listening sockets" if rows == 0 else f"{rows} listening sockets"
+        lines = (result.stdout or "").splitlines()
+        data = lines[1:] if len(lines) > 1 else lines
+        ports = []
+        for ln in data:
+            parts = ln.split()
+            if len(parts) >= 5:
+                local = parts[4]
+                if ":" in local:
+                    ports.append(local.rsplit(":", 1)[-1])
+        uniq = []
+        for p in ports:
+            if p not in uniq:
+                uniq.append(p)
+        rows = len(data)
+        if rows == 0:
+            return "no listening sockets"
+        shown = ",".join(uniq[:6]) if uniq else "unknown"
+        return f"{rows} listening sockets ports={shown}"
     if result.tool == "network.listeners.filtered":
         port = result.command[-1] if result.command else "port"
         return f"port {port.lstrip(':')}: {'listener found' if first else 'no listener'}"

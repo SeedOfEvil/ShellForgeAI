@@ -14,4 +14,4 @@ def test_storage_pressure_selects_storage_followup() -> None:
 def test_service_question_selects_service_followup() -> None:
     sel = select_followup_investigation("health", [], "what services are running?")
     assert sel
-    assert sel["intent"] == "service_health_deep_dive"
+    assert sel["intent"] == "service_inventory_deep_dive"

@@ -118,3 +118,6 @@ without calling the model; `/help` and `/exit` continue to work.
 - Disk-space breakdown queries (e.g., "what is using disk space?") trigger bounded `disk.top_dirs` read-only collection.
 
 Deterministic findings are severity-aware (`critical`, `warning`, `info`, `limitation`). Container-only gaps (for example missing `systemctl`/`journalctl` in Docker) are reported as limitations, not direct faults.
+
+
+Service inventory follow-ups (`proceed`/`dig deeper` after service-discovery questions) run listener/process/service-manager evidence collection, not a generic health-only pass.

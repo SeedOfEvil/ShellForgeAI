@@ -52,3 +52,6 @@ Service-impacting commands are described as approval-required and
 operator-run; ShellForgeAI does not run them.
 
 `diagnose` now reports findings by severity in the terminal summary so informational limitations are not overstated as incidents.
+
+
+When `--json` is used (for commands that support it), stdout is machine-readable JSON only (no tables/markup), suitable for `json.loads`/`python -m json.tool`.

@@ -75,3 +75,9 @@ Smoke checks should confirm `storage.error_summary` outputs such as “no recent
 
 In the REPL, run: `can you restart nginx for me?`, `/pending`, `dig deeper`, `is nginx running?`, `what services are running?`, `what ports are listening?`, `is ssh running?`, `docker status`.
 Expected: read-only service evidence collection, no restart/reload/stop/start execution, and useful container-limit context when service managers are unavailable.
+
+
+JSON smoke:
+`shellforgeai diagnose nginx --json | python -m json.tool >/dev/null`
+`shellforgeai diagnose performance --json | python -m json.tool >/dev/null`
+`shellforgeai diagnose disk --json | python -m json.tool >/dev/null`
