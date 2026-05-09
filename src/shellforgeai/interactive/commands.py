@@ -113,6 +113,32 @@ def route_input(text: str) -> RoutedCommand:
         "auth logs",
         "login failed",
     ]
+    lab_container_aliases = (
+        "missing env",
+        "missing-env",
+        "restart loop",
+        "restart-loop",
+        "noisy logs",
+        "noisy-logs",
+        "bad volume perms",
+        "bad-volume-perms",
+        "bad network",
+        "bad-network",
+        "sfai-missing-env",
+        "sfai missing env",
+        "sfai-restart-loop",
+        "sfai restart loop",
+        "sfai-noisy-logs",
+        "sfai noisy logs",
+        "sfai-bad-volume-perms",
+        "sfai bad volume perms",
+        "sfai-bad-network",
+        "sfai bad network",
+    )
+    if any(alias in lowered for alias in lab_container_aliases) or any(
+        alias in raw.lower() for alias in lab_container_aliases
+    ):
+        return RoutedCommand(name="diagnose", args="docker")
     container_failure_phrases = [
         "why is the app restarting",
         "why is my app restarting",

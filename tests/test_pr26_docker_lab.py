@@ -431,3 +431,136 @@ def test_logs_basic_includes_docker_problem(monkeypatch):
     sources = {i.source for i in items}
     assert "docker.containers" in sources
     assert "docker.problem_summary" in sources
+
+
+# ---------- PR26 follow-up 2: NL routing through CLI + lab aliases ----------
+
+
+def test_routing_lab_alias_missing_env():
+    cmd = route_input("why did missing-env fail?")
+    assert cmd.name == "diagnose" and cmd.args == "docker"
+
+
+def test_routing_lab_alias_bad_network():
+    cmd = route_input("why is bad-network failing?")
+    assert cmd.name == "diagnose" and cmd.args == "docker"
+
+
+def test_routing_lab_alias_sfai_prefix():
+    cmd = route_input("why did sfai-restart-loop fail?")
+    assert cmd.name == "diagnose" and cmd.args == "docker"
+
+
+def test_cli_normalize_target_routes_nl():
+    from shellforgeai.cli import _normalize_diagnose_target
+
+    assert _normalize_diagnose_target("why is the app restarting?") == "docker"
+    assert _normalize_diagnose_target("why did the container exit?") == "docker"
+    assert _normalize_diagnose_target("is anything crashing?") == "docker"
+    assert _normalize_diagnose_target("find recent logs and errors") == "logs"
+    assert _normalize_diagnose_target("docker") == "docker"
+    assert _normalize_diagnose_target("nginx") == "nginx"
+
+
+def test_problem_summary_classifies_noisy_logs(monkeypatch):
+    ps = "id\tsfai-noisy-logs\timg\tUp\trunning\t2 min\t\n"
+    inspects = {
+        "sfai-noisy-logs": {
+            "Name": "/sfai-noisy-logs",
+            "Id": "x" * 12,
+            "Config": {"Image": "img"},
+            "RestartCount": 0,
+            "State": {
+                "Status": "running",
+                "Running": True,
+                "ExitCode": 0,
+                "Error": "",
+                "OOMKilled": False,
+                "Health": None,
+            },
+        }
+    }
+    logs_map = {
+        "sfai-noisy-logs": "INFO ok\nWARN slow path\nERROR something\n",
+    }
+    _stub_docker(monkeypatch, ps, inspects, logs_map)
+    res = containers.problem_summary()
+    payload = json.loads(res.stdout)
+    assert payload["failing"] == []
+    noisy_names = [n["name"] for n in payload["noisy"]]
+    assert "sfai-noisy-logs" in noisy_names
+
+
+def test_problem_summary_classifies_bad_network_noisy(monkeypatch):
+    ps = "id\tsfai-bad-network\timg\tUp\trunning\t2 min\t\n"
+    inspects = {
+        "sfai-bad-network": {
+            "Name": "/sfai-bad-network",
+            "Id": "x" * 12,
+            "Config": {"Image": "img"},
+            "RestartCount": 0,
+            "State": {
+                "Status": "running",
+                "Running": True,
+                "ExitCode": 0,
+                "Error": "",
+                "OOMKilled": False,
+                "Health": None,
+            },
+        }
+    }
+    logs_map = {
+        "sfai-bad-network": (
+            "Could not resolve host upstream.invalid\nERROR temporary failure in name resolution\n"
+        ),
+    }
+    _stub_docker(monkeypatch, ps, inspects, logs_map)
+    res = containers.problem_summary()
+    payload = json.loads(res.stdout)
+    noisy_names = [n["name"] for n in payload["noisy"]]
+    assert "sfai-bad-network" in noisy_names
+    item = EvidenceItem(
+        source="docker.problem_summary",
+        category=EvidenceCategory.logs,
+        ok=True,
+        title="Container problem summary",
+        summary=res.stderr,
+        content=res.stdout,
+    )
+    findings = _findings_from_docker([item])
+    assert any(
+        f.severity == "warning" and "DNS" in f.title.upper().replace("DNS/", "DNS")
+        for f in findings
+    ) or any("upstream" in f.title.lower() for f in findings)
+
+
+def test_findings_for_all_five_lab_cases(monkeypatch):
+    _stub_docker(monkeypatch, _lab_ps_output(), _lab_inspects(), _lab_logs())
+    summary = containers.problem_summary()
+    item = EvidenceItem(
+        source="docker.problem_summary",
+        category=EvidenceCategory.logs,
+        ok=True,
+        title="Container problem summary",
+        summary=summary.stderr,
+        content=summary.stdout,
+    )
+    findings = _findings_from_docker([item])
+    titles = " | ".join(f.title for f in findings)
+    for name in (
+        "sfai-missing-env",
+        "sfai-restart-loop",
+        "sfai-bad-volume-perms",
+        "sfai-noisy-logs",
+        "sfai-bad-network",
+    ):
+        assert name in titles, f"missing finding for {name}"
+    sevs = [f.severity for f in findings]
+    assert any(s in {"warning", "critical"} for s in sevs)
+
+
+def test_followup_target_container_lab_alias_normalized():
+    sel = select_followup_investigation("docker", [], "why did missing-env fail?")
+    assert sel is not None
+    # Either resolved from sfai- prefix tokens or unresolved; routing test ensures docker.
+    assert sel["intent"] == "logs_deep_dive"

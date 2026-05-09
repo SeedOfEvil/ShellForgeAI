@@ -226,16 +226,23 @@ _PROBLEM_PATTERNS = [
         "dns_failure",
         re.compile(
             r"(?i)temporary failure in name resolution|name or service not known|"
-            r"could not resolve host|no such host"
+            r"could not resolve host|no such host|getaddrinfo|dns lookup failed|"
+            r"servfail|nxdomain"
         ),
     ),
     (
         "upstream_unreachable",
-        re.compile(r"(?i)connection refused|network is unreachable|no route to host"),
+        re.compile(
+            r"(?i)connection refused|network is unreachable|no route to host|"
+            r"upstream (?:unreachable|host|connect|timeout|down)|host is unreachable|"
+            r"connection reset by peer"
+        ),
     ),
     ("oom", re.compile(r"(?i)out of memory|oom[\- ]killed|killed process")),
     ("config_error", re.compile(r"(?i)config(uration)? error|invalid config")),
     ("traceback", re.compile(r"(?i)traceback \(most recent call last\)")),
+    ("error_line", re.compile(r"(?im)^\s*(?:\[?ERROR\]?|ERR:|FATAL)\b")),
+    ("warn_line", re.compile(r"(?im)^\s*(?:\[?WARN(?:ING)?\]?)\b")),
 ]
 
 

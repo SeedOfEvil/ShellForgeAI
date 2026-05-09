@@ -183,10 +183,16 @@ def _findings_from_docker(items) -> list[Finding]:
     for entry in payload.get("noisy", []) or []:
         name = entry.get("name") or "container"
         themes = entry.get("log_themes") or {}
+        if themes.get("dns_failure") or themes.get("upstream_unreachable"):
+            sev = "warning"
+            title = f"{name} is running but logs show upstream DNS/reachability errors"
+        else:
+            sev = "info"
+            title = f"{name} is running but logs contain WARN/ERROR noise (not a crash)"
         findings.append(
             Finding(
-                severity="info",
-                title=f"{name} is running but logs contain noise",
+                severity=sev,
+                title=title,
                 detail=f"themes={','.join(themes.keys()) or 'none'}",
                 evidence_refs=["docker.problem_summary"],
                 confidence="medium",
