@@ -742,7 +742,20 @@ def select_followup_investigation(
             "bundle": "services",
             "target": _extract_service_target(question),
         }
-    if any(w in q for w in ("network", "dns", "route", "firewall")):
+    if any(
+        w in q
+        for w in (
+            "network",
+            "netwrok",
+            "dns",
+            "dns statsu",
+            "route",
+            "firewall",
+            "firwall",
+            "conenctivity",
+            "listerning",
+        )
+    ):
         return {
             "intent": "network_dns_firewall_deep_dive",
             "label": "network/DNS",

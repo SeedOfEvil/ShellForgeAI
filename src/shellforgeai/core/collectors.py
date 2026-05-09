@@ -264,9 +264,18 @@ def collect_disk_evidence(context) -> list[EvidenceItem]:
 
 def collect_network_evidence(context) -> list[EvidenceItem]:
     return [
-        _to_item(network.listeners(), EvidenceCategory.network, "Listeners"),
-        _to_item(network.routes(), EvidenceCategory.network, "Routes"),
+        _to_item(host.host_info(), EvidenceCategory.host, "Host information"),
+        _to_item(host.host_resources(), EvidenceCategory.host, "Host resources"),
+        _to_item(system.container_detect(), EvidenceCategory.host, "Container detection"),
+        _to_item(
+            network.namespace_context(), EvidenceCategory.network, "Network namespace context"
+        ),
+        _to_item(network.interfaces(), EvidenceCategory.network, "Interfaces"),
+        _to_item(network.default_route(), EvidenceCategory.network, "Default route"),
         _to_item(network.dns(), EvidenceCategory.network, "DNS config"),
+        _to_item(network.resolution_test(), EvidenceCategory.network, "DNS resolution test"),
+        _to_item(network.listeners(), EvidenceCategory.network, "Listeners"),
+        _to_item(network.firewall_context(), EvidenceCategory.network, "Firewall context"),
     ]
 
 
