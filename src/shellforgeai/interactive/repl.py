@@ -90,6 +90,17 @@ def _is_firewall_question(text: str) -> bool:
     )
 
 
+def _extract_reachability_target(text: str) -> tuple[str, int] | None:
+    low = text.lower()
+    m = re.search(r"([a-z0-9\.\-]+):(\d{1,5})", low)
+    if m:
+        return m.group(1), int(m.group(2))
+    m2 = re.search(r"port\s+(\d{1,5})\s+(?:on|to)\s+([a-z0-9\.\-]+)", low)
+    if m2:
+        return m2.group(2), int(m2.group(1))
+    return None
+
+
 def _model_dump_json_safe(value: Any, *, indent: int = 2) -> str:
     dumper = getattr(value, "model_dump_json", None)
     if callable(dumper):
@@ -522,6 +533,13 @@ def _deterministic_operator_summary(
     dns_row = _find("network.dns")
     process_row = _find("process.snapshot")
     listeners_row = _find("network.listeners")
+    iface_row = _find("network.interfaces")
+    default_route_row = _find("network.default_route")
+    dns_test_row = _find("network.resolution_test")
+    ns_row = _find("network.namespace_context")
+    fw_row = _find("network.firewall_context")
+    listener_attr_row = _find("network.listener_attribution")
+    tcp_row = _find("network.tcp_connect_test")
     manager_row = _find("service.manager_detect")
     if intent == "service_health_deep_dive":
         svc = (target or "service").lower()
@@ -575,6 +593,45 @@ def _deterministic_operator_summary(
             "## Safety\n"
             "Read-only checks only. No restart/reload/start/stop/install/delete "
             "actions were performed.\n"
+        )
+    if intent in {"network_dns_firewall_deep_dive", "network"}:
+        interface_summary = iface_row["summary"] if iface_row else "interface view unavailable"
+        route_summary = (
+            default_route_row["summary"]
+            if default_route_row
+            else (route_row["summary"] if route_row else "default route unavailable")
+        )
+        dns_summary = dns_row["summary"] if dns_row else "dns config unavailable"
+        dns_test_summary = (
+            dns_test_row["summary"] if dns_test_row else "dns resolution test unavailable"
+        )
+        listener_summary = (
+            listeners_row["summary"] if listeners_row else "listener view unavailable"
+        )
+        listener_attr = (
+            listener_attr_row["summary"] if listener_attr_row else "listener ownership unavailable"
+        )
+        fw_summary = fw_row["summary"] if fw_row else "firewall context unavailable"
+        ns_summary = ns_row["summary"] if ns_row else "namespace context unavailable"
+        tcp_summary = f"- Target reachability: {tcp_row['summary']}.\n" if tcp_row else ""
+        return (
+            "## Assessment\n"
+            "Deeper network check completed from this runtime context.\n\n"
+            "## What I found\n"
+            f"- Namespace/container context: {ns_summary}.\n"
+            f"- Interfaces: {interface_summary}.\n"
+            f"- Route/default gateway: {route_summary}.\n"
+            f"- DNS resolver config: {dns_summary}.\n"
+            f"- DNS resolution: {dns_test_summary}.\n"
+            f"{tcp_summary}"
+            f"- Listeners: {listener_summary}.\n"
+            f"- Listener ownership: {listener_attr}.\n"
+            f"- Firewall context: {fw_summary}.\n\n"
+            "## Best read\n"
+            "Network basics are evaluated from this container/runtime view; "
+            "host firewall and host routing may differ.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No firewall/route/interface/service changes were performed.\n"
         )
     if os_row:
         facts.append(f"- Host context: {os_row['summary']}.")
@@ -702,6 +759,46 @@ def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
     q = question.lower()
+    if any(
+        w in q
+        for w in (
+            "network",
+            "netwrok",
+            "dns",
+            "dns statsu",
+            "route",
+            "firewall",
+            "firwall",
+            "conenctivity",
+            "listerning",
+            "reachable",
+            "reach ",
+            "connect to",
+            "open port",
+            "allow port",
+        )
+    ):
+        subtype = "connectivity"
+        if "dns" in q or "resolve" in q:
+            subtype = "dns"
+        elif "firewall" in q or "firwall" in q:
+            subtype = "firewall"
+        elif "open port" in q or "allow port" in q:
+            subtype = "port-open"
+        elif "port" in q or "listening" in q or "listerning" in q:
+            subtype = "listener"
+        if "reach " in q or "connect to" in q or "reachable" in q:
+            subtype = "reachability"
+        return {
+            "intent": "network_dns_firewall_deep_dive",
+            "label": "network/DNS",
+            "description": (
+                "routes, DNS, listeners, firewall context, and bounded target reachability"
+            ),
+            "bundle": "network",
+            "type": "network",
+            "subtype": subtype,
+        }
     is_disk_capacity_intent = (
         any(
             k in q
@@ -741,13 +838,6 @@ def select_followup_investigation(
             "description": "listening ports, service detectors, and recent service clues",
             "bundle": "services",
             "target": _extract_service_target(question),
-        }
-    if any(w in q for w in ("network", "dns", "route", "firewall")):
-        return {
-            "intent": "network_dns_firewall_deep_dive",
-            "label": "network/DNS",
-            "description": "routes, DNS, listeners, and firewall context",
-            "bundle": "network",
         }
     disk_summary = next((c.get("summary", "") for c in checks if c.get("tool") == "disk.usage"), "")
     inode_summary = next(
@@ -1071,7 +1161,9 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                         pending_snapshot["intent"], checks, pending_snapshot.get("target")
                     )
                 )
-            completed_followups.append(pending_snapshot["intent"])
+            completed_followups.append(
+                f"{pending_snapshot['intent']}:{pending_snapshot.get('subtype', 'generic')}"
+            )
             pending_followup = None
             continue
         if routed.name in {"/exit", "/quit"}:
@@ -1301,6 +1393,31 @@ No command was executed.""")
         if routed.name in {"diagnose"}:
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, routed.args, online=False, since="30m")
+            if routed.args == "network":
+                res.evidence.items.append(
+                    _evidence_item_from_result(
+                        network.listener_attribution(),
+                        EvidenceCategory.network,
+                        "Listener attribution",
+                    )
+                )
+                target = _extract_reachability_target(user_input)
+                if target:
+                    host_target, port_target = target
+                    res.evidence.items.append(
+                        _evidence_item_from_result(
+                            network.resolution_test(host_target),
+                            EvidenceCategory.network,
+                            "Target DNS resolution test",
+                        )
+                    )
+                    res.evidence.items.append(
+                        _evidence_item_from_result(
+                            network.tcp_connect_test(host_target, port_target),
+                            EvidenceCategory.network,
+                            "Target TCP connect test",
+                        )
+                    )
             if _is_disk_usage_breakdown_intent(user_input):
                 top_dirs = disk.top_dirs("/")
                 res.evidence.items.append(
@@ -1362,9 +1479,18 @@ No command was executed.""")
             if natural_language_diagnose:
                 pending_followup = None
                 pending_followup = select_followup_investigation(routed.args, checks, user_input)
-                if pending_followup and pending_followup["intent"] in completed_followups:
+                followup_key = (
+                    f"{pending_followup['intent']}:{pending_followup.get('subtype', 'generic')}"
+                    if pending_followup
+                    else ""
+                )
+                if pending_followup and followup_key in completed_followups:
                     pending_followup = None
                 if pending_followup:
+                    reach_target = _extract_reachability_target(user_input)
+                    if reach_target:
+                        pending_followup["target_host"] = reach_target[0]
+                        pending_followup["target_port"] = reach_target[1]
                     pending_followup["created_from_session"] = runtime.session.session_id
                     pending_followup["created_from_question"] = user_input
                     pending_followup["created_from_intent"] = routed.args
@@ -1420,7 +1546,12 @@ No command was executed.""")
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)
-                    if pending_followup and pending_followup["intent"] not in completed_followups:
+                    followup_key = (
+                        f"{pending_followup['intent']}:{pending_followup.get('subtype', 'generic')}"
+                        if pending_followup
+                        else ""
+                    )
+                    if pending_followup and followup_key not in completed_followups:
                         console.print(
                             _operator_followup_text(
                                 pending_followup["label"], pending_followup["description"]
