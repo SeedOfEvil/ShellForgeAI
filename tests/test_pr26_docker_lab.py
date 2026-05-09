@@ -564,3 +564,105 @@ def test_followup_target_container_lab_alias_normalized():
     assert sel is not None
     # Either resolved from sfai- prefix tokens or unresolved; routing test ensures docker.
     assert sel["intent"] == "logs_deep_dive"
+
+
+# ---------- PR26 followup-3: routing + severity consistency ----------
+
+
+def test_routing_failed_containers_explain_cause():
+    cmd = route_input("find failed containers and explain likely cause")
+    assert cmd.name == "diagnose" and cmd.args == "docker"
+
+
+def test_routing_what_containers_failing():
+    cmd = route_input("what containers are failing?")
+    assert cmd.name == "diagnose" and cmd.args == "docker"
+
+
+def test_routing_network_reachability_broken():
+    cmd = route_input("network reachability is broken")
+    assert cmd.name == "diagnose" and cmd.args == "docker"
+
+
+def test_routing_write_to_disk():
+    cmd = route_input("why can the service not write to disk?")
+    assert cmd.name == "diagnose" and cmd.args == "logs"
+
+
+def test_routing_read_only_filesystem():
+    cmd = route_input("read-only filesystem")
+    assert cmd.name == "diagnose" and cmd.args == "logs"
+
+
+def test_routing_app_cannot_reach_upstream():
+    cmd = route_input("app cannot reach upstream")
+    assert cmd.name == "diagnose" and cmd.args == "docker"
+
+
+def test_summary_severity_matches_findings_object(tmp_path):
+    from pathlib import Path
+
+    from shellforgeai.core.diagnose import Finding, displayed_finding_severity_counts
+    from shellforgeai.render.summary import write_diagnosis_summary_md
+
+    findings = [
+        Finding(severity="critical", title="sfai-restart-loop in restart loop", detail="x"),
+        Finding(severity="warning", title="sfai-missing-env exited 42", detail="x"),
+        Finding(severity="warning", title="sfai-bad-volume-perms exit 1", detail="x"),
+        Finding(severity="warning", title="sfai-bad-network upstream errors", detail="x"),
+        Finding(severity="warning", title="extra warning A", detail="x"),
+        Finding(severity="warning", title="extra warning B", detail="x"),
+        Finding(severity="info", title="sfai-noisy-logs noise", detail="x"),
+        Finding(severity="info", title="info A", detail="x"),
+        Finding(severity="info", title="info B", detail="x"),
+        Finding(severity="info", title="info C", detail="x"),
+        Finding(severity="limitation", title="journal unavailable", detail="x"),
+        Finding(severity="limitation", title="docker dummy lim", detail="x"),
+    ]
+    expected = displayed_finding_severity_counts(findings)
+    target_path = Path(tmp_path) / "summary.md"
+    write_diagnosis_summary_md(
+        path=target_path,
+        session_id="s1",
+        target="docker",
+        target_type="generic",
+        created_at="2026-05-09T00:00:00Z",
+        evidence_items=[],
+        findings=findings,
+        artifact_dir=Path(tmp_path),
+    )
+    text = target_path.read_text()
+    sev_line = next((line for line in text.splitlines() if "Findings severity" in line), "")
+    assert f"{expected['critical']} critical" in sev_line
+    assert f"{expected['warning']} warning" in sev_line
+    expected_info_lim = expected["info"] + expected["limitation"]
+    assert f"{expected_info_lim} info/limitations" in sev_line
+    findings_count_line = next(
+        (line for line in text.splitlines() if line.startswith("- Findings count:")), ""
+    )
+    assert f"Findings count: {sum(expected.values())}" in findings_count_line
+
+
+def test_summary_does_not_say_no_actionable_when_critical_present(tmp_path):
+    from pathlib import Path
+
+    from shellforgeai.core.diagnose import Finding
+    from shellforgeai.render.summary import write_diagnosis_summary_md
+
+    findings = [
+        Finding(severity="critical", title="sfai-restart-loop in restart loop", detail="x"),
+    ]
+    target_path = Path(tmp_path) / "summary.md"
+    write_diagnosis_summary_md(
+        path=target_path,
+        session_id="s1",
+        target="docker",
+        target_type="generic",
+        created_at="2026-05-09T00:00:00Z",
+        evidence_items=[],
+        findings=findings,
+        artifact_dir=Path(tmp_path),
+    )
+    text = target_path.read_text()
+    assert "1 critical" in text
+    assert "No actionable findings" not in text

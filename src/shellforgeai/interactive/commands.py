@@ -139,6 +139,58 @@ def route_input(text: str) -> RoutedCommand:
         alias in raw.lower() for alias in lab_container_aliases
     ):
         return RoutedCommand(name="diagnose", args="docker")
+    failed_container_phrases = [
+        "find failed containers",
+        "find failed container",
+        "failed containers",
+        "failed docker containers",
+        "any failed containers",
+        "container failures",
+        "explain container failures",
+        "show failing containers",
+        "explain likely cause",
+    ]
+    if any(p in lowered for p in failed_container_phrases):
+        return RoutedCommand(name="diagnose", args="docker")
+    write_failure_phrases = [
+        "service cannot write to disk",
+        "service can not write",
+        "service cant write",
+        "app cannot write to disk",
+        "app cant write",
+        "cannot write file",
+        "cannot write to disk",
+        "cant write to disk",
+        "cannot create file",
+        "write failed",
+        "read-only filesystem",
+        "read only filesystem",
+        "filesystem read-only",
+        "filesystem read only",
+        "disk write permission",
+        "volume permission",
+        "why can the service not write",
+        "why cant the service write",
+        "why can not the service write",
+        "why can the app not write",
+        "why cant the app write",
+    ]
+    if any(p in lowered for p in write_failure_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
+    network_log_failure_phrases = [
+        "network reachability is broken",
+        "network reachabilty is broken",
+        "upstream is unreachable",
+        "upstream unreachable",
+        "app cannot reach upstream",
+        "app cant reach upstream",
+        "service cannot reach upstream",
+        "service cant reach upstream",
+        "dns errors in logs",
+        "dns errors in log",
+    ]
+    if any(p in lowered for p in network_log_failure_phrases):
+        return RoutedCommand(name="diagnose", args="docker")
     container_failure_phrases = [
         "why is the app restarting",
         "why is my app restarting",
