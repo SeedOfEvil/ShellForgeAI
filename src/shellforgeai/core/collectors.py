@@ -8,12 +8,11 @@ from shellforgeai.knowledge.search import search_local
 from shellforgeai.tools import (
     audit_recent,
     disk,
-    files,
     firewall,
     host,
-    journal,
     network,
     process,
+    services,
     storage,
     system,
     systemd,
@@ -81,8 +80,24 @@ def _summarize(result) -> str:
             return val.replace(":", "=").replace("(", "").replace(")", "").replace(" ", "")
         return first
     if result.tool == "network.listeners":
-        rows = max(0, len((result.stdout or "").splitlines()) - 1)
-        return "no listening sockets" if rows == 0 else f"{rows} listening sockets"
+        lines = (result.stdout or "").splitlines()
+        data = lines[1:] if len(lines) > 1 else lines
+        ports = []
+        for ln in data:
+            parts = ln.split()
+            if len(parts) >= 5:
+                local = parts[4]
+                if ":" in local:
+                    ports.append(local.rsplit(":", 1)[-1])
+        uniq = []
+        for p in ports:
+            if p not in uniq:
+                uniq.append(p)
+        rows = len(data)
+        if rows == 0:
+            return "no listening sockets"
+        shown = ",".join(uniq[:6]) if uniq else "unknown"
+        return f"{rows} listening sockets ports={shown}"
     if result.tool == "network.listeners.filtered":
         port = result.command[-1] if result.command else "port"
         return f"port {port.lstrip(':')}: {'listener found' if first else 'no listener'}"
@@ -172,54 +187,56 @@ def collect_host_evidence(context) -> list[EvidenceItem]:
 
 
 def collect_service_evidence(context, service_name: str, since: str = "30m") -> list[EvidenceItem]:
+    target = service_name.lower().strip()
     items = [
-        _to_item(
-            systemd.status(service_name), EvidenceCategory.service, f"systemd status {service_name}"
-        ),
-        _to_item(
-            journal.unit(service_name, since=since),
-            EvidenceCategory.logs,
-            f"Journal for {service_name}",
-        ),
-        _to_item(systemd.list_failed(), EvidenceCategory.service, "Failed systemd units"),
+        _to_item(system.container_detect(), EvidenceCategory.host, "Container detection"),
+        _to_item(services.manager_detect(), EvidenceCategory.service, "Service manager context"),
+        _to_item(network.listeners(), EvidenceCategory.network, "Listeners"),
+        _to_item(process.snapshot(), EvidenceCategory.host, "Process snapshot"),
+        _to_item(process.top(), EvidenceCategory.host, "Top processes"),
     ]
-    if not items[0].ok:
-        items.append(
+    if target in {"services", "service-discovery", "ports", "listening"}:
+        for daemon in ["nginx", "ssh", "docker", "caddy", "redis", "postgres", "mysql"]:
+            items.append(
+                _to_item(
+                    services.processes(daemon),
+                    EvidenceCategory.host,
+                    f"{daemon} process check",
+                )
+            )
+        return _dedupe_items(items)
+
+    items.extend(
+        [
             _to_item(
-                host.command_exists(service_name),
+                services.status(service_name), EvidenceCategory.service, f"{service_name} status"
+            ),
+            _to_item(
+                services.unit_file(service_name),
                 EvidenceCategory.service,
-                f"command exists {service_name}",
-            )
-        )
-        items.append(
+                f"{service_name} unit file",
+            ),
             _to_item(
-                process.find(service_name), EvidenceCategory.service, f"process find {service_name}"
-            )
-        )
-        if service_name.lower() == "nginx":
-            items.append(
-                _to_item(
-                    network.listeners_filtered(":80"),
-                    EvidenceCategory.network,
-                    "nginx likely listener 80",
-                )
-            )
-            items.append(
-                _to_item(
-                    network.listeners_filtered(":443"),
-                    EvidenceCategory.network,
-                    "nginx likely listener 443",
-                )
-            )
-            items.append(
-                _to_item(
-                    files.stat("/etc/nginx/nginx.conf"), EvidenceCategory.files, "nginx config path"
-                )
-            )
-            items.append(
-                _to_item(files.stat("/var/log/nginx"), EvidenceCategory.files, "nginx log dir")
-            )
-    return items
+                services.processes(service_name),
+                EvidenceCategory.host,
+                f"{service_name} processes",
+            ),
+            _to_item(
+                services.ports(service_name), EvidenceCategory.network, f"{service_name} listeners"
+            ),
+            _to_item(
+                services.config_hints(service_name),
+                EvidenceCategory.files,
+                f"{service_name} config hints",
+            ),
+            _to_item(
+                services.service_logs(service_name, since=since),
+                EvidenceCategory.logs,
+                f"{service_name} logs",
+            ),
+        ]
+    )
+    return _dedupe_items(items)
 
 
 def collect_disk_evidence(context) -> list[EvidenceItem]:

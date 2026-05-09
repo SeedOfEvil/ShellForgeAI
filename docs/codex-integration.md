@@ -23,6 +23,8 @@ model cannot reliably execute those collectors.
 - Arbitrary shell stays blocked.
 - Mutation stays blocked or approval-required.
 - `apply` is validation-only in this alpha.
+- Model subprocesses must use bounded timeouts and explicit cleanup/reaping;
+  failures/timeouts should return safely without hanging the REPL.
 
 ## Future optional approach (experimental, disabled by default)
 

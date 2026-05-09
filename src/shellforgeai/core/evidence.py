@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from enum import StrEnum
 
@@ -88,4 +89,6 @@ def classify_target(target: str) -> TargetType:
         return TargetType.network
     if any(k in t for k in ["host", "machine", "server"]):
         return TargetType.host
+    if re.fullmatch(r"[a-z0-9_.-]{2,64}", t):
+        return TargetType.service
     return TargetType.generic

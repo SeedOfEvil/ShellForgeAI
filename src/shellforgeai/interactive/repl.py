@@ -4,6 +4,8 @@ import os
 import platform
 import re
 from ast import literal_eval
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from typing import Any
 
@@ -498,7 +500,9 @@ def _storage_io_deep_dive_synthesis(
     )
 
 
-def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -> str:
+def _deterministic_operator_summary(
+    intent: str, checks: list[dict[str, str]], target: str | None = None
+) -> str:
     def _find(tool: str) -> dict[str, str] | None:
         return next((c for c in checks if c["tool"] == tool), None)
 
@@ -515,6 +519,61 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     route_row = _find("network.routes")
     dns_row = _find("network.dns")
     process_row = _find("process.snapshot")
+    listeners_row = _find("network.listeners")
+    manager_row = _find("service.manager_detect")
+    if intent == "service_health_deep_dive":
+        svc = (target or "service").lower()
+        svc_proc = _find("service.processes")
+        svc_ports = _find("service.ports")
+        svc_cfg = _find("service.config_hints")
+        svc_logs = _find("service.logs")
+        mgr = manager_row["summary"] if manager_row else "service manager context unavailable"
+        proc = svc_proc["summary"] if svc_proc else "process evidence unavailable"
+        ports = svc_ports["summary"] if svc_ports else "listener evidence unavailable"
+        cfg = svc_cfg["summary"] if svc_cfg else "config hints unavailable"
+        logs = svc_logs["summary"] if svc_logs else "logs unavailable"
+        return (
+            "## Assessment\n"
+            f"Deeper {svc} service check completed from current runtime view.\n\n"
+            "## What I found\n"
+            f"- Service manager context: {mgr}.\n"
+            f"- {svc} process status: {proc}.\n"
+            f"- {svc} listener status: {ports}.\n"
+            f"- {svc} config hints: {cfg}.\n"
+            f"- {svc} log visibility: {logs}.\n\n"
+            "## Best read\n"
+            "This remains a read-only container/runtime view. If the service is expected "
+            "elsewhere, confirm host vs sibling-container ownership before restart decisions.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No restart/reload/start/stop/install/delete "
+            "actions were performed.\n"
+        )
+    if intent == "service_inventory_deep_dive":
+        listener_line = "listener evidence unavailable"
+        if listeners_row:
+            lsum = listeners_row["summary"]
+            if "ports=" in lsum:
+                listener_line = f"listening ports: {lsum.split('ports=', 1)[-1].strip()}"
+            elif "no listening sockets" in lsum.lower():
+                listener_line = "no listeners found"
+            else:
+                listener_line = lsum
+        mgr = manager_row["summary"] if manager_row else "service manager context unavailable"
+        proc = process_row["summary"] if process_row else "process evidence unavailable"
+        return (
+            "## Assessment\n"
+            "Deeper service inventory completed from current runtime view.\n\n"
+            "## What I found\n"
+            f"- Service manager context: {mgr}.\n"
+            f"- Listener view: {listener_line}.\n"
+            f"- Process view: {proc}.\n\n"
+            "## Best read\n"
+            "This reflects container-visible services/listeners only; "
+            "host-level service managers may be out of scope here.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No restart/reload/start/stop/install/delete "
+            "actions were performed.\n"
+        )
     if os_row:
         facts.append(f"- Host context: {os_row['summary']}.")
     if cpu_mem_row:
@@ -617,6 +676,26 @@ def _is_disk_usage_breakdown_intent(question: str) -> bool:
     return any(p in q for p in phrases)
 
 
+def _extract_service_target(question: str) -> str:
+    q = question.lower()
+    aliases = [
+        "nginx",
+        "ssh",
+        "sshd",
+        "docker",
+        "postgres",
+        "postgresql",
+        "mysql",
+        "mariadb",
+        "redis",
+        "caddy",
+    ]
+    for a in aliases:
+        if a in q:
+            return a
+    return "service-discovery"
+
+
 def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
@@ -635,12 +714,31 @@ def select_followup_investigation(
         or intent in {"disk"}
         or _is_disk_usage_breakdown_intent(q)
     )
-    if any(w in q for w in ("service", "services", "nginx", "ssh", "docker", "port")):
+    if intent in {"nginx", "ssh", "sshd", "docker", "service", "services"} or any(
+        w in q
+        for w in (
+            "service",
+            "services",
+            "nginx",
+            "ssh",
+            "docker",
+            "port",
+            "restart",
+            "restarat",
+            "reeestart",
+            "ngnix",
+        )
+    ):
         return {
-            "intent": "service_health_deep_dive",
+            "intent": (
+                "service_inventory_deep_dive"
+                if any(w in q for w in ("what services", "services are running", "what ports"))
+                else "service_health_deep_dive"
+            ),
             "label": "service health",
             "description": "listening ports, service detectors, and recent service clues",
             "bundle": "services",
+            "target": _extract_service_target(question),
         }
     if any(w in q for w in ("network", "dns", "route", "firewall")):
         return {
@@ -827,6 +925,18 @@ def _detect_action_request(text: str) -> str | None:
     )
 
 
+def _extract_service_action_target(text: str) -> str | None:
+    low = text.lower().strip()
+    m = re.search(
+        r"\b(?:restart|reload|stop|start|bounce)\b\s+([\w\-./]+)",
+        low,
+    )
+    if not m:
+        return None
+    target = m.group(1).strip("?.!,")
+    return target or None
+
+
 def _contains_internal_collector_language(text: str) -> bool:
     low = text.lower()
     blocked = [
@@ -880,10 +990,38 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                     "such as slow system, disk issue, network issue, or service issue."
                 )
                 continue
-            with console.status("Running deeper read-only investigation..."):
-                res = diagnose_target(
-                    runtime, pending_followup["bundle"], online=False, since="30m"
+            followup_target = pending_followup.get("target") or pending_followup["bundle"]
+            if pending_followup.get("intent") == "service_health_deep_dive" and not followup_target:
+                pending_followup["last_error"] = "missing target"
+                console.print(
+                    "I had a pending service follow-up, but the target was missing. "
+                    "Please ask the service question again."
                 )
+                continue
+            try:
+                with console.status("Running deeper read-only investigation..."):
+                    if (
+                        pending_followup.get("intent") == "service_health_deep_dive"
+                        and followup_target == "service-discovery"
+                    ):
+                        followup_target = "services"
+                    with ThreadPoolExecutor(max_workers=1) as ex:
+                        fut = ex.submit(diagnose_target, runtime, followup_target, False, "30m")
+                        res = fut.result(timeout=45)
+            except (TimeoutError, FutureTimeout):
+                pending_followup["last_error"] = "timeout"
+                console.print(
+                    "The deeper service check timed out safely. No changes were made, "
+                    "and the REPL is still healthy."
+                )
+                continue
+            except Exception as exc:
+                pending_followup["last_error"] = str(exc)
+                console.print(
+                    "The deeper follow-up failed safely, but the REPL is still healthy. "
+                    "No changes were made."
+                )
+                continue
             checks = [
                 {
                     "tool": i.source,
@@ -908,7 +1046,11 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                     )
                 )
             else:
-                console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
+                console.print(
+                    _deterministic_operator_summary(
+                        pending_followup["intent"], checks, pending_followup.get("target")
+                    )
+                )
             completed_followups.append(pending_followup["intent"])
             pending_followup = None
             continue
@@ -990,12 +1132,17 @@ Commands:
         if routed.name == "/pending":
             if not pending_followup:
                 console.print("No pending investigation.")
+            elif "label" not in pending_followup:
+                console.print(
+                    "Pending investigation state is invalid. Please ask the service question again."
+                )
             else:
                 console.print(
                     f"Pending investigation: {pending_followup['label']}\n"
                     f"Reason: {pending_followup.get('reason', 'not specified')}\n"
                     f"From: {pending_followup.get('created_from_question', 'unknown')}\n"
-                    f"Session: {pending_followup.get('created_from_session', 'unknown')}"
+                    f"Session: {pending_followup.get('created_from_session', 'unknown')}\n"
+                    f"Last error: {pending_followup.get('last_error', 'none')}"
                 )
             continue
         if routed.name in {"/doctor", "/status", "/health"}:
@@ -1493,6 +1640,45 @@ No command was executed.""")
             console.print(
                 "Collectors used in the most recent run: "
                 f"{', '.join(tool_names) if tool_names else 'none recorded yet'}."
+            )
+            continue
+        service_action_target = _extract_service_action_target(user_input)
+        if service_action_target:
+            with console.status("Collecting read-only service evidence..."):
+                res = diagnose_target(runtime, service_action_target, online=False, since="30m")
+            checks = [
+                {
+                    "tool": i.source,
+                    "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+                    "summary": i.summary,
+                }
+                for i in res.evidence.items
+            ]
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            if evidence_mode == "full":
+                _evidence_table(console, checks)
+            else:
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
+            pending_followup = {
+                "intent": "service_health_deep_dive",
+                "label": "service health",
+                "description": "service manager context, processes, listeners, and logs",
+                "bundle": "services",
+                "target": service_action_target,
+                "created_from_session": runtime.session.session_id,
+                "created_from_question": user_input,
+                "created_from_intent": service_action_target,
+                "first_pass_checks": list(checks),
+            }
+            console.print(
+                f"I can’t execute restart/reload/start/stop from inspect mode. "
+                f"I checked {service_action_target} first with read-only evidence. "
+                "Service-impacting actions remain operator-run, and apply stays validation-only."
+            )
+            console.print(
+                _operator_followup_text(pending_followup["label"], pending_followup["description"])
             )
             continue
         action_response = _detect_action_request(user_input)

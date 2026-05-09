@@ -46,6 +46,7 @@ Never commit `.codex/auth.json`; treat it as a password.
 ```yaml
 services:
   shellforgeai:
+    init: true
     volumes:
       - ./data:/data
       - ./codex-home:/root/.codex

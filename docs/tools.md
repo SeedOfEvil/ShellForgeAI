@@ -23,7 +23,7 @@ shellforgeai tools describe <name>
 | `network` | Interfaces, routes, listening sockets, DNS. |
 | `firewall` | Read-only firewall view. |
 | `packages` | Installed packages and versions. |
-| `services` | Service-discovery and listening-port summaries. |
+| `services` | Service investigation collectors (manager/status/processes/ports/logs/config hints). |
 | `process` | Process snapshot. |
 | `containers` | Container introspection (read-only). |
 | `logs` | Log fan-out around an intent. |
@@ -62,3 +62,6 @@ remain read-only.
 - `disk.top_dirs` — Bounded top-level disk usage.
 - `storage.mounts` — Mount and filesystem context.
 - `audit.recent` — Recent ShellForgeAI session trends.
+
+
+Service investigation adds read-only collectors: `service.manager_detect`, `service.status`, `service.unit_file`, `service.processes`, `service.ports`, `service.config_hints`, and `service.logs`.

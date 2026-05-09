@@ -25,3 +25,27 @@ def test_command_flags(monkeypatch):
     assert "--json" in c
     assert "--skip-git-repo-check" in c
     assert "--yolo" not in c
+
+
+def test_stream_complete_reuses_complete_for_safe_cleanup(monkeypatch):
+    p = CodexProvider()
+    monkeypatch.setattr(
+        p,
+        "complete",
+        lambda _req: type(
+            "Resp",
+            (),
+            {
+                "text": "hello",
+                "provider": "openai-codex",
+                "model": "gpt-5.5",
+                "ok": True,
+                "error": None,
+            },
+        )(),
+    )
+    evs = list(
+        p.stream_complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
+    )
+    assert evs[0]["type"] == "text"
+    assert evs[-1]["type"] == "final"

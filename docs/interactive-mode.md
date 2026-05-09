@@ -63,8 +63,7 @@ Debug
   collectors before any model call.
 - Sluggish/laggy symptoms route to performance diagnostics rather than a
   generic ask.
-- Service-discovery questions (services / listening / ports / nginx / ssh /
-  docker) route to read-only evidence collection before synthesis.
+- Service and service-health questions (e.g., nginx/ssh/docker status, restart requests, listening ports) route to read-only service investigation evidence before synthesis.
 
 ## Streaming synthesis
 
@@ -119,3 +118,15 @@ without calling the model; `/help` and `/exit` continue to work.
 - Disk-space breakdown queries (e.g., "what is using disk space?") trigger bounded `disk.top_dirs` read-only collection.
 
 Deterministic findings are severity-aware (`critical`, `warning`, `info`, `limitation`). Container-only gaps (for example missing `systemctl`/`journalctl` in Docker) are reported as limitations, not direct faults.
+
+
+Service inventory follow-ups (`proceed`/`dig deeper` after service-discovery questions) run listener/process/service-manager evidence collection, not a generic health-only pass.
+
+
+Action-style service requests (for example `restart <service>`) trigger an immediate read-only service check first, then return a safety boundary response (no mutation execution).
+
+
+For service action follow-ups, ShellForgeAI preserves the detected target service (for example nginx or shellforgeai) so `dig deeper` stays target-specific rather than generic inventory-only.
+
+
+If a queued follow-up times out or fails, ShellForgeAI reports the failure safely, keeps the REPL alive, and `/pending` remains readable with last error state.
