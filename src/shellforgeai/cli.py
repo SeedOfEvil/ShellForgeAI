@@ -518,7 +518,28 @@ def ask(
         )
     )
     if not resp.ok:
-        console.print("Model unavailable. Install Codex CLI and login with: codex login")
+        err_text = (resp.error or "").lower()
+        if "not found on path" in err_text or "install" in err_text:
+            console.print("Model unavailable. Install Codex CLI and login with: codex login")
+        elif "auth" in err_text or "login" in err_text:
+            console.print("Codex auth failed. Run: codex login")
+        elif "timed out" in err_text:
+            console.print("Codex timed out before producing a response.")
+        elif "argument" in err_text:
+            stderr_snippet = (resp.raw or {}).get("stderr", "") if resp.raw else ""
+            console.print(
+                "Codex CLI argument error: "
+                + (resp.error or "unexpected CLI options")
+                + (f"\n{stderr_snippet}" if stderr_snippet else "")
+            )
+        elif "no final response" in err_text:
+            console.print("Codex returned no final response.")
+        else:
+            stderr_snippet = (resp.raw or {}).get("stderr", "") if resp.raw else ""
+            console.print(
+                f"Codex error: {resp.error or 'unknown failure'}"
+                + (f"\n{stderr_snippet}" if stderr_snippet else "")
+            )
         raise typer.Exit(code=1)
     console.print(resp.text)
     console.print(f"\nProvider: {resp.provider}\nModel: {resp.model}\n{_usage_line(resp)}")

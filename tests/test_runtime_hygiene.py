@@ -26,12 +26,13 @@ def test_codex_timeout_returns_structured_error(monkeypatch):
             return None
 
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
     p = CodexProvider()
     resp = p.complete(
         ModelRequest(prompt="x", model="gpt-5.5", provider="openai-codex", timeout_seconds=1)
     )
     assert not resp.ok
-    assert resp.error == "timeout"
+    assert "timed out" in (resp.error or "").lower()
 
 
 def test_cleanup_active_processes_terminates_children():
