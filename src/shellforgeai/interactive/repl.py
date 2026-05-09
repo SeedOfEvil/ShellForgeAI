@@ -988,14 +988,36 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                     "such as slow system, disk issue, network issue, or service issue."
                 )
                 continue
-            with console.status("Running deeper read-only investigation..."):
-                followup_target = pending_followup.get("target") or pending_followup["bundle"]
-                if (
-                    pending_followup.get("intent") == "service_health_deep_dive"
-                    and followup_target == "service-discovery"
-                ):
-                    followup_target = "services"
-                res = diagnose_target(runtime, followup_target, online=False, since="30m")
+            followup_target = pending_followup.get("target") or pending_followup["bundle"]
+            if pending_followup.get("intent") == "service_health_deep_dive" and not followup_target:
+                pending_followup["last_error"] = "missing target"
+                console.print(
+                    "I had a pending service follow-up, but the target was missing. "
+                    "Please ask the service question again."
+                )
+                continue
+            try:
+                with console.status("Running deeper read-only investigation..."):
+                    if (
+                        pending_followup.get("intent") == "service_health_deep_dive"
+                        and followup_target == "service-discovery"
+                    ):
+                        followup_target = "services"
+                    res = diagnose_target(runtime, followup_target, online=False, since="30m")
+            except TimeoutError:
+                pending_followup["last_error"] = "timeout"
+                console.print(
+                    "The deeper service check timed out safely. The REPL is still healthy. "
+                    "No changes were made."
+                )
+                continue
+            except Exception as exc:
+                pending_followup["last_error"] = str(exc)
+                console.print(
+                    "The deeper follow-up failed safely, but the REPL is still healthy. "
+                    "No changes were made."
+                )
+                continue
             checks = [
                 {
                     "tool": i.source,
@@ -1111,7 +1133,8 @@ Commands:
                     f"Pending investigation: {pending_followup['label']}\n"
                     f"Reason: {pending_followup.get('reason', 'not specified')}\n"
                     f"From: {pending_followup.get('created_from_question', 'unknown')}\n"
-                    f"Session: {pending_followup.get('created_from_session', 'unknown')}"
+                    f"Session: {pending_followup.get('created_from_session', 'unknown')}\n"
+                    f"Last error: {pending_followup.get('last_error', 'none')}"
                 )
             continue
         if routed.name in {"/doctor", "/status", "/health"}:
