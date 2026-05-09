@@ -91,3 +91,35 @@ No-hang follow-up smoke: run `can you restart nginx`, `/pending`, `proceed`, `/p
 Zombie/process smoke: compare `ps -eo pid,ppid,stat,comm,args | grep -E "codex|defunct|shellforgeai" | grep -v grep || true` before/after interactive checks; no accumulating defunct children should remain.
 
 Runtime hygiene check: `shellforgeai doctor` should report `runtime_hygiene ... init_reaper=yes` when compose is running with `init: true`.
+
+
+## Targeted network follow-up smoke
+
+In the REPL, run:
+
+```
+can this server reach example.com:443?
+/pending
+proceed
+can you open port 443?
+/pending
+proceed
+check DNS for example.com
+/pending
+proceed
+```
+
+Expected:
+
+- `/pending` shows target context (host:port, port, or domain).
+- `proceed` after a reachability question runs a target-specific deep dive
+  (namespace context, default route, DNS resolver, target DNS resolution,
+  bounded TCP connect to the same host:port, firewall context). It does
+  not fall back to a generic network deep dive.
+- `proceed` after `can you open port 443?` focuses on port 443
+  (listeners, listener ownership, firewall context, container/route view)
+  and does not mutate or emit unconditional firewall commands.
+- `proceed` after a DNS question repeats the resolver/resolution test
+  for the requested domain (or notes the safe default if no domain was
+  given).
+- Apply remains validation-only.

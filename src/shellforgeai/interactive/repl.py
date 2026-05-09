@@ -90,14 +90,123 @@ def _is_firewall_question(text: str) -> bool:
     )
 
 
+_SAFE_DEFAULT_DNS_DOMAIN = "example.com"
+
+
 def _extract_reachability_target(text: str) -> tuple[str, int] | None:
     low = text.lower()
-    m = re.search(r"([a-z0-9\.\-]+):(\d{1,5})", low)
+    m = re.search(r"([a-z0-9][a-z0-9\.\-]*\.[a-z0-9\.\-]+):(\d{1,5})", low)
     if m:
         return m.group(1), int(m.group(2))
-    m2 = re.search(r"port\s+(\d{1,5})\s+(?:on|to)\s+([a-z0-9\.\-]+)", low)
+    m2 = re.search(r"port\s+(\d{1,5})\s+(?:on|to|at|of|for)\s+([a-z0-9][a-z0-9\.\-]+)", low)
     if m2:
         return m2.group(2), int(m2.group(1))
+    m3 = re.search(
+        r"(?:reach|conenct|connect|reachable|test|tcp\s*connect)[a-z\s]*?"
+        r"\s([a-z0-9][a-z0-9\.\-]*\.[a-z0-9\.\-]+)\s+(\d{1,5})",
+        low,
+    )
+    if m3:
+        return m3.group(1), int(m3.group(2))
+    m4 = re.search(r"([a-z0-9][a-z0-9\.\-]*\.[a-z0-9\.\-]+)\s+(?:port\s+)?(\d{1,5})\b", low)
+    if m4:
+        return m4.group(1), int(m4.group(2))
+    return None
+
+
+def _extract_port_target(text: str) -> int | None:
+    low = text.lower()
+    m = re.search(r"port\s+(\d{1,5})", low)
+    if m:
+        return int(m.group(1))
+    m2 = re.search(r":(\d{1,5})\b", low)
+    if m2:
+        return int(m2.group(1))
+    return None
+
+
+def _extract_dns_target(text: str) -> str | None:
+    low = text.lower()
+    for pat in (
+        r"(?:dns|resolve|resolution|lookup|dig|nslookup)\s+(?:for|of|on)?\s*"
+        r"([a-z0-9][a-z0-9\.\-]*\.[a-z0-9\.\-]+)",
+        r"(?:dns|resolve|resolution|lookup)\s+([a-z0-9][a-z0-9\.\-]*\.[a-z0-9\.\-]+)",
+        r"check\s+dns\s+for\s+([a-z0-9][a-z0-9\.\-]*\.[a-z0-9\.\-]+)",
+    ):
+        m = re.search(pat, low)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _detect_network_subtype(text: str) -> str:
+    low = text.lower()
+    if "open port" in low or "allow port" in low or "publish port" in low:
+        return "port-open"
+    if "dns" in low or "resolve" in low or "resolution" in low or "nslookup" in low:
+        return "dns"
+    if (
+        "firewall" in low
+        or "firwall" in low
+        or "iptables" in low
+        or "nftables" in low
+        or "ufw" in low
+    ):
+        return "firewall"
+    if (
+        "reach" in low
+        or "reachable" in low
+        or "connect to" in low
+        or "conenct to" in low
+        or "test port" in low
+        or "tcp connect" in low
+    ):
+        return "reachability"
+    if "is port" in low or "port " in low or "listening" in low or "listerning" in low:
+        return "listener"
+    return "connectivity"
+
+
+def _network_subtype_label(subtype: str) -> str:
+    return {
+        "reachability": "network reachability",
+        "port-open": "network port-open",
+        "dns": "network DNS",
+        "listener": "network listener",
+        "firewall": "network firewall",
+        "connectivity": "network/DNS",
+    }.get(subtype, "network/DNS")
+
+
+def _network_followup_description(subtype: str) -> str:
+    return {
+        "reachability": (
+            "namespace context, default route, DNS, target resolution, and bounded TCP connect"
+        ),
+        "port-open": (
+            "listener inventory, listener ownership, firewall context, and container/route view"
+        ),
+        "dns": "DNS resolver config, target resolution test, default route, and namespace context",
+        "listener": "listener inventory, ownership, and container/firewall context",
+        "firewall": "firewall tooling visibility, container context, and listener view",
+        "connectivity": (
+            "routes, DNS, listeners, firewall context, and bounded target reachability"
+        ),
+    }.get(subtype, "routes, DNS, listeners, firewall context, and bounded target reachability")
+
+
+def _pending_target_phrase(p: dict[str, Any]) -> str | None:
+    host_t = p.get("target_host")
+    port_t = p.get("target_port")
+    dom_t = p.get("target_domain")
+    if host_t and port_t:
+        return f"{host_t}:{port_t}"
+    if host_t:
+        return str(host_t)
+    if dom_t:
+        return str(dom_t)
+    if port_t:
+        return f"port {port_t}"
     return None
 
 
@@ -691,6 +800,146 @@ def _deterministic_operator_summary(
     )
 
 
+def _checks_from_results(results: list) -> list[dict[str, str]]:
+    items = [_evidence_item_from_result(r, EvidenceCategory.network, r.tool) for r in results]
+    return [
+        {
+            "tool": i.source,
+            "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+            "summary": i.summary,
+        }
+        for i in items
+    ]
+
+
+def _run_network_followup(
+    pending: dict[str, Any],
+) -> tuple[list[dict[str, str]], str]:
+    subtype = pending.get("subtype", "connectivity")
+    host_t = pending.get("target_host")
+    port_t = pending.get("target_port")
+    domain_t = pending.get("target_domain")
+    results: list = []
+    if subtype == "reachability":
+        results.append(network.namespace_context())
+        results.append(network.default_route())
+        results.append(network.dns())
+        if host_t:
+            results.append(network.resolution_test(host_t))
+            if port_t:
+                results.append(network.tcp_connect_test(host_t, int(port_t)))
+        results.append(network.firewall_context())
+    elif subtype == "port-open" or subtype == "listener":
+        results.append(network.listeners())
+        results.append(network.listener_attribution())
+        results.append(network.firewall_context())
+        results.append(network.namespace_context())
+        results.append(network.default_route())
+    elif subtype == "dns":
+        target = domain_t or host_t or _SAFE_DEFAULT_DNS_DOMAIN
+        results.append(network.dns())
+        results.append(network.resolution_test(target))
+        results.append(network.default_route())
+        results.append(network.namespace_context())
+        results.append(network.firewall_context())
+    elif subtype == "firewall":
+        results.append(network.firewall_context())
+        results.append(network.namespace_context())
+        results.append(network.listeners())
+        results.append(network.default_route())
+    else:
+        results.append(network.namespace_context())
+        results.append(network.interfaces())
+        results.append(network.default_route())
+        results.append(network.dns())
+        results.append(network.listeners())
+        results.append(network.firewall_context())
+    checks = _checks_from_results(results)
+    text = _network_followup_synthesis(pending, checks)
+    return checks, text
+
+
+def _network_followup_synthesis(pending: dict[str, Any], checks: list[dict[str, str]]) -> str:
+    subtype = pending.get("subtype", "connectivity")
+    host_t = pending.get("target_host")
+    port_t = pending.get("target_port")
+    domain_t = pending.get("target_domain")
+    by = {c["tool"]: c.get("summary", "") for c in checks}
+    ns = by.get("network.namespace_context", "namespace context unavailable")
+    route = by.get("network.default_route", "default route unavailable")
+    dns_cfg = by.get("network.dns", "dns config unavailable")
+    dns_test = by.get("network.resolution_test", "")
+    tcp = by.get("network.tcp_connect_test", "")
+    listeners_s = by.get("network.listeners", "listener view unavailable")
+    listener_attr = by.get("network.listener_attribution", "")
+    fw = by.get("network.firewall_context", "firewall context unavailable")
+    if subtype == "reachability" and host_t and port_t:
+        tcp_line = tcp or f"bounded TCP connect to {host_t}:{port_t} not run"
+        dns_line = dns_test or f"DNS resolution test for {host_t} not run"
+        return (
+            "## Assessment\n"
+            f"Deeper reachability check for {host_t}:{port_t} completed.\n\n"
+            "## What I found\n"
+            f"- Namespace/container context: {ns}.\n"
+            f"- Default route: {route}.\n"
+            f"- DNS resolver config: {dns_cfg}.\n"
+            f"- DNS resolution: {dns_line}.\n"
+            f"- TCP connect: {tcp_line}.\n"
+            f"- Firewall context: {fw}.\n\n"
+            "## Best read\n"
+            f"This reachability view is taken from the current container/runtime namespace; "
+            f"host routing and host firewall may differ for {host_t}:{port_t}.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No firewall/route/interface/service changes were performed.\n"
+        )
+    if subtype in {"port-open", "listener"} and port_t is not None:
+        port_str = str(port_t)
+        listening_line = (
+            f"port {port_str} is listening"
+            if f":{port_str}" in listeners_s
+            else f"port {port_str} is not listening from this container view"
+        )
+        return (
+            "## Assessment\n"
+            f"Deeper port {port_str} check completed.\n\n"
+            "## What I found\n"
+            f"- Listener status: {listening_line}.\n"
+            f"- Visible listeners: {listeners_s}.\n"
+            f"- Listener ownership: {listener_attr or 'ownership unavailable'}.\n"
+            f"- Firewall context: {fw}.\n"
+            f"- Namespace/container context: {ns}.\n"
+            f"- Default route: {route}.\n\n"
+            "## Best read\n"
+            f"Host firewall and Docker port publishing are not visible from this container. "
+            f"Opening port {port_str} would require an operator-approved change such as "
+            f"starting a service listener, publishing the Docker port, "
+            f"and/or allowing host firewall policy.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No mutation was performed; "
+            "no unconditional firewall commands are issued from here.\n"
+        )
+    if subtype == "dns":
+        target = domain_t or host_t or _SAFE_DEFAULT_DNS_DOMAIN
+        used_default_note = (
+            ""
+            if (domain_t or host_t)
+            else f" No domain was specified, so the safe default {target} was used."
+        )
+        return (
+            "## Assessment\n"
+            f"DNS follow-up for {target} completed.{used_default_note}\n\n"
+            "## What I found\n"
+            f"- DNS resolver config: {dns_cfg}.\n"
+            f"- Resolution test: {dns_test or 'resolution test unavailable'}.\n"
+            f"- Default route: {route}.\n"
+            f"- Namespace/container context: {ns}.\n"
+            f"- Firewall context: {fw}.\n\n"
+            "## Safety\n"
+            "Read-only DNS lookups only. No resolver/firewall/route changes were performed.\n"
+        )
+    return _deterministic_operator_summary("network_dns_firewall_deep_dive", checks)
+
+
 _FOLLOWUP_CONFIRM = {
     "yes",
     "y",
@@ -759,7 +1008,7 @@ def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
     q = question.lower()
-    if any(
+    if intent == "network" or any(
         w in q
         for w in (
             "network",
@@ -774,31 +1023,40 @@ def select_followup_investigation(
             "reachable",
             "reach ",
             "connect to",
+            "conenct to",
+            "test port",
+            "tcp connect",
             "open port",
             "allow port",
+            "is port ",
+            "port ",
+            "listening",
         )
     ):
-        subtype = "connectivity"
-        if "dns" in q or "resolve" in q:
-            subtype = "dns"
-        elif "firewall" in q or "firwall" in q:
-            subtype = "firewall"
-        elif "open port" in q or "allow port" in q:
-            subtype = "port-open"
-        elif "port" in q or "listening" in q or "listerning" in q:
-            subtype = "listener"
-        if "reach " in q or "connect to" in q or "reachable" in q:
-            subtype = "reachability"
-        return {
+        subtype = _detect_network_subtype(question)
+        reach = _extract_reachability_target(question)
+        port_only = _extract_port_target(question) if not reach else None
+        dom = _extract_dns_target(question)
+        label = _network_subtype_label(subtype)
+        description = _network_followup_description(subtype)
+        followup: dict[str, Any] = {
             "intent": "network_dns_firewall_deep_dive",
-            "label": "network/DNS",
-            "description": (
-                "routes, DNS, listeners, firewall context, and bounded target reachability"
-            ),
+            "label": label,
+            "description": description,
             "bundle": "network",
             "type": "network",
             "subtype": subtype,
         }
+        if reach:
+            followup["target_host"] = reach[0]
+            followup["target_port"] = reach[1]
+        elif port_only is not None:
+            followup["target_port"] = port_only
+        if dom:
+            followup["target_domain"] = dom
+        elif reach:
+            followup["target_domain"] = reach[0]
+        return followup
     is_disk_capacity_intent = (
         any(
             k in q
@@ -1100,16 +1358,25 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                     "Please ask the service question again."
                 )
                 continue
+            network_followup_text: str | None = None
+            proceed_res: Any = None
             try:
                 with console.status("Running deeper read-only investigation..."):
-                    if (
-                        pending_snapshot.get("intent") == "service_health_deep_dive"
-                        and followup_target == "service-discovery"
-                    ):
-                        followup_target = "services"
-                    with ThreadPoolExecutor(max_workers=1) as ex:
-                        fut = ex.submit(diagnose_target, runtime, followup_target, False, "30m")
-                        res = fut.result(timeout=45)
+                    if pending_snapshot.get("type") == "network":
+                        with ThreadPoolExecutor(max_workers=1) as ex:
+                            fut_net = ex.submit(_run_network_followup, pending_snapshot)
+                            checks, network_followup_text = fut_net.result(timeout=45)
+                    else:
+                        if (
+                            pending_snapshot.get("intent") == "service_health_deep_dive"
+                            and followup_target == "service-discovery"
+                        ):
+                            followup_target = "services"
+                        with ThreadPoolExecutor(max_workers=1) as ex:
+                            fut_diag = ex.submit(
+                                diagnose_target, runtime, followup_target, False, "30m"
+                            )
+                            proceed_res = fut_diag.result(timeout=45)
             except (TimeoutError, FutureTimeout):
                 pending_followup["last_error"] = "timeout"
                 console.print(
@@ -1132,14 +1399,15 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                     "No changes were made."
                 )
                 continue
-            checks = [
-                {
-                    "tool": i.source,
-                    "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
-                    "summary": i.summary,
-                }
-                for i in res.evidence.items
-            ]
+            if proceed_res is not None:
+                checks = [
+                    {
+                        "tool": i.source,
+                        "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+                        "summary": i.summary,
+                    }
+                    for i in proceed_res.evidence.items
+                ]
             console.print(
                 f"Deeper investigation complete: {len(checks)} read-only evidence item(s)."
             )
@@ -1149,7 +1417,9 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                 console.print("Highlights:")
                 for line in _evidence_highlights(checks):
                     console.print(line)
-            if pending_snapshot["intent"] == "storage_io_deep_dive":
+            if network_followup_text is not None:
+                console.print(network_followup_text)
+            elif pending_snapshot["intent"] == "storage_io_deep_dive":
                 console.print(
                     _storage_io_deep_dive_synthesis(
                         pending_snapshot.get("first_pass_checks"), checks
@@ -1250,9 +1520,12 @@ Commands:
                     "Pending investigation state is invalid. Please ask the service question again."
                 )
             else:
+                target_phrase = _pending_target_phrase(pending_followup)
+                target_line = f"Target: {target_phrase}\n" if target_phrase else ""
                 console.print(
                     f"Pending investigation: {pending_followup['label']}\n"
-                    f"Reason: {pending_followup.get('reason', 'not specified')}\n"
+                    + target_line
+                    + f"Reason: {pending_followup.get('reason', 'not specified')}\n"
                     f"From: {pending_followup.get('created_from_question', 'unknown')}\n"
                     f"Session: {pending_followup.get('created_from_session', 'unknown')}\n"
                     f"Last error: {pending_followup.get('last_error', 'none')}"
@@ -1491,6 +1764,13 @@ No command was executed.""")
                     if reach_target:
                         pending_followup["target_host"] = reach_target[0]
                         pending_followup["target_port"] = reach_target[1]
+                    if pending_followup.get("type") == "network":
+                        port_only = _extract_port_target(user_input)
+                        if port_only is not None and pending_followup.get("target_port") is None:
+                            pending_followup["target_port"] = port_only
+                        dns_target = _extract_dns_target(user_input)
+                        if dns_target and not pending_followup.get("target_domain"):
+                            pending_followup["target_domain"] = dns_target
                     pending_followup["created_from_session"] = runtime.session.session_id
                     pending_followup["created_from_question"] = user_input
                     pending_followup["created_from_intent"] = routed.args

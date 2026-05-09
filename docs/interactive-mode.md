@@ -137,3 +137,14 @@ If a queued follow-up times out or fails, ShellForgeAI reports the failure safel
 - `/pending` is local/state-only and does not call model providers or collectors.
 - Follow-up timeouts and interruptions are handled safely; the REPL remains usable and returns to `sfai>`.
 - Exiting the REPL (`/exit` or Ctrl-D) performs ShellForgeAI-owned model subprocess cleanup.
+
+
+Pending network follow-ups preserve the original target context. When a
+user asks a network question — for example `can this server reach
+example.com:443?`, `can you open port 443?`, or `check DNS for
+example.com` — the queued follow-up records `type=network`, the detected
+`subtype` (`reachability`, `port-open`, `listener`, `dns`, `firewall`),
+and any `target_host`, `target_port`, or `target_domain` parsed from the
+question. `/pending` displays this target alongside the label, and
+`proceed` runs a target-specific read-only deep dive that reuses the same
+host/port/domain instead of a generic network pass.

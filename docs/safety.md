@@ -47,3 +47,20 @@ Restart/reload command examples are only appropriate when service presence and a
 
 
 Failures/timeouts in diagnostics do not trigger mutation; restart/reload/install actions remain operator-run and `apply` remains validation-only.
+
+
+Targeted network follow-ups (reachability, port-open, listener, DNS,
+firewall) preserve and reuse the original `target_host`, `target_port`,
+and `target_domain` from the source user message. Follow-up deep dives
+for these subtypes use only read-only collectors:
+
+- DNS resolver inspection (`/etc/resolv.conf`).
+- Read-only DNS resolution test for the explicit target domain (or the
+  project's safe default when no domain is given).
+- Read-only route/interface/listener inspection.
+- Bounded TCP connect to the explicit target host/port only.
+- Firewall context (tooling visibility / container view).
+
+Opening or allowing a port, changing firewall rules, changing routes or
+interfaces, restarting networking or services, and Docker port-publish
+changes remain operator-run. ShellForgeAI never executes them.
