@@ -1,0 +1,10 @@
+services:
+  shellforgeai:
+    build: .
+    container_name: shellforgeai
+    init: true
+    command: ["sleep", "infinity"]
+    working_dir: /workspace/ShellForceAI
+    volumes:
+      - ./:/workspace/ShellForceAI
+      - ./data:/data
