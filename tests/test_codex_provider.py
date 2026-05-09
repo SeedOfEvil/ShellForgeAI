@@ -1,29 +1,147 @@
+import contextlib
+
 from shellforgeai.llm.codex import CodexProvider
 from shellforgeai.llm.schemas import ModelRequest
 
 
-def test_command_flags(monkeypatch):
-    calls = {}
+def _fake_popen_factory(returncode=0, stdout="ok", stderr="", last_message=None):
+    captured = {}
 
     class FakePopen:
-        returncode = 0
-
         def __init__(self, cmd, **kwargs):
-            calls["cmd"] = cmd
+            captured["cmd"] = cmd
+            captured["stdin"] = kwargs.get("stdin")
+            self.returncode = returncode
+            self._kwargs = kwargs
+            # Find the --output-last-message tmp path and write last_message
+            if last_message is not None:
+                from pathlib import Path
+
+                for i, tok in enumerate(cmd):
+                    if tok == "--output-last-message" and i + 1 < len(cmd):
+                        with contextlib.suppress(OSError):
+                            Path(cmd[i + 1]).write_text(last_message)
 
         def communicate(self, timeout=None):
-            return ("ok", "")
+            return (stdout, stderr)
 
-    monkeypatch.setattr("subprocess.Popen", FakePopen)
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            pass
+
+        def kill(self):
+            pass
+
+    return FakePopen, captured
+
+
+def test_command_global_options_before_exec(monkeypatch):
+    Fake, captured = _fake_popen_factory(stdout="", last_message="ok")
+    monkeypatch.setattr("subprocess.Popen", Fake)
+    p = CodexProvider()
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
+    p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
+    cmd = captured["cmd"]
+    exec_idx = cmd.index("exec")
+    # Global options must come before exec.
+    for flag in ("--sandbox", "read-only", "--ask-for-approval", "never", "-m", "gpt-5.5"):
+        assert flag in cmd
+        assert cmd.index(flag) < exec_idx, f"{flag} must precede exec"
+    # Exec-only options after exec.
+    assert "--skip-git-repo-check" in cmd
+    assert cmd.index("--skip-git-repo-check") > exec_idx
+    assert "--output-last-message" in cmd
+    assert cmd.index("--output-last-message") > exec_idx
+    # Approval/sandbox not duplicated post-exec.
+    post = cmd[exec_idx + 1 :]
+    assert "--ask-for-approval" not in post
+    assert "--sandbox" not in post
+    # No yolo / dangerous flags.
+    assert "--yolo" not in cmd
+    assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
+
+
+def test_provider_uses_devnull_stdin(monkeypatch):
+    import subprocess as _subprocess
+
+    Fake, captured = _fake_popen_factory(stdout="", last_message="ok")
+    monkeypatch.setattr("subprocess.Popen", Fake)
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
+    p = CodexProvider()
+    p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
+    assert captured["stdin"] == _subprocess.DEVNULL
+
+
+def test_provider_returns_last_message_text(monkeypatch):
+    Fake, _ = _fake_popen_factory(stdout="", last_message="ok\n")
+    monkeypatch.setattr("subprocess.Popen", Fake)
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
     p = CodexProvider()
     r = p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
     assert r.ok
-    c = calls["cmd"]
-    assert "exec" in c and "-m" in c and "gpt-5.5" in c
-    assert "--sandbox" in c and "read-only" in c
-    assert "--json" in c
-    assert "--skip-git-repo-check" in c
-    assert "--yolo" not in c
+    assert r.text == "ok"
+
+
+def test_provider_missing_binary_returns_install_message(monkeypatch):
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: None)
+    p = CodexProvider()
+    r = p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
+    assert not r.ok
+    assert "not found" in (r.error or "")
+
+
+def test_provider_cli_argument_error_not_login(monkeypatch):
+    err = "error: unexpected argument '--ask-for-approval' found"
+    Fake, _ = _fake_popen_factory(returncode=2, stdout="", stderr=err)
+    monkeypatch.setattr("subprocess.Popen", Fake)
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
+    p = CodexProvider()
+    r = p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
+    assert not r.ok
+    assert "argument" in (r.error or "").lower()
+    assert "login" not in (r.error or "").lower()
+
+
+def test_provider_timeout(monkeypatch):
+    import subprocess as _sp
+
+    class TimeoutPopen:
+        def __init__(self, cmd, **kwargs):
+            self.returncode = None
+            self._kwargs = kwargs
+
+        def communicate(self, timeout=None):
+            raise _sp.TimeoutExpired(cmd="codex", timeout=timeout)
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr("subprocess.Popen", TimeoutPopen)
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
+    p = CodexProvider(timeout_seconds=1)
+    r = p.complete(
+        ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex", timeout_seconds=1)
+    )
+    assert not r.ok
+    assert "timed out" in (r.error or "").lower()
+
+
+def test_provider_empty_response(monkeypatch):
+    Fake, _ = _fake_popen_factory(returncode=0, stdout="", stderr="", last_message="")
+    monkeypatch.setattr("subprocess.Popen", Fake)
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
+    p = CodexProvider()
+    r = p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
+    assert not r.ok
+    assert "no final response" in (r.error or "").lower()
 
 
 def test_stream_complete_reuses_complete_for_safe_cleanup(monkeypatch):

@@ -650,6 +650,38 @@ def _deterministic_operator_summary(
     listener_attr_row = _find("network.listener_attribution")
     tcp_row = _find("network.tcp_connect_test")
     manager_row = _find("service.manager_detect")
+    if intent == "logs_deep_dive":
+        common = _find("logs.common_paths")
+        recent = _find("logs.recent_errors")
+        auth = _find("logs.auth_errors")
+        kern = _find("logs.kernel_errors")
+        themes = _find("logs.error_themes")
+        svc_errs = _find("logs.service_errors")
+        docker_s = _find("docker.problem_summary")
+        common_s = common["summary"] if common else "common log paths unavailable"
+        recent_s = recent["summary"] if recent else "recent error scan unavailable"
+        auth_s = auth["summary"] if auth else "auth scan unavailable"
+        kern_s = kern["summary"] if kern else "kernel scan unavailable"
+        themes_s = themes["summary"] if themes else "no theme summary"
+        svc_line = f"- Service-specific log errors: {svc_errs['summary']}.\n" if svc_errs else ""
+        docker_line = f"- Container problem summary: {docker_s['summary']}.\n" if docker_s else ""
+        return (
+            "## Assessment\n"
+            "Deeper read-only log/error triage completed from current runtime view.\n\n"
+            "## What I found\n"
+            f"- Visible log sources: {common_s}.\n"
+            f"- Recent error scan: {recent_s}.\n"
+            f"- Auth log scan: {auth_s}.\n"
+            f"- Kernel log scan: {kern_s}.\n"
+            f"- Error themes: {themes_s}.\n"
+            f"{svc_line}{docker_line}\n"
+            "## Best read\n"
+            "Visible logs were inspected with bounded reads only. Host-level journal/syslog "
+            "may be outside this view if running inside a container.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No log deletion, truncation, rotation, restart, or "
+            "install actions were performed.\n"
+        )
     if intent == "service_health_deep_dive":
         svc = (target or "service").lower()
         svc_proc = _find("service.processes")
@@ -1008,6 +1040,100 @@ def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
     q = question.lower()
+    if intent == "docker" or any(
+        p in q
+        for p in (
+            "container restart",
+            "restart loop",
+            "crash loop",
+            "container exit",
+            "container crash",
+            "container failing",
+            "anything crashing",
+            "any container errors",
+        )
+    ):
+        target_container: str | None = None
+        for tok in q.split():
+            if tok.startswith("sfai-"):
+                target_container = tok.strip(".,?!")
+                break
+        subtype = "container-errors"
+        if "restart" in q or "restaring" in q or "restart loop" in q:
+            subtype = "restart-loop"
+        elif "exit" in q:
+            subtype = "exited-containers"
+        elif "noisy" in q:
+            subtype = "noisy-logs"
+        elif any(t in q for t in ("dns", "reachability", "network")):
+            subtype = "network-log-errors"
+        followup_d: dict[str, Any] = {
+            "intent": "logs_deep_dive",
+            "label": "container/log deep dive",
+            "description": (
+                "container inventory, restart counts, exit codes, and bounded logs for "
+                "failing/restarting containers"
+            ),
+            "bundle": "docker",
+            "type": "logs",
+            "subtype": subtype,
+            "target": "docker",
+        }
+        if target_container:
+            followup_d["target_container"] = target_container
+        return followup_d
+    if intent in {"logs", "errors", "auth", "log", "error"} or intent.startswith("logs:"):
+        subtype = "general"
+        target_service: str | None = None
+        if intent == "auth" or any(
+            p in q for p in ("auth", "login fail", "ssh fail", "sudo fail", "permission denied")
+        ):
+            subtype = "auth"
+        elif intent.startswith("logs:"):
+            subtype = "service"
+            target_service = intent.split(":", 1)[1].strip() or None
+        elif any(
+            p in q for p in ("kernel", "oom", "killed process", "i/o error", "io error", "panic")
+        ):
+            subtype = "kernel"
+        elif any(p in q for p in ("connection refused", "timeout", "tls", "certificate", "dns")):
+            subtype = "network-errors"
+        elif any(p in q for p in ("no space left", "disk full", "read-only", "filesystem")):
+            subtype = "storage-errors"
+        if not target_service:
+            for svc in (
+                "nginx",
+                "ssh",
+                "sshd",
+                "docker",
+                "postgres",
+                "postgresql",
+                "mysql",
+                "mariadb",
+                "redis",
+                "caddy",
+                "shellforgeai",
+            ):
+                if svc in q:
+                    target_service = svc
+                    if subtype == "general":
+                        subtype = "service"
+                    break
+        followup: dict[str, Any] = {
+            "intent": "logs_deep_dive",
+            "label": "log/error deep dive",
+            "description": (
+                "broader bounded error scan, auth/kernel clues, and service-specific themes"
+            ),
+            "bundle": "logs_deep_dive",
+            "type": "logs",
+            "subtype": subtype,
+            "target": "logs_deep_dive",
+        }
+        if target_service:
+            followup["target_service"] = target_service
+            followup["target"] = f"logs:{target_service}"
+        return followup
     if intent == "network" or any(
         w in q
         for w in (
@@ -1039,7 +1165,7 @@ def select_followup_investigation(
         dom = _extract_dns_target(question)
         label = _network_subtype_label(subtype)
         description = _network_followup_description(subtype)
-        followup: dict[str, Any] = {
+        followup = {
             "intent": "network_dns_firewall_deep_dive",
             "label": label,
             "description": description,
@@ -1602,6 +1728,38 @@ Commands:
                 f"Mode/Profile: {runtime.session.mode}/{runtime.profile.name}\n"
                 "Safety: workspace trust allows bounded read context only."
             )
+            continue
+        if routed.name == "logs_mutation_refused":
+            console.print(
+                "Log deletion, truncation, or rotation is not performed by ShellForgeAI. "
+                "Collecting read-only log evidence instead so you can decide safely."
+            )
+            try:
+                with (
+                    console.status("Running read-only log triage..."),
+                    ThreadPoolExecutor(max_workers=1) as ex,
+                ):
+                    fut = ex.submit(diagnose_target, runtime, "logs", False, "30m")
+                    res = fut.result(timeout=45)
+                checks = [
+                    {
+                        "tool": i.source,
+                        "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+                        "summary": i.summary,
+                    }
+                    for i in res.evidence.items
+                ]
+                console.print(
+                    f"Read-only log evidence collected: {len(checks)} item(s). "
+                    "No logs were modified."
+                )
+                console.print("Highlights:")
+                for line in _evidence_highlights(checks):
+                    console.print(line)
+            except Exception:
+                console.print(
+                    "Log triage failed safely; no logs were modified and the REPL is healthy."
+                )
             continue
         if routed.name == "/tools":
             t = Table("Name", "Category", "Risk", "Description")

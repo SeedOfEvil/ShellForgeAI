@@ -64,3 +64,24 @@ for these subtypes use only read-only collectors:
 Opening or allowing a port, changing firewall rules, changing routes or
 interfaces, restarting networking or services, and Docker port-publish
 changes remain operator-run. ShellForgeAI never executes them.
+
+
+Log/error investigation is read-only and bounded. ShellForgeAI never
+deletes, truncates, rotates, or `tail -f`s logs. Log file scans cap files,
+bytes, and line counts, redact secrets/tokens/passwords/API keys/private
+keys/cookies/Authorization headers, and reject binary/oversized targets.
+Requests like "delete logs", "clear logs", "truncate logs", "rotate logs",
+and "wipe logs" are refused — ShellForgeAI collects read-only log
+evidence instead. `apply` remains validation-only.
+
+
+Docker visibility is read-only. ShellForgeAI's container collectors only
+issue `docker ps`, `docker inspect`, and `docker logs --tail N`. They
+never run `docker start/stop/restart/rm/exec/cp/build/pull/prune`,
+compose mutation, or volume/network mutation, even if the Docker socket
+is mounted. Container logs are bounded by line/byte caps, redacted for
+secrets/tokens/passwords/API keys/cookies/Authorization headers, and
+never followed (`-f` is forbidden). When the Docker CLI/daemon is
+unreachable the missing visibility surfaces as a limitation finding;
+ShellForgeAI never claims the host is healthy on the basis of its own
+container being healthy.

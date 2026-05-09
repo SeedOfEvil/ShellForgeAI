@@ -17,6 +17,7 @@ from shellforgeai.core.evidence import classify_target
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.session import build_session_context
+from shellforgeai.interactive.commands import route_input
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.manager import build_provider
 from shellforgeai.llm.prompts import build_contextual_prompt, build_model_prompt
@@ -268,6 +269,34 @@ def audit_show(ctx: typer.Context, session_id: str) -> None:
     console.print(val)
 
 
+_LAB_NAME_ALIASES = {
+    "missing-env": "sfai-missing-env",
+    "restart-loop": "sfai-restart-loop",
+    "noisy-logs": "sfai-noisy-logs",
+    "bad-volume-perms": "sfai-bad-volume-perms",
+    "bad-network": "sfai-bad-network",
+}
+
+
+def _normalize_diagnose_target(target: str) -> str:
+    """Route NL-style diagnose targets through the interactive router.
+
+    `diagnose docker` and `diagnose logs` already resolve directly. But
+    sentences like ``"why is the app restarting?"`` previously fell through
+    to a generic host-only bundle. Apply the same router used by the REPL
+    so the CLI behaves consistently.
+    """
+    raw = target.strip()
+    if not raw or " " not in raw and "?" not in raw and not raw.endswith("?"):
+        return raw
+    routed = route_input(raw)
+    if routed.name == "diagnose" and routed.args:
+        return routed.args
+    if routed.name == "logs_mutation_refused":
+        return "logs"
+    return raw
+
+
 @app.command()
 def diagnose(
     ctx: typer.Context,
@@ -281,6 +310,7 @@ def diagnose(
     full_context: bool = typer.Option(False, "--full-context"),
 ) -> None:
     runtime = _ctx(ctx)
+    target = _normalize_diagnose_target(target)
     result = diagnose_target(runtime, target, online=online, since=since)
     audit = AuditStorage(runtime.session.data_dir)
     _ensure_artifact_dir(runtime)
@@ -488,7 +518,28 @@ def ask(
         )
     )
     if not resp.ok:
-        console.print("Model unavailable. Install Codex CLI and login with: codex login")
+        err_text = (resp.error or "").lower()
+        if "not found on path" in err_text or "install" in err_text:
+            console.print("Model unavailable. Install Codex CLI and login with: codex login")
+        elif "auth" in err_text or "login" in err_text:
+            console.print("Codex auth failed. Run: codex login")
+        elif "timed out" in err_text:
+            console.print("Codex timed out before producing a response.")
+        elif "argument" in err_text:
+            stderr_snippet = (resp.raw or {}).get("stderr", "") if resp.raw else ""
+            console.print(
+                "Codex CLI argument error: "
+                + (resp.error or "unexpected CLI options")
+                + (f"\n{stderr_snippet}" if stderr_snippet else "")
+            )
+        elif "no final response" in err_text:
+            console.print("Codex returned no final response.")
+        else:
+            stderr_snippet = (resp.raw or {}).get("stderr", "") if resp.raw else ""
+            console.print(
+                f"Codex error: {resp.error or 'unknown failure'}"
+                + (f"\n{stderr_snippet}" if stderr_snippet else "")
+            )
         raise typer.Exit(code=1)
     console.print(resp.text)
     console.print(f"\nProvider: {resp.provider}\nModel: {resp.model}\n{_usage_line(resp)}")

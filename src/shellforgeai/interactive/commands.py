@@ -78,6 +78,233 @@ def route_input(text: str) -> RoutedCommand:
     ]
     if any(p in lowered for p in storage_perf_intents):
         return RoutedCommand(name="diagnose", args="storage_performance")
+    log_service_aliases = [
+        "nginx",
+        "apache",
+        "httpd",
+        "caddy",
+        "ssh",
+        "sshd",
+        "docker",
+        "postgres",
+        "postgresql",
+        "mysql",
+        "mariadb",
+        "redis",
+        "shellforgeai",
+    ]
+    auth_phrases = [
+        "auth failing",
+        "auth fail",
+        "login failing",
+        "logins failing",
+        "ssh login failing",
+        "ssh failed",
+        "ssh failing",
+        "sudo failing",
+        "sudo failed",
+        "permission denied",
+        "permision denied",
+        "failed password",
+        "invalid user",
+        "pam error",
+        "pam errors",
+        "auth log",
+        "auth logs",
+        "login failed",
+    ]
+    lab_container_aliases = (
+        "missing env",
+        "missing-env",
+        "restart loop",
+        "restart-loop",
+        "noisy logs",
+        "noisy-logs",
+        "bad volume perms",
+        "bad-volume-perms",
+        "bad network",
+        "bad-network",
+        "sfai-missing-env",
+        "sfai missing env",
+        "sfai-restart-loop",
+        "sfai restart loop",
+        "sfai-noisy-logs",
+        "sfai noisy logs",
+        "sfai-bad-volume-perms",
+        "sfai bad volume perms",
+        "sfai-bad-network",
+        "sfai bad network",
+    )
+    if any(alias in lowered for alias in lab_container_aliases) or any(
+        alias in raw.lower() for alias in lab_container_aliases
+    ):
+        return RoutedCommand(name="diagnose", args="docker")
+    failed_container_phrases = [
+        "find failed containers",
+        "find failed container",
+        "failed containers",
+        "failed docker containers",
+        "any failed containers",
+        "container failures",
+        "explain container failures",
+        "show failing containers",
+        "explain likely cause",
+    ]
+    if any(p in lowered for p in failed_container_phrases):
+        return RoutedCommand(name="diagnose", args="docker")
+    write_failure_phrases = [
+        "service cannot write to disk",
+        "service can not write",
+        "service cant write",
+        "app cannot write to disk",
+        "app cant write",
+        "cannot write file",
+        "cannot write to disk",
+        "cant write to disk",
+        "cannot create file",
+        "write failed",
+        "read-only filesystem",
+        "read only filesystem",
+        "filesystem read-only",
+        "filesystem read only",
+        "disk write permission",
+        "volume permission",
+        "why can the service not write",
+        "why cant the service write",
+        "why can not the service write",
+        "why can the app not write",
+        "why cant the app write",
+    ]
+    if any(p in lowered for p in write_failure_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
+    network_log_failure_phrases = [
+        "network reachability is broken",
+        "network reachabilty is broken",
+        "upstream is unreachable",
+        "upstream unreachable",
+        "app cannot reach upstream",
+        "app cant reach upstream",
+        "service cannot reach upstream",
+        "service cant reach upstream",
+        "dns errors in logs",
+        "dns errors in log",
+    ]
+    if any(p in lowered for p in network_log_failure_phrases):
+        return RoutedCommand(name="diagnose", args="docker")
+    container_failure_phrases = [
+        "why is the app restarting",
+        "why is my app restarting",
+        "why is the container restarting",
+        "why is the container restaring",
+        "container restarting",
+        "container restaring",
+        "why did the container exit",
+        "why did the contianer exit",
+        "exited container",
+        "exited containers",
+        "what containers are failing",
+        "what containers failing",
+        "any container errors",
+        "container errors",
+        "container error",
+        "container is crashing",
+        "container is crashng",
+        "containers are crashing",
+        "is the container healthy",
+        "container unhealthy",
+        "restart loop",
+        "crash loop",
+        "crashloop",
+        "container crashing",
+        "is anything crashing",
+        "anything crashing",
+        "is anything crasing",
+        "is the app crashing",
+        "is the app restarting",
+        "show container logs",
+        "show docker logs",
+    ]
+    if any(p in lowered for p in container_failure_phrases):
+        return RoutedCommand(name="diagnose", args="docker")
+    log_phrases = [
+        "any errors",
+        "any erorrs",
+        "any erors",
+        "any error",
+        "any warnings",
+        "any critical errors",
+        "check logs",
+        "check loggs",
+        "show logs",
+        "show recent errors",
+        "recent errors",
+        "recent failures",
+        "anything failing",
+        "anything crashing",
+        "is anything crashing",
+        "what do the logs say",
+        "look for errors",
+        "summarize errors",
+        "summarize the errors",
+        "summarise errors",
+        "check recent failures",
+        "why did it fail",
+        "why is it failing",
+        "is it failng",
+        "is it crasing",
+        "loggs",
+        "log errors",
+        "find recent logs",
+        "find recent errors",
+        "find recent logs and errors",
+        "recent logs and errors",
+        "show recent logs",
+        "find logs",
+    ]
+    log_storage_phrases = [
+        "disk errors",
+        "i/o errors",
+        "io errors",
+        "no space left",
+        "filesystem read-only",
+        "read-only filesystem",
+        "oom killed",
+        "oom kill",
+    ]
+    log_network_error_phrases = [
+        "connection refused errors",
+        "timeout errors",
+        "tls errors",
+        "certificate errors",
+        "dns errors",
+    ]
+    delete_log_phrases = [
+        "delete logs",
+        "clear logs",
+        "truncate logs",
+        "rotate logs",
+        "wipe logs",
+        "remove logs",
+    ]
+    if any(p in lowered for p in delete_log_phrases):
+        return RoutedCommand(name="logs_mutation_refused", args=raw)
+    if any(p in lowered for p in auth_phrases):
+        return RoutedCommand(name="diagnose", args="auth")
+    for svc in log_service_aliases:
+        if (
+            (f"check {svc} logs" in lowered)
+            or (f"{svc} logs" in lowered)
+            or (f"{svc} errors" in lowered)
+            or (f"why is {svc} failing" in lowered)
+            or (f"why is {svc} broken" in lowered)
+        ):
+            return RoutedCommand(name="diagnose", args=f"logs:{svc}")
+    if any(p in lowered for p in log_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
+    if any(p in lowered for p in log_storage_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
+    if any(p in lowered for p in log_network_error_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
     perf_intents = [
         "my machine is running slow",
         "my computer is slow",

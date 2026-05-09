@@ -203,7 +203,10 @@ def write_diagnosis_summary_md(
     artifacts = _existing_artifacts(artifact_dir, artifact_candidates, assume_present={path.name})
     findings_block: list[str]
     actionable = sev.get("critical", 0) + sev.get("warning", 0)
-    if actionable == 0:
+    if (
+        actionable == 0
+        and (displayed_sev.get("critical", 0) + displayed_sev.get("warning", 0)) == 0
+    ):
         findings_block = ["No actionable findings were raised by deterministic checks."]
         displayed_count = 0
         displayed_sev = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
@@ -211,18 +214,8 @@ def write_diagnosis_summary_md(
         findings_block = _humanize_findings(findings[:8])
         if findings_count > 8:
             findings_block.append(f"- ...and {findings_count - 8} more.")
-        displayed_count = len([line for line in findings_block if line.startswith("-")])
-        displayed_sev = {"critical": 0, "warning": 0, "info": 0, "limitation": 0}
-        for line in findings_block:
-            low = line.lower()
-            if low.startswith("- critical"):
-                displayed_sev["critical"] += 1
-            elif low.startswith("- warning"):
-                displayed_sev["warning"] += 1
-            elif low.startswith("- limitation"):
-                displayed_sev["limitation"] += 1
-            elif low.startswith("- info"):
-                displayed_sev["info"] += 1
+        # Summary severity is the source of truth for the whole findings list.
+        displayed_count = sum(displayed_sev.values())
 
     lines: list[str] = [
         "# ShellForgeAI Diagnosis Summary",

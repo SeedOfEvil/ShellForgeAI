@@ -64,6 +64,17 @@ Debug
 - Sluggish/laggy symptoms route to performance diagnostics rather than a
   generic ask.
 - Service and service-health questions (e.g., nginx/ssh/docker status, restart requests, listening ports) route to read-only service investigation evidence before synthesis.
+- Log/error questions (e.g. "any errors?", "check logs", "why is nginx
+  failing?", "ssh login failing", "permission denied") route to read-only
+  log investigation. Requests to delete, truncate, or rotate logs are
+  refused; ShellForgeAI collects read-only log evidence instead.
+- Container failure questions (e.g. "why is the app restarting?", "why
+  did the container exit?", "is anything crashing?", "what containers
+  are failing?", "show container logs", "restart loop", "crash loop",
+  including typos like "restaring", "crasing") route to the read-only
+  Docker investigation: `docker.containers`, `docker.inspect`, bounded
+  `docker.container_logs`, and `docker.problem_summary`. No mutating
+  Docker commands are ever issued.
 
 ## Streaming synthesis
 

@@ -2,12 +2,28 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 from shellforgeai.llm.codex_events import parse_codex_jsonl
 from shellforgeai.llm.schemas import ModelRequest, ModelResponse
+
+
+def _redact(text: str) -> str:
+    if not text:
+        return text
+    out = []
+    for ln in text.splitlines():
+        low = ln.lower()
+        if any(
+            k in low for k in ("token", "secret", "password", "api_key", "authorization", "bearer")
+        ):
+            out.append("[REDACTED]")
+        else:
+            out.append(ln)
+    return "\n".join(out)
 
 
 class CodexProvider:
@@ -23,6 +39,7 @@ class CodexProvider:
         use_json: bool = True,
         skip_git_repo_check: bool = True,
         allow_fallback: bool = True,
+        approval: str = "never",
     ) -> None:
         self.binary = binary
         self.default_model = default_model
@@ -32,10 +49,14 @@ class CodexProvider:
         self.use_json = use_json
         self.skip_git_repo_check = skip_git_repo_check
         self.allow_fallback = allow_fallback
+        self.approval = approval
 
     def available(self) -> tuple[bool, str]:
         if shutil.which(self.binary) is None:
             return False, "codex CLI not found on PATH"
+        auth_cache = Path.home() / ".codex" / "auth.json"
+        if not auth_cache.exists():
+            return False, "codex auth cache missing"
         return True, "ok"
 
     def doctor(self) -> dict[str, str | bool]:
@@ -45,7 +66,11 @@ class CodexProvider:
         if found:
             try:
                 r = subprocess.run(
-                    [self.binary, "--version"], capture_output=True, text=True, timeout=10
+                    [self.binary, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    stdin=subprocess.DEVNULL,
                 )
                 version = (r.stdout or r.stderr).strip() or "unknown"
             except Exception:
@@ -59,6 +84,7 @@ class CodexProvider:
             "codex_version": version,
             "auth_cache_present": auth_cache.exists(),
             "sandbox": self.sandbox,
+            "approval": self.approval,
             "timeout_seconds": str(self.timeout_seconds),
             "fallback_enabled": self.allow_fallback,
         }
@@ -80,38 +106,69 @@ class CodexProvider:
             except Exception:
                 continue
 
-    def _run(self, prompt: str, model: str, timeout: int) -> tuple[int, str, str]:
-        cmd = [self.binary, "exec", "-m", model, "--sandbox", self.sandbox]
-        if self.use_json:
-            cmd.append("--json")
+    def _build_cmd(self, prompt: str, model: str, last_message_path: Path | None) -> list[str]:
+        """Build a codex-cli 0.130.0 invocation.
+
+        Shape: ``codex [GLOBAL OPTIONS] exec [EXEC OPTIONS] [PROMPT]``.
+        Global options must precede ``exec``; ``--ask-for-approval`` and
+        ``--sandbox`` are global.
+        """
+        cmd = [self.binary, "--sandbox", self.sandbox, "--ask-for-approval", self.approval]
+        if model:
+            cmd.extend(["-m", model])
+        cmd.append("exec")
         if self.skip_git_repo_check:
             cmd.append("--skip-git-repo-check")
+        if self.use_json:
+            cmd.append("--json")
+        if last_message_path is not None:
+            cmd.extend(["--output-last-message", str(last_message_path)])
         cmd.append(prompt)
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-        with self._active_lock:
-            self._active_procs.add(proc)
-        try:
-            out, err = proc.communicate(timeout=timeout)
-            return proc.returncode, out, err
-        except subprocess.TimeoutExpired as exc:
-            proc.terminate()
-            try:
-                out, err = proc.communicate(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                out, err = proc.communicate(timeout=2)
-            raise subprocess.TimeoutExpired(
-                cmd=cmd, timeout=timeout, output=out, stderr=err
-            ) from exc
-        finally:
+        return cmd
+
+    def _run(
+        self, prompt: str, model: str, timeout: int
+    ) -> tuple[int, str, str, str | None, list[str]]:
+        """Return (returncode, stdout, stderr, last_message, cmd)."""
+        with tempfile.TemporaryDirectory(prefix="sfai-codex-") as tmp:
+            last_msg_path = Path(tmp) / "last_message.txt"
+            cmd = self._build_cmd(prompt, model, last_msg_path)
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
             with self._active_lock:
-                self._active_procs.discard(proc)
+                self._active_procs.add(proc)
+            try:
+                try:
+                    out, err = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired as exc:
+                    proc.terminate()
+                    try:
+                        out, err = proc.communicate(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        try:
+                            out, err = proc.communicate(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            out, err = "", ""
+                    raise subprocess.TimeoutExpired(
+                        cmd=cmd, timeout=timeout, output=out, stderr=err
+                    ) from exc
+            finally:
+                with self._active_lock:
+                    self._active_procs.discard(proc)
+            last_message: str | None = None
+            try:
+                if last_msg_path.exists():
+                    last_message = last_msg_path.read_text(errors="ignore")[:65536].strip()
+            except OSError:
+                last_message = None
+            return proc.returncode, out, err, last_message, cmd
 
     def stream_complete(self, request: ModelRequest):
         response = self.complete(request)
@@ -119,11 +176,36 @@ class CodexProvider:
             yield {"type": "text", "text": response.text}
         yield {"type": "final", "response": response}
 
+    def _classify_error(self, rc: int, err: str) -> str:
+        low = (err or "").lower()
+        if "unexpected argument" in low or "error: " in low and "argument" in low:
+            return "codex CLI argument error"
+        if (
+            "not authenticated" in low
+            or "please run codex login" in low
+            or "auth" in low
+            and "fail" in low
+        ):
+            return "codex auth failed; run: codex login"
+        if rc == 124:
+            return "codex timed out"
+        return f"codex exited with code {rc}"
+
     def complete(self, request: ModelRequest) -> ModelResponse:
         started = time.monotonic()
         warnings: list[str] = []
+        if shutil.which(self.binary) is None:
+            return ModelResponse(
+                provider=self.name,
+                model=request.model,
+                text="",
+                ok=False,
+                error="codex CLI not found on PATH; install Codex CLI",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                raw={"stderr": ""},
+            )
         try:
-            rc, out, err = self._run(
+            rc, out, err, last_message, cmd = self._run(
                 request.prompt, request.model or self.default_model, request.timeout_seconds
             )
         except subprocess.TimeoutExpired as exc:
@@ -132,9 +214,12 @@ class CodexProvider:
                 model=request.model,
                 text="",
                 ok=False,
-                error="timeout",
+                error="codex timed out",
                 duration_ms=int((time.monotonic() - started) * 1000),
-                raw={"stderr": str(exc.stderr or ""), "stdout": str(exc.output or "")},
+                raw={
+                    "stderr": _redact(str(exc.stderr or "")),
+                    "stdout": _redact(str(exc.output or "")),
+                },
             )
 
         model_used = request.model or self.default_model
@@ -145,20 +230,24 @@ class CodexProvider:
             and model_used != self.fallback_model
             and "model" in (err + out).lower()
         ):
-            rc, out, err = self._run(request.prompt, self.fallback_model, request.timeout_seconds)
+            rc, out, err, last_message, cmd = self._run(
+                request.prompt, self.fallback_model, request.timeout_seconds
+            )
             model_used = self.fallback_model
             warnings.append(
                 f"{request.model or self.default_model} was unavailable through Codex; "
                 f"retried with fallback model {self.fallback_model}."
             )
 
-        text = (out or err).strip()
+        text = ""
         usage: dict[str, int | None] | None = None
         metadata: dict[str, str] = {}
+        if last_message:
+            text = last_message
         if self.use_json and out.strip():
             parsed = parse_codex_jsonl(out, keep_raw=bool(request.metadata.get("raw")))
             warnings.extend(parsed.warnings)
-            if parsed.final_text:
+            if parsed.final_text and not text:
                 text = parsed.final_text
             usage = {
                 "input_tokens": parsed.usage.input_tokens,
@@ -168,15 +257,27 @@ class CodexProvider:
             }
             if parsed.thread_id:
                 metadata["thread_id"] = parsed.thread_id
+        if not text:
+            text = (out or err).strip()
+
+        if rc == 0 and not text:
+            error: str | None = "codex returned no final response"
+            ok = False
+        else:
+            error = None if rc == 0 else self._classify_error(rc, err)
+            ok = rc == 0
+
         return ModelResponse(
             provider=self.name,
             model=model_used,
             text=text,
-            raw={"stderr": err, "stdout_jsonl": out}
-            if request.metadata.get("raw")
-            else {"stderr": err},
-            ok=rc == 0,
-            error=None if rc == 0 else f"codex exit {rc}",
+            raw=(
+                {"stderr": _redact(err), "stdout_jsonl": out}
+                if request.metadata.get("raw")
+                else {"stderr": _redact(err)}
+            ),
+            ok=ok,
+            error=error,
             duration_ms=int((time.monotonic() - started) * 1000),
             usage=usage,
             warnings=warnings,
