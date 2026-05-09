@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import platform
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
 
@@ -22,6 +23,7 @@ from shellforgeai.llm.prompts import build_contextual_prompt, build_model_prompt
 from shellforgeai.llm.schemas import ModelRequest
 from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import host, journal, registry, systemd
+from shellforgeai.util.subprocess import run_command
 from shellforgeai.version import get_build_info
 
 app = typer.Typer(
@@ -154,6 +156,20 @@ def doctor(ctx: typer.Context) -> None:
                 f"model={runtime.settings.model.provider}/{runtime.settings.model.model}",
             ]
         )
+    )
+    pid1 = "unknown"
+    with suppress(Exception):
+        pid1 = Path("/proc/1/comm").read_text(encoding="utf-8").strip()
+    ps = run_command(["ps", "-eo", "stat=,comm="], timeout=5)
+    defunct_codex = 0
+    if ps.exit_code == 0:
+        for line in ps.stdout.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2 and "Z" in parts[0] and parts[1] == "codex":
+                defunct_codex += 1
+    init_reaper = "yes" if pid1 in {"tini", "dumb-init", "systemd", "init"} else "no"
+    console.print(
+        f"runtime_hygiene pid1={pid1} init_reaper={init_reaper} defunct_codex={defunct_codex}"
     )
 
 

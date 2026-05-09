@@ -130,3 +130,10 @@ For service action follow-ups, ShellForgeAI preserves the detected target servic
 
 
 If a queued follow-up times out or fails, ShellForgeAI reports the failure safely, keeps the REPL alive, and `/pending` remains readable with last error state.
+
+
+## Runtime hygiene notes
+
+- `/pending` is local/state-only and does not call model providers or collectors.
+- Follow-up timeouts and interruptions are handled safely; the REPL remains usable and returns to `sfai>`.
+- Exiting the REPL (`/exit` or Ctrl-D) performs ShellForgeAI-owned model subprocess cleanup.

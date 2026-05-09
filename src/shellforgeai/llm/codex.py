@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -62,6 +63,23 @@ class CodexProvider:
             "fallback_enabled": self.allow_fallback,
         }
 
+    @classmethod
+    def cleanup_active_processes(cls) -> None:
+        with cls._active_lock:
+            procs = list(cls._active_procs)
+            cls._active_procs.clear()
+        for proc in procs:
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.communicate(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.communicate(timeout=2)
+            except Exception:
+                continue
+
     def _run(self, prompt: str, model: str, timeout: int) -> tuple[int, str, str]:
         cmd = [self.binary, "exec", "-m", model, "--sandbox", self.sandbox]
         if self.use_json:
@@ -69,8 +87,31 @@ class CodexProvider:
         if self.skip_git_repo_check:
             cmd.append("--skip-git-repo-check")
         cmd.append(prompt)
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return p.returncode, p.stdout, p.stderr
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        with self._active_lock:
+            self._active_procs.add(proc)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+            return proc.returncode, out, err
+        except subprocess.TimeoutExpired as exc:
+            proc.terminate()
+            try:
+                out, err = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate(timeout=2)
+            raise subprocess.TimeoutExpired(
+                cmd=cmd, timeout=timeout, output=out, stderr=err
+            ) from exc
+        finally:
+            with self._active_lock:
+                self._active_procs.discard(proc)
 
     def stream_complete(self, request: ModelRequest):
         response = self.complete(request)
@@ -85,7 +126,7 @@ class CodexProvider:
             rc, out, err = self._run(
                 request.prompt, request.model or self.default_model, request.timeout_seconds
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             return ModelResponse(
                 provider=self.name,
                 model=request.model,
@@ -93,6 +134,7 @@ class CodexProvider:
                 ok=False,
                 error="timeout",
                 duration_ms=int((time.monotonic() - started) * 1000),
+                raw={"stderr": str(exc.stderr or ""), "stdout": str(exc.output or "")},
             )
 
         model_used = request.model or self.default_model
@@ -140,3 +182,6 @@ class CodexProvider:
             warnings=warnings,
             metadata=metadata,
         )
+
+    _active_procs: set[subprocess.Popen[str]] = set()
+    _active_lock = threading.Lock()

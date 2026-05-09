@@ -5,17 +5,16 @@ from shellforgeai.llm.schemas import ModelRequest
 def test_command_flags(monkeypatch):
     calls = {}
 
-    def fake_run(cmd, capture_output, text, timeout):
-        calls["cmd"] = cmd
+    class FakePopen:
+        returncode = 0
 
-        class R:
-            returncode = 0
-            stdout = "ok"
-            stderr = ""
+        def __init__(self, cmd, **kwargs):
+            calls["cmd"] = cmd
 
-        return R()
+        def communicate(self, timeout=None):
+            return ("ok", "")
 
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.Popen", FakePopen)
     p = CodexProvider()
     r = p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
     assert r.ok
