@@ -231,6 +231,7 @@ def route_input(text: str) -> RoutedCommand:
         "is port ",
         "can it reach ",
         "can this server reach ",
+        "server reach ",
         "can it connect to ",
         "reachable",
         "open port ",

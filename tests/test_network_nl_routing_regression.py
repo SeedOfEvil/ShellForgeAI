@@ -17,6 +17,10 @@ def test_reachability_routes_to_diagnose_network():
     assert route_input("can this server reach example.com:443?").args == "network"
 
 
+def test_reachability_typo_routes_to_diagnose_network():
+    assert route_input("can thiis server reach example.com:443?").args == "network"
+
+
 def test_open_port_routes_to_diagnose_network_not_services():
     assert route_input("can you open port 443?").args == "network"
 
@@ -31,3 +35,10 @@ def test_network_followup_has_subtype_and_target():
     assert follow["bundle"] == "network"
     assert follow["type"] == "network"
     assert follow["subtype"] == "reachability"
+
+
+def test_dns_followup_has_dns_subtype():
+    follow = select_followup_investigation("network", [], "check DNS")
+    assert follow
+    assert follow["bundle"] == "network"
+    assert follow["subtype"] == "dns"
