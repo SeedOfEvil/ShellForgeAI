@@ -4,6 +4,8 @@ import os
 import platform
 import re
 from ast import literal_eval
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from typing import Any
 
@@ -1003,12 +1005,14 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                         and followup_target == "service-discovery"
                     ):
                         followup_target = "services"
-                    res = diagnose_target(runtime, followup_target, online=False, since="30m")
-            except TimeoutError:
+                    with ThreadPoolExecutor(max_workers=1) as ex:
+                        fut = ex.submit(diagnose_target, runtime, followup_target, False, "30m")
+                        res = fut.result(timeout=45)
+            except (TimeoutError, FutureTimeout):
                 pending_followup["last_error"] = "timeout"
                 console.print(
-                    "The deeper service check timed out safely. The REPL is still healthy. "
-                    "No changes were made."
+                    "The deeper service check timed out safely. No changes were made, "
+                    "and the REPL is still healthy."
                 )
                 continue
             except Exception as exc:
@@ -1128,6 +1132,10 @@ Commands:
         if routed.name == "/pending":
             if not pending_followup:
                 console.print("No pending investigation.")
+            elif "label" not in pending_followup:
+                console.print(
+                    "Pending investigation state is invalid. Please ask the service question again."
+                )
             else:
                 console.print(
                     f"Pending investigation: {pending_followup['label']}\n"

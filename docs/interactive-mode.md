@@ -127,3 +127,6 @@ Action-style service requests (for example `restart <service>`) trigger an immed
 
 
 For service action follow-ups, ShellForgeAI preserves the detected target service (for example nginx or shellforgeai) so `dig deeper` stays target-specific rather than generic inventory-only.
+
+
+If a queued follow-up times out or fails, ShellForgeAI reports the failure safely, keeps the REPL alive, and `/pending` remains readable with last error state.

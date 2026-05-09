@@ -44,3 +44,6 @@ When ShellForgeAI is running inside a container, unavailable host-only tools/che
 
 
 Restart/reload command examples are only appropriate when service presence and a valid manager/tooling path are confirmed; otherwise ShellForgeAI should advise confirming service ownership/location first.
+
+
+Failures/timeouts in diagnostics do not trigger mutation; restart/reload/install actions remain operator-run and `apply` remains validation-only.
