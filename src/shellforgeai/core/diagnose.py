@@ -12,6 +12,10 @@ from shellforgeai.core.collectors import (
     collect_health_evidence,
     collect_host_evidence,
     collect_local_knowledge_evidence,
+    collect_logs_auth_evidence,
+    collect_logs_basic_evidence,
+    collect_logs_deep_dive_evidence,
+    collect_logs_service_evidence,
     collect_network_evidence,
     collect_nginx_evidence,
     collect_performance_evidence,
@@ -108,6 +112,109 @@ def _looks_like_not_found(text: str) -> bool:
     return any(s in text for s in ["not found", "no such file", "no matching process"])
 
 
+def _findings_from_logs(items) -> list[Finding]:
+    findings: list[Finding] = []
+    in_container = _is_container(items)
+    common_paths_item = next((i for i in items if i.source == "logs.common_paths"), None)
+    recent_item = next((i for i in items if i.source == "logs.recent_errors"), None)
+    auth_item = next((i for i in items if i.source == "logs.auth_errors"), None)
+    kernel_item = next((i for i in items if i.source == "logs.kernel_errors"), None)
+    themes_item = next((i for i in items if i.source == "logs.error_themes"), None)
+    no_visible_logs = False
+    if common_paths_item and "readable_logs=0" in (common_paths_item.summary or ""):
+        no_visible_logs = True
+        findings.append(
+            Finding(
+                severity="limitation",
+                title="No common readable log files were visible",
+                detail=(
+                    "No common log files were readable from this runtime context"
+                    + (" (container view)" if in_container else "")
+                    + "."
+                ),
+                evidence_refs=["logs.common_paths"],
+                confidence="high",
+            )
+        )
+    if (
+        recent_item
+        and recent_item.ok
+        and "no recent error-like patterns found" in (recent_item.summary or "").lower()
+        and not no_visible_logs
+    ):
+        findings.append(
+            Finding(
+                severity="info",
+                title="Visible logs did not contain recent error patterns",
+                detail="Bounded scan found no recent error-like lines.",
+                evidence_refs=["logs.recent_errors"],
+                confidence="medium",
+            )
+        )
+    if recent_item and recent_item.ok and "total=" in (recent_item.summary or ""):
+        try:
+            total = int((recent_item.summary or "").split("total=", 1)[1].split()[0])
+        except (ValueError, IndexError):
+            total = 0
+        if total > 0:
+            findings.append(
+                Finding(
+                    severity="warning",
+                    title="Recent error-like log patterns were found",
+                    detail=recent_item.summary,
+                    evidence_refs=["logs.recent_errors"],
+                    confidence="medium",
+                )
+            )
+    if auth_item and auth_item.ok and "auth_errors total=" in (auth_item.summary or ""):
+        try:
+            total = int(auth_item.summary.split("total=", 1)[1].split()[0])
+        except (ValueError, IndexError):
+            total = 0
+        if total > 0:
+            findings.append(
+                Finding(
+                    severity="warning",
+                    title="Auth log failures detected",
+                    detail=auth_item.summary,
+                    evidence_refs=["logs.auth_errors"],
+                    confidence="medium",
+                )
+            )
+    if kernel_item and kernel_item.ok:
+        summ = kernel_item.summary or ""
+        if "files_total=" in summ:
+            try:
+                ftotal = int(summ.split("files_total=", 1)[1].split()[0])
+            except (ValueError, IndexError):
+                ftotal = 0
+            try:
+                dtotal = int(summ.split("dmesg_matches=", 1)[1].split()[0])
+            except (ValueError, IndexError):
+                dtotal = 0
+            if ftotal + dtotal > 0:
+                findings.append(
+                    Finding(
+                        severity="critical",
+                        title="Kernel/system error patterns were found",
+                        detail=summ,
+                        evidence_refs=["logs.kernel_errors"],
+                        confidence="medium",
+                    )
+                )
+    if themes_item and themes_item.ok and "themes:" in (themes_item.summary or "").lower():
+        findings.append(
+            Finding(
+                severity="info",
+                title="Error theme summary",
+                detail=themes_item.summary,
+                evidence_refs=["logs.error_themes"],
+                confidence="medium",
+            )
+        )
+    return findings
+
+
 def _dedupe(items):
     seen = set()
     out = []
@@ -144,6 +251,141 @@ def diagnose_target(
         target = "storage-performance"
     if canonical_target in {"performance", "slow", "slowness", "host", "performance_deep_dive"}:
         canonical_target = "host"
+    log_targets = {
+        "logs",
+        "errors",
+        "log",
+        "error",
+        "logs_basic",
+        "logs_deep_dive",
+        "log_deep_dive",
+    }
+    log_auth_targets = {"auth", "auth-logs", "logs_auth", "login", "logins"}
+    log_service_prefix = "logs:"
+    if canonical_target in log_targets:
+        items.extend(collect_logs_basic_evidence(context))
+        if canonical_target in {"logs_deep_dive", "log_deep_dive"}:
+            items.extend(collect_logs_deep_dive_evidence(context))
+        items = _dedupe(items)
+        bundle = EvidenceBundle(
+            target=target, target_type=TargetType.generic, items=items, warnings=warnings
+        )
+        plan = Plan(
+            plan_id=f"plan_{uuid4().hex[:8]}",
+            goal=f"Diagnose {target}",
+            session_id=context.session.session_id,
+            steps=[
+                PlanStep(
+                    step_id="1",
+                    title="Review visible log sources",
+                    description="Check which common logs are readable from this runtime.",
+                ),
+                PlanStep(
+                    step_id="2",
+                    title="Review recent error themes",
+                    description="Inspect bounded error samples grouped by theme.",
+                ),
+                PlanStep(
+                    step_id="3",
+                    title="Decide on targeted follow-up",
+                    description=(
+                        "Pick service-specific log triage if a theme points at a service."
+                    ),
+                ),
+            ],
+            notes=["Read-only log triage only; no log mutation is performed."],
+        )
+        for i in items:
+            if not i.ok:
+                continue
+        return DiagnosisResult(
+            session_id=context.session.session_id,
+            target=target,
+            target_type=TargetType.generic,
+            evidence=bundle,
+            findings=_findings_from_logs(items),
+            proposed_plan=plan,
+            warnings=warnings,
+        )
+    if canonical_target in log_auth_targets:
+        items.extend(collect_logs_auth_evidence(context))
+        items = _dedupe(items)
+        bundle = EvidenceBundle(
+            target=target, target_type=TargetType.generic, items=items, warnings=warnings
+        )
+        plan = Plan(
+            plan_id=f"plan_{uuid4().hex[:8]}",
+            goal=f"Diagnose {target}",
+            session_id=context.session.session_id,
+            steps=[
+                PlanStep(
+                    step_id="1",
+                    title="Review auth log visibility",
+                    description="Check which auth/secure logs are readable.",
+                ),
+                PlanStep(
+                    step_id="2",
+                    title="Review failed auth themes",
+                    description=(
+                        "Look for failed passwords, invalid users, sudo failures, PAM errors."
+                    ),
+                ),
+                PlanStep(
+                    step_id="3",
+                    title="Plan operator follow-up",
+                    description="No mutation; recommend operator-run remediation steps.",
+                ),
+            ],
+            notes=["Read-only auth log triage only."],
+        )
+        return DiagnosisResult(
+            session_id=context.session.session_id,
+            target=target,
+            target_type=TargetType.generic,
+            evidence=bundle,
+            findings=_findings_from_logs(items),
+            proposed_plan=plan,
+            warnings=warnings,
+        )
+    if target.lower().startswith(log_service_prefix):
+        svc = target.split(":", 1)[1].strip() or "service-discovery"
+        items.extend(collect_logs_service_evidence(context, svc, since=since))
+        items = _dedupe(items)
+        bundle = EvidenceBundle(
+            target=target, target_type=TargetType.service, items=items, warnings=warnings
+        )
+        plan = Plan(
+            plan_id=f"plan_{uuid4().hex[:8]}",
+            goal=f"Diagnose {target}",
+            session_id=context.session.session_id,
+            steps=[
+                PlanStep(
+                    step_id="1",
+                    title="Review service log visibility",
+                    description=f"Check what is visible for {svc}.",
+                ),
+                PlanStep(
+                    step_id="2",
+                    title="Review recent error themes",
+                    description="Inspect bounded error samples grouped by theme.",
+                ),
+                PlanStep(
+                    step_id="3",
+                    title="Plan operator follow-up",
+                    description="Read-only triage; no mutation is performed.",
+                ),
+            ],
+            notes=["Read-only service log triage only."],
+        )
+        return DiagnosisResult(
+            session_id=context.session.session_id,
+            target=target,
+            target_type=TargetType.service,
+            evidence=bundle,
+            findings=_findings_from_logs(items),
+            proposed_plan=plan,
+            warnings=warnings,
+        )
     if target in {"health"} or canonical_target == "host":
         items.extend(collect_health_evidence(context))
     if any(

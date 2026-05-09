@@ -64,6 +64,10 @@ Debug
 - Sluggish/laggy symptoms route to performance diagnostics rather than a
   generic ask.
 - Service and service-health questions (e.g., nginx/ssh/docker status, restart requests, listening ports) route to read-only service investigation evidence before synthesis.
+- Log/error questions (e.g. "any errors?", "check logs", "why is nginx
+  failing?", "ssh login failing", "permission denied") route to read-only
+  log investigation. Requests to delete, truncate, or rotate logs are
+  refused; ShellForgeAI collects read-only log evidence instead.
 
 ## Streaming synthesis
 

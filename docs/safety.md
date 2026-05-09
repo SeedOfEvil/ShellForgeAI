@@ -64,3 +64,12 @@ for these subtypes use only read-only collectors:
 Opening or allowing a port, changing firewall rules, changing routes or
 interfaces, restarting networking or services, and Docker port-publish
 changes remain operator-run. ShellForgeAI never executes them.
+
+
+Log/error investigation is read-only and bounded. ShellForgeAI never
+deletes, truncates, rotates, or `tail -f`s logs. Log file scans cap files,
+bytes, and line counts, redact secrets/tokens/passwords/API keys/private
+keys/cookies/Authorization headers, and reject binary/oversized targets.
+Requests like "delete logs", "clear logs", "truncate logs", "rotate logs",
+and "wipe logs" are refused — ShellForgeAI collects read-only log
+evidence instead. `apply` remains validation-only.

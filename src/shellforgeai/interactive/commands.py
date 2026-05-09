@@ -78,6 +78,114 @@ def route_input(text: str) -> RoutedCommand:
     ]
     if any(p in lowered for p in storage_perf_intents):
         return RoutedCommand(name="diagnose", args="storage_performance")
+    log_service_aliases = [
+        "nginx",
+        "apache",
+        "httpd",
+        "caddy",
+        "ssh",
+        "sshd",
+        "docker",
+        "postgres",
+        "postgresql",
+        "mysql",
+        "mariadb",
+        "redis",
+        "shellforgeai",
+    ]
+    auth_phrases = [
+        "auth failing",
+        "auth fail",
+        "login failing",
+        "logins failing",
+        "ssh login failing",
+        "ssh failed",
+        "ssh failing",
+        "sudo failing",
+        "sudo failed",
+        "permission denied",
+        "permision denied",
+        "failed password",
+        "invalid user",
+        "pam error",
+        "pam errors",
+        "auth log",
+        "auth logs",
+        "login failed",
+    ]
+    log_phrases = [
+        "any errors",
+        "any erorrs",
+        "any erors",
+        "any error",
+        "any warnings",
+        "any critical errors",
+        "check logs",
+        "check loggs",
+        "show logs",
+        "show recent errors",
+        "recent errors",
+        "recent failures",
+        "anything failing",
+        "anything crashing",
+        "is anything crashing",
+        "what do the logs say",
+        "look for errors",
+        "summarize errors",
+        "summarize the errors",
+        "summarise errors",
+        "check recent failures",
+        "why did it fail",
+        "why is it failing",
+        "is it failng",
+        "is it crasing",
+        "loggs",
+        "log errors",
+    ]
+    log_storage_phrases = [
+        "disk errors",
+        "i/o errors",
+        "io errors",
+        "no space left",
+        "filesystem read-only",
+        "read-only filesystem",
+        "oom killed",
+        "oom kill",
+    ]
+    log_network_error_phrases = [
+        "connection refused errors",
+        "timeout errors",
+        "tls errors",
+        "certificate errors",
+        "dns errors",
+    ]
+    delete_log_phrases = [
+        "delete logs",
+        "clear logs",
+        "truncate logs",
+        "rotate logs",
+        "wipe logs",
+        "remove logs",
+    ]
+    if any(p in lowered for p in delete_log_phrases):
+        return RoutedCommand(name="logs_mutation_refused", args=raw)
+    if any(p in lowered for p in auth_phrases):
+        return RoutedCommand(name="diagnose", args="auth")
+    for svc in log_service_aliases:
+        if (
+            (f"check {svc} logs" in lowered)
+            or (f"{svc} logs" in lowered)
+            or (f"{svc} errors" in lowered)
+            or (f"why is {svc} failing" in lowered)
+            or (f"why is {svc} broken" in lowered)
+        ):
+            return RoutedCommand(name="diagnose", args=f"logs:{svc}")
+    if any(p in lowered for p in log_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
+    if any(p in lowered for p in log_storage_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
+    if any(p in lowered for p in log_network_error_phrases):
+        return RoutedCommand(name="diagnose", args="logs")
     perf_intents = [
         "my machine is running slow",
         "my computer is slow",

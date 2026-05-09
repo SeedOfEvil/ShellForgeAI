@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from ast import literal_eval
 
 from shellforgeai.core.evidence import EvidenceCategory, EvidenceItem
@@ -10,6 +11,7 @@ from shellforgeai.tools import (
     disk,
     firewall,
     host,
+    logs,
     network,
     process,
     services,
@@ -381,6 +383,87 @@ def collect_firewall_evidence(context) -> list[EvidenceItem]:
     return _dedupe_items(
         [_to_item(r, EvidenceCategory.network, "firewall collector") for r in firewall.detect()]
     )
+
+
+def collect_logs_basic_evidence(context) -> list[EvidenceItem]:
+    items = [
+        _to_item(host.host_info(), EvidenceCategory.host, "Host information"),
+        _to_item(host.host_resources(), EvidenceCategory.host, "Host resources"),
+        _to_item(system.container_detect(), EvidenceCategory.host, "Container detection"),
+        _to_item(services.manager_detect(), EvidenceCategory.service, "Service manager context"),
+        _to_item(logs.common_paths(), EvidenceCategory.logs, "Common log paths"),
+        _to_item(logs.recent_errors(), EvidenceCategory.logs, "Recent error scan"),
+        _to_item(logs.kernel_errors(), EvidenceCategory.logs, "Kernel error scan"),
+        _to_item(logs.auth_errors(), EvidenceCategory.logs, "Auth error scan"),
+        _to_item(audit_recent.recent(), EvidenceCategory.knowledge, "Recent audit trend"),
+    ]
+    recent = logs.recent_errors()
+    try:
+        payload = json.loads(recent.stdout) if recent.stdout.strip().startswith("{") else None
+    except (ValueError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict):
+        themes = logs.error_themes(sources_payload=payload)
+        items.append(_to_item(themes, EvidenceCategory.logs, "Error themes"))
+    return _dedupe_items(items)
+
+
+def collect_logs_service_evidence(
+    context, service_name: str, since: str = "30m"
+) -> list[EvidenceItem]:
+    target = service_name.lower().strip() or "service-discovery"
+    items = collect_logs_basic_evidence(context)
+    items.extend(
+        [
+            _to_item(services.status(target), EvidenceCategory.service, f"{target} status"),
+            _to_item(services.processes(target), EvidenceCategory.host, f"{target} processes"),
+            _to_item(
+                services.service_logs(target, since=since),
+                EvidenceCategory.logs,
+                f"{target} logs",
+            ),
+            _to_item(
+                logs.service_errors(target, since=since),
+                EvidenceCategory.logs,
+                f"{target} log errors",
+            ),
+        ]
+    )
+    return _dedupe_items(items)
+
+
+def collect_logs_auth_evidence(context) -> list[EvidenceItem]:
+    items = [
+        _to_item(system.container_detect(), EvidenceCategory.host, "Container detection"),
+        _to_item(logs.common_paths(), EvidenceCategory.logs, "Common log paths"),
+        _to_item(logs.auth_errors(), EvidenceCategory.logs, "Auth error scan"),
+        _to_item(services.status("ssh"), EvidenceCategory.service, "ssh status"),
+        _to_item(services.ports("ssh"), EvidenceCategory.network, "ssh listeners"),
+    ]
+    auth = logs.auth_errors()
+    try:
+        payload = json.loads(auth.stdout) if auth.stdout.strip().startswith("{") else None
+    except (ValueError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict):
+        themes = logs.error_themes(sources_payload=payload)
+        items.append(_to_item(themes, EvidenceCategory.logs, "Auth error themes"))
+    return _dedupe_items(items)
+
+
+def collect_logs_deep_dive_evidence(context) -> list[EvidenceItem]:
+    items = collect_logs_basic_evidence(context)
+    items.extend(
+        [
+            _to_item(
+                logs.recent_errors(max_files=12, max_bytes_per_file=131072),
+                EvidenceCategory.logs,
+                "Expanded recent error scan",
+            ),
+            _to_item(audit_recent.recent(), EvidenceCategory.knowledge, "Recent audit trend"),
+        ]
+    )
+    return _dedupe_items(items)
 
 
 def collect_storage_evidence(context) -> list[EvidenceItem]:

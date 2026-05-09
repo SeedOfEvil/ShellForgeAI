@@ -65,3 +65,11 @@ remain read-only.
 
 
 Service investigation adds read-only collectors: `service.manager_detect`, `service.status`, `service.unit_file`, `service.processes`, `service.ports`, `service.config_hints`, and `service.logs`.
+
+Log/error investigation adds read-only collectors: `logs.common_paths`,
+`logs.recent_errors`, `logs.service_errors`, `logs.auth_errors`,
+`logs.kernel_errors`, `logs.error_themes`, and `logs.safe_tail`. All log
+collectors do bounded reads, redact secrets/tokens/passwords/keys, and
+never tail `-f`, delete, truncate, or rotate logs. `diagnose logs`,
+`diagnose errors`, `diagnose auth`, and `diagnose logs:<service>` route
+into these bundles.
