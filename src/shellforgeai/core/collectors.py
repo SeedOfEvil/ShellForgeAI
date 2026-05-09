@@ -8,6 +8,7 @@ from shellforgeai.knowledge.audits import search_recent_audits
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.tools import (
     audit_recent,
+    containers,
     disk,
     firewall,
     host,
@@ -374,15 +375,38 @@ def collect_ssh_evidence(context) -> list[EvidenceItem]:
 
 
 def collect_docker_evidence(context) -> list[EvidenceItem]:
-    return _dedupe_items(
-        [_to_item(r, EvidenceCategory.service, "docker collector") for r in docker_detect()]
-    )
+    items = [_to_item(r, EvidenceCategory.service, "docker collector") for r in docker_detect()]
+    items.extend(collect_docker_problem_evidence(context))
+    return _dedupe_items(items)
 
 
 def collect_firewall_evidence(context) -> list[EvidenceItem]:
     return _dedupe_items(
         [_to_item(r, EvidenceCategory.network, "firewall collector") for r in firewall.detect()]
     )
+
+
+def collect_docker_problem_evidence(context) -> list[EvidenceItem]:
+    items = [_to_item(containers.containers(), EvidenceCategory.host, "Container inventory")]
+    summary = containers.problem_summary()
+    items.append(_to_item(summary, EvidenceCategory.logs, "Container problem summary"))
+    if summary.ok and summary.stdout:
+        try:
+            payload = json.loads(summary.stdout)
+        except (ValueError, json.JSONDecodeError):
+            payload = {}
+        for entry in (payload.get("failing", []) or [])[:6]:
+            name = entry.get("name") or ""
+            if not name:
+                continue
+            items.append(
+                _to_item(
+                    containers.container_logs(name, tail=120),
+                    EvidenceCategory.logs,
+                    f"{name} logs",
+                )
+            )
+    return items
 
 
 def collect_logs_basic_evidence(context) -> list[EvidenceItem]:
@@ -397,6 +421,7 @@ def collect_logs_basic_evidence(context) -> list[EvidenceItem]:
         _to_item(logs.auth_errors(), EvidenceCategory.logs, "Auth error scan"),
         _to_item(audit_recent.recent(), EvidenceCategory.knowledge, "Recent audit trend"),
     ]
+    items.extend(collect_docker_problem_evidence(context))
     recent = logs.recent_errors()
     try:
         payload = json.loads(recent.stdout) if recent.stdout.strip().startswith("{") else None

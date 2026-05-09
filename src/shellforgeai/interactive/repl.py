@@ -657,12 +657,14 @@ def _deterministic_operator_summary(
         kern = _find("logs.kernel_errors")
         themes = _find("logs.error_themes")
         svc_errs = _find("logs.service_errors")
+        docker_s = _find("docker.problem_summary")
         common_s = common["summary"] if common else "common log paths unavailable"
         recent_s = recent["summary"] if recent else "recent error scan unavailable"
         auth_s = auth["summary"] if auth else "auth scan unavailable"
         kern_s = kern["summary"] if kern else "kernel scan unavailable"
         themes_s = themes["summary"] if themes else "no theme summary"
         svc_line = f"- Service-specific log errors: {svc_errs['summary']}.\n" if svc_errs else ""
+        docker_line = f"- Container problem summary: {docker_s['summary']}.\n" if docker_s else ""
         return (
             "## Assessment\n"
             "Deeper read-only log/error triage completed from current runtime view.\n\n"
@@ -672,7 +674,7 @@ def _deterministic_operator_summary(
             f"- Auth log scan: {auth_s}.\n"
             f"- Kernel log scan: {kern_s}.\n"
             f"- Error themes: {themes_s}.\n"
-            f"{svc_line}\n"
+            f"{svc_line}{docker_line}\n"
             "## Best read\n"
             "Visible logs were inspected with bounded reads only. Host-level journal/syslog "
             "may be outside this view if running inside a container.\n\n"
@@ -1038,6 +1040,48 @@ def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
     q = question.lower()
+    if intent == "docker" or any(
+        p in q
+        for p in (
+            "container restart",
+            "restart loop",
+            "crash loop",
+            "container exit",
+            "container crash",
+            "container failing",
+            "anything crashing",
+            "any container errors",
+        )
+    ):
+        target_container: str | None = None
+        for tok in q.split():
+            if tok.startswith("sfai-"):
+                target_container = tok.strip(".,?!")
+                break
+        subtype = "container-errors"
+        if "restart" in q or "restaring" in q or "restart loop" in q:
+            subtype = "restart-loop"
+        elif "exit" in q:
+            subtype = "exited-containers"
+        elif "noisy" in q:
+            subtype = "noisy-logs"
+        elif any(t in q for t in ("dns", "reachability", "network")):
+            subtype = "network-log-errors"
+        followup_d: dict[str, Any] = {
+            "intent": "logs_deep_dive",
+            "label": "container/log deep dive",
+            "description": (
+                "container inventory, restart counts, exit codes, and bounded logs for "
+                "failing/restarting containers"
+            ),
+            "bundle": "docker",
+            "type": "logs",
+            "subtype": subtype,
+            "target": "docker",
+        }
+        if target_container:
+            followup_d["target_container"] = target_container
+        return followup_d
     if intent in {"logs", "errors", "auth", "log", "error"} or intent.startswith("logs:"):
         subtype = "general"
         target_service: str | None = None

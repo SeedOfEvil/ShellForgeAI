@@ -112,6 +112,92 @@ def _looks_like_not_found(text: str) -> bool:
     return any(s in text for s in ["not found", "no such file", "no matching process"])
 
 
+def _findings_from_docker(items) -> list[Finding]:
+    import json as _json
+
+    findings: list[Finding] = []
+    inv = next((i for i in items if i.source == "docker.containers"), None)
+    summary = next((i for i in items if i.source == "docker.problem_summary"), None)
+    if summary is not None and not summary.ok:
+        if (
+            "not available" in (summary.summary or "").lower()
+            or "unavailable" in (summary.summary or "").lower()
+        ):
+            findings.append(
+                Finding(
+                    severity="limitation",
+                    title="Docker visibility is unavailable from this runtime",
+                    detail=(
+                        "Docker CLI/daemon was not reachable; container failures cannot be "
+                        "diagnosed from this view."
+                    ),
+                    evidence_refs=["docker.problem_summary"],
+                    confidence="high",
+                )
+            )
+        return findings
+    if summary is None or not summary.ok:
+        return findings
+    try:
+        payload = _json.loads(summary.content or summary.summary or "{}")
+    except (ValueError, _json.JSONDecodeError):
+        payload = {}
+    for entry in payload.get("failing", []) or []:
+        name = entry.get("name") or "container"
+        state = (entry.get("state") or "").lower()
+        themes = entry.get("log_themes") or {}
+        ec = entry.get("exit_code")
+        rc = entry.get("restart_count") or 0
+        if state == "restarting" or rc and int(rc) >= 3:
+            sev = "critical"
+            title = f"{name} appears to be in a restart loop"
+        elif state == "exited":
+            sev = "warning"
+            title = f"{name} exited with code {ec}"
+        elif entry.get("oom_killed"):
+            sev = "critical"
+            title = f"{name} was OOM-killed"
+        else:
+            sev = "warning"
+            title = f"{name} is in an unhealthy state ({state})"
+        if themes.get("missing_required_setting"):
+            title += " (missing required setting)"
+        elif themes.get("read_only_fs") or themes.get("permission_denied"):
+            title += " (write/permission failure)"
+        elif themes.get("dns_failure") or themes.get("upstream_unreachable"):
+            title += " (network/DNS failure in logs)"
+        elif themes.get("simulated_crash") or themes.get("traceback"):
+            title += " (repeated crash)"
+        findings.append(
+            Finding(
+                severity=sev,
+                title=title,
+                detail=(
+                    f"state={state} exit_code={ec} restart_count={rc} "
+                    f"themes={','.join(themes.keys()) or 'none'}"
+                ),
+                evidence_refs=["docker.problem_summary"],
+                confidence="high",
+            )
+        )
+    for entry in payload.get("noisy", []) or []:
+        name = entry.get("name") or "container"
+        themes = entry.get("log_themes") or {}
+        findings.append(
+            Finding(
+                severity="info",
+                title=f"{name} is running but logs contain noise",
+                detail=f"themes={','.join(themes.keys()) or 'none'}",
+                evidence_refs=["docker.problem_summary"],
+                confidence="medium",
+            )
+        )
+    if inv is None and summary.ok:
+        # ok but no inventory item; nothing to add
+        pass
+    return findings
+
+
 def _findings_from_logs(items) -> list[Finding]:
     findings: list[Finding] = []
     in_container = _is_container(items)
@@ -303,7 +389,7 @@ def diagnose_target(
             target=target,
             target_type=TargetType.generic,
             evidence=bundle,
-            findings=_findings_from_logs(items),
+            findings=_findings_from_logs(items) + _findings_from_docker(items),
             proposed_plan=plan,
             warnings=warnings,
         )
@@ -343,7 +429,7 @@ def diagnose_target(
             target=target,
             target_type=TargetType.generic,
             evidence=bundle,
-            findings=_findings_from_logs(items),
+            findings=_findings_from_logs(items) + _findings_from_docker(items),
             proposed_plan=plan,
             warnings=warnings,
         )
@@ -382,7 +468,7 @@ def diagnose_target(
             target=target,
             target_type=TargetType.service,
             evidence=bundle,
-            findings=_findings_from_logs(items),
+            findings=_findings_from_logs(items) + _findings_from_docker(items),
             proposed_plan=plan,
             warnings=warnings,
         )
@@ -638,6 +724,7 @@ def diagnose_target(
         steps=steps,
         notes=["Restart/reload actions are deferred and require operator approval."],
     )
+    findings.extend(_findings_from_docker(items))
     bundle = EvidenceBundle(target=target, target_type=ttype, items=items, warnings=warnings)
     return DiagnosisResult(
         session_id=context.session.session_id,

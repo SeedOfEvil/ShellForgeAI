@@ -123,3 +123,60 @@ Expected:
   for the requested domain (or notes the safe default if no domain was
   given).
 - Apply remains validation-only.
+
+
+## Docker01 lab smoke (read-only logs/error/container)
+
+A repeatable failure range exists at `/srv/lab-cases` on Docker01. The
+lab cases drive container failure detection scenarios used to validate
+read-only log/error/Docker triage:
+
+- `missing-env` — exits 42, logs `REQUIRED_SETTING is missing`.
+- `restart-loop` — restarting/crashing, repeated simulated crash.
+- `noisy-logs` — running with WARN/ERROR noise (not a crash).
+- `bad-volume-perms` — exits, read-only filesystem / permission denied.
+- `bad-network` — running with DNS/reachability errors in logs.
+
+Bring up + status:
+
+```
+sudo /srv/lab-cases/bin/lab-clean
+sudo /srv/lab-cases/bin/lab-up missing-env
+sudo /srv/lab-cases/bin/lab-up restart-loop
+sudo /srv/lab-cases/bin/lab-up noisy-logs
+sudo /srv/lab-cases/bin/lab-up bad-volume-perms
+sudo /srv/lab-cases/bin/lab-up bad-network
+sudo /srv/lab-cases/bin/lab-status
+```
+
+ShellForgeAI checks (all read-only):
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai diagnose docker --save-plan
+sudo docker compose exec -T shellforgeai shellforgeai diagnose logs --save-plan
+sudo docker compose exec -T shellforgeai shellforgeai diagnose errors --save-plan
+sudo docker compose exec -T shellforgeai shellforgeai diagnose "is anything crashing?" --save-plan
+sudo docker compose exec -T shellforgeai shellforgeai diagnose "why did the container exit?" --save-plan
+sudo docker compose exec -T shellforgeai shellforgeai diagnose "find recent logs and errors" --save-plan
+```
+
+Expected findings:
+
+- missing-env: warning — exited with code 42 + missing required setting.
+- restart-loop: critical — restart loop / repeated simulated crash.
+- noisy-logs: info — running but logs contain noise (not crashed).
+- bad-volume-perms: warning — exited with write/permission failure.
+- bad-network: info/warning — running with DNS/reachability errors in logs.
+
+Cleanup:
+
+```
+sudo /srv/lab-cases/bin/lab-clean
+sudo /srv/lab-cases/bin/lab-status
+```
+
+ShellForgeAI's Docker visibility is read-only by convention: only
+`docker ps`, `docker inspect`, and `docker logs --tail N` are issued.
+Mutation (start/stop/restart/rm/exec/cp/build/pull/prune, compose
+mutation, volume/network mutation) is never executed. `apply` remains
+validation-only.

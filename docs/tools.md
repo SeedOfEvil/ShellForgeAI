@@ -73,3 +73,15 @@ collectors do bounded reads, redact secrets/tokens/passwords/keys, and
 never tail `-f`, delete, truncate, or rotate logs. `diagnose logs`,
 `diagnose errors`, `diagnose auth`, and `diagnose logs:<service>` route
 into these bundles.
+
+Container failure investigation adds read-only Docker collectors:
+`docker.containers` (inventory), `docker.inspect` (state, exit code,
+restart count, health), `docker.container_logs` (bounded redacted tail,
+no follow), and `docker.problem_summary` (failing/noisy classification
+with log-theme signals: missing_required_setting, simulated_crash,
+permission_denied, read_only_fs, dns_failure, upstream_unreachable, oom,
+config_error, traceback). ShellForgeAI never invokes mutating Docker
+commands (`start`, `stop`, `restart`, `rm`, `exec`, `cp`, `build`,
+`pull`, `prune`, compose mutation). When the Docker CLI/daemon is
+unreachable the missing visibility surfaces as a limitation finding
+instead of false-healthy output.

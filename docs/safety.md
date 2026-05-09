@@ -73,3 +73,15 @@ keys/cookies/Authorization headers, and reject binary/oversized targets.
 Requests like "delete logs", "clear logs", "truncate logs", "rotate logs",
 and "wipe logs" are refused — ShellForgeAI collects read-only log
 evidence instead. `apply` remains validation-only.
+
+
+Docker visibility is read-only. ShellForgeAI's container collectors only
+issue `docker ps`, `docker inspect`, and `docker logs --tail N`. They
+never run `docker start/stop/restart/rm/exec/cp/build/pull/prune`,
+compose mutation, or volume/network mutation, even if the Docker socket
+is mounted. Container logs are bounded by line/byte caps, redacted for
+secrets/tokens/passwords/API keys/cookies/Authorization headers, and
+never followed (`-f` is forbidden). When the Docker CLI/daemon is
+unreachable the missing visibility surfaces as a limitation finding;
+ShellForgeAI never claims the host is healthy on the basis of its own
+container being healthy.

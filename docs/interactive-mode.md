@@ -68,6 +68,13 @@ Debug
   failing?", "ssh login failing", "permission denied") route to read-only
   log investigation. Requests to delete, truncate, or rotate logs are
   refused; ShellForgeAI collects read-only log evidence instead.
+- Container failure questions (e.g. "why is the app restarting?", "why
+  did the container exit?", "is anything crashing?", "what containers
+  are failing?", "show container logs", "restart loop", "crash loop",
+  including typos like "restaring", "crasing") route to the read-only
+  Docker investigation: `docker.containers`, `docker.inspect`, bounded
+  `docker.container_logs`, and `docker.problem_summary`. No mutating
+  Docker commands are ever issued.
 
 ## Streaming synthesis
 
