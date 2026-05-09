@@ -498,7 +498,9 @@ def _storage_io_deep_dive_synthesis(
     )
 
 
-def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -> str:
+def _deterministic_operator_summary(
+    intent: str, checks: list[dict[str, str]], target: str | None = None
+) -> str:
     def _find(tool: str) -> dict[str, str] | None:
         return next((c for c in checks if c["tool"] == tool), None)
 
@@ -517,7 +519,34 @@ def _deterministic_operator_summary(intent: str, checks: list[dict[str, str]]) -
     process_row = _find("process.snapshot")
     listeners_row = _find("network.listeners")
     manager_row = _find("service.manager_detect")
-    if intent in {"service_health_deep_dive", "service_inventory_deep_dive"}:
+    if intent == "service_health_deep_dive":
+        svc = (target or "service").lower()
+        svc_proc = _find("service.processes")
+        svc_ports = _find("service.ports")
+        svc_cfg = _find("service.config_hints")
+        svc_logs = _find("service.logs")
+        mgr = manager_row["summary"] if manager_row else "service manager context unavailable"
+        proc = svc_proc["summary"] if svc_proc else "process evidence unavailable"
+        ports = svc_ports["summary"] if svc_ports else "listener evidence unavailable"
+        cfg = svc_cfg["summary"] if svc_cfg else "config hints unavailable"
+        logs = svc_logs["summary"] if svc_logs else "logs unavailable"
+        return (
+            "## Assessment\n"
+            f"Deeper {svc} service check completed from current runtime view.\n\n"
+            "## What I found\n"
+            f"- Service manager context: {mgr}.\n"
+            f"- {svc} process status: {proc}.\n"
+            f"- {svc} listener status: {ports}.\n"
+            f"- {svc} config hints: {cfg}.\n"
+            f"- {svc} log visibility: {logs}.\n\n"
+            "## Best read\n"
+            "This remains a read-only container/runtime view. If the service is expected "
+            "elsewhere, confirm host vs sibling-container ownership before restart decisions.\n\n"
+            "## Safety\n"
+            "Read-only checks only. No restart/reload/start/stop/install/delete "
+            "actions were performed.\n"
+        )
+    if intent == "service_inventory_deep_dive":
         listener_line = "listener evidence unavailable"
         if listeners_row:
             lsum = listeners_row["summary"]
@@ -991,7 +1020,11 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                     )
                 )
             else:
-                console.print(_deterministic_operator_summary(pending_followup["intent"], checks))
+                console.print(
+                    _deterministic_operator_summary(
+                        pending_followup["intent"], checks, pending_followup.get("target")
+                    )
+                )
             completed_followups.append(pending_followup["intent"])
             pending_followup = None
             continue

@@ -124,3 +124,6 @@ Service inventory follow-ups (`proceed`/`dig deeper` after service-discovery que
 
 
 Action-style service requests (for example `restart <service>`) trigger an immediate read-only service check first, then return a safety boundary response (no mutation execution).
+
+
+For service action follow-ups, ShellForgeAI preserves the detected target service (for example nginx or shellforgeai) so `dig deeper` stays target-specific rather than generic inventory-only.
