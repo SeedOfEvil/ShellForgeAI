@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import time
 from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
@@ -21,6 +22,7 @@ from shellforgeai.core.evidence import EvidenceCategory, classify_target
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.interactive.banner import build_banner
 from shellforgeai.knowledge.search import search_local
+from shellforgeai.llm.codex import CodexProvider
 from shellforgeai.llm.manager import build_provider
 from shellforgeai.llm.prompts import build_contextual_prompt
 from shellforgeai.llm.schemas import ModelRequest
@@ -979,7 +981,16 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
     completed_followups: list[str] = []
     evidence_mode = "compact"
     while True:
-        user_input = input("sfai> ").strip()
+        try:
+            user_input = input("sfai> ").strip()
+        except EOFError:
+            CodexProvider.cleanup_active_processes()
+            console.print("Goodbye.")
+            return
+        except KeyboardInterrupt:
+            CodexProvider.cleanup_active_processes()
+            console.print("\nInterrupted safely. REPL is still healthy.")
+            continue
         routed = route_input(user_input)
         if routed.name == "noop":
             continue
@@ -990,8 +1001,9 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                     "such as slow system, disk issue, network issue, or service issue."
                 )
                 continue
-            followup_target = pending_followup.get("target") or pending_followup["bundle"]
-            if pending_followup.get("intent") == "service_health_deep_dive" and not followup_target:
+            pending_snapshot = dict(pending_followup)
+            followup_target = pending_snapshot.get("target") or pending_snapshot.get("bundle")
+            if pending_snapshot.get("intent") == "service_health_deep_dive" and not followup_target:
                 pending_followup["last_error"] = "missing target"
                 console.print(
                     "I had a pending service follow-up, but the target was missing. "
@@ -1001,7 +1013,7 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
             try:
                 with console.status("Running deeper read-only investigation..."):
                     if (
-                        pending_followup.get("intent") == "service_health_deep_dive"
+                        pending_snapshot.get("intent") == "service_health_deep_dive"
                         and followup_target == "service-discovery"
                     ):
                         followup_target = "services"
@@ -1012,6 +1024,14 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                 pending_followup["last_error"] = "timeout"
                 console.print(
                     "The deeper service check timed out safely. No changes were made, "
+                    "and the REPL is still healthy."
+                )
+                continue
+            except KeyboardInterrupt:
+                pending_followup["last_error"] = "interrupted"
+                CodexProvider.cleanup_active_processes()
+                console.print(
+                    "The deeper check was interrupted safely. No changes were made, "
                     "and the REPL is still healthy."
                 )
                 continue
@@ -1039,22 +1059,23 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
                 console.print("Highlights:")
                 for line in _evidence_highlights(checks):
                     console.print(line)
-            if pending_followup["intent"] == "storage_io_deep_dive":
+            if pending_snapshot["intent"] == "storage_io_deep_dive":
                 console.print(
                     _storage_io_deep_dive_synthesis(
-                        pending_followup.get("first_pass_checks"), checks
+                        pending_snapshot.get("first_pass_checks"), checks
                     )
                 )
             else:
                 console.print(
                     _deterministic_operator_summary(
-                        pending_followup["intent"], checks, pending_followup.get("target")
+                        pending_snapshot["intent"], checks, pending_snapshot.get("target")
                     )
                 )
-            completed_followups.append(pending_followup["intent"])
+            completed_followups.append(pending_snapshot["intent"])
             pending_followup = None
             continue
         if routed.name in {"/exit", "/quit"}:
+            CodexProvider.cleanup_active_processes()
             console.print("Goodbye.")
             return
         if routed.name == "/clear":
@@ -1347,6 +1368,11 @@ No command was executed.""")
                     pending_followup["created_from_session"] = runtime.session.session_id
                     pending_followup["created_from_question"] = user_input
                     pending_followup["created_from_intent"] = routed.args
+                    pending_followup["session_id"] = runtime.session.session_id
+                    pending_followup["source_user_message"] = user_input
+                    pending_followup["created_at"] = time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                    )
                     pending_followup["first_pass_checks"] = list(checks)
                 provider_error = None
                 try:

@@ -94,3 +94,6 @@ Run `shellforgeai`, then `/doctor`, `/model`, `/tools`, `diagnose disk`, and `/e
 - Confirmation phrases run pending follow-up when queued; otherwise a helpful no-pending message is shown.
 - Normal synthesized answers hide collector names and keep technical names in evidence/debug surfaces.
 - Safety unchanged: read-only follow-ups only, no arbitrary shell execution, apply remains validation-only.
+
+
+- Dev/test compose should keep `init: true` for the `shellforgeai` service so PID 1 reaps zombies; this is process hygiene, not service supervision.
