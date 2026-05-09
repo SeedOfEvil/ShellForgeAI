@@ -217,6 +217,32 @@ def route_input(text: str) -> RoutedCommand:
     ]
     if any(p in lowered for p in health_intents):
         return RoutedCommand(name="diagnose", args="health")
+    network_intents = [
+        "network status",
+        "check network",
+        "is networking okay",
+        "is this server online",
+        "check dns",
+        "dns status",
+        "dns broken",
+        "cannot resolve",
+        "resolver issue",
+        "firewall status",
+        "is port ",
+        "can it reach ",
+        "can this server reach ",
+        "can it connect to ",
+        "reachable",
+        "open port ",
+        "allow port ",
+        "add firewall rule",
+        "netwrok status",
+        "dns statsu",
+        "firwall status",
+        "listerning ports",
+    ]
+    if any(p in lowered for p in network_intents):
+        return RoutedCommand(name="diagnose", args="network")
     service_intents = [
         "what services this computer is running",
         "what services are running",
@@ -261,8 +287,8 @@ def route_input(text: str) -> RoutedCommand:
         ("inode", "disk"),
         ("firewall", "firewall"),
         ("service", "services"),
-        ("listening", "services"),
-        ("port", "services"),
+        ("ports", "services"),
+        ("exposed", "services"),
         ("nginx", "nginx"),
         ("docker", "docker"),
         ("ssh", "ssh"),

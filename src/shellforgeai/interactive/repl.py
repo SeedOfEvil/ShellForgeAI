@@ -90,6 +90,17 @@ def _is_firewall_question(text: str) -> bool:
     )
 
 
+def _extract_reachability_target(text: str) -> tuple[str, int] | None:
+    low = text.lower()
+    m = re.search(r"([a-z0-9\.\-]+):(\d{1,5})", low)
+    if m:
+        return m.group(1), int(m.group(2))
+    m2 = re.search(r"port\s+(\d{1,5})\s+(?:on|to)\s+([a-z0-9\.\-]+)", low)
+    if m2:
+        return m2.group(2), int(m2.group(1))
+    return None
+
+
 def _model_dump_json_safe(value: Any, *, indent: int = 2) -> str:
     dumper = getattr(value, "model_dump_json", None)
     if callable(dumper):
@@ -702,6 +713,46 @@ def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
     q = question.lower()
+    if any(
+        w in q
+        for w in (
+            "network",
+            "netwrok",
+            "dns",
+            "dns statsu",
+            "route",
+            "firewall",
+            "firwall",
+            "conenctivity",
+            "listerning",
+            "reachable",
+            "reach ",
+            "connect to",
+            "open port",
+            "allow port",
+        )
+    ):
+        subtype = "connectivity"
+        if "dns" in q or "resolve" in q:
+            subtype = "dns"
+        elif "firewall" in q or "firwall" in q:
+            subtype = "firewall"
+        elif "open port" in q or "allow port" in q:
+            subtype = "port-open"
+        elif "port" in q or "listening" in q or "listerning" in q:
+            subtype = "listener"
+        if "reach " in q or "connect to" in q or "reachable" in q:
+            subtype = "reachability"
+        return {
+            "intent": "network_dns_firewall_deep_dive",
+            "label": "network/DNS",
+            "description": (
+                "routes, DNS, listeners, firewall context, and bounded target reachability"
+            ),
+            "bundle": "network",
+            "type": "network",
+            "subtype": subtype,
+        }
     is_disk_capacity_intent = (
         any(
             k in q
@@ -741,26 +792,6 @@ def select_followup_investigation(
             "description": "listening ports, service detectors, and recent service clues",
             "bundle": "services",
             "target": _extract_service_target(question),
-        }
-    if any(
-        w in q
-        for w in (
-            "network",
-            "netwrok",
-            "dns",
-            "dns statsu",
-            "route",
-            "firewall",
-            "firwall",
-            "conenctivity",
-            "listerning",
-        )
-    ):
-        return {
-            "intent": "network_dns_firewall_deep_dive",
-            "label": "network/DNS",
-            "description": "routes, DNS, listeners, and firewall context",
-            "bundle": "network",
         }
     disk_summary = next((c.get("summary", "") for c in checks if c.get("tool") == "disk.usage"), "")
     inode_summary = next(
@@ -1314,6 +1345,31 @@ No command was executed.""")
         if routed.name in {"diagnose"}:
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, routed.args, online=False, since="30m")
+            if routed.args == "network":
+                res.evidence.items.append(
+                    _evidence_item_from_result(
+                        network.listener_attribution(),
+                        EvidenceCategory.network,
+                        "Listener attribution",
+                    )
+                )
+                target = _extract_reachability_target(user_input)
+                if target:
+                    host_target, port_target = target
+                    res.evidence.items.append(
+                        _evidence_item_from_result(
+                            network.resolution_test(host_target),
+                            EvidenceCategory.network,
+                            "Target DNS resolution test",
+                        )
+                    )
+                    res.evidence.items.append(
+                        _evidence_item_from_result(
+                            network.tcp_connect_test(host_target, port_target),
+                            EvidenceCategory.network,
+                            "Target TCP connect test",
+                        )
+                    )
             if _is_disk_usage_breakdown_intent(user_input):
                 top_dirs = disk.top_dirs("/")
                 res.evidence.items.append(
@@ -1378,6 +1434,10 @@ No command was executed.""")
                 if pending_followup and pending_followup["intent"] in completed_followups:
                     pending_followup = None
                 if pending_followup:
+                    reach_target = _extract_reachability_target(user_input)
+                    if reach_target:
+                        pending_followup["target_host"] = reach_target[0]
+                        pending_followup["target_port"] = reach_target[1]
                     pending_followup["created_from_session"] = runtime.session.session_id
                     pending_followup["created_from_question"] = user_input
                     pending_followup["created_from_intent"] = routed.args
