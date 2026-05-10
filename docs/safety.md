@@ -85,3 +85,14 @@ never followed (`-f` is forbidden). When the Docker CLI/daemon is
 unreachable the missing visibility surfaces as a limitation finding;
 ShellForgeAI never claims the host is healthy on the basis of its own
 container being healthy.
+
+
+`shellforgeai ask` is read-only. For obvious ops-shaped questions it
+reuses the same natural-language router and read-only evidence
+collectors as `diagnose` (one source of truth in
+`shellforgeai.interactive.commands.route_input`). Mutation-style
+phrasing such as "can you restart nginx?", "open port 443", or "delete
+logs" is treated as a request to *inspect*: ShellForgeAI collects the
+relevant read-only evidence and prints an explicit safety boundary
+instead of running the mutation. `--no-evidence` disables routing and
+forces plain model Q&A. `apply` remains validation-only.

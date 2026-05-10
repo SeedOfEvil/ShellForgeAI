@@ -1,0 +1,145 @@
+"""Routing for `shellforgeai ask`.
+
+`ask` is conversational by default. For ops-shaped questions, this
+module decides whether to upgrade the call into an evidence-backed
+ask that reuses the same read-only routing/evidence collection used
+by `diagnose` and the interactive REPL.
+
+There is exactly one source of truth for natural-language intent
+matching: ``shellforgeai.interactive.commands.route_input``. This
+module is a thin adapter on top of it.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from shellforgeai.interactive.commands import _normalize_intent_text, route_input
+
+PLAIN = "plain_model_ask"
+EVIDENCE_BACKED = "evidence_backed_ask"
+
+
+_MUTATION_PHRASES = (
+    "restart ",
+    "reboot",
+    "stop the ",
+    "stop service",
+    "stop nginx",
+    "stop docker",
+    "stop ssh",
+    "start the ",
+    "start service",
+    "start nginx",
+    "start docker",
+    "start ssh",
+    "kill ",
+    "delete ",
+    "remove ",
+    "uninstall ",
+    "install ",
+    "open port",
+    "allow port",
+    "add firewall",
+    "drop firewall",
+    "block port",
+    "clear logs",
+    "delete logs",
+    "wipe logs",
+    "truncate logs",
+    "rotate logs",
+    "rm -rf",
+    "prune ",
+    "docker prune",
+    "docker rm",
+    "docker stop",
+    "docker kill",
+    "docker restart",
+    "can you restart",
+    "can you reboot",
+    "can you stop",
+    "can you start",
+    "can you delete",
+    "can you remove",
+    "can you install",
+    "please restart",
+    "please reboot",
+)
+
+
+@dataclass(frozen=True)
+class AskRoute:
+    """Decision returned by :func:`route_ask_intent`."""
+
+    mode: str
+    target: str = ""
+    intent_label: str = ""
+    mutation_request: bool = False
+
+
+def is_mutation_request(text: str) -> bool:
+    lowered = _normalize_intent_text(text or "")
+    return any(p in lowered for p in _MUTATION_PHRASES)
+
+
+def route_ask_intent(text: str) -> AskRoute:
+    """Decide whether an ``ask`` question should collect read-only evidence.
+
+    Returns ``plain_model_ask`` for generic Q&A and ``evidence_backed_ask``
+    when the natural-language router maps the question to a known diagnose
+    target. The third runtime mode (``evidence_required_but_unavailable``)
+    is decided at evidence-collection time, not here, since this routing
+    layer cannot know whether collectors will succeed.
+    """
+
+    raw = (text or "").strip()
+    if not raw:
+        return AskRoute(mode=PLAIN)
+
+    mutation = is_mutation_request(raw)
+    routed = route_input(raw)
+
+    if routed.name == "diagnose" and routed.args:
+        target = routed.args
+        return AskRoute(
+            mode=EVIDENCE_BACKED,
+            target=target,
+            intent_label=target,
+            mutation_request=mutation,
+        )
+    if routed.name == "logs_mutation_refused":
+        return AskRoute(
+            mode=EVIDENCE_BACKED,
+            target="logs",
+            intent_label="logs",
+            mutation_request=True,
+        )
+    return AskRoute(mode=PLAIN, mutation_request=mutation)
+
+
+def evidence_brief(findings, evidence_items, *, max_findings: int = 8, max_evidence: int = 12):
+    """Produce a compact dict suitable for prompt context.
+
+    Keeps the evidence brief small so the model focuses on signal, not noise.
+    """
+
+    f_rows = []
+    for f in list(findings)[:max_findings]:
+        f_rows.append(
+            {
+                "severity": getattr(f, "severity", "info"),
+                "title": getattr(f, "title", ""),
+                "detail": getattr(f, "detail", "")[:400],
+            }
+        )
+    e_rows = []
+    for i in list(evidence_items)[:max_evidence]:
+        e_rows.append(
+            {
+                "source": getattr(i, "source", "unknown"),
+                "ok": bool(getattr(i, "ok", False)),
+                "title": getattr(i, "title", "")[:120],
+                "summary": (getattr(i, "summary", "") or "").splitlines()[0][:240],
+            }
+        )
+    return {"findings": f_rows, "evidence": e_rows}

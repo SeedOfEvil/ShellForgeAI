@@ -25,7 +25,7 @@ Running with no `<command>` enters interactive mode (see
 | `research <query>` | Search local knowledge (`SHELLFORGE.md`, `knowledge.local_paths`). With `--model`, ask the provider to synthesize from hits. |
 | `plan <goal>` | Emit a deterministic conservative plan JSON. With `--model`, attach a model review. |
 | `apply <plan.json>` | Validation-only in this alpha — parses and exits. |
-| `ask <question>` | Free-form ask. Options: `--context standard\|minimal\|full`, `--full-context`, `--raw`. |
+| `ask <question>` | Free-form ask. Options: `--context standard\|minimal\|full`, `--full-context`, `--raw`, `--no-evidence`, `--since 30m`. For recognized ops-shaped questions (e.g. "find failed containers", "network reachability is broken", "why can the service not write to disk?") `ask` reuses the same read-only routing and evidence collection as `diagnose`, writes `evidence.json` + `ask-summary.md`, and answers from the evidence. Use `--no-evidence` to force plain model Q&A. `ask` never mutates: a mutation-style request (e.g. "can you restart nginx?") collects read-only evidence and prints a safety boundary. |
 | `inspect host` | Host info / resources / uptime. |
 | `inspect service <unit>` | `systemctl status` of a unit. |
 | `logs <unit> [--since 30m]` | `journalctl -u <unit> --no-pager`. |
