@@ -10,6 +10,13 @@ import typer
 from rich.console import Console
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.core.ask_routing import (
+    EVIDENCE_BACKED,
+    PLAIN,
+    AskRoute,
+    evidence_brief,
+    route_ask_intent,
+)
 from shellforgeai.core.config import load_settings
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
@@ -495,19 +502,56 @@ def ask(
     context: str = typer.Option("standard", "--context"),
     full_context: bool = typer.Option(False, "--full-context"),
     raw: bool = typer.Option(False, "--raw"),
+    no_evidence: bool = typer.Option(
+        False, "--no-evidence", help="Disable evidence-aware routing for this ask."
+    ),
+    since: str = typer.Option("30m", "--since"),
 ) -> None:
     runtime = _ctx(ctx)
     provider = build_provider(runtime.settings)
     ctx_mode = "full" if full_context else context
-    prompt = build_contextual_prompt(
-        question,
-        {
+
+    route = AskRoute(mode=PLAIN) if no_evidence else route_ask_intent(question)
+    evidence_result = None
+    evidence_error: str | None = None
+    if route.mode == EVIDENCE_BACKED:
+        try:
+            evidence_result = diagnose_target(runtime, route.target, online=False, since=since)
+        except Exception as exc:  # collection failure: degrade, do not hallucinate
+            evidence_error = f"{type(exc).__name__}: {exc}"
+
+    if route.mode == EVIDENCE_BACKED and evidence_result is not None:
+        _ensure_artifact_dir(runtime)
+        ev_path = runtime.session.artifact_dir / "evidence.json"
+        ev_path.write_text(evidence_result.evidence.model_dump_json(indent=2), encoding="utf-8")
+        brief = evidence_brief(evidence_result.findings, evidence_result.evidence.items)
+        prompt_context = {
             "host": platform.platform(),
             "mode": runtime.session.mode,
             "identity": "CLI-first Linux ops harness with read-only safety boundaries.",
-        },
-        mode=ctx_mode,
-    )
+            "ask_intent": route.intent_label,
+            "session_id": evidence_result.session_id,
+            "findings": brief["findings"],
+            "evidence": brief["evidence"],
+            "mutation_request": route.mutation_request,
+            "safety": (
+                "Inspect-only; no restart/stop/start/delete/install/firewall changes "
+                "performed. apply remains validation-only."
+            ),
+        }
+        prompt = build_contextual_prompt(question, prompt_context, mode=ctx_mode)
+    else:
+        prompt_context = {
+            "host": platform.platform(),
+            "mode": runtime.session.mode,
+            "identity": "CLI-first Linux ops harness with read-only safety boundaries.",
+        }
+        if route.mode == EVIDENCE_BACKED and evidence_error is not None:
+            prompt_context["evidence_unavailable"] = (
+                f"Recognized as ops diagnostic ({route.intent_label}) but read-only "
+                f"evidence collection failed: {evidence_error}. Do not invent findings."
+            )
+        prompt = build_contextual_prompt(question, prompt_context, mode=ctx_mode)
     resp = provider.complete(
         ModelRequest(
             prompt=prompt,
@@ -543,5 +587,38 @@ def ask(
         raise typer.Exit(code=1)
     console.print(resp.text)
     console.print(f"\nProvider: {resp.provider}\nModel: {resp.model}\n{_usage_line(resp)}")
+    if route.mode == EVIDENCE_BACKED and evidence_result is not None:
+        artifact_dir = runtime.session.artifact_dir
+        ev_path = artifact_dir / "evidence.json"
+        ask_summary_path = artifact_dir / "ask-summary.md"
+        ask_summary_path.write_text(
+            f"# Ask: evidence-backed\n\n"
+            f"Session: {evidence_result.session_id}\n"
+            f"Intent: {route.intent_label}\n"
+            f"Question: {question}\n\n"
+            f"{findings_summary_line(list(evidence_result.findings))}\n\n"
+            f"## Answer\n\n{resp.text}\n",
+            encoding="utf-8",
+        )
+        console.print(
+            "\nEvidence-backed ask:"
+            f"\n- intent: {route.intent_label}"
+            f"\n- session: {evidence_result.session_id}"
+            f"\n- {findings_summary_line(list(evidence_result.findings))}"
+            f"\n- evidence: {ev_path}"
+            f"\n- ask summary: {ask_summary_path}"
+        )
+        if route.mutation_request:
+            console.print(
+                "\nSafety: detected a mutation-style request. ShellForgeAI ran read-only "
+                "evidence only. No restart/stop/start/delete/install/firewall changes were "
+                "performed. apply remains validation-only."
+            )
+    elif route.mode == EVIDENCE_BACKED and evidence_error is not None:
+        console.print(
+            f"\nNote: this question matched the {route.intent_label} diagnostic intent, "
+            "but read-only evidence collection failed in this runtime. Try "
+            f'`shellforgeai diagnose "{question}" --save-plan` for a full diagnose run.'
+        )
     if raw and resp.raw and resp.raw.get("stdout_jsonl"):
         console.print(resp.raw["stdout_jsonl"])

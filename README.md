@@ -48,7 +48,16 @@ shellforgeai research "nginx permission denied"
 shellforgeai plan "investigate high disk usage"
 shellforgeai audit list
 shellforgeai ask "what is this machine doing?"
+shellforgeai ask "find failed containers and explain likely cause"   # evidence-backed
+shellforgeai ask "why can the service not write to disk?"            # evidence-backed
+shellforgeai ask --no-evidence "explain DNS like I am new"           # plain model Q&A
 ```
+
+For ops-shaped questions `ask` reuses the same read-only evidence
+collection as `diagnose`. Generic explainers and conceptual questions
+stay as plain model Q&A. `ask` never mutates — mutation-style requests
+("can you restart nginx?") collect read-only evidence and print a
+safety boundary; `apply` remains validation-only.
 
 ## Using OpenAI Codex / ChatGPT sign-in
 
