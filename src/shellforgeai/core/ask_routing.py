@@ -43,6 +43,17 @@ _MUTATION_PHRASES = (
     "add firewall",
     "drop firewall",
     "block port",
+    "fix the network",
+    "fix network",
+    "fix dns",
+    "change dns",
+    "change the dns",
+    "edit dns",
+    "modify dns",
+    "set dns",
+    "flush dns",
+    "fix firewall",
+    "modify firewall",
     "clear logs",
     "delete logs",
     "wipe logs",
@@ -67,6 +78,34 @@ _MUTATION_PHRASES = (
 )
 
 
+_NETWORK_REACH_TOKENS = (
+    "reachab",
+    "reechab",
+    "upstream",
+    "upstram",
+    "dns error",
+    "dns erro",
+    "dns erorr",
+    "connection refused",
+    "coneccion refused",
+    "timeout",
+    "timout",
+    "cant reach",
+    "cannot reach",
+    "can not reach",
+    "reach the server",
+    "reach upstream",
+    "reach the upstream",
+    "container network",
+    "network errors",
+    "network reachability",
+    "netwrok reachab",
+    "service dependency unreach",
+    "bad network",
+    "bad-network",
+)
+
+
 @dataclass(frozen=True)
 class AskRoute:
     """Decision returned by :func:`route_ask_intent`."""
@@ -75,11 +114,21 @@ class AskRoute:
     target: str = ""
     intent_label: str = ""
     mutation_request: bool = False
+    network_reachability: bool = False
 
 
 def is_mutation_request(text: str) -> bool:
     lowered = _normalize_intent_text(text or "")
     return any(p in lowered for p in _MUTATION_PHRASES)
+
+
+def is_network_reachability_intent(text: str) -> bool:
+    """Detect questions that focus on app/network reachability or upstream failures."""
+    lowered = _normalize_intent_text(text or "")
+    raw_lower = (text or "").lower()
+    if any(tok in lowered for tok in _NETWORK_REACH_TOKENS):
+        return True
+    return any(tok in raw_lower for tok in _NETWORK_REACH_TOKENS)
 
 
 def route_ask_intent(text: str) -> AskRoute:
@@ -98,14 +147,17 @@ def route_ask_intent(text: str) -> AskRoute:
 
     mutation = is_mutation_request(raw)
     routed = route_input(raw)
+    net_reach = is_network_reachability_intent(raw)
 
     if routed.name == "diagnose" and routed.args:
         target = routed.args
+        intent = "network_reachability" if net_reach else target
         return AskRoute(
             mode=EVIDENCE_BACKED,
             target=target,
-            intent_label=target,
+            intent_label=intent,
             mutation_request=mutation,
+            network_reachability=net_reach,
         )
     if routed.name == "logs_mutation_refused":
         return AskRoute(
@@ -113,8 +165,9 @@ def route_ask_intent(text: str) -> AskRoute:
             target="logs",
             intent_label="logs",
             mutation_request=True,
+            network_reachability=net_reach,
         )
-    return AskRoute(mode=PLAIN, mutation_request=mutation)
+    return AskRoute(mode=PLAIN, mutation_request=mutation, network_reachability=net_reach)
 
 
 def evidence_brief(findings, evidence_items, *, max_findings: int = 8, max_evidence: int = 12):

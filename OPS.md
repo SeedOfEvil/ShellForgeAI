@@ -166,7 +166,23 @@ Expected findings:
 - restart-loop: critical — restart loop / repeated simulated crash.
 - noisy-logs: info — running but logs contain noise (not crashed).
 - bad-volume-perms: warning — exited with write/permission failure.
-- bad-network: info/warning — running with DNS/reachability errors in logs.
+- bad-network: warning — running with DNS/reachability errors in logs.
+
+Network/log ask smoke (PR28):
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai ask "network reachability is broken"
+sudo docker compose exec -T shellforgeai shellforgeai ask "why is bad-network failing?"
+sudo docker compose exec -T shellforgeai shellforgeai ask "DNS errors in logs"
+sudo docker compose exec -T shellforgeai shellforgeai ask "app cannot reach upstream"
+```
+
+Expected: the answer mentions `sfai-bad-network`, says it is running but logging
+DNS/upstream/reachability errors, separates app/container failure from host-wide
+network health (a healthy DNS resolver/default route does not cancel app log
+evidence), and never mutates. Mutation-style asks ("fix the network",
+"open port 443", "change DNS") collect read-only evidence and emit a safety
+boundary; `apply` remains validation-only.
 
 Cleanup:
 

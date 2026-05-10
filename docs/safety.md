@@ -65,6 +65,14 @@ Opening or allowing a port, changing firewall rules, changing routes or
 interfaces, restarting networking or services, and Docker port-publish
 changes remain operator-run. ShellForgeAI never executes them.
 
+For reachability questions, ShellForgeAI ranks app/container log evidence
+(DNS, upstream unreachable, connection refused, timeout, TLS) ahead of
+runtime network basics: a healthy DNS resolver and default route do not
+cancel an app/container log showing reachability failure. Mutation-style
+phrases ("fix the network", "change DNS", "open port 443", "add firewall
+rule") are detected and downgraded to read-only evidence collection plus a
+safety notice; no DNS/firewall/route/interface change is performed.
+
 
 Log/error investigation is read-only and bounded. ShellForgeAI never
 deletes, truncates, rotates, or `tail -f`s logs. Log file scans cap files,

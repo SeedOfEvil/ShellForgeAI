@@ -65,6 +65,64 @@ def _ensure_artifact_dir(runtime: RuntimeContext) -> None:
     runtime.session.artifact_dir.mkdir(parents=True, exist_ok=True)
 
 
+def _network_reachability_hints(findings, items) -> list[str]:
+    """Build prioritized synthesis hints for network reachability questions.
+
+    The model must rank app/container log evidence above runtime network basics
+    so a healthy DNS resolver/default route does not silently cancel out a
+    container that is logging upstream/DNS/reachability failures.
+    """
+    hints: list[str] = []
+    app_net_finding = next(
+        (
+            f
+            for f in findings
+            if str(getattr(f, "severity", "")) == "warning"
+            and any(
+                tok in (getattr(f, "title", "") or "").lower()
+                for tok in (
+                    "dns",
+                    "upstream",
+                    "reachab",
+                    "connection refused",
+                    "timeout",
+                    "tls",
+                    "certificate",
+                )
+            )
+        ),
+        None,
+    )
+    if app_net_finding is not None:
+        hints.append(
+            f"App/container log evidence shows a reachability failure: "
+            f"{getattr(app_net_finding, 'title', '')}. Surface this first."
+        )
+
+    def _item(source: str):
+        return next((i for i in items if getattr(i, "source", "") == source), None)
+
+    dns_test = _item("network.resolution_test")
+    default_route = _item("network.default_route")
+    runtime_ok = bool(
+        (dns_test and getattr(dns_test, "ok", False))
+        and (default_route and getattr(default_route, "ok", False))
+    )
+    if runtime_ok and app_net_finding is not None:
+        hints.append(
+            "Runtime DNS resolution and default route appear OK from this namespace, "
+            "but that does NOT cancel the app/container log evidence above. Frame this "
+            "as an app/container reachability issue, not a host-wide network outage."
+        )
+    container_detect = _item("system.container_detect")
+    if container_detect is not None:
+        hints.append(
+            "Host firewall and host-level routes are not directly visible from a "
+            "container namespace; mention this caveat briefly."
+        )
+    return hints
+
+
 def _write_summary_md(
     path: Path,
     session_id: str,
@@ -317,8 +375,22 @@ def diagnose(
     full_context: bool = typer.Option(False, "--full-context"),
 ) -> None:
     runtime = _ctx(ctx)
+    raw_target_text = target
     target = _normalize_diagnose_target(target)
+    from shellforgeai.core.ask_routing import is_network_reachability_intent
+
+    net_reach = is_network_reachability_intent(raw_target_text)
     result = diagnose_target(runtime, target, online=online, since=since)
+    if net_reach:
+        try:
+            from shellforgeai.core.collectors import collect_network_evidence
+
+            existing_sources = {i.source for i in result.evidence.items}
+            for ni in collect_network_evidence(runtime):
+                if ni.source not in existing_sources:
+                    result.evidence.items.append(ni)
+        except Exception:
+            pass
     audit = AuditStorage(runtime.session.data_dir)
     _ensure_artifact_dir(runtime)
     ev_path = runtime.session.artifact_dir / "evidence.json"
@@ -522,9 +594,24 @@ def ask(
 
     if route.mode == EVIDENCE_BACKED and evidence_result is not None:
         _ensure_artifact_dir(runtime)
+        if route.network_reachability:
+            try:
+                from shellforgeai.core.collectors import collect_network_evidence
+
+                existing_sources = {i.source for i in evidence_result.evidence.items}
+                for ni in collect_network_evidence(runtime):
+                    if ni.source not in existing_sources:
+                        evidence_result.evidence.items.append(ni)
+            except Exception:
+                pass
         ev_path = runtime.session.artifact_dir / "evidence.json"
         ev_path.write_text(evidence_result.evidence.model_dump_json(indent=2), encoding="utf-8")
         brief = evidence_brief(evidence_result.findings, evidence_result.evidence.items)
+        synthesis_hints = (
+            _network_reachability_hints(evidence_result.findings, evidence_result.evidence.items)
+            if route.network_reachability
+            else []
+        )
         prompt_context = {
             "host": platform.platform(),
             "mode": runtime.session.mode,
@@ -539,6 +626,19 @@ def ask(
                 "performed. apply remains validation-only."
             ),
         }
+        if synthesis_hints:
+            prompt_context["synthesis_hints"] = synthesis_hints
+            prompt_context["evidence_ranking"] = (
+                "Rank evidence in this order for reachability questions: "
+                "(1) target/app/container log themes (DNS, upstream unreachable, "
+                "connection refused, timeout, TLS); "
+                "(2) service listener/exposure evidence; "
+                "(3) runtime network basics (DNS resolver, default route, listeners); "
+                "(4) visibility limitations. "
+                "Healthy runtime DNS/default route does NOT cancel app/container logs "
+                "showing reachability failure. Do not label the host network globally "
+                "broken unless runtime evidence supports it."
+            )
         prompt = build_contextual_prompt(question, prompt_context, mode=ctx_mode)
     else:
         prompt_context = {
