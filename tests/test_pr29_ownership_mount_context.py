@@ -34,19 +34,13 @@ def test_collect_path_ownership_includes_stat_mount_and_owner(monkeypatch) -> No
     )
     monkeypatch.setattr(
         collectors.storage,
-        "mount_target",
+        "mounts",
         lambda p: ToolResult(
-            tool="storage.mount_target",
+            tool="storage.mounts",
             stdout=f"{p} /dev/mapper/disk[/usr/bin/docker] ext4 ro,relatime",
         ),
-    )
-    monkeypatch.setattr(
-        collectors.storage,
-        "mounts",
-        lambda: ToolResult(tool="storage.mounts", stdout="/dev/mapper / ext4 ro"),
     )
     items = collect_path_ownership_evidence(_DummyCtx(), "/usr/local/bin/docker")
     sources = [i.source for i in items]
     assert "files.stat" in sources
-    assert "storage.mount_target" in sources
     assert "storage.mounts" in sources

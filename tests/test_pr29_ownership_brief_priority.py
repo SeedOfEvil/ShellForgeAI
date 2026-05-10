@@ -21,18 +21,10 @@ def test_ownership_rows_prioritize_mount_and_stat() -> None:
             ok=True,
         ),
         EvidenceItem(
-            source="storage.mount_target",
-            category=EvidenceCategory.host,
-            title="mt",
-            summary="/usr/local/bin/docker /dev/mapper[/usr/bin/docker] ext4 ro",
-            content="",
-            ok=True,
-        ),
-        EvidenceItem(
             source="storage.mounts",
             category=EvidenceCategory.host,
             title="m",
-            summary="root=ext4",
+            summary="/usr/local/bin/docker /dev/mapper[/usr/bin/docker] ext4 ro,relatime",
             content="",
             ok=True,
         ),
@@ -47,9 +39,8 @@ def test_ownership_rows_prioritize_mount_and_stat() -> None:
     ]
     rows = _ownership_evidence_rows(items)
     sources = [r["source"] for r in rows]
-    assert sources[:4] == [
+    assert sources[:3] == [
         "files.stat",
-        "storage.mount_target",
         "storage.mounts",
         "package.file_owner",
     ]

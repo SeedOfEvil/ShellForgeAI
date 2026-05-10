@@ -571,6 +571,5 @@ def collect_config_evidence(context, target: str = "") -> list[EvidenceItem]:
 def collect_path_ownership_evidence(context, path: str) -> list[EvidenceItem]:
     return [
         _to_item(files.stat(path), EvidenceCategory.files, f"Path stat: {path}"),
-        _to_item(storage.mount_target(path), EvidenceCategory.host, f"Mount target: {path}"),
-        _to_item(storage.mounts(), EvidenceCategory.host, "Storage mounts"),
+        _to_item(storage.mounts(path), EvidenceCategory.host, f"Storage mounts: {path}"),
     ]

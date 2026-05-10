@@ -76,7 +76,6 @@ def _is_path_ownership_question(question: str) -> bool:
 def _ownership_context(evidence_items) -> dict:
     out: dict[str, dict[str, str]] = {
         "file": {},
-        "mount_target": {},
         "mounts": {},
         "package_owner": {},
     }
@@ -84,11 +83,6 @@ def _ownership_context(evidence_items) -> dict:
         src = getattr(i, "source", "")
         if src == "files.stat":
             out["file"] = {
-                "summary": getattr(i, "summary", ""),
-                "content": getattr(i, "content", "")[:400],
-            }
-        elif src == "storage.mount_target":
-            out["mount_target"] = {
                 "summary": getattr(i, "summary", ""),
                 "content": getattr(i, "content", "")[:400],
             }
@@ -109,7 +103,7 @@ def _ownership_context(evidence_items) -> dict:
 def _ownership_evidence_rows(evidence_items, *, max_rows: int = 8) -> list[dict]:
     """Prioritize ownership-specific evidence rows for ask prompt context."""
     rows: list[dict] = []
-    preferred = ("files.stat", "storage.mount_target", "storage.mounts", "package.file_owner")
+    preferred = ("files.stat", "storage.mounts", "package.file_owner")
     for src in preferred:
         for i in evidence_items:
             if getattr(i, "source", "") != src:
