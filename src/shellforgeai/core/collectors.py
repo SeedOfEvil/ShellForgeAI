@@ -112,6 +112,17 @@ def _summarize(result) -> str:
     if result.tool == "files.exists":
         path = result.command[-1] if result.command else "path"
         return f"{path}: {'exists' if result.ok else 'missing'}"
+    if result.tool == "files.stat" and (result.stdout or "").startswith("{"):
+        try:
+            data = literal_eval(result.stdout)
+        except (ValueError, SyntaxError):
+            data = {}
+        if not data.get("exists"):
+            return f"{data.get('path', 'path')}: missing"
+        return (
+            f"{data.get('path', 'path')}: owner={data.get('owner')}:{data.get('group')} "
+            f"mode={data.get('mode')} exec={'yes' if data.get('executable') else 'no'}"
+        )
     if result.tool == "process.top":
         if not result.ok or not result.stdout.strip():
             return "process details unavailable from this context"
@@ -559,7 +570,7 @@ def collect_config_evidence(context, target: str = "") -> list[EvidenceItem]:
 
 def collect_path_ownership_evidence(context, path: str) -> list[EvidenceItem]:
     return [
-        _to_item(files.exists(path), EvidenceCategory.files, f"Path stat: {path}"),
+        _to_item(files.stat(path), EvidenceCategory.files, f"Path stat: {path}"),
         _to_item(storage.mount_target(path), EvidenceCategory.host, f"Mount target: {path}"),
         _to_item(storage.mounts(), EvidenceCategory.host, "Storage mounts"),
     ]

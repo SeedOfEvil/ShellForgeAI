@@ -77,7 +77,7 @@ def _ownership_context(evidence_items) -> dict:
     out: dict[str, dict[str, str]] = {"file": {}, "mount": {}, "package_owner": {}}
     for i in evidence_items:
         src = getattr(i, "source", "")
-        if src == "files.exists":
+        if src == "files.stat":
             out["file"] = {
                 "summary": getattr(i, "summary", ""),
                 "content": getattr(i, "content", "")[:400],

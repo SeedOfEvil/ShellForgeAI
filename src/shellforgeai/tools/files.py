@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import fnmatch
+import grp
+import os
+import pwd
 from pathlib import Path
 
 from .base import ToolResult
@@ -121,4 +124,43 @@ def read_text(
 
 
 def stat(path: str) -> ToolResult:
-    return exists(path)
+    p = Path(path)
+    if _denied(path):
+        return ToolResult(tool="files.stat", ok=False, exit_code=1, stderr="sensitive path denied")
+    if not (p.exists() or p.is_symlink()):
+        return ToolResult(
+            tool="files.stat",
+            stdout=str({"path": path, "exists": False}),
+            ok=True,
+        )
+    st = p.lstat()
+    mode = oct(st.st_mode & 0o777)
+    is_exec = bool(st.st_mode & 0o111)
+    try:
+        owner = pwd.getpwuid(st.st_uid).pw_name
+    except KeyError:
+        owner = str(st.st_uid)
+    try:
+        group = grp.getgrgid(st.st_gid).gr_name
+    except KeyError:
+        group = str(st.st_gid)
+    payload = {
+        "path": path,
+        "exists": True,
+        "type": (
+            "symlink"
+            if p.is_symlink()
+            else "dir"
+            if p.is_dir()
+            else "file"
+            if p.is_file()
+            else "other"
+        ),
+        "owner": owner,
+        "group": group,
+        "mode": mode,
+        "executable": is_exec,
+        "size": st.st_size,
+        "symlink_target": os.readlink(path) if p.is_symlink() else None,
+    }
+    return ToolResult(tool="files.stat", stdout=str(payload), ok=True)
