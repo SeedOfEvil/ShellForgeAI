@@ -50,7 +50,9 @@ app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
 app.add_typer(model_app, name="model")
-console = Console()
+# Treat all runtime/model/evidence strings as untrusted; disable Rich markup
+# interpretation to prevent crashes on bracketed data like mount sources.
+console = Console(markup=False)
 
 
 def _is_oncall_overview_question(question: str) -> bool:
