@@ -15,6 +15,8 @@ from shellforgeai.core.ask_routing import (
     PLAIN,
     AskRoute,
     evidence_brief,
+    extract_container_target,
+    network_reachability_brief,
     route_ask_intent,
 )
 from shellforgeai.core.config import load_settings
@@ -607,39 +609,68 @@ def ask(
         ev_path = runtime.session.artifact_dir / "evidence.json"
         ev_path.write_text(evidence_result.evidence.model_dump_json(indent=2), encoding="utf-8")
         brief = evidence_brief(evidence_result.findings, evidence_result.evidence.items)
+        target_container = extract_container_target(question) if route.network_reachability else ""
+        net_brief = (
+            network_reachability_brief(
+                evidence_result.findings,
+                evidence_result.evidence.items,
+                target_container=target_container,
+            )
+            if route.network_reachability
+            else None
+        )
         synthesis_hints = (
             _network_reachability_hints(evidence_result.findings, evidence_result.evidence.items)
             if route.network_reachability
             else []
         )
         prompt_context = {
+            "ask_intent": route.intent_label,
+            "identity": "CLI-first Linux ops harness with read-only safety boundaries.",
             "host": platform.platform(),
             "mode": runtime.session.mode,
-            "identity": "CLI-first Linux ops harness with read-only safety boundaries.",
-            "ask_intent": route.intent_label,
             "session_id": evidence_result.session_id,
-            "findings": brief["findings"],
-            "evidence": brief["evidence"],
             "mutation_request": route.mutation_request,
             "safety": (
                 "Inspect-only; no restart/stop/start/delete/install/firewall changes "
                 "performed. apply remains validation-only."
             ),
         }
+        if net_brief is not None:
+            # Pin reachability-relevant blocks to the front of the JSON dump
+            # so the prompt char budget cannot truncate them out.
+            if target_container:
+                prompt_context["target_container"] = target_container
+            prompt_context["network_reachability_brief"] = net_brief
+            # Use the reachability-ranked findings rows so the model sees
+            # targeted/network-themed findings first.
+            prompt_context["findings"] = net_brief["findings"]
+            prompt_context["evidence"] = brief["evidence"]
+        else:
+            prompt_context["findings"] = brief["findings"]
+            prompt_context["evidence"] = brief["evidence"]
         if synthesis_hints:
             prompt_context["synthesis_hints"] = synthesis_hints
             prompt_context["evidence_ranking"] = (
                 "Rank evidence in this order for reachability questions: "
                 "(1) target/app/container log themes (DNS, upstream unreachable, "
-                "connection refused, timeout, TLS); "
+                "connection refused, timeout, TLS) -- see "
+                "network_reachability_brief.container_log_evidence; "
                 "(2) service listener/exposure evidence; "
-                "(3) runtime network basics (DNS resolver, default route, listeners); "
+                "(3) runtime network basics (DNS resolver, default route, listeners) "
+                "-- see network_reachability_brief.runtime_network_basics; "
                 "(4) visibility limitations. "
                 "Healthy runtime DNS/default route does NOT cancel app/container logs "
-                "showing reachability failure. Do not label the host network globally "
-                "broken unless runtime evidence supports it."
+                "showing reachability failure. If container_log_evidence contains an "
+                "entry, name that container and its themes explicitly in the answer. "
+                "Do not say 'no DNS-specific evidence' or 'reachability unconfirmed' "
+                "when container_log_evidence is non-empty. Do not label the host "
+                "network globally broken unless runtime evidence supports it."
             )
-        prompt = build_contextual_prompt(question, prompt_context, mode=ctx_mode)
+        # Reachability briefs need more headroom than 2500 chars to keep the
+        # container_log_evidence + runtime_network_basics blocks intact.
+        effective_mode = "full" if net_brief is not None and ctx_mode != "full" else ctx_mode
+        prompt = build_contextual_prompt(question, prompt_context, mode=effective_mode)
     else:
         prompt_context = {
             "host": platform.platform(),

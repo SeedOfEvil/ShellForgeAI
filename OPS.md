@@ -180,9 +180,14 @@ sudo docker compose exec -T shellforgeai shellforgeai ask "app cannot reach upst
 Expected: the answer mentions `sfai-bad-network`, says it is running but logging
 DNS/upstream/reachability errors, separates app/container failure from host-wide
 network health (a healthy DNS resolver/default route does not cancel app log
-evidence), and never mutates. Mutation-style asks ("fix the network",
-"open port 443", "change DNS") collect read-only evidence and emit a safety
-boundary; `apply` remains validation-only.
+evidence), and never mutates. The prompt sent to the model carries an explicit
+`network_reachability_brief` block with `container_log_evidence` (per-container
+themes labelled `dns_resolution` / `upstream_unreachable` / `connection_refused`
+/ `timeout` / `tls_certificate`) listed before `runtime_network_basics`; when
+the question names a lab case (e.g. `bad-network`) the targeted container is
+pinned to the front of `container_log_evidence` and is never truncated out.
+Mutation-style asks ("fix the network", "open port 443", "change DNS") collect
+read-only evidence and emit a safety boundary; `apply` remains validation-only.
 
 Cleanup:
 
