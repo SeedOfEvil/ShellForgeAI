@@ -18,6 +18,7 @@ from shellforgeai.core.ask_routing import (
     extract_container_target,
     network_reachability_brief,
     route_ask_intent,
+    target_container_status,
 )
 from shellforgeai.core.config import load_settings
 from shellforgeai.core.context import RuntimeContext
@@ -609,7 +610,11 @@ def ask(
         ev_path = runtime.session.artifact_dir / "evidence.json"
         ev_path.write_text(evidence_result.evidence.model_dump_json(indent=2), encoding="utf-8")
         brief = evidence_brief(evidence_result.findings, evidence_result.evidence.items)
-        target_container = extract_container_target(question) if route.network_reachability else ""
+        # Extract target container for any evidence-backed ask. This lets
+        # "is the healthy web service okay?" surface sfai-healthy-web's
+        # Docker health, not just for reachability questions.
+        target_container = extract_container_target(question)
+        tc_status = target_container_status(evidence_result.evidence.items, target_container)
         net_brief = (
             network_reachability_brief(
                 evidence_result.findings,
@@ -636,11 +641,19 @@ def ask(
                 "performed. apply remains validation-only."
             ),
         }
+        if target_container:
+            prompt_context["target_container"] = target_container
+        if tc_status is not None:
+            prompt_context["target_container_status"] = tc_status
+            prompt_context["target_container_directive"] = (
+                "target_container_status reflects Docker container inventory + "
+                "problem summary. If state=running and (health=healthy or bucket=healthy), "
+                "say the container is running and healthy; do NOT fall back to a "
+                "local-process check (e.g. 'nginx not found in this container') for a "
+                "Docker lab/service target. If log_themes are present, name them and the "
+                "container in the answer."
+            )
         if net_brief is not None:
-            # Pin reachability-relevant blocks to the front of the JSON dump
-            # so the prompt char budget cannot truncate them out.
-            if target_container:
-                prompt_context["target_container"] = target_container
             prompt_context["network_reachability_brief"] = net_brief
             # Use the reachability-ranked findings rows so the model sees
             # targeted/network-themed findings first.
@@ -667,9 +680,13 @@ def ask(
                 "when container_log_evidence is non-empty. Do not label the host "
                 "network globally broken unless runtime evidence supports it."
             )
-        # Reachability briefs need more headroom than 2500 chars to keep the
-        # container_log_evidence + runtime_network_basics blocks intact.
-        effective_mode = "full" if net_brief is not None and ctx_mode != "full" else ctx_mode
+        # Reachability briefs and target-container blocks need more headroom
+        # than 2500 chars to stay intact in the prompt.
+        effective_mode = (
+            "full"
+            if (net_brief is not None or tc_status is not None) and ctx_mode != "full"
+            else ctx_mode
+        )
         prompt = build_contextual_prompt(question, prompt_context, mode=effective_mode)
     else:
         prompt_context = {

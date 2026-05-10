@@ -227,7 +227,9 @@ _PROBLEM_PATTERNS = [
         re.compile(
             r"(?i)temporary failure in name resolution|name or service not known|"
             r"could not resolve host|no such host|getaddrinfo|dns lookup failed|"
-            r"servfail|nxdomain"
+            r"servfail|nxdomain|bad address|bad host name|bad host\b|"
+            r"wget:\s*bad address|ping:\s*bad address|"
+            r"unable to resolve|name resolution failed"
         ),
     ),
     (
@@ -256,6 +258,14 @@ _PROBLEM_PATTERNS = [
             r"(?i)network is unreachable|no route to host|"
             r"upstream (?:unreachable|host|connect|down)|host is unreachable|"
             r"connection reset by peer|destination unreachable"
+        ),
+    ),
+    (
+        "unknown_network_error",
+        re.compile(
+            r"(?i)wget:\s*(?:download timed out|can't connect|server returned)|"
+            r"curl:\s*\(\d+\)|network error|"
+            r"socket (?:hang up|closed)|broken pipe"
         ),
     ),
     ("oom", re.compile(r"(?i)out of memory|oom[\- ]killed|killed process")),

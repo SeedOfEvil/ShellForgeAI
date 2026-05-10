@@ -31,6 +31,7 @@ NETWORK_THEME_LABEL = {
     "connection_refused": "connection_refused",
     "timeout": "timeout",
     "tls_certificate": "tls_certificate",
+    "unknown_network_error": "unknown_network_error",
 }
 NETWORK_THEME_KEYS = tuple(NETWORK_THEME_LABEL.keys())
 
@@ -197,6 +198,9 @@ _LAB_CONTAINER_HINTS = {
     "bad-volume-perms": "sfai-bad-volume-perms",
     "bad volume perms": "sfai-bad-volume-perms",
     "healthy-web": "sfai-healthy-web",
+    "healthy web": "sfai-healthy-web",
+    "healthy webservice": "sfai-healthy-web",
+    "the healthy web service": "sfai-healthy-web",
 }
 
 
@@ -363,6 +367,86 @@ def network_reachability_brief(
             "container dependency issue unless runtime evidence proves a "
             "host-wide outage."
         ),
+    }
+
+
+def target_container_status(evidence_items, target_container: str):
+    """Return a compact status dict for the named container, if visible.
+
+    Looks at ``docker.containers`` (full inventory, includes healthy
+    containers) and ``docker.problem_summary`` (failing/noisy buckets with
+    log themes). Returns ``None`` if Docker is not visible or the container
+    is not present. Used so the model can confidently say e.g.
+    ``sfai-healthy-web is running and healthy`` instead of falling back to
+    a local-process check that fails inside the ShellForgeAI container.
+    """
+
+    if not target_container:
+        return None
+    inv_item = next(
+        (i for i in evidence_items if getattr(i, "source", "") == "docker.containers"),
+        None,
+    )
+    if inv_item is None or not getattr(inv_item, "ok", False):
+        return None
+    try:
+        inv_payload = json.loads(getattr(inv_item, "content", "") or "{}")
+    except (ValueError, json.JSONDecodeError):
+        inv_payload = {}
+    row = next(
+        (
+            r
+            for r in (inv_payload.get("containers") or [])
+            if (r.get("name") or "") == target_container
+        ),
+        None,
+    )
+    if row is None:
+        return None
+
+    summary_item = next(
+        (i for i in evidence_items if getattr(i, "source", "") == "docker.problem_summary"),
+        None,
+    )
+    health = None
+    log_themes: dict = {}
+    log_sample: list = []
+    bucket = "healthy"
+    if summary_item is not None and getattr(summary_item, "ok", False):
+        try:
+            payload = json.loads(getattr(summary_item, "content", "") or "{}")
+        except (ValueError, json.JSONDecodeError):
+            payload = {}
+        for entry in payload.get("failing", []) or []:
+            if entry.get("name") == target_container:
+                bucket = "failing"
+                health = entry.get("health")
+                log_themes = entry.get("log_themes") or {}
+                log_sample = [str(s)[:200] for s in (entry.get("log_sample") or [])][-3:]
+                break
+        else:
+            for entry in payload.get("noisy", []) or []:
+                if entry.get("name") == target_container:
+                    bucket = "noisy"
+                    health = entry.get("health")
+                    log_themes = entry.get("log_themes") or {}
+                    log_sample = [str(s)[:200] for s in (entry.get("log_sample") or [])][-3:]
+                    break
+    status = (row.get("status") or "").lower()
+    if health is None:
+        if "healthy" in status:
+            health = "healthy"
+        elif "unhealthy" in status:
+            health = "unhealthy"
+    return {
+        "name": target_container,
+        "image": row.get("image") or "",
+        "state": row.get("state") or "",
+        "status": row.get("status") or "",
+        "health": health,
+        "bucket": bucket,
+        "log_themes": [NETWORK_THEME_LABEL.get(k, k) for k in log_themes if log_themes.get(k)],
+        "log_sample": log_sample,
     }
 
 

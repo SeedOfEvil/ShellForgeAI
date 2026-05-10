@@ -124,6 +124,11 @@ def route_input(text: str) -> RoutedCommand:
         "bad-volume-perms",
         "bad network",
         "bad-network",
+        "healthy web",
+        "healthy-web",
+        "healthy web service",
+        "the healthy web service",
+        "is the healthy web service",
         "sfai-missing-env",
         "sfai missing env",
         "sfai-restart-loop",
@@ -134,6 +139,8 @@ def route_input(text: str) -> RoutedCommand:
         "sfai bad volume perms",
         "sfai-bad-network",
         "sfai bad network",
+        "sfai-healthy-web",
+        "sfai healthy web",
     )
     if any(alias in lowered for alias in lab_container_aliases) or any(
         alias in raw.lower() for alias in lab_container_aliases
