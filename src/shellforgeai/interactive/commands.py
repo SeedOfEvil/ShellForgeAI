@@ -538,6 +538,12 @@ def route_input(text: str) -> RoutedCommand:
         return RoutedCommand(name="diagnose", args="ssh")
     if "is docker running" in lowered:
         return RoutedCommand(name="diagnose", args="docker")
+    pkg_install_match = re.search(r"\bis\s+([a-z0-9.+_-]+)\s+installed\b", lowered)
+    if pkg_install_match:
+        return RoutedCommand(name="diagnose", args=f"packages:{pkg_install_match.group(1)}")
+    owner_match = re.search(r"\bwhat\s+package\s+owns\s+(/[^\s]+)", lowered)
+    if owner_match:
+        return RoutedCommand(name="diagnose", args=f"package-owner:{owner_match.group(1)}")
     package_config_intents = [
         ("what packages changed recently", "packages"),
         ("package history", "packages"),

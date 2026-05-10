@@ -501,7 +501,7 @@ def collect_storage_evidence(context) -> list[EvidenceItem]:
     ]
 
 
-def collect_package_evidence(context, target: str = "") -> list[EvidenceItem]:
+def collect_package_evidence(context, target: str = "", owner_path: str = "") -> list[EvidenceItem]:
     items = [
         _to_item(packages.manager_detect(), EvidenceCategory.packages, "Package manager detection"),
         _to_item(packages.recent_history(), EvidenceCategory.packages, "Recent package history"),
@@ -509,6 +509,14 @@ def collect_package_evidence(context, target: str = "") -> list[EvidenceItem]:
     if target:
         items.append(
             _to_item(packages.query(target), EvidenceCategory.packages, f"Package query: {target}")
+        )
+    if owner_path:
+        items.append(
+            _to_item(
+                packages.file_owner(owner_path),
+                EvidenceCategory.packages,
+                f"Package owner for {owner_path}",
+            )
         )
     return _dedupe_items(items)
 

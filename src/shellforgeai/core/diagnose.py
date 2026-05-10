@@ -499,7 +499,13 @@ def diagnose_target(
             warnings=warnings,
         )
 
-    if canonical_target in {"packages", "package", "changes", "change", "config"}:
+    if canonical_target.startswith("packages:"):
+        pkg = canonical_target.split(":", 1)[1].strip()
+        items.extend(collect_package_evidence(context, target=pkg))
+    elif canonical_target.startswith("package-owner:"):
+        owner_path = target.split(":", 1)[1].strip() if ":" in target else ""
+        items.extend(collect_package_evidence(context, owner_path=owner_path))
+    elif canonical_target in {"packages", "package", "changes", "change", "config"}:
         if canonical_target in {"packages", "package"}:
             items.extend(collect_package_evidence(context))
         elif canonical_target == "config":
