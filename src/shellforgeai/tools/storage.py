@@ -80,3 +80,17 @@ def mounts() -> ToolResult:
         f"overlay={'yes' if overlay else 'no'} ro_mounts={ro_count}"
     )
     return ToolResult(tool="storage.mounts", stdout="\n".join(rows), stderr=summary, ok=True)
+
+
+def mount_target(path: str) -> ToolResult:
+    r = run_command(["findmnt", "-T", path, "-o", "TARGET,SOURCE,FSTYPE,OPTIONS", "-n"])
+    if r.exit_code != 0:
+        return ToolResult(
+            tool="storage.mount_target",
+            ok=False,
+            exit_code=r.exit_code,
+            stderr="mount target unavailable",
+        )
+    return ToolResult(
+        tool="storage.mount_target", command=r.command, stdout=r.stdout.strip(), ok=True
+    )

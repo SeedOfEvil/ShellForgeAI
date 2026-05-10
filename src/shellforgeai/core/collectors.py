@@ -11,6 +11,7 @@ from shellforgeai.tools import (
     configs,
     containers,
     disk,
+    files,
     firewall,
     host,
     logs,
@@ -106,6 +107,8 @@ def _summarize(result) -> str:
     if result.tool == "network.listeners.filtered":
         port = result.command[-1] if result.command else "port"
         return f"port {port.lstrip(':')}: {'listener found' if first else 'no listener'}"
+    if result.tool == "storage.mount_target":
+        return (result.stdout or "mount target unavailable").strip()[:180]
     if result.tool == "files.exists":
         path = result.command[-1] if result.command else "path"
         return f"{path}: {'exists' if result.ok else 'missing'}"
@@ -370,9 +373,6 @@ def collect_performance_evidence(context) -> list[EvidenceItem]:
         _to_item(process.io(), EvidenceCategory.host, "Process I/O"),
         _to_item(system.pressure(), EvidenceCategory.host, "Pressure"),
         _to_item(system.cgroup_limits(), EvidenceCategory.host, "Cgroup limits"),
-        _to_item(process.io(), EvidenceCategory.host, "Process I/O"),
-        _to_item(system.pressure(), EvidenceCategory.host, "Pressure"),
-        _to_item(system.cgroup_limits(), EvidenceCategory.host, "Cgroup limits"),
         _to_item(storage.mounts(), EvidenceCategory.host, "Storage mounts"),
         _to_item(audit_recent.recent(), EvidenceCategory.knowledge, "Recent audit trend"),
         _to_item(systemd.list_failed(), EvidenceCategory.service, "Failed systemd units"),
@@ -555,3 +555,11 @@ def collect_config_evidence(context, target: str = "") -> list[EvidenceItem]:
         _to_item(configs.recent_changes(), EvidenceCategory.files, "Recent config changes"),
     ]
     return _dedupe_items(items)
+
+
+def collect_path_ownership_evidence(context, path: str) -> list[EvidenceItem]:
+    return [
+        _to_item(files.exists(path), EvidenceCategory.files, f"Path stat: {path}"),
+        _to_item(storage.mount_target(path), EvidenceCategory.host, f"Mount target: {path}"),
+        _to_item(storage.mounts(), EvidenceCategory.host, "Storage mounts"),
+    ]

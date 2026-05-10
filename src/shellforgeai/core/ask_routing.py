@@ -450,6 +450,33 @@ def target_container_status(evidence_items, target_container: str):
     }
 
 
+def _docker_problem_rows(evidence_items, max_rows: int = 8) -> list[dict]:
+    summary_item = next(
+        (i for i in evidence_items if getattr(i, "source", "") == "docker.problem_summary"), None
+    )
+    if summary_item is None or not getattr(summary_item, "ok", False):
+        return []
+    try:
+        payload = json.loads(getattr(summary_item, "content", "") or "{}")
+    except (ValueError, json.JSONDecodeError):
+        return []
+    rows: list[dict] = []
+    for bucket in ("failing", "noisy", "healthy"):
+        for entry in payload.get(bucket, []) or []:
+            rows.append(
+                {
+                    "bucket": bucket,
+                    "name": entry.get("name"),
+                    "state": entry.get("state"),
+                    "exit_code": entry.get("exit_code"),
+                    "themes": [k for k, v in (entry.get("log_themes") or {}).items() if v],
+                }
+            )
+            if len(rows) >= max_rows:
+                return rows
+    return rows
+
+
 def evidence_brief(findings, evidence_items, *, max_findings: int = 8, max_evidence: int = 12):
     """Produce a compact dict suitable for prompt context.
 
@@ -475,4 +502,8 @@ def evidence_brief(findings, evidence_items, *, max_findings: int = 8, max_evide
                 "summary": (getattr(i, "summary", "") or "").splitlines()[0][:240],
             }
         )
-    return {"findings": f_rows, "evidence": e_rows}
+    brief = {"findings": f_rows, "evidence": e_rows}
+    drows = _docker_problem_rows(evidence_items)
+    if drows:
+        brief["docker_problem_rows"] = drows
+    return brief
