@@ -19,6 +19,11 @@
 - `audit list` / `audit show`; artifacts are written only when produced.
 - Build metadata via `SHELLFORGEAI_BUILD_PR` / `_COMMIT` / `_BRANCH` /
   `_DATE` env vars; surfaced by `--version`, `version`, and `doctor`.
+- PR30: evidence-backed operator runbooks. `shellforgeai runbook` (and
+  `diagnose --with-runbook`, fix-plan asks) turn existing read-only
+  evidence into a labelled operator-run remediation plan with
+  prechecks, options, rollback, and post-fix validation. ShellForgeAI
+  does not execute any of the steps; `apply` remains validation-only.
 
 ## Next
 

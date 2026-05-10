@@ -189,6 +189,29 @@ pinned to the front of `container_log_evidence` and is never truncated out.
 Mutation-style asks ("fix the network", "open port 443", "change DNS") collect
 read-only evidence and emit a safety boundary; `apply` remains validation-only.
 
+Operator runbook smoke (PR30):
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai diagnose docker --save-plan --with-runbook
+sudo docker compose exec -T shellforgeai shellforgeai runbook --latest
+sudo docker compose exec -T shellforgeai shellforgeai ask "give me a safe fix plan for the failed containers"
+sudo docker compose exec -T shellforgeai shellforgeai ask "fix bad-network safely"
+sudo docker compose exec -T shellforgeai shellforgeai ask "fix write permissions safely"
+sudo docker compose exec -T shellforgeai shellforgeai ask "fix missing env safely"
+sudo docker compose exec -T shellforgeai shellforgeai ask "what should I do next?"
+```
+
+Expected: a `runbook.md` (and `runbook.json`) artifact is written next
+to `evidence.json`. The runbook covers `sfai-missing-env`,
+`sfai-bad-volume-perms`, `sfai-restart-loop`, and `sfai-bad-network`
+with prechecks, operator-run options, rollback, and post-fix
+validation; `sfai-noisy-logs` is recommended for investigation only and
+sorted last; `sfai-healthy-web` is listed as a known-good baseline.
+Every mutating step is labelled `OPERATOR-RUN` (also
+`SERVICE-IMPACTING` / `REQUIRES APPROVAL` / `ROLLBACK ADVISED` where
+appropriate) and the runbook explicitly states "ShellForgeAI did not
+execute these steps." `apply` remains validation-only — no mutation.
+
 Cleanup:
 
 ```

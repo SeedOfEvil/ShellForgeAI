@@ -104,3 +104,17 @@ logs" is treated as a request to *inspect*: ShellForgeAI collects the
 relevant read-only evidence and prints an explicit safety boundary
 instead of running the mutation. `--no-evidence` disables routing and
 forces plain model Q&A. `apply` remains validation-only.
+
+`shellforgeai runbook` (and `diagnose --with-runbook`, and fix-plan
+intents in `ask`) produce an *operator-run* remediation plan from
+existing read-only evidence. The runbook is read-only synthesis — no
+shell commands are executed, no files are edited, no services are
+restarted, no packages are installed/removed/updated, no Docker
+containers are mutated, and no firewall/route/DNS state is changed.
+Every mutating command in the runbook is shown as a labelled hint
+(`OPERATOR-RUN`, `REQUIRES APPROVAL`, `SERVICE-IMPACTING`,
+`ROLLBACK ADVISED`) for a human operator to run, and every runbook
+explicitly states "ShellForgeAI did not execute these steps. This is an
+operator-run plan." Risk levels are advisory; ShellForgeAI does not act
+on them.
+

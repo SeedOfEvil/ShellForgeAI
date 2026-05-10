@@ -51,13 +51,21 @@ shellforgeai ask "what is this machine doing?"
 shellforgeai ask "find failed containers and explain likely cause"   # evidence-backed
 shellforgeai ask "why can the service not write to disk?"            # evidence-backed
 shellforgeai ask --no-evidence "explain DNS like I am new"           # plain model Q&A
+shellforgeai diagnose docker --save-plan --with-runbook              # safe operator runbook
+shellforgeai runbook --latest                                        # build runbook from latest evidence
+shellforgeai ask "give me a safe fix plan for the failed containers" # evidence + runbook
 ```
 
 For ops-shaped questions `ask` reuses the same read-only evidence
 collection as `diagnose`. Generic explainers and conceptual questions
 stay as plain model Q&A. `ask` never mutates — mutation-style requests
 ("can you restart nginx?") collect read-only evidence and print a
-safety boundary; `apply` remains validation-only.
+safety boundary; `apply` remains validation-only. Fix-plan / runbook
+intents (e.g. "what should I do next?", "fix bad-network safely")
+synthesize an operator-run remediation plan (`runbook.md`,
+`runbook.json`) from existing evidence; ShellForgeAI does not execute
+any of the steps and labels mutating commands `OPERATOR-RUN` /
+`REQUIRES APPROVAL` / `SERVICE-IMPACTING`.
 
 ## Using OpenAI Codex / ChatGPT sign-in
 
