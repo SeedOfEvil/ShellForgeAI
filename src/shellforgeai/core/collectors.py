@@ -8,12 +8,15 @@ from shellforgeai.knowledge.audits import search_recent_audits
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.tools import (
     audit_recent,
+    configs,
     containers,
     disk,
+    files,
     firewall,
     host,
     logs,
     network,
+    packages,
     process,
     services,
     storage,
@@ -104,9 +107,22 @@ def _summarize(result) -> str:
     if result.tool == "network.listeners.filtered":
         port = result.command[-1] if result.command else "port"
         return f"port {port.lstrip(':')}: {'listener found' if first else 'no listener'}"
+    if result.tool == "storage.mount_target":
+        return (result.stdout or "mount target unavailable").strip()[:180]
     if result.tool == "files.exists":
         path = result.command[-1] if result.command else "path"
         return f"{path}: {'exists' if result.ok else 'missing'}"
+    if result.tool == "files.stat" and (result.stdout or "").startswith("{"):
+        try:
+            data = literal_eval(result.stdout)
+        except (ValueError, SyntaxError):
+            data = {}
+        if not data.get("exists"):
+            return f"{data.get('path', 'path')}: missing"
+        return (
+            f"{data.get('path', 'path')}: owner={data.get('owner')}:{data.get('group')} "
+            f"mode={data.get('mode')} exec={'yes' if data.get('executable') else 'no'}"
+        )
     if result.tool == "process.top":
         if not result.ok or not result.stdout.strip():
             return "process details unavailable from this context"
@@ -129,6 +145,33 @@ def _summarize(result) -> str:
         )
     if result.tool == "system.pressure":
         return "pressure samples collected" if result.ok else "pressure unavailable"
+    if result.tool == "package.query" and (result.stdout or "").strip().startswith("{"):
+        try:
+            data = json.loads(result.stdout)
+        except (ValueError, json.JSONDecodeError):
+            data = {}
+        inst = data.get("installed")
+        pkg = data.get("package_name") or data.get("query") or "package"
+        ver = data.get("version")
+        if inst is True:
+            return f"{pkg} installed" + (f" version={ver}" if ver else "")
+        if inst is False:
+            return f"{pkg} not installed"
+        return f"{pkg} install status unknown"
+    if result.tool == "package.file_owner" and (result.stdout or "").strip().startswith("{"):
+        try:
+            data = json.loads(result.stdout)
+        except (ValueError, json.JSONDecodeError):
+            data = {}
+        status = data.get("owner_status")
+        path = data.get("path") or "path"
+        if status == "owned":
+            return f"{path} owned by {data.get('owner_package') or 'package'}"
+        if status == "path_missing":
+            return f"{path} is missing"
+        if status == "not_owned":
+            return f"{path} has no installed package owner"
+        return f"{path} ownership unavailable"
     if result.tool == "network.dns" and "nameserver" in (result.stdout or ""):
         ns = [ln.split()[1] for ln in result.stdout.splitlines() if ln.startswith("nameserver")]
         return (
@@ -341,9 +384,6 @@ def collect_performance_evidence(context) -> list[EvidenceItem]:
         _to_item(process.io(), EvidenceCategory.host, "Process I/O"),
         _to_item(system.pressure(), EvidenceCategory.host, "Pressure"),
         _to_item(system.cgroup_limits(), EvidenceCategory.host, "Cgroup limits"),
-        _to_item(process.io(), EvidenceCategory.host, "Process I/O"),
-        _to_item(system.pressure(), EvidenceCategory.host, "Pressure"),
-        _to_item(system.cgroup_limits(), EvidenceCategory.host, "Cgroup limits"),
         _to_item(storage.mounts(), EvidenceCategory.host, "Storage mounts"),
         _to_item(audit_recent.recent(), EvidenceCategory.knowledge, "Recent audit trend"),
         _to_item(systemd.list_failed(), EvidenceCategory.service, "Failed systemd units"),
@@ -496,4 +536,40 @@ def collect_storage_evidence(context) -> list[EvidenceItem]:
         _to_item(storage.context(), EvidenceCategory.host, "Storage context"),
         _to_item(storage.pressure(), EvidenceCategory.host, "Storage pressure"),
         _to_item(storage.error_summary(), EvidenceCategory.logs, "Storage errors"),
+    ]
+
+
+def collect_package_evidence(context, target: str = "", owner_path: str = "") -> list[EvidenceItem]:
+    items = [
+        _to_item(packages.manager_detect(), EvidenceCategory.packages, "Package manager detection"),
+        _to_item(packages.recent_history(), EvidenceCategory.packages, "Recent package history"),
+    ]
+    if target:
+        items.append(
+            _to_item(packages.query(target), EvidenceCategory.packages, f"Package query: {target}")
+        )
+    if owner_path:
+        items.append(
+            _to_item(
+                packages.file_owner(owner_path),
+                EvidenceCategory.packages,
+                f"Package owner for {owner_path}",
+            )
+        )
+    return _dedupe_items(items)
+
+
+def collect_config_evidence(context, target: str = "") -> list[EvidenceItem]:
+    t = target or "nginx"
+    items = [
+        _to_item(configs.find_common(t), EvidenceCategory.files, f"Common config paths for {t}"),
+        _to_item(configs.recent_changes(), EvidenceCategory.files, "Recent config changes"),
+    ]
+    return _dedupe_items(items)
+
+
+def collect_path_ownership_evidence(context, path: str) -> list[EvidenceItem]:
+    return [
+        _to_item(files.stat(path), EvidenceCategory.files, f"Path stat: {path}"),
+        _to_item(storage.mounts(path), EvidenceCategory.host, f"Storage mounts: {path}"),
     ]

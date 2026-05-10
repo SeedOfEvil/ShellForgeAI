@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -49,7 +50,77 @@ app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
 app.add_typer(model_app, name="model")
-console = Console()
+# Treat all runtime/model/evidence strings as untrusted; disable Rich markup
+# interpretation to prevent crashes on bracketed data like mount sources.
+console = Console(markup=False)
+
+
+def _is_oncall_overview_question(question: str) -> bool:
+    q = re.sub(r"[^a-z0-9\s]", " ", (question or "").lower())
+    q = re.sub(r"\s+", " ", q).strip()
+    toks = [
+        "on call",
+        "what s broken",
+        "anything broken",
+        "what needs attention",
+        "incident overview",
+        "triage this box",
+        "operator overview",
+    ]
+    return any(t in q for t in toks)
+
+
+def _is_path_ownership_question(question: str) -> bool:
+    q = (question or "").lower()
+    return bool(re.search(r"\b(?:what\s+owns|who\s+owns|what\s+package\s+owns)\s+/", q))
+
+
+def _ownership_context(evidence_items) -> dict:
+    out: dict[str, dict[str, str]] = {
+        "file": {},
+        "mounts": {},
+        "package_owner": {},
+    }
+    for i in evidence_items:
+        src = getattr(i, "source", "")
+        if src == "files.stat":
+            out["file"] = {
+                "summary": getattr(i, "summary", ""),
+                "content": getattr(i, "content", "")[:400],
+            }
+        elif src == "storage.mounts":
+            content = getattr(i, "content", "")[:1200]
+            out["mounts"] = {
+                "summary": getattr(i, "summary", ""),
+                "content": content,
+            }
+        elif src == "package.file_owner":
+            out["package_owner"] = {
+                "summary": getattr(i, "summary", ""),
+                "content": getattr(i, "content", "")[:400],
+            }
+    return out
+
+
+def _ownership_evidence_rows(evidence_items, *, max_rows: int = 8) -> list[dict]:
+    """Prioritize ownership-specific evidence rows for ask prompt context."""
+    rows: list[dict] = []
+    preferred = ("files.stat", "storage.mounts", "package.file_owner")
+    for src in preferred:
+        for i in evidence_items:
+            if getattr(i, "source", "") != src:
+                continue
+            rows.append(
+                {
+                    "source": src,
+                    "ok": bool(getattr(i, "ok", False)),
+                    "title": getattr(i, "title", "")[:120],
+                    "summary": (getattr(i, "summary", "") or "").splitlines()[0][:240],
+                }
+            )
+            if len(rows) >= max_rows:
+                return rows
+    return rows
 
 
 def _usage_line(resp) -> str:
@@ -615,18 +686,22 @@ def ask(
         # Docker health, not just for reachability questions.
         target_container = extract_container_target(question)
         tc_status = target_container_status(evidence_result.evidence.items, target_container)
+        oncall_overview = _is_oncall_overview_question(question)
+        use_net_rank = route.network_reachability or oncall_overview
         net_brief = (
             network_reachability_brief(
                 evidence_result.findings,
                 evidence_result.evidence.items,
                 target_container=target_container,
+                max_containers=20,
+                max_findings=20,
             )
-            if route.network_reachability
+            if use_net_rank
             else None
         )
         synthesis_hints = (
             _network_reachability_hints(evidence_result.findings, evidence_result.evidence.items)
-            if route.network_reachability
+            if use_net_rank
             else []
         )
         prompt_context = {
@@ -641,6 +716,20 @@ def ask(
                 "performed. apply remains validation-only."
             ),
         }
+        if _is_path_ownership_question(question):
+            prompt_context["ownership_context"] = _ownership_context(evidence_result.evidence.items)
+            prompt_context["ownership_directive"] = (
+                "For path ownership questions, answer in this order: file existence/stat, "
+                "symlink target, mount target/source/options (if present), package owner status, "
+                "then container/host boundary caveat. Do not stop at package owner alone."
+            )
+            own_rows = _ownership_evidence_rows(evidence_result.evidence.items)
+            if own_rows:
+                existing_rows = prompt_context.get("evidence")
+                if isinstance(existing_rows, list):
+                    prompt_context["evidence"] = own_rows + existing_rows
+                else:
+                    prompt_context["evidence"] = own_rows
         if target_container:
             prompt_context["target_container"] = target_container
         if tc_status is not None:

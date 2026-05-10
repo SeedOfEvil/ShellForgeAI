@@ -334,6 +334,17 @@ def route_input(text: str) -> RoutedCommand:
             or (f"why is {svc} broken" in lowered)
         ):
             return RoutedCommand(name="diagnose", args=f"logs:{svc}")
+    oncall_phrases = [
+        "i m on call what s broken",
+        "what s broken",
+        "anything broken",
+        "what needs attention",
+        "incident overview",
+        "triage this box",
+        "operator overview",
+    ]
+    if any(p in lowered for p in oncall_phrases):
+        return RoutedCommand(name="diagnose", args="docker")
     if any(p in lowered for p in log_phrases):
         return RoutedCommand(name="diagnose", args="logs")
     if any(p in lowered for p in log_storage_phrases):
@@ -538,6 +549,31 @@ def route_input(text: str) -> RoutedCommand:
         return RoutedCommand(name="diagnose", args="ssh")
     if "is docker running" in lowered:
         return RoutedCommand(name="diagnose", args="docker")
+    pkg_install_match = re.search(r"\bis\s+([a-z0-9.+_-]+)\s+installed\b", lowered)
+    if pkg_install_match:
+        return RoutedCommand(name="diagnose", args=f"packages:{pkg_install_match.group(1)}")
+    owner_match = re.search(
+        r"\b(?:what\s+package\s+owns|what\s+owns|who\s+owns)\s+(/[^\s]+)", lowered
+    )
+    if owner_match:
+        return RoutedCommand(name="diagnose", args=f"package-owner:{owner_match.group(1)}")
+    package_config_intents = [
+        ("what packages changed recently", "packages"),
+        ("package history", "packages"),
+        ("is nginx installed", "packages"),
+        ("what version of nginx", "packages"),
+        ("what package owns", "packages"),
+        ("what config changed recently", "config"),
+        ("check nginx config", "config"),
+        ("ngnix config", "config"),
+        ("confg", "config"),
+        ("cnfig", "config"),
+        ("what changed before this broke", "changes"),
+        ("recent chagnes", "changes"),
+    ]
+    for tok, tgt in package_config_intents:
+        if tok in lowered:
+            return RoutedCommand(name="diagnose", args=tgt)
     for prefix, cmd in [
         ("diagnose ", "diagnose"),
         ("research ", "research"),

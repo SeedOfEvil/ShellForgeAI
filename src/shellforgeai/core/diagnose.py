@@ -6,6 +6,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from shellforgeai.core.collectors import (
+    collect_config_evidence,
     collect_disk_evidence,
     collect_docker_evidence,
     collect_firewall_evidence,
@@ -18,6 +19,8 @@ from shellforgeai.core.collectors import (
     collect_logs_service_evidence,
     collect_network_evidence,
     collect_nginx_evidence,
+    collect_package_evidence,
+    collect_path_ownership_evidence,
     collect_performance_evidence,
     collect_service_evidence,
     collect_ssh_evidence,
@@ -496,6 +499,22 @@ def diagnose_target(
             proposed_plan=plan,
             warnings=warnings,
         )
+
+    if canonical_target.startswith("packages:"):
+        pkg = canonical_target.split(":", 1)[1].strip()
+        items.extend(collect_package_evidence(context, target=pkg))
+    elif canonical_target.startswith("package-owner:"):
+        owner_path = target.split(":", 1)[1].strip() if ":" in target else ""
+        items.extend(collect_path_ownership_evidence(context, owner_path))
+        items.extend(collect_package_evidence(context, owner_path=owner_path))
+    elif canonical_target in {"packages", "package", "changes", "change", "config"}:
+        if canonical_target in {"packages", "package"}:
+            items.extend(collect_package_evidence(context))
+        elif canonical_target == "config":
+            items.extend(collect_config_evidence(context))
+        else:
+            items.extend(collect_package_evidence(context))
+            items.extend(collect_config_evidence(context))
     if target in {"health"} or canonical_target == "host":
         items.extend(collect_health_evidence(context))
     if any(
@@ -510,7 +529,10 @@ def diagnose_target(
         items.extend(collect_performance_evidence(context))
         items.extend(collect_disk_evidence(context))
         items.extend(collect_local_knowledge_evidence(context, "disk"))
-    elif ttype == TargetType.service or canonical_target == "service-discovery":
+    elif (
+        (ttype == TargetType.service or canonical_target == "service-discovery")
+        and not canonical_target.startswith("package-owner:")
+    ):
         items.extend(collect_service_evidence(context, target, since=since))
         if target.lower() == "nginx":
             items.extend(collect_nginx_evidence(context))
