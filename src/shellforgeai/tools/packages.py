@@ -46,47 +46,90 @@ def manager_detect() -> ToolResult:
 
 
 def query(name: str) -> ToolResult:
-    p = json.loads(manager_detect().stdout).get("primary", "unknown")
-    if p == "apt/dpkg":
-        return _as_tool_result(
-            "package.query",
-            run_command(["sh", "-lc", f"dpkg -s {name} 2>/dev/null | sed -n '1,8p'"]),
+    manager = json.loads(manager_detect().stdout).get("primary", "unknown")
+    payload = {
+        "query": name,
+        "manager": manager,
+        "installed": "unknown",
+        "package_name": None,
+        "version": None,
+        "architecture": None,
+        "raw_status": None,
+        "limitation": None,
+    }
+    if manager == "apt/dpkg":
+        r = run_command(
+            [
+                "sh",
+                "-lc",
+                (
+                    "dpkg-query -W -f='${Status}|${Package}|${Version}|${Architecture}' "
+                    f"{name} 2>/dev/null"
+                ),
+            ]
         )
-    if p == "dnf/yum/rpm":
-        return _as_tool_result(
-            "package.query",
-            run_command(["sh", "-lc", f"rpm -qi {name} 2>/dev/null | sed -n '1,10p'"]),
-        )
-    if p == "apk":
-        return _as_tool_result(
-            "package.query",
-            run_command(["sh", "-lc", f"apk info -e {name} && apk info -v {name} | head -n 3"]),
-        )
+        txt = (r.stdout or "").strip()
+        if r.exit_code == 0 and txt:
+            parts = txt.split("|")
+            payload["raw_status"] = parts[0] if parts else ""
+            payload["package_name"] = parts[1] if len(parts) > 1 else name
+            payload["version"] = parts[2] if len(parts) > 2 else None
+            payload["architecture"] = parts[3] if len(parts) > 3 else None
+            payload["installed"] = bool("installed" in (parts[0] if parts else ""))
+        else:
+            payload["installed"] = False
+            payload["raw_status"] = "not-installed"
+        return ToolResult(tool="package.query", stdout=json.dumps(payload), ok=True)
+    payload["limitation"] = "package manager unavailable"
     return ToolResult(
-        tool="package.query", ok=False, exit_code=1, stderr="package manager unavailable"
+        tool="package.query",
+        stdout=json.dumps(payload),
+        ok=False,
+        exit_code=1,
+        stderr="package manager unavailable",
     )
 
 
 def file_owner(path: str) -> ToolResult:
-    p = json.loads(manager_detect().stdout).get("primary", "unknown")
-    if p == "apt/dpkg":
-        return _as_tool_result(
-            "package.file_owner",
-            run_command(["sh", "-lc", f"dpkg -S {path} 2>/dev/null | head -n 1"]),
+    p = Path(path)
+    exists = p.exists() or p.is_symlink()
+    symlink_target = str(p.resolve()) if p.is_symlink() else None
+    manager = json.loads(manager_detect().stdout).get("primary", "unknown")
+    payload = {
+        "path": path,
+        "exists": exists,
+        "symlink_target": symlink_target,
+        "manager": manager,
+        "owner_package": None,
+        "owner_status": "error",
+        "limitation": None,
+    }
+    if not exists:
+        payload["owner_status"] = "path_missing"
+        return ToolResult(tool="package.file_owner", stdout=json.dumps(payload), ok=True)
+    if manager != "apt/dpkg":
+        payload["owner_status"] = "manager_unavailable"
+        payload["limitation"] = "package manager unavailable"
+        return ToolResult(
+            tool="package.file_owner",
+            stdout=json.dumps(payload),
+            ok=False,
+            exit_code=1,
+            stderr="package manager unavailable",
         )
-    if p == "dnf/yum/rpm":
-        return _as_tool_result(
-            "package.file_owner",
-            run_command(["sh", "-lc", f"rpm -qf {path} 2>/dev/null | head -n 1"]),
-        )
-    if p == "apk":
-        return _as_tool_result(
-            "package.file_owner",
-            run_command(["sh", "-lc", f"apk info -W {path} 2>/dev/null | head -n 1"]),
-        )
-    return ToolResult(
-        tool="package.file_owner", ok=False, exit_code=1, stderr="package manager unavailable"
-    )
+
+    check_paths = [path]
+    if symlink_target and symlink_target != path:
+        check_paths.append(symlink_target)
+    for cp in check_paths:
+        r = run_command(["sh", "-lc", f"dpkg -S {cp} 2>/dev/null | head -n 1"])
+        line = (r.stdout or "").strip()
+        if r.exit_code == 0 and ":" in line:
+            payload["owner_package"] = line.split(":", 1)[0].strip()
+            payload["owner_status"] = "owned"
+            return ToolResult(tool="package.file_owner", stdout=json.dumps(payload), ok=True)
+    payload["owner_status"] = "not_owned"
+    return ToolResult(tool="package.file_owner", stdout=json.dumps(payload), ok=True)
 
 
 def recent_history(lines: int = 80) -> ToolResult:

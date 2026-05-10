@@ -131,6 +131,33 @@ def _summarize(result) -> str:
         )
     if result.tool == "system.pressure":
         return "pressure samples collected" if result.ok else "pressure unavailable"
+    if result.tool == "package.query" and (result.stdout or "").strip().startswith("{"):
+        try:
+            data = json.loads(result.stdout)
+        except (ValueError, json.JSONDecodeError):
+            data = {}
+        inst = data.get("installed")
+        pkg = data.get("package_name") or data.get("query") or "package"
+        ver = data.get("version")
+        if inst is True:
+            return f"{pkg} installed" + (f" version={ver}" if ver else "")
+        if inst is False:
+            return f"{pkg} not installed"
+        return f"{pkg} install status unknown"
+    if result.tool == "package.file_owner" and (result.stdout or "").strip().startswith("{"):
+        try:
+            data = json.loads(result.stdout)
+        except (ValueError, json.JSONDecodeError):
+            data = {}
+        status = data.get("owner_status")
+        path = data.get("path") or "path"
+        if status == "owned":
+            return f"{path} owned by {data.get('owner_package') or 'package'}"
+        if status == "path_missing":
+            return f"{path} is missing"
+        if status == "not_owned":
+            return f"{path} has no installed package owner"
+        return f"{path} ownership unavailable"
     if result.tool == "network.dns" and "nameserver" in (result.stdout or ""):
         ns = [ln.split()[1] for ln in result.stdout.splitlines() if ln.startswith("nameserver")]
         return (

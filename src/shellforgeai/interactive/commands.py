@@ -334,6 +334,17 @@ def route_input(text: str) -> RoutedCommand:
             or (f"why is {svc} broken" in lowered)
         ):
             return RoutedCommand(name="diagnose", args=f"logs:{svc}")
+    oncall_phrases = [
+        "i m on call what s broken",
+        "what s broken",
+        "anything broken",
+        "what needs attention",
+        "incident overview",
+        "triage this box",
+        "operator overview",
+    ]
+    if any(p in lowered for p in oncall_phrases):
+        return RoutedCommand(name="diagnose", args="docker")
     if any(p in lowered for p in log_phrases):
         return RoutedCommand(name="diagnose", args="logs")
     if any(p in lowered for p in log_storage_phrases):
@@ -541,7 +552,9 @@ def route_input(text: str) -> RoutedCommand:
     pkg_install_match = re.search(r"\bis\s+([a-z0-9.+_-]+)\s+installed\b", lowered)
     if pkg_install_match:
         return RoutedCommand(name="diagnose", args=f"packages:{pkg_install_match.group(1)}")
-    owner_match = re.search(r"\bwhat\s+package\s+owns\s+(/[^\s]+)", lowered)
+    owner_match = re.search(
+        r"\b(?:what\s+package\s+owns|what\s+owns|who\s+owns)\s+(/[^\s]+)", lowered
+    )
     if owner_match:
         return RoutedCommand(name="diagnose", args=f"package-owner:{owner_match.group(1)}")
     package_config_intents = [
