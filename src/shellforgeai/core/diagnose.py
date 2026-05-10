@@ -166,6 +166,12 @@ def _findings_from_docker(items) -> list[Finding]:
             title += " (write/permission failure)"
         elif themes.get("dns_failure") or themes.get("upstream_unreachable"):
             title += " (network/DNS failure in logs)"
+        elif themes.get("connection_refused"):
+            title += " (connection refused in logs)"
+        elif themes.get("timeout"):
+            title += " (timeout in logs)"
+        elif themes.get("tls_certificate"):
+            title += " (TLS/certificate failure in logs)"
         elif themes.get("simulated_crash") or themes.get("traceback"):
             title += " (repeated crash)"
         findings.append(
@@ -183,9 +189,21 @@ def _findings_from_docker(items) -> list[Finding]:
     for entry in payload.get("noisy", []) or []:
         name = entry.get("name") or "container"
         themes = entry.get("log_themes") or {}
-        if themes.get("dns_failure") or themes.get("upstream_unreachable"):
+        net_themes = [
+            t
+            for t in (
+                "dns_failure",
+                "upstream_unreachable",
+                "connection_refused",
+                "timeout",
+                "tls_certificate",
+            )
+            if themes.get(t)
+        ]
+        if net_themes:
             sev = "warning"
-            title = f"{name} is running but logs show upstream DNS/reachability errors"
+            theme_label = "/".join(t.replace("_", " ") for t in net_themes)
+            title = f"{name} is running but logs show {theme_label} (app/container reachability)"
         else:
             sev = "info"
             title = f"{name} is running but logs contain WARN/ERROR noise (not a crash)"

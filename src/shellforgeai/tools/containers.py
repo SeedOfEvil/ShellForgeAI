@@ -227,15 +227,45 @@ _PROBLEM_PATTERNS = [
         re.compile(
             r"(?i)temporary failure in name resolution|name or service not known|"
             r"could not resolve host|no such host|getaddrinfo|dns lookup failed|"
-            r"servfail|nxdomain"
+            r"servfail|nxdomain|bad address|bad host name|bad host\b|"
+            r"wget:\s*bad address|ping:\s*bad address|"
+            r"unable to resolve|name resolution failed"
+        ),
+    ),
+    (
+        "connection_refused",
+        re.compile(r"(?i)connection refused|econnrefused|connect\(\) failed|upstream refused"),
+    ),
+    (
+        "timeout",
+        re.compile(
+            r"(?i)connection timed out|i/o timeout|read timed out|"
+            r"timeout connecting|upstream timeout|deadline exceeded|"
+            r"\btimed out\b|\btimout\b"
+        ),
+    ),
+    (
+        "tls_certificate",
+        re.compile(
+            r"(?i)certificate verify failed|tls handshake (?:failed|timeout)|"
+            r"unknown authority|x509[: ]|self[- ]signed certificate|"
+            r"certificate has expired|ssl[:_ ]error"
         ),
     ),
     (
         "upstream_unreachable",
         re.compile(
-            r"(?i)connection refused|network is unreachable|no route to host|"
-            r"upstream (?:unreachable|host|connect|timeout|down)|host is unreachable|"
-            r"connection reset by peer"
+            r"(?i)network is unreachable|no route to host|"
+            r"upstream (?:unreachable|host|connect|down)|host is unreachable|"
+            r"connection reset by peer|destination unreachable"
+        ),
+    ),
+    (
+        "unknown_network_error",
+        re.compile(
+            r"(?i)wget:\s*(?:download timed out|can't connect|server returned)|"
+            r"curl:\s*\(\d+\)|network error|"
+            r"socket (?:hang up|closed)|broken pipe"
         ),
     ),
     ("oom", re.compile(r"(?i)out of memory|oom[\- ]killed|killed process")),

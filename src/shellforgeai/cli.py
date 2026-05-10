@@ -15,7 +15,10 @@ from shellforgeai.core.ask_routing import (
     PLAIN,
     AskRoute,
     evidence_brief,
+    extract_container_target,
+    network_reachability_brief,
     route_ask_intent,
+    target_container_status,
 )
 from shellforgeai.core.config import load_settings
 from shellforgeai.core.context import RuntimeContext
@@ -63,6 +66,64 @@ def _ctx(ctx: typer.Context) -> RuntimeContext:
 
 def _ensure_artifact_dir(runtime: RuntimeContext) -> None:
     runtime.session.artifact_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _network_reachability_hints(findings, items) -> list[str]:
+    """Build prioritized synthesis hints for network reachability questions.
+
+    The model must rank app/container log evidence above runtime network basics
+    so a healthy DNS resolver/default route does not silently cancel out a
+    container that is logging upstream/DNS/reachability failures.
+    """
+    hints: list[str] = []
+    app_net_finding = next(
+        (
+            f
+            for f in findings
+            if str(getattr(f, "severity", "")) == "warning"
+            and any(
+                tok in (getattr(f, "title", "") or "").lower()
+                for tok in (
+                    "dns",
+                    "upstream",
+                    "reachab",
+                    "connection refused",
+                    "timeout",
+                    "tls",
+                    "certificate",
+                )
+            )
+        ),
+        None,
+    )
+    if app_net_finding is not None:
+        hints.append(
+            f"App/container log evidence shows a reachability failure: "
+            f"{getattr(app_net_finding, 'title', '')}. Surface this first."
+        )
+
+    def _item(source: str):
+        return next((i for i in items if getattr(i, "source", "") == source), None)
+
+    dns_test = _item("network.resolution_test")
+    default_route = _item("network.default_route")
+    runtime_ok = bool(
+        (dns_test and getattr(dns_test, "ok", False))
+        and (default_route and getattr(default_route, "ok", False))
+    )
+    if runtime_ok and app_net_finding is not None:
+        hints.append(
+            "Runtime DNS resolution and default route appear OK from this namespace, "
+            "but that does NOT cancel the app/container log evidence above. Frame this "
+            "as an app/container reachability issue, not a host-wide network outage."
+        )
+    container_detect = _item("system.container_detect")
+    if container_detect is not None:
+        hints.append(
+            "Host firewall and host-level routes are not directly visible from a "
+            "container namespace; mention this caveat briefly."
+        )
+    return hints
 
 
 def _write_summary_md(
@@ -317,8 +378,22 @@ def diagnose(
     full_context: bool = typer.Option(False, "--full-context"),
 ) -> None:
     runtime = _ctx(ctx)
+    raw_target_text = target
     target = _normalize_diagnose_target(target)
+    from shellforgeai.core.ask_routing import is_network_reachability_intent
+
+    net_reach = is_network_reachability_intent(raw_target_text)
     result = diagnose_target(runtime, target, online=online, since=since)
+    if net_reach:
+        try:
+            from shellforgeai.core.collectors import collect_network_evidence
+
+            existing_sources = {i.source for i in result.evidence.items}
+            for ni in collect_network_evidence(runtime):
+                if ni.source not in existing_sources:
+                    result.evidence.items.append(ni)
+        except Exception:
+            pass
     audit = AuditStorage(runtime.session.data_dir)
     _ensure_artifact_dir(runtime)
     ev_path = runtime.session.artifact_dir / "evidence.json"
@@ -522,24 +597,97 @@ def ask(
 
     if route.mode == EVIDENCE_BACKED and evidence_result is not None:
         _ensure_artifact_dir(runtime)
+        if route.network_reachability:
+            try:
+                from shellforgeai.core.collectors import collect_network_evidence
+
+                existing_sources = {i.source for i in evidence_result.evidence.items}
+                for ni in collect_network_evidence(runtime):
+                    if ni.source not in existing_sources:
+                        evidence_result.evidence.items.append(ni)
+            except Exception:
+                pass
         ev_path = runtime.session.artifact_dir / "evidence.json"
         ev_path.write_text(evidence_result.evidence.model_dump_json(indent=2), encoding="utf-8")
         brief = evidence_brief(evidence_result.findings, evidence_result.evidence.items)
+        # Extract target container for any evidence-backed ask. This lets
+        # "is the healthy web service okay?" surface sfai-healthy-web's
+        # Docker health, not just for reachability questions.
+        target_container = extract_container_target(question)
+        tc_status = target_container_status(evidence_result.evidence.items, target_container)
+        net_brief = (
+            network_reachability_brief(
+                evidence_result.findings,
+                evidence_result.evidence.items,
+                target_container=target_container,
+            )
+            if route.network_reachability
+            else None
+        )
+        synthesis_hints = (
+            _network_reachability_hints(evidence_result.findings, evidence_result.evidence.items)
+            if route.network_reachability
+            else []
+        )
         prompt_context = {
+            "ask_intent": route.intent_label,
+            "identity": "CLI-first Linux ops harness with read-only safety boundaries.",
             "host": platform.platform(),
             "mode": runtime.session.mode,
-            "identity": "CLI-first Linux ops harness with read-only safety boundaries.",
-            "ask_intent": route.intent_label,
             "session_id": evidence_result.session_id,
-            "findings": brief["findings"],
-            "evidence": brief["evidence"],
             "mutation_request": route.mutation_request,
             "safety": (
                 "Inspect-only; no restart/stop/start/delete/install/firewall changes "
                 "performed. apply remains validation-only."
             ),
         }
-        prompt = build_contextual_prompt(question, prompt_context, mode=ctx_mode)
+        if target_container:
+            prompt_context["target_container"] = target_container
+        if tc_status is not None:
+            prompt_context["target_container_status"] = tc_status
+            prompt_context["target_container_directive"] = (
+                "target_container_status reflects Docker container inventory + "
+                "problem summary. If state=running and (health=healthy or bucket=healthy), "
+                "say the container is running and healthy; do NOT fall back to a "
+                "local-process check (e.g. 'nginx not found in this container') for a "
+                "Docker lab/service target. If log_themes are present, name them and the "
+                "container in the answer."
+            )
+        if net_brief is not None:
+            prompt_context["network_reachability_brief"] = net_brief
+            # Use the reachability-ranked findings rows so the model sees
+            # targeted/network-themed findings first.
+            prompt_context["findings"] = net_brief["findings"]
+            prompt_context["evidence"] = brief["evidence"]
+        else:
+            prompt_context["findings"] = brief["findings"]
+            prompt_context["evidence"] = brief["evidence"]
+        if synthesis_hints:
+            prompt_context["synthesis_hints"] = synthesis_hints
+            prompt_context["evidence_ranking"] = (
+                "Rank evidence in this order for reachability questions: "
+                "(1) target/app/container log themes (DNS, upstream unreachable, "
+                "connection refused, timeout, TLS) -- see "
+                "network_reachability_brief.container_log_evidence; "
+                "(2) service listener/exposure evidence; "
+                "(3) runtime network basics (DNS resolver, default route, listeners) "
+                "-- see network_reachability_brief.runtime_network_basics; "
+                "(4) visibility limitations. "
+                "Healthy runtime DNS/default route does NOT cancel app/container logs "
+                "showing reachability failure. If container_log_evidence contains an "
+                "entry, name that container and its themes explicitly in the answer. "
+                "Do not say 'no DNS-specific evidence' or 'reachability unconfirmed' "
+                "when container_log_evidence is non-empty. Do not label the host "
+                "network globally broken unless runtime evidence supports it."
+            )
+        # Reachability briefs and target-container blocks need more headroom
+        # than 2500 chars to stay intact in the prompt.
+        effective_mode = (
+            "full"
+            if (net_brief is not None or tc_status is not None) and ctx_mode != "full"
+            else ctx_mode
+        )
+        prompt = build_contextual_prompt(question, prompt_context, mode=effective_mode)
     else:
         prompt_context = {
             "host": platform.platform(),
