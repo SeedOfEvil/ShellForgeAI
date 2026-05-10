@@ -538,6 +538,23 @@ def route_input(text: str) -> RoutedCommand:
         return RoutedCommand(name="diagnose", args="ssh")
     if "is docker running" in lowered:
         return RoutedCommand(name="diagnose", args="docker")
+    package_config_intents = [
+        ("what packages changed recently", "packages"),
+        ("package history", "packages"),
+        ("is nginx installed", "packages"),
+        ("what version of nginx", "packages"),
+        ("what package owns", "packages"),
+        ("what config changed recently", "config"),
+        ("check nginx config", "config"),
+        ("ngnix config", "config"),
+        ("confg", "config"),
+        ("cnfig", "config"),
+        ("what changed before this broke", "changes"),
+        ("recent chagnes", "changes"),
+    ]
+    for tok, tgt in package_config_intents:
+        if tok in lowered:
+            return RoutedCommand(name="diagnose", args=tgt)
     for prefix, cmd in [
         ("diagnose ", "diagnose"),
         ("research ", "research"),

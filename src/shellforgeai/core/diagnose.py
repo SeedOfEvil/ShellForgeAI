@@ -6,6 +6,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from shellforgeai.core.collectors import (
+    collect_config_evidence,
     collect_disk_evidence,
     collect_docker_evidence,
     collect_firewall_evidence,
@@ -18,6 +19,7 @@ from shellforgeai.core.collectors import (
     collect_logs_service_evidence,
     collect_network_evidence,
     collect_nginx_evidence,
+    collect_package_evidence,
     collect_performance_evidence,
     collect_service_evidence,
     collect_ssh_evidence,
@@ -496,6 +498,15 @@ def diagnose_target(
             proposed_plan=plan,
             warnings=warnings,
         )
+
+    if canonical_target in {"packages", "package", "changes", "change", "config"}:
+        if canonical_target in {"packages", "package"}:
+            items.extend(collect_package_evidence(context))
+        elif canonical_target == "config":
+            items.extend(collect_config_evidence(context))
+        else:
+            items.extend(collect_package_evidence(context))
+            items.extend(collect_config_evidence(context))
     if target in {"health"} or canonical_target == "host":
         items.extend(collect_health_evidence(context))
     if any(

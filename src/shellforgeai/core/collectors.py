@@ -8,12 +8,14 @@ from shellforgeai.knowledge.audits import search_recent_audits
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.tools import (
     audit_recent,
+    configs,
     containers,
     disk,
     firewall,
     host,
     logs,
     network,
+    packages,
     process,
     services,
     storage,
@@ -497,3 +499,24 @@ def collect_storage_evidence(context) -> list[EvidenceItem]:
         _to_item(storage.pressure(), EvidenceCategory.host, "Storage pressure"),
         _to_item(storage.error_summary(), EvidenceCategory.logs, "Storage errors"),
     ]
+
+
+def collect_package_evidence(context, target: str = "") -> list[EvidenceItem]:
+    items = [
+        _to_item(packages.manager_detect(), EvidenceCategory.packages, "Package manager detection"),
+        _to_item(packages.recent_history(), EvidenceCategory.packages, "Recent package history"),
+    ]
+    if target:
+        items.append(
+            _to_item(packages.query(target), EvidenceCategory.packages, f"Package query: {target}")
+        )
+    return _dedupe_items(items)
+
+
+def collect_config_evidence(context, target: str = "") -> list[EvidenceItem]:
+    t = target or "nginx"
+    items = [
+        _to_item(configs.find_common(t), EvidenceCategory.files, f"Common config paths for {t}"),
+        _to_item(configs.recent_changes(), EvidenceCategory.files, "Recent config changes"),
+    ]
+    return _dedupe_items(items)
