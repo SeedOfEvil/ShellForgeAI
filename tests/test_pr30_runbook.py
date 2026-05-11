@@ -23,6 +23,7 @@ from shellforgeai.core.runbook import (
     latest_evidence_artifact,
     render_runbook_md,
     runbook_from_evidence_file,
+    validate_runbook_payload,
 )
 
 # ---------- Fixtures ----------
@@ -252,11 +253,11 @@ def test_runbook_json_is_valid():
         target="docker",
         evidence_items=_docker_evidence(),
     )
-    payload = json.loads(rb.model_dump_json())
+    payload = rb.to_schema_dict()
     assert payload["session_id"] == "sf_test"
     assert payload["target"] == "docker"
-    assert "operator_steps" in payload
-    assert payload["risk_level"] in {"low", "medium", "high"}
+    assert "remediation_options" in payload
+    assert payload["overall_risk"] in {"low", "medium", "high"}
 
 
 def test_runbook_problems_include_severity_and_evidence():
@@ -532,7 +533,28 @@ def test_runbook_cli_writes_artifacts(tmp_path):
     # Validate runbook.json shape
     rb_json = json.loads((sess_dir / "runbook.json").read_text(encoding="utf-8"))
     assert rb_json["session_id"]
-    assert "operator_steps" in rb_json
+    assert "remediation_options" in rb_json
+
+
+def test_runbook_schema_validation_passes():
+    rb = build_runbook(session_id="sf_test", target="docker", evidence_items=_docker_evidence())
+    errors, _ = validate_runbook_payload(rb.to_schema_dict())
+    assert errors == []
+
+
+def test_validate_runbook_cli(tmp_path):
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
+
+    sess_dir = tmp_path / "sf_validate"
+    sess_dir.mkdir()
+    ev = _write_evidence_bundle(sess_dir)
+    runner = CliRunner()
+    assert runner.invoke(app, ["runbook", str(ev)]).exit_code == 0
+    result = runner.invoke(app, ["validate-runbook", str(sess_dir / "runbook.json")])
+    assert result.exit_code == 0, result.output
+    assert "Runbook validation passed" in result.output
 
 
 def test_runbook_cli_accepts_session_directory(tmp_path):

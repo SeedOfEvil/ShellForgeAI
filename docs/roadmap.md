@@ -20,6 +20,7 @@
 - Build metadata via `SHELLFORGEAI_BUILD_PR` / `_COMMIT` / `_BRANCH` /
   `_DATE` env vars; surfaced by `--version`, `version`, and `doctor`.
 - PR30: evidence-backed operator runbooks. `shellforgeai runbook` (and
+- PR31: formal runbook validation (`validate-runbook`), schema-versioned `runbook.json`, and stricter advisory risk scoring.
   `diagnose --with-runbook`, fix-plan asks) turn existing read-only
   evidence into a labelled operator-run remediation plan with
   prechecks, options, rollback, and post-fix validation. ShellForgeAI
