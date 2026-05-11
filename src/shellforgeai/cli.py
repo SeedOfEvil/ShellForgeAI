@@ -32,6 +32,7 @@ from shellforgeai.core.runbook import (
     latest_evidence_artifact,
     render_runbook_md,
     runbook_from_evidence_file,
+    validate_runbook_payload,
 )
 from shellforgeai.core.session import build_session_context
 from shellforgeai.interactive.commands import route_input
@@ -487,15 +488,15 @@ def diagnose(
     runbook_path = runtime.session.artifact_dir / "runbook.md"
     runbook_json_path = runtime.session.artifact_dir / "runbook.json"
     if with_runbook:
-        rb = build_runbook(
-            session_id=result.session_id,
+        rb = runbook_from_evidence_file(
+            ev_path,
+            session_id=runtime.session.session_id,
             target=target,
-            evidence_items=list(result.evidence.items),
-            findings=list(result.findings),
-            source_artifacts=[str(ev_path)],
         )
         runbook_path.write_text(render_runbook_md(rb), encoding="utf-8")
-        runbook_json_path.write_text(rb.model_dump_json(indent=2), encoding="utf-8")
+        import json
+
+        runbook_json_path.write_text(json.dumps(rb.to_schema_dict(), indent=2), encoding="utf-8")
     summary_candidates = ["evidence.json", "plan.json", "summary.md"]
     if with_runbook:
         summary_candidates += ["runbook.md", "runbook.json"]
@@ -594,7 +595,8 @@ def diagnose(
             f"- plan: {plan_path if save_plan else 'not-saved'}\n"
             f"- model response: {model_response_display}\n"
             f"- summary: {summary_path if summary_path.exists() else 'n/a'}\n"
-            f"- runbook: {runbook_path if runbook_path.exists() else 'not-saved'}"
+            f"- runbook: {runbook_path if runbook_path.exists() else 'not-saved'}\n"
+            f"- runbook json: {runbook_json_path if runbook_json_path.exists() else 'not-saved'}"
         )
         console.print(summary)
 
@@ -714,7 +716,9 @@ def runbook(
     md_path = out_dir / "runbook.md"
     json_path = out_dir / "runbook.json"
     md_path.write_text(render_runbook_md(rb), encoding="utf-8")
-    json_path.write_text(rb.model_dump_json(indent=2), encoding="utf-8")
+    import json
+
+    json_path.write_text(json.dumps(rb.to_schema_dict(), indent=2), encoding="utf-8")
     console.print(
         "Operator runbook written (read-only synthesis; ShellForgeAI did not execute anything):\n"
         f"- {md_path}\n"
@@ -723,6 +727,61 @@ def runbook(
         f"- problems: {len(rb.problems)}\n"
         f"- options: {len(rb.operator_steps)}\n"
         f"- risk: {rb.risk_level}"
+    )
+
+
+@app.command("validate-runbook")
+def validate_runbook_cmd(
+    ctx: typer.Context,
+    artifact: Annotated[Path | None, typer.Argument()] = None,
+    latest: bool = typer.Option(False, "--latest"),
+) -> None:
+    runtime = _ctx(ctx)
+    target_path: Path | None = None
+    if artifact is not None:
+        target_path = artifact / "runbook.json" if artifact.is_dir() else artifact
+    elif latest:
+        ev = latest_evidence_artifact(runtime.session.data_dir)
+        target_path = ev.parent / "runbook.json" if ev else None
+    if target_path is None or not target_path.exists():
+        console.print(
+            "Runbook validation failed:\n"
+            f"- runbook: {target_path}\n"
+            "- errors:\n"
+            "  - runbook.json not found"
+        )
+        raise typer.Exit(code=1)
+    try:
+        import json
+
+        payload = json.loads(target_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        console.print(
+            "Runbook validation failed:\n"
+            f"- runbook: {target_path}\n"
+            "- errors:\n"
+            f"  - malformed JSON: {exc}"
+        )
+        raise typer.Exit(code=1) from None
+    errors, warnings = validate_runbook_payload(payload)
+    if errors:
+        console.print("Runbook validation failed:")
+        console.print(f"- runbook: {target_path}")
+        console.print("- errors:")
+        for err in errors:
+            console.print(f"  - {err}")
+        raise typer.Exit(code=1)
+    console.print(
+        "Runbook validation passed:\n"
+        f"- runbook: {target_path}\n"
+        f"- session: {payload.get('session_id')}\n"
+        f"- problems: {len(payload.get('problems') or [])}\n"
+        f"- options: {len(payload.get('remediation_options') or [])}\n"
+        f"- risk: {payload.get('overall_risk')}\n"
+        "- safety: operator-run only\n"
+        "- schema: ok\n"
+        f"- references: {'ok' if not warnings else 'warning'}\n"
+        "- mutation execution: none"
     )
 
 
@@ -943,8 +1002,10 @@ def ask(
                 source_artifacts=[str(ev_path)],
             )
             runbook_md_path = artifact_dir / "runbook.md"
+            import json
+
             (artifact_dir / "runbook.json").write_text(
-                rb.model_dump_json(indent=2), encoding="utf-8"
+                json.dumps(rb.to_schema_dict(), indent=2), encoding="utf-8"
             )
             runbook_md_path.write_text(render_runbook_md(rb), encoding="utf-8")
         console.print(

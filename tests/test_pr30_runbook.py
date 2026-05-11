@@ -23,6 +23,7 @@ from shellforgeai.core.runbook import (
     latest_evidence_artifact,
     render_runbook_md,
     runbook_from_evidence_file,
+    validate_runbook_payload,
 )
 
 # ---------- Fixtures ----------
@@ -252,11 +253,11 @@ def test_runbook_json_is_valid():
         target="docker",
         evidence_items=_docker_evidence(),
     )
-    payload = json.loads(rb.model_dump_json())
+    payload = rb.to_schema_dict()
     assert payload["session_id"] == "sf_test"
     assert payload["target"] == "docker"
-    assert "operator_steps" in payload
-    assert payload["risk_level"] in {"low", "medium", "high"}
+    assert "remediation_options" in payload
+    assert payload["overall_risk"] in {"low", "medium", "high"}
 
 
 def test_runbook_problems_include_severity_and_evidence():
@@ -532,7 +533,28 @@ def test_runbook_cli_writes_artifacts(tmp_path):
     # Validate runbook.json shape
     rb_json = json.loads((sess_dir / "runbook.json").read_text(encoding="utf-8"))
     assert rb_json["session_id"]
-    assert "operator_steps" in rb_json
+    assert "remediation_options" in rb_json
+
+
+def test_runbook_schema_validation_passes():
+    rb = build_runbook(session_id="sf_test", target="docker", evidence_items=_docker_evidence())
+    errors, _ = validate_runbook_payload(rb.to_schema_dict())
+    assert errors == []
+
+
+def test_validate_runbook_cli(tmp_path):
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
+
+    sess_dir = tmp_path / "sf_validate"
+    sess_dir.mkdir()
+    ev = _write_evidence_bundle(sess_dir)
+    runner = CliRunner()
+    assert runner.invoke(app, ["runbook", str(ev)]).exit_code == 0
+    result = runner.invoke(app, ["validate-runbook", str(sess_dir / "runbook.json")])
+    assert result.exit_code == 0, result.output
+    assert "Runbook validation passed" in result.output
 
 
 def test_runbook_cli_accepts_session_directory(tmp_path):
@@ -684,7 +706,7 @@ def test_diagnose_with_runbook_writes_runbook(tmp_path, monkeypatch):
     from shellforgeai import cli as cli_mod
 
     monkeypatch.setattr(cli_mod, "diagnose_target", fake_diag)
-    # redirect data_dir
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path / "sfdata"))
     monkeypatch.setenv("HOME", str(tmp_path))
     runner = CliRunner()
     result = runner.invoke(app, ["diagnose", "docker", "--with-runbook"])
@@ -692,9 +714,20 @@ def test_diagnose_with_runbook_writes_runbook(tmp_path, monkeypatch):
     # Find the runbook artifact
     runbooks = list(Path(tmp_path).rglob("runbook.md"))
     assert runbooks, f"no runbook.md found under {tmp_path}\n{result.output}"
-    md = runbooks[0].read_text(encoding="utf-8")
+    runbook_md = runbooks[0]
+    runbook_json = runbook_md.with_name("runbook.json")
+    evidence_json = runbook_md.with_name("evidence.json")
+    assert runbook_json.exists()
+    assert evidence_json.exists()
+    md = runbook_md.read_text(encoding="utf-8")
     assert SAFETY_LINE in md
     assert "sfai-missing-env" in md
+    assert str(runbook_md.parent).startswith(str(tmp_path))
+    assert "/data/artifacts" not in str(runbook_md)
+    assert "/data/artifacts" not in result.output
+    assert "sfdata/artifacts" in result.output
+    assert "runbook.md" in result.output
+    assert "runbook json:" in result.output
 
 
 # ---------- Regression: PR27/28/29 routing still healthy ----------

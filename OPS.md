@@ -194,6 +194,7 @@ Operator runbook smoke (PR30):
 ```
 sudo docker compose exec -T shellforgeai shellforgeai diagnose docker --save-plan --with-runbook
 sudo docker compose exec -T shellforgeai shellforgeai runbook --latest
+sudo docker compose exec -T shellforgeai shellforgeai validate-runbook --latest
 sudo docker compose exec -T shellforgeai shellforgeai ask "give me a safe fix plan for the failed containers"
 sudo docker compose exec -T shellforgeai shellforgeai ask "fix bad-network safely"
 sudo docker compose exec -T shellforgeai shellforgeai ask "fix write permissions safely"

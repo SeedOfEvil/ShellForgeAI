@@ -27,11 +27,14 @@ SAFETY_LINE = "ShellForgeAI did not execute these steps. This is an operator-run
 RISK_LOW = "low"
 RISK_MEDIUM = "medium"
 RISK_HIGH = "high"
+SCHEMA_VERSION = "1"
 
 
 class RunbookProblem(BaseModel):
+    id: str = ""
     name: str
     component: str = ""
+    kind: str = ""
     severity: str = "warning"
     evidence: list[str] = Field(default_factory=list)
     likely_cause: str = ""
@@ -39,7 +42,9 @@ class RunbookProblem(BaseModel):
 
 
 class RunbookOption(BaseModel):
+    id: str = ""
     title: str
+    applies_to: list[str] = Field(default_factory=list)
     risk: str = RISK_MEDIUM
     impact: str = ""
     preconditions: list[str] = Field(default_factory=list)
@@ -63,6 +68,51 @@ class Runbook(BaseModel):
     validation: list[str] = Field(default_factory=list)
     safety_notes: list[str] = Field(default_factory=lambda: [SAFETY_LINE])
     executive_summary: str = ""
+
+    def to_schema_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "session_id": self.session_id,
+            "target": self.target,
+            "generated_at": self.generated_at.isoformat(),
+            "source_evidence": self.source_artifacts[0] if self.source_artifacts else "",
+            "safety_mode": "read-only / operator-run only",
+            "overall_risk": self.risk_level,
+            "problems": [
+                p.model_dump(
+                    include={
+                        "id",
+                        "component",
+                        "kind",
+                        "severity",
+                        "confidence",
+                        "likely_cause",
+                        "evidence",
+                    }
+                )
+                for p in self.problems
+            ],
+            "remediation_options": [
+                {
+                    "id": o.id,
+                    "title": o.title,
+                    "applies_to": o.applies_to,
+                    "risk": o.risk,
+                    "impact": o.impact,
+                    "preconditions": o.preconditions,
+                    "steps": o.steps,
+                    "rollback": o.rollback,
+                    "verification": o.verification,
+                    "safety_label": o.label,
+                }
+                for o in self.operator_steps
+            ],
+            "recommended_order": [o.id or o.title for o in self.operator_steps],
+            "post_fix_validation": self.validation,
+            "rollback_notes": self.rollback,
+            "safety_notes": self.safety_notes,
+            "executive_summary": self.executive_summary,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -364,8 +414,10 @@ def _problems_from_docker(
         }
         problems.append(
             RunbookProblem(
+                id=f"problem:{name}:{kind}",
                 name=f"{name}: {kind}",
                 component=name,
+                kind=kind,
                 severity=sev,
                 evidence=ev,
                 likely_cause=cause_map.get(kind, ""),
@@ -373,17 +425,35 @@ def _problems_from_docker(
             )
         )
         if kind == "missing-env":
-            options.append(_opt_missing_env(name, sample))
+            opt = _opt_missing_env(name, sample)
+            opt.id = f"option:{name}:{kind}"
+            opt.applies_to = [f"problem:{name}:{kind}", name]
+            options.append(opt)
         elif kind == "bad-volume-perms":
-            options.append(_opt_bad_volume_perms(name, sample))
+            opt = _opt_bad_volume_perms(name, sample)
+            opt.id = f"option:{name}:{kind}"
+            opt.applies_to = [f"problem:{name}:{kind}", name]
+            options.append(opt)
         elif kind == "restart-loop":
-            options.append(_opt_restart_loop(name, sample))
+            opt = _opt_restart_loop(name, sample)
+            opt.id = f"option:{name}:{kind}"
+            opt.applies_to = [f"problem:{name}:{kind}", name]
+            options.append(opt)
         elif kind == "bad-network":
-            options.append(_opt_bad_network(name, sample))
+            opt = _opt_bad_network(name, sample)
+            opt.id = f"option:{name}:{kind}"
+            opt.applies_to = [f"problem:{name}:{kind}", name]
+            options.append(opt)
         elif kind == "noisy-logs":
-            options.append(_opt_noisy_logs(name, sample))
+            opt = _opt_noisy_logs(name, sample)
+            opt.id = f"option:{name}:{kind}"
+            opt.applies_to = [f"problem:{name}:{kind}", name]
+            options.append(opt)
         elif kind == "exited-nonzero":
-            options.append(_opt_exited_nonzero(name, entry.get("exit_code"), sample))
+            opt = _opt_exited_nonzero(name, entry.get("exit_code"), sample)
+            opt.id = f"option:{name}:{kind}"
+            opt.applies_to = [f"problem:{name}:{kind}", name]
+            options.append(opt)
 
     for entry in buckets["failing"]:
         _add(entry, "failing")
@@ -542,6 +612,142 @@ def _risk_level(options: list[RunbookOption]) -> str:
     return RISK_LOW
 
 
+_MUTATION_TOKENS = (
+    "restart",
+    "recreate",
+    "install",
+    "update",
+    "chmod",
+    "chown",
+    "edit",
+    "delete",
+    "firewall",
+    "route",
+    "dns",
+    "docker compose up -d",
+)
+
+
+def option_risk_from_text(option: RunbookOption) -> str:
+    blob = " ".join([option.title, option.impact, *option.steps]).lower()
+    if "document host-mounted docker cli" in blob:
+        return RISK_LOW
+    if any(
+        tok in blob
+        for tok in (
+            "chmod 777",
+            "package update all",
+            "docker daemon restart",
+            "broad chown",
+            "broad chmod",
+            "volume deletion",
+            "firewall",
+            "route",
+            "dns changes",
+        )
+    ):
+        return RISK_HIGH
+    if any(tok in blob for tok in ("docker compose up -d", "restart", "recreate")):
+        return RISK_MEDIUM
+    return RISK_LOW
+
+
+def validate_runbook_payload(payload: dict[str, Any]) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    required_top = [
+        "schema_version",
+        "session_id",
+        "target",
+        "generated_at",
+        "source_evidence",
+        "safety_mode",
+        "overall_risk",
+        "problems",
+        "remediation_options",
+        "recommended_order",
+        "post_fix_validation",
+        "safety_notes",
+    ]
+    for key in required_top:
+        if key not in payload:
+            errors.append(f"missing required field: {key}")
+    safety_mode = str(payload.get("safety_mode", "")).lower()
+    if "read-only" not in safety_mode and "operator-run" not in safety_mode:
+        errors.append("safety_mode must mention read-only or operator-run")
+    notes = " ".join(str(x) for x in (payload.get("safety_notes") or []))
+    if "did not execute" not in notes.lower():
+        errors.append("runbook missing safety note")
+    problems = payload.get("problems") or []
+    for i, p in enumerate(problems):
+        for key in (
+            "id",
+            "component",
+            "kind",
+            "severity",
+            "confidence",
+            "likely_cause",
+            "evidence",
+        ):
+            if key not in p:
+                errors.append(f"problem[{i}] missing {key}")
+        if p.get("severity") not in {"critical", "warning", "info"}:
+            errors.append(f"problem[{i}].severity must be one of critical|warning|info")
+        if p.get("confidence") not in {"high", "medium", "low"}:
+            errors.append(f"problem[{i}].confidence must be one of high|medium|low")
+    options = payload.get("remediation_options") or []
+    known_problem_refs = {p.get("id") for p in problems} | {p.get("component") for p in problems}
+    for i, o in enumerate(options):
+        for key in (
+            "id",
+            "title",
+            "applies_to",
+            "risk",
+            "impact",
+            "preconditions",
+            "steps",
+            "rollback",
+            "verification",
+            "safety_label",
+        ):
+            if key not in o:
+                errors.append(f"option[{i}] missing {key}")
+        if o.get("risk") not in {RISK_LOW, RISK_MEDIUM, RISK_HIGH}:
+            errors.append(f"option[{i}].risk must be one of low|medium|high")
+        if o.get("risk") in {RISK_MEDIUM, RISK_HIGH} and not o.get("rollback"):
+            errors.append(f"option[{i}] is missing rollback")
+        if not o.get("verification"):
+            errors.append(f"option[{i}] is missing verification")
+        steps = " ".join(str(s) for s in (o.get("steps") or [])).lower()
+        mutating = any(tok in steps for tok in _MUTATION_TOKENS)
+        if mutating and "OPERATOR-RUN" not in str(o.get("safety_label", "")):
+            errors.append("mutating step is not labeled OPERATOR-RUN")
+        if mutating and not any(
+            lbl in str(o.get("steps", "")) for lbl in ("REQUIRES APPROVAL", "SERVICE-IMPACTING")
+        ):
+            errors.append("mutating step missing REQUIRES APPROVAL or SERVICE-IMPACTING")
+        applies_to = o.get("applies_to") or []
+        if applies_to and not all(
+            (a in known_problem_refs or str(a).startswith("general:")) for a in applies_to
+        ):
+            warnings.append(f"option[{i}] applies_to does not match known problem ids/components")
+    max_risk = (
+        _risk_level(
+            [
+                RunbookOption.model_validate(
+                    {"title": str(o.get("title", "")), "risk": o.get("risk", RISK_LOW)}
+                )
+                for o in options
+            ]
+        )
+        if options
+        else RISK_LOW
+    )
+    if payload.get("overall_risk") != max_risk:
+        errors.append(f"overall_risk must be {max_risk} based on remediation_options")
+    return errors, warnings
+
+
 # Order: high-confidence + low-risk first; restart-loop is critical and should
 # bubble up; noisy-logs is always last.
 _KIND_ORDER = {
@@ -585,6 +791,17 @@ def build_runbook(
     fo_options = _problems_from_file_owner(evidence_items)
     cc_options = _problems_from_config_changes(evidence_items)
     options = _sort_options(docker_options + pkg_options + fo_options + cc_options)
+    for idx, opt in enumerate(options, 1):
+        if not opt.id:
+            opt.id = f"option:general:{idx}"
+            opt.applies_to = ["general:investigation"]
+        derived = option_risk_from_text(opt)
+        if {RISK_LOW: 0, RISK_MEDIUM: 1, RISK_HIGH: 2}[derived] > {
+            RISK_LOW: 0,
+            RISK_MEDIUM: 1,
+            RISK_HIGH: 2,
+        }[opt.risk]:
+            opt.risk = derived
 
     inv = _docker_inventory(evidence_items)
     healthy_names = []
