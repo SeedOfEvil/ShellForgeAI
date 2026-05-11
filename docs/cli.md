@@ -36,6 +36,8 @@ Running with no `<command>` enters interactive mode (see
 | `tools describe <name>` | Print tool metadata as JSON. |
 | `audit list` | List audit session ids. |
 | `audit show <session_id>` | Show a session's JSON record. |
+| `export <session-id\|session-dir>` / `export --latest` / `export --proposal <id>` / `export --latest-approved` / `export --approved` (refused) / `export --output PATH` / `export --redact` | Bundle evidence/summary/plan/runbook/proposal/apply-preflight artifacts into a portable audit pack under `<data_dir>/exports/<export_id>/`. Writes `export-manifest.json`, `export-summary.md`, `checksums.sha256`, and copies any optional artifact files that exist (`evidence.json`, `summary.md`, `plan.json`, `runbook.md`, `runbook.json`, `proposal.json`, `apply-preview.md`, `operator-commands.sh`, `rollback.sh`, `validation.md`, `apply-preflight.json`). Missing optional files are recorded in the manifest. `--approved` is intentionally refused; use `--proposal <id>` or `--latest-approved`. `--redact` best-effort masks `password=`, `token=`, `api_key=`, `secret=`, `Authorization: Bearer ...` in copied text/JSON files. Export only reads/copies files — no commands are executed. |
+| `validate-export <export-dir\|export-manifest.json>` | Validate an export pack: manifest exists, included files present, checksums match, safety note present, and `apply-preflight.json` (when included) records `execution_allowed=false` / `execution_status=not_executed`. Exit `0` valid, `1` invalid/missing. |
 | `model doctor` | Provider doctor. Shows whether `codex` and auth cache are present and suggests `codex login` when missing. |
 | `model test [prompt]` | One-shot model call. Options: `--raw`, `--timeout`, `--model`. |
 

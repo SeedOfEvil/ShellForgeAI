@@ -48,6 +48,16 @@ from shellforgeai.core.config import load_settings
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import classify_target
+from shellforgeai.core.export_pack import (
+    export_from_proposal,
+    export_from_session,
+    export_latest_approved,
+    export_latest_session,
+    is_export_intent,
+    latest_session_dir,
+    resolve_session_dir,
+    validate_export,
+)
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.runbook import (
@@ -970,6 +980,149 @@ def apply(
 
 
 # ---------------------------------------------------------------------------
+# Export pack (PR34)
+
+
+def _print_export_result(result) -> None:
+    console.print("Audit/export pack written (ShellForgeAI did not execute anything):")
+    console.print(f"- export id: {result.export_id}")
+    console.print(f"- export dir: {result.export_dir}")
+    console.print(f"- source type: {result.source_type}")
+    if result.source_session_id:
+        console.print(f"- source session: {result.source_session_id}")
+    if result.source_proposal_id:
+        console.print(f"- source proposal: {result.source_proposal_id}")
+    console.print(f"- files: {len(result.included_files)}")
+    for f in result.included_files:
+        console.print(f"  - {f}")
+    if result.missing_optional:
+        console.print(f"- missing optional: {len(result.missing_optional)}")
+        for f in result.missing_optional:
+            console.print(f"  - {f}")
+    console.print(f"- manifest: {result.manifest_path}")
+    console.print(f"- summary: {result.summary_path}")
+    console.print(f"- checksums: {result.checksums_path}")
+    console.print("- execution: not_executed")
+    console.print("- No commands were executed.")
+
+
+@app.command("export")
+def export_cmd(
+    ctx: typer.Context,
+    target: Annotated[str | None, typer.Argument()] = None,
+    latest: bool = typer.Option(False, "--latest", help="Export the newest artifact session."),
+    proposal: str | None = typer.Option(
+        None, "--proposal", help="Export an approved/pending proposal pack by id."
+    ),
+    approved: bool = typer.Option(
+        False,
+        "--approved",
+        help="Export all approved proposals (refused in PR34; use --latest-approved).",
+    ),
+    latest_approved: bool = typer.Option(
+        False, "--latest-approved", help="Export the newest approved proposal."
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output", help="Explicit output directory (default: <data_dir>/exports/<id>)."
+        ),
+    ] = None,
+    redact: bool = typer.Option(
+        False, "--redact", help="Apply best-effort secret redaction to text copies."
+    ),
+) -> None:
+    """Bundle evidence/runbook/proposal/preflight into a portable audit pack.
+
+    ShellForgeAI does not execute remediation. ``export`` only reads/copies
+    existing artifacts and writes a new directory under
+    ``<data_dir>/exports/``.
+    """
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    if approved:
+        console.print(
+            "Export refused:\n"
+            "- --approved would export every approved proposal and is too broad.\n"
+            "- use --proposal <id> or --latest-approved to scope the export."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        if proposal is not None:
+            result = export_from_proposal(data_dir, proposal, output=output, redact=redact)
+        elif latest_approved:
+            result = export_latest_approved(data_dir, output=output, redact=redact)
+        elif latest:
+            result = export_latest_session(data_dir, output=output, redact=redact)
+        elif target:
+            session_dir = resolve_session_dir(data_dir, target)
+            if session_dir is None:
+                console.print(
+                    f"Export failed:\n- session not found: {target}\n- no commands executed"
+                )
+                raise typer.Exit(code=1)
+            result = export_from_session(data_dir, session_dir, output=output, redact=redact)
+        else:
+            raise typer.BadParameter(
+                "Provide a session id/dir, --latest, --proposal <id>, or --latest-approved."
+            )
+    except FileNotFoundError as exc:
+        console.print(f"Export failed:\n- {exc}\n- no commands executed")
+        raise typer.Exit(code=1) from None
+    _print_export_result(result)
+
+
+@app.command("validate-export")
+def validate_export_cmd(ctx: typer.Context, target: Path) -> None:
+    """Validate an export pack: manifest, included files, checksums, safety."""
+    _ = _ctx(ctx)
+    result = validate_export(target)
+    if not result.ok:
+        console.print("Export validation failed:")
+        for err in result.errors or ["unknown error"]:
+            console.print(f"- {err}")
+        raise typer.Exit(code=1)
+    console.print("Export validation passed:")
+    console.print(f"- export: {result.info.get('export_dir', target)}")
+    console.print(f"- files: {result.info.get('file_count', 0)}")
+    console.print("- checksums: ok")
+    console.print("- safety: ok")
+    console.print("- execution: none")
+
+
+def _handle_export_ask(runtime: RuntimeContext, question: str) -> bool:
+    intent = is_export_intent(question)
+    if not intent.matched:
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    try:
+        if intent.prefer_approved:
+            result = export_latest_approved(data_dir)
+        else:
+            latest = latest_session_dir(data_dir)
+            if latest is None:
+                console.print(
+                    "Cannot export an audit pack yet: no session artifacts found.\n"
+                    "- run `shellforgeai diagnose <target> --with-runbook` first.\n"
+                    "- no commands were executed."
+                )
+                return True
+            result = export_from_session(data_dir, latest)
+            result.source_type = "latest"
+    except FileNotFoundError as exc:
+        console.print(
+            f"Cannot export an audit pack: {exc}.\n"
+            "- run `shellforgeai diagnose <target> --with-runbook` "
+            "and `shellforgeai approvals approve <id> --reason ...` first.\n"
+            "- no commands were executed."
+        )
+        return True
+    _print_export_result(result)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Approvals subcommands (PR32 scaffolding consumed by PR33 apply)
 
 
@@ -1441,6 +1594,8 @@ def ask(
     runtime = _ctx(ctx)
     if not no_evidence:
         if _handle_immediate_fix_ask(runtime, question):
+            return
+        if _handle_export_ask(runtime, question):
             return
         if _handle_apply_approved_ask(runtime, question):
             return

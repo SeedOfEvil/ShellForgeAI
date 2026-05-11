@@ -155,3 +155,18 @@ instead.
 
 - Proposal replay protection: ShellForgeAI computes a stable SHA-256 proposal fingerprint from runbook/session content and skips duplicates by default to prevent queue spam.
 - Approval transitions and apply preflight remain non-executing; execution fields stay `execution_allowed=false` and `execution_status=not_executed`.
+
+`shellforgeai export` packages evidence/summary/runbook/proposal/apply-preflight
+artifacts into a portable audit pack under `<data_dir>/exports/<export_id>/`.
+Export is read-only synthesis: it copies files and writes a new manifest +
+checksum file but does **not** execute remediation, restart services, edit
+files, install/remove packages, modify Docker containers, or change
+firewall/route/DNS state. Raw evidence files are preserved verbatim by default
+and a manifest warning notes that they may contain environment/config details
+and must be reviewed before sharing. `--redact` performs a best-effort secret
+mask (`password=`, `token=`, `api_key=`, `secret=`, `Authorization: Bearer`)
+on copied text/JSON files. `validate-export` re-checks an export pack: missing
+files, checksum mismatches, or an `apply-preflight.json` claiming
+`execution_allowed=true` cause validation to fail. **Approved does not mean
+applied**, and **exported does not mean applied**. `apply` remains
+validation-only.
