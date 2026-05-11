@@ -29,6 +29,7 @@ from shellforgeai.core.approvals import (
     Proposal,
     ProposalApproval,
     ProposalExecution,
+    ProposalSource,
     approve_proposal,
     find_proposal_path,
     proposal_filename,
@@ -50,18 +51,19 @@ def _mk_proposal(
 ) -> Proposal:
     return Proposal(
         proposal_id=proposal_id,
-        session_id="sf_test",
         created_at="2026-05-11T00:00:00+00:00",
         status=status,
+        source=ProposalSource(session_id="sf_test"),
+        target="docker",
         component="sfai-missing-env",
+        kind="container_env_config_change",
         title="Provide REQUIRED_SETTING for sfai-missing-env",
         risk=risk,
+        confidence="medium",
         impact="Recreates sfai-missing-env after config change.",
         safety_labels=safety_labels
         if safety_labels is not None
         else ["OPERATOR-RUN", "REQUIRES APPROVAL", "SERVICE-IMPACTING"],
-        source_evidence="",
-        source_runbook="",
         preconditions=["Confirm required variable name."],
         proposed_steps=steps
         if steps is not None
@@ -81,7 +83,9 @@ def _mk_proposal(
         notes="",
         execution=ProposalExecution(allowed=execution_allowed, status=execution_status),
         approval=ProposalApproval(
-            reason="approved for test", approved_at="2026-05-11T00:00:01+00:00", approved_by="op"
+            reason="approved for test",
+            approved_at="2026-05-11T00:00:01+00:00",
+            approved_by="op",
         )
         if status == STATUS_APPROVED
         else ProposalApproval(),
@@ -457,11 +461,12 @@ def test_approvals_create_from_runbook_session(_data_env, tmp_path):
     runner = CliRunner()
     result = runner.invoke(app, ["approvals", "create", session_id])
     assert result.exit_code == 0, result.output
-    assert "Created 1 pending proposal" in result.output
+    assert "created: 1" in result.output
+    assert "execution: disabled" in result.output
 
     listed = runner.invoke(app, ["approvals", "list"])
     assert listed.exit_code == 0, listed.output
-    assert "[pending]" in listed.output
+    assert "Pending approval proposals" in listed.output
     assert "sfai-missing-env" in listed.output
 
 

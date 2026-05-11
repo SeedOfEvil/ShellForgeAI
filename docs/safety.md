@@ -138,3 +138,16 @@ preflight and no operator-run scripts are written. `approved` is
 strictly a paper trail; it does not enable execution. ShellForgeAI's
 apply remains validation-only in this alpha.
 
+`shellforgeai approvals create|list|show|approve|reject|cancel|archive|validate`
+manages mutation proposal objects on disk only. Proposals are derived
+from `runbook.json` and live under
+`<data_dir>/approvals/{pending,approved,rejected,canceled,archived}/<id>.proposal.json`.
+Every proposal records `execution.allowed = false` and
+`execution.status = "not_executed"`, and the JSON schema is validated
+by `approvals validate`. Approval, rejection, cancellation, and
+archival only update metadata — ShellForgeAI does not execute any
+proposed step. "Approved" does not mean "applied". Immediate-fix
+asks like "approve and run the fix" or "fix everything now" are
+refused cleanly; ShellForgeAI offers to stage proposals for approval
+instead.
+

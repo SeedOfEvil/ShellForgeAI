@@ -242,6 +242,36 @@ Mutation (start/stop/restart/rm/exec/cp/build/pull/prune, compose
 mutation, volume/network mutation) is never executed. `apply` remains
 validation-only.
 
+Approval queue smoke (PR32):
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai diagnose docker --save-plan --with-runbook
+latest=$(sudo docker compose exec -T shellforgeai sh -lc 'find /data/artifacts -maxdepth 1 -type d -name "sf_*" | sort | tail -n 1' | tr -d "\r")
+sudo docker compose exec -T shellforgeai shellforgeai approvals create "$latest"
+sudo docker compose exec -T shellforgeai shellforgeai approvals list
+first=$(sudo docker compose exec -T shellforgeai sh -lc 'find /data/approvals/pending -name "*.proposal.json" | sort | head -n 1 | xargs -r basename | sed "s/.proposal.json$//"' | tr -d "\r")
+sudo docker compose exec -T shellforgeai shellforgeai approvals show "$first"
+sudo docker compose exec -T shellforgeai shellforgeai approvals validate "$first"
+sudo docker compose exec -T shellforgeai shellforgeai approvals approve "$first" --reason "Docker01 PR32 approval test"
+sudo docker compose exec -T shellforgeai shellforgeai approvals list
+sudo docker compose exec -T shellforgeai sh -lc 'find /data/approvals -maxdepth 2 -type f -name "*.proposal.json" -print | sort'
+sudo docker compose exec -T shellforgeai shellforgeai ask "queue the safe fixes for approval"
+sudo docker compose exec -T shellforgeai shellforgeai ask "approve and run the fix"
+sudo docker compose exec -T shellforgeai shellforgeai ask "fix everything now"
+```
+
+Expected: proposals are created for `sfai-missing-env`,
+`sfai-bad-volume-perms`, `sfai-restart-loop`, `sfai-bad-network`
+(noisy-logs/healthy-web skipped by default). `approvals show` displays
+preconditions/steps/rollback/verification with safety labels and an
+explicit "Not executed by ShellForgeAI" line. `approvals validate`
+reports `execution: disabled`, `schema: ok`, `safety: ok`. `approve`
+only updates status and moves the JSON file between
+`/data/approvals/{pending,approved}/`. Asks like "approve and run the
+fix" and "fix everything now" refuse execution and point at
+`approvals create` / `approvals approve` / `apply` flow. No mutation
+is performed.
+
 Apply preflight + operator bundle smoke (PR33):
 
 ```

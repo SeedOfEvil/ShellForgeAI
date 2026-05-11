@@ -219,8 +219,8 @@ def run_preflight(proposal: Proposal | None, *, require_approved: bool = True) -
             "broad_destructive_words",
             "broad destructive words detected in proposed_steps",
         )
-    if proposal.source_evidence:
-        ev_path = Path(proposal.source_evidence)
+    if proposal.source.evidence:
+        ev_path = Path(proposal.source.evidence)
         if not ev_path.exists():
             result.warn(
                 "source_evidence_path",
@@ -243,12 +243,16 @@ def _render_preview_md(proposal: Proposal, preflight: PreflightResult) -> str:
     lines.append("# Apply preview")
     lines.append("")
     lines.append(f"- Proposal: {proposal.proposal_id}")
-    if proposal.session_id:
-        lines.append(f"- Session: {proposal.session_id}")
+    if proposal.source.session_id:
+        lines.append(f"- Session: {proposal.source.session_id}")
     if proposal.component:
         lines.append(f"- Component: {proposal.component}")
+    if proposal.kind:
+        lines.append(f"- Kind: {proposal.kind}")
     lines.append(f"- Title: {proposal.title}")
     lines.append(f"- Risk: {proposal.risk}")
+    if proposal.confidence:
+        lines.append(f"- Confidence: {proposal.confidence}")
     if proposal.impact:
         lines.append(f"- Impact: {proposal.impact}")
     lines.append(f"- Approval status: {proposal.status}")
@@ -256,13 +260,17 @@ def _render_preview_md(proposal: Proposal, preflight: PreflightResult) -> str:
         lines.append(f"- Approval reason: {proposal.approval.reason}")
     if proposal.approval.approved_at:
         lines.append(f"- Approved at: {proposal.approval.approved_at}")
+    if proposal.approval.approved_by:
+        lines.append(f"- Approved by: {proposal.approval.approved_by}")
     lines.append("- Execution: not_executed (execution_allowed=false)")
     if proposal.safety_labels:
         lines.append(f"- Safety labels: {', '.join(proposal.safety_labels)}")
-    if proposal.source_evidence:
-        lines.append(f"- Source evidence: {proposal.source_evidence}")
-    if proposal.source_runbook:
-        lines.append(f"- Source runbook: {proposal.source_runbook}")
+    if proposal.source.evidence:
+        lines.append(f"- Source evidence: {proposal.source.evidence}")
+    if proposal.source.runbook:
+        lines.append(f"- Source runbook: {proposal.source.runbook}")
+    if proposal.source.summary:
+        lines.append(f"- Source summary: {proposal.source.summary}")
     lines.append("")
 
     lines.append("## Preconditions")
@@ -415,7 +423,7 @@ def _render_preflight_json(
         "execution_status": EXECUTION_NOT_EXECUTED,
         "risk": proposal.risk,
         "safety_labels": list(proposal.safety_labels),
-        "source_proposal": proposal.source_runbook or proposal.source_evidence or "",
+        "source_proposal": proposal.source.runbook or proposal.source.evidence or "",
         "bundle_dir": str(bundle_dir),
         "checks": [
             {"name": c.name, "status": c.status, "message": c.message} for c in preflight.checks

@@ -184,6 +184,67 @@ def is_fix_plan_intent(text: str) -> bool:
     )
 
 
+_CREATE_PROPOSALS_TOKENS = (
+    "create approval proposals",
+    "create approval proposal",
+    "approval proposals from latest runbook",
+    "approval proposals from the latest runbook",
+    "approval proposals from latest",
+    "queue the safe fixes for approval",
+    "queue the safe fixes",
+    "queue safe fixes",
+    "make approval proposals",
+    "make an approval proposal",
+    "prepare changes for approval",
+    "prepare the changes for approval",
+    "stage the remediation plan for approval",
+    "stage the remediation plan",
+    "stage remediation for approval",
+    "create pending fixes",
+    "put those fixes in the approval queue",
+    "put these fixes in the approval queue",
+    "put the fixes in the approval queue",
+    "queue these fixes for approval",
+    "queue those fixes for approval",
+)
+
+
+_IMMEDIATE_FIX_TOKENS = (
+    "approve and run the fix",
+    "approve and run the fixes",
+    "approve and apply",
+    "approve and execute",
+    "fix everything now",
+    "fix it now",
+    "fix this now",
+    "just fix it",
+    "just fix everything",
+    "apply the fix now",
+    "apply the fixes now",
+    "run the fix now",
+    "run the fixes now",
+)
+
+
+@dataclass(frozen=True)
+class CreateProposalsIntent:
+    matched: bool
+
+
+def is_create_proposals_intent(text: str) -> CreateProposalsIntent:
+    """Detect ask phrasing that asks ShellForgeAI to queue proposals."""
+    raw = (text or "").lower()
+    if any(tok in raw for tok in _CREATE_PROPOSALS_TOKENS):
+        return CreateProposalsIntent(matched=True)
+    return CreateProposalsIntent(matched=False)
+
+
+def is_immediate_fix_intent(text: str) -> bool:
+    """Detect 'approve and run / fix everything now' style asks."""
+    raw = (text or "").lower()
+    return any(tok in raw for tok in _IMMEDIATE_FIX_TOKENS)
+
+
 _APPLY_APPROVED_TOKENS = (
     "apply the approved proposal",
     "apply approved proposal",

@@ -1,10 +1,11 @@
-"""Approval queue / mutation proposal objects (PR32 scaffolding).
+"""Approval queue / mutation proposal objects (PR32).
 
 ShellForgeAI is a Tier-3 triage tool. It never executes mutation. The
 approval queue is a *paper trail*: it turns operator-run runbook options
 into proposal objects that an operator can mark ``approved``, ``rejected``,
-or ``canceled``. Marking a proposal ``approved`` does NOT execute anything;
-it only records that a human authorized a future operator-run change.
+``canceled``, or ``archived``. Marking a proposal ``approved`` does NOT
+execute anything; it only records that a human authorized a future
+operator-run change.
 
 PR33 consumes these proposals to generate an operator execution bundle
 (``apply_bundle.py``). Generation is still inspection-only.
@@ -19,6 +20,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -28,47 +30,72 @@ STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 STATUS_CANCELED = "canceled"
-APPROVAL_STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_CANCELED)
+STATUS_ARCHIVED = "archived"
+APPROVAL_STATUSES = (
+    STATUS_PENDING,
+    STATUS_APPROVED,
+    STATUS_REJECTED,
+    STATUS_CANCELED,
+    STATUS_ARCHIVED,
+)
 
 RISK_LOW = "low"
 RISK_MEDIUM = "medium"
 RISK_HIGH = "high"
 RISK_VALUES = (RISK_LOW, RISK_MEDIUM, RISK_HIGH)
 
+CONFIDENCE_VALUES = ("low", "medium", "high")
+
+EXECUTION_DISABLED_REASON = "PR32 only records proposals; apply remains validation-only."
+
+
+class ProposalSource(BaseModel):
+    session_id: str = ""
+    runbook: str = ""
+    evidence: str = ""
+    summary: str = ""
+
 
 class ProposalExecution(BaseModel):
     allowed: bool = False
     status: str = "not_executed"
+    reason: str = EXECUTION_DISABLED_REASON
 
 
 class ProposalApproval(BaseModel):
-    reason: str = ""
-    approved_at: str = ""
-    approved_by: str = ""
+    approved_by: str | None = None
+    approved_at: str | None = None
+    rejected_by: str | None = None
+    rejected_at: str | None = None
+    canceled_by: str | None = None
+    canceled_at: str | None = None
+    archived_by: str | None = None
+    archived_at: str | None = None
+    reason: str | None = None
 
 
 class Proposal(BaseModel):
     schema_version: str = PROPOSAL_SCHEMA_VERSION
     proposal_id: str
-    session_id: str = ""
     created_at: str = ""
     status: str = STATUS_PENDING
+    source: ProposalSource = Field(default_factory=ProposalSource)
+    target: str = ""
     component: str = ""
+    kind: str = ""
     title: str = ""
     risk: str = RISK_MEDIUM
     impact: str = ""
-    safety_labels: list[str] = Field(default_factory=list)
-    source_evidence: str = ""
-    source_runbook: str = ""
+    confidence: str = "medium"
+    evidence: list[str] = Field(default_factory=list)
     preconditions: list[str] = Field(default_factory=list)
     proposed_steps: list[str] = Field(default_factory=list)
     rollback: list[str] = Field(default_factory=list)
     verification: list[str] = Field(default_factory=list)
+    safety_labels: list[str] = Field(default_factory=list)
     notes: str = ""
     execution: ProposalExecution = Field(default_factory=ProposalExecution)
     approval: ProposalApproval = Field(default_factory=ProposalApproval)
-    rejection_reason: str = ""
-    canceled_reason: str = ""
 
     def is_mutating(self) -> bool:
         return _is_mutating_steps(self.proposed_steps)
@@ -135,6 +162,19 @@ def has_broad_destructive_words(steps: list[str]) -> bool:
     return any(tok in blob for tok in _DESTRUCTIVE_BROAD_TOKENS)
 
 
+def _has_service_impacting_tokens(text: str) -> bool:
+    blob = text.lower()
+    return (
+        "service-impacting" in blob
+        or "docker compose up -d" in blob
+        or "docker restart" in blob
+        or "systemctl restart" in blob
+        or "systemctl reload" in blob
+        or "service restart" in blob
+        or "service reload" in blob
+    )
+
+
 # ---------------------------------------------------------------------------
 # Storage layout
 
@@ -165,7 +205,7 @@ def find_proposal_path(data_dir: Path, proposal_id: str) -> tuple[Path | None, s
     Returns ``(path, status)`` or ``(None, None)``.
     """
     name = proposal_filename(proposal_id)
-    order = (STATUS_APPROVED, STATUS_PENDING, STATUS_REJECTED, STATUS_CANCELED)
+    order = (STATUS_APPROVED, STATUS_PENDING, STATUS_REJECTED, STATUS_CANCELED, STATUS_ARCHIVED)
     for status in order:
         candidate = _status_dir(data_dir, status) / name
         if candidate.exists():
@@ -215,6 +255,7 @@ def validate_proposal_payload(payload: dict[str, Any]) -> tuple[list[str], list[
         "title",
         "proposed_steps",
         "execution",
+        "source",
     )
     for k in required:
         if k not in payload:
@@ -223,6 +264,8 @@ def validate_proposal_payload(payload: dict[str, Any]) -> tuple[list[str], list[
         errors.append(f"status must be one of {APPROVAL_STATUSES}")
     if payload.get("risk") and payload["risk"] not in RISK_VALUES:
         errors.append(f"risk must be one of {RISK_VALUES}")
+    if payload.get("confidence") and payload["confidence"] not in CONFIDENCE_VALUES:
+        errors.append(f"confidence must be one of {CONFIDENCE_VALUES}")
     steps = payload.get("proposed_steps") or []
     if not steps:
         errors.append("proposed_steps must not be empty")
@@ -244,8 +287,15 @@ def validate_proposal_payload(payload: dict[str, Any]) -> tuple[list[str], list[
             errors.append("mutating proposal must include safety_label 'OPERATOR-RUN'")
         if "REQUIRES APPROVAL" not in labels:
             errors.append("mutating proposal must include safety_label 'REQUIRES APPROVAL'")
+    if risk == RISK_HIGH and "HIGH-RISK" not in labels:
+        warnings.append("high-risk proposal is missing safety_label 'HIGH-RISK'")
     if has_broad_destructive_words(steps):
         warnings.append("broad destructive words detected in proposed_steps")
+        if "BACKUP-REQUIRED" not in labels:
+            warnings.append("destructive proposal is missing safety_label 'BACKUP-REQUIRED'")
+    source = payload.get("source") or {}
+    if not (source.get("runbook") or source.get("evidence") or source.get("session_id")):
+        warnings.append("source has no runbook/evidence/session_id reference")
     return errors, warnings
 
 
@@ -261,12 +311,45 @@ _LABEL_PATTERNS = (
 )
 
 
-def _derive_safety_labels(option: dict[str, Any]) -> list[str]:
+_KIND_BY_PROBLEM_KIND = {
+    "missing-env": "container_env_config_change",
+    "bad-volume-perms": "container_mount_permission_change",
+    "restart-loop": "container_startup_config_change",
+    "bad-network": "container_upstream_config_change",
+    "exited-nonzero": "container_config_change",
+    "noisy-logs": "container_log_investigation",
+}
+
+
+def _derive_kind(option: dict[str, Any]) -> str:
+    """Map a runbook option to a stable proposal ``kind`` string."""
+    applies_to = option.get("applies_to") or []
+    for a in applies_to:
+        a_str = str(a)
+        # Format we emit from runbook: ``problem:<component>:<problem_kind>``
+        if a_str.startswith("problem:"):
+            parts = a_str.split(":", 2)
+            if len(parts) == 3:
+                pk = parts[2]
+                if pk in _KIND_BY_PROBLEM_KIND:
+                    return _KIND_BY_PROBLEM_KIND[pk]
+        if a_str.startswith("general:"):
+            return "general_investigation"
+    title = str(option.get("title") or "").lower()
+    for pk, kind in _KIND_BY_PROBLEM_KIND.items():
+        if pk in title:
+            return kind
+    if "docker" in title:
+        return "container_config_change"
+    return "operator_runbook_option"
+
+
+def _derive_safety_labels(option: dict[str, Any], steps: list[str], risk: str) -> list[str]:
     blob = " ".join(
         [
             str(option.get("title") or ""),
             str(option.get("impact") or ""),
-            " ".join(str(s) for s in (option.get("steps") or [])),
+            " ".join(steps),
             str(option.get("safety_label") or option.get("label") or ""),
         ]
     )
@@ -274,13 +357,35 @@ def _derive_safety_labels(option: dict[str, Any]) -> list[str]:
     for label, pattern in _LABEL_PATTERNS:
         if pattern.search(blob):
             labels.append(label)
-    steps = option.get("steps") or []
-    if _is_mutating_steps([str(s) for s in steps]):
+    mutating = _is_mutating_steps(steps)
+    if mutating:
         if "OPERATOR-RUN" not in labels:
             labels.insert(0, "OPERATOR-RUN")
         if "REQUIRES APPROVAL" not in labels:
             labels.append("REQUIRES APPROVAL")
+    if _has_service_impacting_tokens(blob) and "SERVICE-IMPACTING" not in labels:
+        labels.append("SERVICE-IMPACTING")
+    if risk == RISK_HIGH and "HIGH-RISK" not in labels:
+        labels.append("HIGH-RISK")
+    if has_broad_destructive_words(steps) and "BACKUP-REQUIRED" not in labels:
+        labels.append("BACKUP-REQUIRED")
     return labels
+
+
+def _derive_risk(option: dict[str, Any], steps: list[str]) -> str:
+    raw = str(option.get("risk") or RISK_MEDIUM).lower()
+    if raw not in RISK_VALUES:
+        raw = RISK_MEDIUM
+    if has_broad_destructive_words(steps):
+        return RISK_HIGH
+    return raw
+
+
+def _derive_confidence(option: dict[str, Any]) -> str:
+    raw = str(option.get("confidence") or "medium").lower()
+    if raw in CONFIDENCE_VALUES:
+        return raw
+    return "medium"
 
 
 def _slug(value: str) -> str:
@@ -288,18 +393,46 @@ def _slug(value: str) -> str:
     return s[:64] or "option"
 
 
-def make_proposal_id(session_id: str, option_id: str) -> str:
-    return f"prop_{session_id}_{_slug(option_id)}"
+def make_proposal_id(*, component: str = "", option_id: str = "") -> str:
+    """Stable, readable proposal id: ``prop_YYYYMMDD_HHMMSS_<short>``."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    short = uuid4().hex[:6]
+    return f"prop_{stamp}_{short}"
+
+
+def make_proposal_id_for(option_id: str, *, component: str = "", session_id: str = "") -> str:
+    """Deterministic-ish id when a stable session/option pair is available.
+
+    Used when migrating an existing session into proposals so re-runs do not
+    duplicate. Falls back to the time-stamped form when inputs are empty.
+    """
+    if not option_id and not component:
+        return make_proposal_id()
+    base = _slug(option_id or component)
+    short = uuid4().hex[:6]
+    if session_id:
+        return f"prop_{_slug(session_id)[:16]}_{base[:24]}_{short}"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"prop_{stamp}_{base[:24]}_{short}"
 
 
 def proposals_from_runbook_payload(
     payload: dict[str, Any],
     *,
     source_runbook: str = "",
+    source_evidence: str = "",
+    source_summary: str = "",
+    include_low: bool = False,
 ) -> list[Proposal]:
-    """Build pending Proposal objects from a runbook JSON payload."""
+    """Build pending Proposal objects from a runbook JSON payload.
+
+    Defaults skip low-risk read-only investigation-only options.
+    ``include_low=True`` keeps them as low-risk, read-only proposals.
+    """
     session_id = str(payload.get("session_id") or "session")
-    source_evidence = str(payload.get("source_evidence") or "")
+    if not source_evidence:
+        source_evidence = str(payload.get("source_evidence") or "")
+    target = str(payload.get("target") or "")
     now = datetime.now(timezone.utc).isoformat()
     out: list[Proposal] = []
     for option in payload.get("remediation_options") or []:
@@ -307,28 +440,42 @@ def proposals_from_runbook_payload(
         applies_to = option.get("applies_to") or []
         component = ""
         for a in applies_to:
-            if a and not str(a).startswith("problem:") and not str(a).startswith("general:"):
-                component = str(a)
+            a_str = str(a)
+            if a_str and not a_str.startswith("problem:") and not a_str.startswith("general:"):
+                component = a_str
                 break
         if not component:
             component = "general"
         steps = [str(s) for s in (option.get("steps") or [])]
+        risk = _derive_risk(option, steps)
+        mutating = _is_mutating_steps(steps)
+        if not mutating and risk == RISK_LOW and not include_low:
+            continue
+        labels = _derive_safety_labels(option, steps, risk)
+        kind = _derive_kind(option)
         proposal = Proposal(
-            proposal_id=make_proposal_id(session_id, opt_id),
-            session_id=session_id,
+            proposal_id=make_proposal_id_for(opt_id, component=component, session_id=session_id),
             created_at=now,
             status=STATUS_PENDING,
+            source=ProposalSource(
+                session_id=session_id,
+                runbook=source_runbook,
+                evidence=source_evidence,
+                summary=source_summary,
+            ),
+            target=target,
             component=component,
+            kind=kind,
             title=str(option.get("title") or ""),
-            risk=str(option.get("risk") or RISK_MEDIUM),
+            risk=risk,
             impact=str(option.get("impact") or ""),
-            safety_labels=_derive_safety_labels(option),
-            source_evidence=source_evidence,
-            source_runbook=source_runbook,
+            confidence=_derive_confidence(option),
+            evidence=[str(e) for e in (option.get("evidence") or [])],
             preconditions=[str(p) for p in (option.get("preconditions") or [])],
             proposed_steps=steps,
             rollback=[str(r) for r in (option.get("rollback") or [])],
             verification=[str(v) for v in (option.get("verification") or [])],
+            safety_labels=labels,
             notes=str(option.get("notes") or ""),
             execution=ProposalExecution(),
         )
@@ -336,13 +483,54 @@ def proposals_from_runbook_payload(
     return out
 
 
-def create_proposals_for_session(data_dir: Path, session_dir: Path) -> list[Proposal]:
-    """Read ``runbook.json`` from a session directory and write pending proposals."""
-    runbook_path = Path(session_dir) / "runbook.json"
-    if not runbook_path.exists():
-        raise FileNotFoundError(f"runbook.json not found in {session_dir}")
+def _resolve_runbook_target(data_dir: Path, target: str | Path) -> Path:
+    """Accept a runbook.json path, a session id, or a session dir."""
+    p = Path(target)
+    if p.is_file():
+        return p
+    if p.is_dir():
+        rb = p / "runbook.json"
+        if rb.exists():
+            return rb
+        raise FileNotFoundError(f"runbook.json not found in {p}")
+    if str(target).startswith("sf_"):
+        sess = Path(data_dir) / "artifacts" / str(target)
+        rb = sess / "runbook.json"
+        if rb.exists():
+            return rb
+        raise FileNotFoundError(f"runbook.json not found in {sess}")
+    raise FileNotFoundError(f"runbook source not found: {target}")
+
+
+def latest_runbook(data_dir: Path) -> Path | None:
+    root = Path(data_dir) / "artifacts"
+    if not root.exists():
+        return None
+    candidates = sorted(
+        (p for p in root.glob("sf_*/runbook.json") if p.is_file()),
+        key=lambda p: p.stat().st_mtime,
+    )
+    return candidates[-1] if candidates else None
+
+
+def create_proposals_for_session(
+    data_dir: Path,
+    session_target: str | Path,
+    *,
+    include_low: bool = False,
+) -> list[Proposal]:
+    """Read ``runbook.json`` from a session and write pending proposals."""
+    runbook_path = _resolve_runbook_target(data_dir, session_target)
     payload = json.loads(runbook_path.read_text(encoding="utf-8"))
-    proposals = proposals_from_runbook_payload(payload, source_runbook=str(runbook_path))
+    summary_path = runbook_path.parent / "summary.md"
+    evidence_path = runbook_path.parent / "evidence.json"
+    proposals = proposals_from_runbook_payload(
+        payload,
+        source_runbook=str(runbook_path),
+        source_evidence=str(evidence_path) if evidence_path.exists() else "",
+        source_summary=str(summary_path) if summary_path.exists() else "",
+        include_low=include_low,
+    )
     _ensure_dirs(data_dir)
     for p in proposals:
         write_proposal(data_dir, p)
@@ -351,6 +539,24 @@ def create_proposals_for_session(data_dir: Path, session_dir: Path) -> list[Prop
 
 # ---------------------------------------------------------------------------
 # Transitions
+
+
+def _set_actor_fields(
+    proposal: Proposal, *, status: str, reason: str, actor: str, when: str
+) -> None:
+    proposal.approval.reason = reason
+    if status == STATUS_APPROVED:
+        proposal.approval.approved_by = actor or "operator"
+        proposal.approval.approved_at = when
+    elif status == STATUS_REJECTED:
+        proposal.approval.rejected_by = actor or "operator"
+        proposal.approval.rejected_at = when
+    elif status == STATUS_CANCELED:
+        proposal.approval.canceled_by = actor or "operator"
+        proposal.approval.canceled_at = when
+    elif status == STATUS_ARCHIVED:
+        proposal.approval.archived_by = actor or "operator"
+        proposal.approval.archived_at = when
 
 
 def _transition(
@@ -371,14 +577,7 @@ def _transition(
         return proposal
     proposal.status = new_status
     now = datetime.now(timezone.utc).isoformat()
-    if new_status == STATUS_APPROVED:
-        proposal.approval = ProposalApproval(
-            reason=reason, approved_at=now, approved_by=actor or "operator"
-        )
-    elif new_status == STATUS_REJECTED:
-        proposal.rejection_reason = reason
-    elif new_status == STATUS_CANCELED:
-        proposal.canceled_reason = reason
+    _set_actor_fields(proposal, status=new_status, reason=reason, actor=actor, when=now)
     dest = write_proposal(data_dir, proposal)
     if src != dest and src.exists():
         with contextlib.suppress(OSError):
@@ -407,6 +606,14 @@ def cancel_proposal(
 ) -> Proposal:
     return _transition(
         data_dir, proposal_id, new_status=STATUS_CANCELED, reason=reason, actor=actor
+    )
+
+
+def archive_proposal(
+    data_dir: Path, proposal_id: str, *, reason: str = "", actor: str = "operator"
+) -> Proposal:
+    return _transition(
+        data_dir, proposal_id, new_status=STATUS_ARCHIVED, reason=reason, actor=actor
     )
 
 
