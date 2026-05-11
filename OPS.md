@@ -309,6 +309,30 @@ Expected: execution-style asks refuse cleanly; preview/prepare-style asks
 generate the operator preflight bundle. No mutation in either case.
 
 
+## Audit/export pack smoke (PR34)
+
+Local-only flow (no Docker, no root, no host mutation):
+
+```
+shellforgeai diagnose docker --save-plan --with-runbook
+shellforgeai export --latest
+shellforgeai validate-export <data_dir>/exports/<export_id>
+shellforgeai approvals create --latest
+shellforgeai approvals approve <id> --reason "PR34 export smoke"
+shellforgeai apply <id>
+shellforgeai export --latest-approved
+shellforgeai validate-export <data_dir>/exports/<latest_approved_export_id>
+shellforgeai ask "create an audit pack"
+shellforgeai ask "export the approved proposal"
+```
+
+Expected: an export pack is written under `<data_dir>/exports/<export_id>/`
+containing `export-manifest.json`, `export-summary.md`, `checksums.sha256`,
+and copies of evidence/summary/plan/runbook/proposal/apply-preflight files
+that exist for the source. Missing optional files are recorded in the
+manifest. `validate-export` reports `safety: ok` and `execution: none`.
+ShellForgeAI does not execute any remediation.
+
 ## Local validation (fixtures/mocks only)
 
 Run local validation without Docker daemon, root, or service mutation:
@@ -319,3 +343,4 @@ Run local validation without Docker daemon, root, or service mutation:
 - `pytest -q`
 - `python -m compileall src`
 - `env -u PYTHONPATH pytest -q`
+- `pytest -q tests -k "export or audit or approval or apply or runbook"`

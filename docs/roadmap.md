@@ -63,3 +63,12 @@
 
 
 - PR33: approval/apply hardening milestone: proposal fingerprints + create idempotency, approvals list filters, show/validate polish, idempotent apply bundle refresh status, and script label normalization; apply remains validation-only.
+- PR34: audit/export pack milestone. `shellforgeai export` packages
+  evidence/summary/plan/runbook/proposal/apply-preflight artifacts into
+  `<data_dir>/exports/<export_id>/` with `export-manifest.json`,
+  `export-summary.md`, and `checksums.sha256`. Supports `<session-id|dir>`,
+  `--latest`, `--proposal <id>`, `--latest-approved`, `--output`,
+  `--redact`; `--approved` is refused as too broad. `validate-export`
+  re-checks manifest, files, checksums, and the apply-preflight
+  execution invariants. Export only copies/reads files — no execution,
+  no mutation. `apply` remains validation-only.
