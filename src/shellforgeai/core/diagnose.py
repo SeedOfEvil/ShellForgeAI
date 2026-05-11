@@ -530,9 +530,8 @@ def diagnose_target(
         items.extend(collect_disk_evidence(context))
         items.extend(collect_local_knowledge_evidence(context, "disk"))
     elif (
-        (ttype == TargetType.service or canonical_target == "service-discovery")
-        and not canonical_target.startswith("package-owner:")
-    ):
+        ttype == TargetType.service or canonical_target == "service-discovery"
+    ) and not canonical_target.startswith("package-owner:"):
         items.extend(collect_service_evidence(context, target, since=since))
         if target.lower() == "nginx":
             items.extend(collect_nginx_evidence(context))

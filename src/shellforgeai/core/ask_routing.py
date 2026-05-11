@@ -94,6 +94,42 @@ _MUTATION_PHRASES = (
 )
 
 
+_FIX_PLAN_TOKENS = (
+    "fix plan",
+    "safe fix plan",
+    "safe fix paln",
+    "give me a fix plan",
+    "give me a safe fix plan",
+    "fix-plan",
+    "runbook",
+    "run book",
+    "runbok",
+    "runboook",
+    "operator runbook",
+    "remediation",
+    "remeditation",
+    "remdiation",
+    "rollback plan",
+    "repair plan",
+    "safe operator",
+    "safe operator steps",
+    "post-fix validation",
+    "post fix validation",
+    "prechecks before",
+    "fix failed containers safely",
+    "fix bad-network safely",
+    "fix bad network safely",
+    "fix write permissions safely",
+    "fix missing env safely",
+    "fix missing-env safely",
+    "what should i do next",
+    "what shoud i do next",
+    "how do i fix this safely",
+    "how do i fix this",
+    "fix this safely",
+)
+
+
 _NETWORK_REACH_TOKENS = (
     "reachab",
     "reechab",
@@ -131,11 +167,21 @@ class AskRoute:
     intent_label: str = ""
     mutation_request: bool = False
     network_reachability: bool = False
+    fix_plan: bool = False
 
 
 def is_mutation_request(text: str) -> bool:
     lowered = _normalize_intent_text(text or "")
     return any(p in lowered for p in _MUTATION_PHRASES)
+
+
+def is_fix_plan_intent(text: str) -> bool:
+    """Detect questions asking for an operator-run fix plan / runbook."""
+    lowered = _normalize_intent_text(text or "")
+    raw_lower = (text or "").lower()
+    return any(t in lowered for t in _FIX_PLAN_TOKENS) or any(
+        t in raw_lower for t in _FIX_PLAN_TOKENS
+    )
 
 
 def is_network_reachability_intent(text: str) -> bool:
@@ -164,16 +210,23 @@ def route_ask_intent(text: str) -> AskRoute:
     mutation = is_mutation_request(raw)
     routed = route_input(raw)
     net_reach = is_network_reachability_intent(raw)
+    fix_plan = is_fix_plan_intent(raw)
 
     if routed.name == "diagnose" and routed.args:
         target = routed.args
-        intent = "network_reachability" if net_reach else target
+        if fix_plan:
+            intent = "fix_plan"
+        elif net_reach:
+            intent = "network_reachability"
+        else:
+            intent = target
         return AskRoute(
             mode=EVIDENCE_BACKED,
             target=target,
             intent_label=intent,
             mutation_request=mutation,
             network_reachability=net_reach,
+            fix_plan=fix_plan,
         )
     if routed.name == "logs_mutation_refused":
         return AskRoute(
@@ -182,8 +235,25 @@ def route_ask_intent(text: str) -> AskRoute:
             intent_label="logs",
             mutation_request=True,
             network_reachability=net_reach,
+            fix_plan=fix_plan,
         )
-    return AskRoute(mode=PLAIN, mutation_request=mutation, network_reachability=net_reach)
+    if fix_plan:
+        # Fix-plan requests should always collect docker evidence as a sane
+        # default when the underlying NL router does not pick a target.
+        return AskRoute(
+            mode=EVIDENCE_BACKED,
+            target="docker",
+            intent_label="fix_plan",
+            mutation_request=mutation,
+            network_reachability=net_reach,
+            fix_plan=True,
+        )
+    return AskRoute(
+        mode=PLAIN,
+        mutation_request=mutation,
+        network_reachability=net_reach,
+        fix_plan=fix_plan,
+    )
 
 
 _LAB_CONTAINER_HINTS = {

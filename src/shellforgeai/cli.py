@@ -27,6 +27,12 @@ from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import classify_target
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
+from shellforgeai.core.runbook import (
+    build_runbook,
+    latest_evidence_artifact,
+    render_runbook_md,
+    runbook_from_evidence_file,
+)
 from shellforgeai.core.session import build_session_context
 from shellforgeai.interactive.commands import route_input
 from shellforgeai.knowledge.search import search_local
@@ -208,7 +214,7 @@ def _write_summary_md(
     artifact_dir: Path,
     include_model_response: bool,
 ) -> None:
-    candidates = ["evidence.json", "plan.json", "summary.md"]
+    candidates = ["evidence.json", "plan.json", "summary.md", "runbook.md", "runbook.json"]
     if include_model_response:
         candidates.append("model-response.md")
     write_diagnosis_summary_md(
@@ -447,6 +453,11 @@ def diagnose(
     model: bool = typer.Option(False, "--model"),
     raw: bool = typer.Option(False, "--raw"),
     full_context: bool = typer.Option(False, "--full-context"),
+    with_runbook: bool = typer.Option(
+        False,
+        "--with-runbook",
+        help="Also write an operator-run remediation runbook (read-only synthesis).",
+    ),
 ) -> None:
     runtime = _ctx(ctx)
     raw_target_text = target
@@ -473,17 +484,36 @@ def diagnose(
     if save_plan:
         plan_path.write_text(result.proposed_plan.model_dump_json(indent=2), encoding="utf-8")
     summary_path = runtime.session.artifact_dir / "summary.md"
-    _write_summary_md(
-        summary_path,
-        result.session_id,
-        target,
-        result.target_type.value,
-        result.created_at.isoformat(),
-        list(result.evidence.items),
-        list(result.findings),
-        runtime.session.artifact_dir,
-        include_model_response=False,
+    runbook_path = runtime.session.artifact_dir / "runbook.md"
+    runbook_json_path = runtime.session.artifact_dir / "runbook.json"
+    if with_runbook:
+        rb = build_runbook(
+            session_id=result.session_id,
+            target=target,
+            evidence_items=list(result.evidence.items),
+            findings=list(result.findings),
+            source_artifacts=[str(ev_path)],
+        )
+        runbook_path.write_text(render_runbook_md(rb), encoding="utf-8")
+        runbook_json_path.write_text(rb.model_dump_json(indent=2), encoding="utf-8")
+    summary_candidates = ["evidence.json", "plan.json", "summary.md"]
+    if with_runbook:
+        summary_candidates += ["runbook.md", "runbook.json"]
+    write_diagnosis_summary_md(
+        path=summary_path,
+        session_id=result.session_id,
+        target=target,
+        target_type=result.target_type.value,
+        created_at=result.created_at.isoformat(),
+        evidence_items=list(result.evidence.items),
+        findings=list(result.findings),
+        artifact_dir=runtime.session.artifact_dir,
+        artifact_candidates=summary_candidates,
     )
+    artifacts_list = [str(ev_path)] + ([str(plan_path)] if save_plan else [])
+    if with_runbook:
+        artifacts_list.append(str(runbook_path))
+        artifacts_list.append(str(runbook_json_path))
     rec = {
         "session_id": runtime.session.session_id,
         "command": "diagnose",
@@ -491,7 +521,7 @@ def diagnose(
         "mode": runtime.session.mode,
         "profile": runtime.profile.name,
         "tools_called": [i.source for i in result.evidence.items],
-        "artifacts": [str(ev_path)] + ([str(plan_path)] if save_plan else []),
+        "artifacts": artifacts_list,
         "warnings": result.warnings,
         "errors": result.errors,
         "summary": f"diagnosed {target}",
@@ -563,7 +593,8 @@ def diagnose(
             f"- evidence: {ev_path}\n"
             f"- plan: {plan_path if save_plan else 'not-saved'}\n"
             f"- model response: {model_response_display}\n"
-            f"- summary: {summary_path if summary_path.exists() else 'n/a'}"
+            f"- summary: {summary_path if summary_path.exists() else 'n/a'}\n"
+            f"- runbook: {runbook_path if runbook_path.exists() else 'not-saved'}"
         )
         console.print(summary)
 
@@ -628,6 +659,71 @@ def plan(ctx: typer.Context, goal: str, model: bool = typer.Option(False, "--mod
             resp.text, encoding="utf-8"
         )
     console.print(str(out))
+
+
+@app.command()
+def runbook(
+    ctx: typer.Context,
+    artifact: Annotated[Path | None, typer.Argument()] = None,
+    latest: bool = typer.Option(
+        False, "--latest", help="Use the most recent evidence.json artifact."
+    ),
+    session: str | None = typer.Option(
+        None, "--session", help="Use evidence.json from this session id (sf_*)."
+    ),
+) -> None:
+    """Generate an operator-run remediation runbook from existing evidence.
+
+    This command is read-only synthesis: it reads ``evidence.json`` and writes
+    ``runbook.md`` (and ``runbook.json``) into the same artifact directory.
+    ShellForgeAI does not execute any remediation steps.
+    """
+    runtime = _ctx(ctx)
+    target_path: Path | None = None
+    if artifact is not None:
+        candidate = artifact
+        if candidate.is_dir():
+            ev = candidate / "evidence.json"
+            if not ev.exists():
+                console.print(f"No evidence.json found in artifact directory: {candidate}")
+                raise typer.Exit(code=1)
+            target_path = ev
+        else:
+            target_path = candidate
+    elif session:
+        candidate = Path(runtime.session.data_dir) / "artifacts" / session / "evidence.json"
+        target_path = candidate
+    elif latest:
+        target_path = latest_evidence_artifact(runtime.session.data_dir)
+        if target_path is None:
+            console.print(
+                "No evidence.json artifacts found. Run `shellforgeai diagnose <target>` first."
+            )
+            raise typer.Exit(code=1)
+    else:
+        raise typer.BadParameter("Provide an evidence.json path, --latest, or --session <id>.")
+    if target_path is None or not target_path.exists():
+        console.print(f"Evidence artifact not found: {target_path}")
+        raise typer.Exit(code=1)
+    try:
+        rb = runbook_from_evidence_file(target_path)
+    except (OSError, ValueError) as exc:
+        console.print(f"Failed to read evidence artifact {target_path}: {exc}")
+        raise typer.Exit(code=1) from None
+    out_dir = target_path.parent
+    md_path = out_dir / "runbook.md"
+    json_path = out_dir / "runbook.json"
+    md_path.write_text(render_runbook_md(rb), encoding="utf-8")
+    json_path.write_text(rb.model_dump_json(indent=2), encoding="utf-8")
+    console.print(
+        "Operator runbook written (read-only synthesis; ShellForgeAI did not execute anything):\n"
+        f"- {md_path}\n"
+        f"- {json_path}\n"
+        f"- session: {rb.session_id}\n"
+        f"- problems: {len(rb.problems)}\n"
+        f"- options: {len(rb.operator_steps)}\n"
+        f"- risk: {rb.risk_level}"
+    )
 
 
 @app.command()
@@ -837,6 +933,20 @@ def ask(
             f"## Answer\n\n{resp.text}\n",
             encoding="utf-8",
         )
+        runbook_md_path: Path | None = None
+        if route.fix_plan:
+            rb = build_runbook(
+                session_id=evidence_result.session_id,
+                target=route.target or "docker",
+                evidence_items=list(evidence_result.evidence.items),
+                findings=list(evidence_result.findings),
+                source_artifacts=[str(ev_path)],
+            )
+            runbook_md_path = artifact_dir / "runbook.md"
+            (artifact_dir / "runbook.json").write_text(
+                rb.model_dump_json(indent=2), encoding="utf-8"
+            )
+            runbook_md_path.write_text(render_runbook_md(rb), encoding="utf-8")
         console.print(
             "\nEvidence-backed ask:"
             f"\n- intent: {route.intent_label}"
@@ -844,6 +954,7 @@ def ask(
             f"\n- {findings_summary_line(list(evidence_result.findings))}"
             f"\n- evidence: {ev_path}"
             f"\n- ask summary: {ask_summary_path}"
+            + (f"\n- runbook: {runbook_md_path}" if runbook_md_path else "")
         )
         if route.mutation_request:
             console.print(
