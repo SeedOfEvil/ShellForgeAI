@@ -488,12 +488,10 @@ def diagnose(
     runbook_path = runtime.session.artifact_dir / "runbook.md"
     runbook_json_path = runtime.session.artifact_dir / "runbook.json"
     if with_runbook:
-        rb = build_runbook(
-            session_id=result.session_id,
+        rb = runbook_from_evidence_file(
+            ev_path,
+            session_id=runtime.session.session_id,
             target=target,
-            evidence_items=list(result.evidence.items),
-            findings=list(result.findings),
-            source_artifacts=[str(ev_path)],
         )
         runbook_path.write_text(render_runbook_md(rb), encoding="utf-8")
         import json
@@ -597,7 +595,8 @@ def diagnose(
             f"- plan: {plan_path if save_plan else 'not-saved'}\n"
             f"- model response: {model_response_display}\n"
             f"- summary: {summary_path if summary_path.exists() else 'n/a'}\n"
-            f"- runbook: {runbook_path if runbook_path.exists() else 'not-saved'}"
+            f"- runbook: {runbook_path if runbook_path.exists() else 'not-saved'}\n"
+            f"- runbook json: {runbook_json_path if runbook_json_path.exists() else 'not-saved'}"
         )
         console.print(summary)
 

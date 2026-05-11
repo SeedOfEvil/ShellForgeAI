@@ -706,7 +706,7 @@ def test_diagnose_with_runbook_writes_runbook(tmp_path, monkeypatch):
     from shellforgeai import cli as cli_mod
 
     monkeypatch.setattr(cli_mod, "diagnose_target", fake_diag)
-    # redirect data_dir
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path / "sfdata"))
     monkeypatch.setenv("HOME", str(tmp_path))
     runner = CliRunner()
     result = runner.invoke(app, ["diagnose", "docker", "--with-runbook"])
@@ -714,9 +714,20 @@ def test_diagnose_with_runbook_writes_runbook(tmp_path, monkeypatch):
     # Find the runbook artifact
     runbooks = list(Path(tmp_path).rglob("runbook.md"))
     assert runbooks, f"no runbook.md found under {tmp_path}\n{result.output}"
-    md = runbooks[0].read_text(encoding="utf-8")
+    runbook_md = runbooks[0]
+    runbook_json = runbook_md.with_name("runbook.json")
+    evidence_json = runbook_md.with_name("evidence.json")
+    assert runbook_json.exists()
+    assert evidence_json.exists()
+    md = runbook_md.read_text(encoding="utf-8")
     assert SAFETY_LINE in md
     assert "sfai-missing-env" in md
+    assert str(runbook_md.parent).startswith(str(tmp_path))
+    assert "/data/artifacts" not in str(runbook_md)
+    assert "/data/artifacts" not in result.output
+    assert "sfdata/artifacts" in result.output
+    assert "runbook.md" in result.output
+    assert "runbook json:" in result.output
 
 
 # ---------- Regression: PR27/28/29 routing still healthy ----------
