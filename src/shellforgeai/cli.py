@@ -1098,7 +1098,7 @@ def _handle_export_ask(runtime: RuntimeContext, question: str) -> bool:
     data_dir = Path(runtime.session.data_dir)
     try:
         if intent.prefer_approved:
-            result = export_latest_approved(data_dir)
+            result = export_latest_approved(data_dir, redact=intent.use_redaction)
         else:
             latest = latest_session_dir(data_dir)
             if latest is None:
@@ -1108,7 +1108,7 @@ def _handle_export_ask(runtime: RuntimeContext, question: str) -> bool:
                     "- no commands were executed."
                 )
                 return True
-            result = export_from_session(data_dir, latest)
+            result = export_from_session(data_dir, latest, redact=intent.use_redaction)
             result.source_type = "latest"
     except FileNotFoundError as exc:
         console.print(
@@ -1119,6 +1119,8 @@ def _handle_export_ask(runtime: RuntimeContext, question: str) -> bool:
         )
         return True
     _print_export_result(result)
+    if intent.use_redaction:
+        console.print("- redaction: best-effort only; review the export before external sharing.")
     return True
 
 

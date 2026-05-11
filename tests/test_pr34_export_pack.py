@@ -286,6 +286,15 @@ def test_validate_fails_on_malformed_manifest(data_env):
     assert any("malformed manifest" in e for e in v.errors)
 
 
+def test_validate_fails_when_redaction_report_missing(data_env):
+    sess = _make_session(data_env, "sf_pr35_validate_redact_001")
+    res = export_from_session(data_env, sess, redact=True)
+    (res.export_dir / "redaction-report.json").unlink()
+    v = validate_export(res.export_dir)
+    assert not v.ok
+    assert any("redaction-report.json missing" in e for e in v.errors)
+
+
 def test_validate_fails_on_apply_preflight_execution_allowed(data_env):
     sess = _make_session(data_env, "sf_pr34_validate_005")
     proposal = _make_proposal(
@@ -312,13 +321,21 @@ def test_validate_fails_on_apply_preflight_execution_allowed(data_env):
 
 
 def test_redact_text_masks_common_secrets():
-    txt = "password=hunter2\ntoken: abc123\nAPI_KEY=xyz789\nAuthorization: Bearer eyJ\n"
+    txt = "password=hunter2\ntoken: abc123\nAPI_KEY=xyz789\nAuthorization: Bearer eyJ\nDATABASE_URL=postgres://u:p@h/db\n"
     out = redact_text(txt)
     assert "hunter2" not in out
     assert "abc123" not in out
     assert "xyz789" not in out
     assert "eyJ" not in out
-    assert "<redacted>" in out
+    assert "[REDACTED]" in out
+    assert "postgres://u:p@h/db" not in out
+
+
+def test_redact_text_private_key_block_and_preserve_normal_text():
+    txt = "missing REQUIRED_SETTING\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n"
+    out = redact_text(txt)
+    assert "REQUIRED_SETTING" in out
+    assert "[REDACTED_PRIVATE_KEY_BLOCK]" in out
 
 
 def test_redact_flag_redacts_copied_summary(data_env):
@@ -326,7 +343,13 @@ def test_redact_flag_redacts_copied_summary(data_env):
     res = export_from_session(data_env, sess, redact=True)
     summary_copy = (res.export_dir / "summary.md").read_text(encoding="utf-8")
     assert "hunter2" not in summary_copy
-    assert "<redacted>" in summary_copy
+    assert "[REDACTED]" in summary_copy
+    manifest = json.loads((res.export_dir / "export-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["redaction_applied"] is True
+    assert (res.export_dir / "redaction-report.json").exists()
+    report = json.loads((res.export_dir / "redaction-report.json").read_text(encoding="utf-8"))
+    assert report["redaction_applied"] is True
+    assert "hunter2" not in json.dumps(report)
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +449,12 @@ def test_is_export_intent_prefers_approved():
     out = is_export_intent("export the approved proposal")
     assert out.matched
     assert out.prefer_approved
+
+
+def test_is_export_intent_redaction_phrase():
+    out = is_export_intent("package this for external sharing")
+    assert out.matched
+    assert out.use_redaction
 
 
 def test_ask_create_audit_pack_creates_export(data_env):

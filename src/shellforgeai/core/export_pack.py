@@ -34,6 +34,10 @@ SAFETY_NOTE = "ShellForgeAI exported this audit pack but did not execute any rem
 RAW_EVIDENCE_WARNING = (
     "Raw evidence files may contain environment/config details. Review before sharing."
 )
+REDACTED_EVIDENCE_WARNING = (
+    "This export was generated with best-effort redaction, "
+    "but operators should still review before sharing."
+)
 
 SOURCE_SESSION = "session"
 SOURCE_PROPOSAL = "proposal"
@@ -62,13 +66,43 @@ BUNDLE_OPTIONAL_FILES = (
 ALL_OPTIONAL_FILES = SESSION_OPTIONAL_FILES + ("proposal.json",) + BUNDLE_OPTIONAL_FILES
 
 
-_REDACT_PATTERNS = (
-    re.compile(r"(?i)(password\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(token\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(secret\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"),
+_SECRET_KEYS = (
+    "password",
+    "passwd",
+    "pwd",
+    "token",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "api-key",
+    "secret",
+    "client_secret",
+    "private_key",
+    "ssh_key",
+    "bearer",
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "session",
+    "connection_string",
+    "database_url",
+    "db_password",
+    "redis_url",
+    "mongo_uri",
+    "webhook_url",
 )
+_PRIVATE_KEY_BLOCK_RE = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.IGNORECASE | re.DOTALL,
+)
+_KV_RE = re.compile(
+    r'(?im)(["\']?(?:'
+    + "|".join(re.escape(k) for k in _SECRET_KEYS)
+    + r')["\']?\s*[:=]\s*)(["\']?)([^"\n\r]*?)\2(?=\s*(?:,|$))'
+)
+_AUTH_BEARER_RE = re.compile(r"(?im)(authorization\s*:\s*)bearer\s+\S+")
+_URI_RE = re.compile(r"(?i)\b(?:postgres(?:ql)?|redis|mongodb)://\S+")
 
 
 @dataclass
@@ -83,6 +117,17 @@ class ExportResult:
     source_type: str = ""
     source_session_id: str = ""
     source_proposal_id: str = ""
+    redaction_report_path: Path | None = None
+
+
+@dataclass
+class RedactionReport:
+    files_scanned: int = 0
+    files_redacted: int = 0
+    total_replacements: int = 0
+    patterns: set[str] = field(default_factory=set)
+    files: list[dict[str, Any]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -104,10 +149,43 @@ def exports_root(data_dir: Path) -> Path:
 
 
 def redact_text(text: str) -> str:
+    return apply_redaction(text).text
+
+
+@dataclass
+class RedactionOutcome:
+    text: str
+    replacements: int
+    matched_kinds: set[str]
+
+
+def apply_redaction(text: str) -> RedactionOutcome:
     out = text
-    for pat in _REDACT_PATTERNS:
-        out = pat.sub(r"\1<redacted>", out)
-    return out
+    replacements = 0
+    matched_kinds: set[str] = set()
+    out, n = _PRIVATE_KEY_BLOCK_RE.subn("[REDACTED_PRIVATE_KEY_BLOCK]", out)
+    if n:
+        replacements += n
+        matched_kinds.add("private_key_block")
+    out, n = _AUTH_BEARER_RE.subn(r"\1[REDACTED]", out)
+    if n:
+        replacements += n
+        matched_kinds.add("authorization")
+    out, n = _URI_RE.subn("[REDACTED]", out)
+    if n:
+        replacements += n
+        matched_kinds.add("connection_uri")
+
+    def _kv_sub(m: re.Match[str]) -> str:
+        nonlocal replacements
+        key = m.group(1)
+        replacements += 1
+        matched_kinds.add(key.strip(" \"'=:").lower())
+        quote = m.group(2) or ""
+        return f"{key}{quote}[REDACTED]{quote}"
+
+    out = _KV_RE.sub(_kv_sub, out)
+    return RedactionOutcome(text=out, replacements=replacements, matched_kinds=matched_kinds)
 
 
 # ---------------------------------------------------------------------------
@@ -170,30 +248,50 @@ def latest_session_dir(data_dir: Path) -> Path | None:
 # Copy helpers
 
 
-def _copy_if_exists(src: Path, dst: Path, *, redact: bool) -> bool:
+def _copy_if_exists(
+    src: Path, dst: Path, *, redact: bool, report: RedactionReport | None = None
+) -> bool:
     if not src.exists() or not src.is_file():
         return False
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if redact and src.suffix.lower() in {".md", ".json", ".sh", ".txt", ".log"}:
+    if redact:
+        if report is not None:
+            report.files_scanned += 1
         try:
             text = src.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             shutil.copy2(src, dst)
+            if report is not None:
+                report.warnings.append(f"{dst.name}: copied as-is (non-text/unsupported)")
             return True
-        dst.write_text(redact_text(text), encoding="utf-8")
+        outcome = apply_redaction(text)
+        dst.write_text(outcome.text, encoding="utf-8")
+        if report is not None:
+            if outcome.replacements > 0:
+                report.files_redacted += 1
+            report.total_replacements += outcome.replacements
+            report.patterns.update(outcome.matched_kinds)
+            report.files.append(
+                {
+                    "path": dst.name,
+                    "redacted": outcome.replacements > 0,
+                    "replacements": outcome.replacements,
+                    "matched_kinds": sorted(outcome.matched_kinds),
+                }
+            )
         return True
     shutil.copy2(src, dst)
     return True
 
 
 def _gather_session_files(
-    session_dir: Path, export_dir: Path, *, redact: bool
+    session_dir: Path, export_dir: Path, *, redact: bool, report: RedactionReport | None = None
 ) -> tuple[list[str], list[str]]:
     included: list[str] = []
     missing: list[str] = []
     for name in SESSION_OPTIONAL_FILES:
         src = session_dir / name
-        if _copy_if_exists(src, export_dir / name, redact=redact):
+        if _copy_if_exists(src, export_dir / name, redact=redact, report=report):
             included.append(name)
         else:
             missing.append(name)
@@ -201,23 +299,40 @@ def _gather_session_files(
 
 
 def _gather_bundle_files(
-    bundle_dir: Path, export_dir: Path, *, redact: bool
+    bundle_dir: Path, export_dir: Path, *, redact: bool, report: RedactionReport | None = None
 ) -> tuple[list[str], list[str]]:
     included: list[str] = []
     missing: list[str] = []
     for name in BUNDLE_OPTIONAL_FILES:
         src = bundle_dir / name
-        if _copy_if_exists(src, export_dir / name, redact=redact):
+        if _copy_if_exists(src, export_dir / name, redact=redact, report=report):
             included.append(name)
         else:
             missing.append(name)
     return included, missing
 
 
-def _write_proposal_file(proposal: Proposal, export_dir: Path, *, redact: bool) -> str:
+def _write_proposal_file(
+    proposal: Proposal, export_dir: Path, *, redact: bool, report: RedactionReport | None = None
+) -> str:
     text = proposal.model_dump_json(indent=2)
     if redact:
-        text = redact_text(text)
+        outcome = apply_redaction(text)
+        text = outcome.text
+        if report is not None:
+            report.files_scanned += 1
+            if outcome.replacements > 0:
+                report.files_redacted += 1
+            report.total_replacements += outcome.replacements
+            report.patterns.update(outcome.matched_kinds)
+            report.files.append(
+                {
+                    "path": "proposal.json",
+                    "redacted": outcome.replacements > 0,
+                    "replacements": outcome.replacements,
+                    "matched_kinds": sorted(outcome.matched_kinds),
+                }
+            )
     (export_dir / "proposal.json").write_text(text, encoding="utf-8")
     return "proposal.json"
 
@@ -239,6 +354,7 @@ def _render_export_summary(
     included: list[str],
     missing: list[str],
     redact: bool,
+    redaction_report: RedactionReport | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("# ShellForgeAI audit/export pack")
@@ -255,6 +371,10 @@ def _render_export_summary(
     if bundle_dir is not None:
         lines.append(f"- Apply bundle dir: {bundle_dir}")
     lines.append(f"- Redaction: {'on' if redact else 'off (raw copies preserved)'}")
+    if redact and redaction_report is not None:
+        lines.append(f"- Redaction files scanned: {redaction_report.files_scanned}")
+        lines.append(f"- Redaction files redacted: {redaction_report.files_redacted}")
+        lines.append(f"- Redaction replacements: {redaction_report.total_replacements}")
     lines.append("- Execution status: not_executed")
     lines.append("- Execution allowed: false")
     lines.append("")
@@ -314,7 +434,7 @@ def _render_export_summary(
     lines.append("## Safety")
     lines.append("")
     lines.append(f"- {SAFETY_NOTE}")
-    lines.append(f"- {RAW_EVIDENCE_WARNING}")
+    lines.append(f"- {REDACTED_EVIDENCE_WARNING if redact else RAW_EVIDENCE_WARNING}")
     lines.append("- apply remains validation-only. No commands were executed.")
     return "\n".join(lines) + "\n"
 
@@ -333,6 +453,7 @@ def _build_manifest(
     session_dir: Path | None,
     bundle_dir: Path | None,
     redact: bool,
+    redaction_report_path: str = "",
 ) -> dict[str, Any]:
     build = get_build_info()
     manifest: dict[str, Any] = {
@@ -350,10 +471,12 @@ def _build_manifest(
         "execution_allowed": False,
         "execution_status": "not_executed",
         "redaction_applied": bool(redact),
-        "raw_evidence_warning": RAW_EVIDENCE_WARNING,
+        "raw_evidence_warning": REDACTED_EVIDENCE_WARNING if redact else RAW_EVIDENCE_WARNING,
         "safety_note": SAFETY_NOTE,
         "shellforgeai_version": build.display_version,
     }
+    if redact:
+        manifest["redaction_report"] = redaction_report_path or "redaction-report.json"
     if proposal is not None:
         manifest["proposal"] = {
             "proposal_id": proposal.proposal_id,
@@ -409,7 +532,8 @@ def export_from_session(
     export_dir = output or (exports_root(Path(data_dir)) / export_id)
     export_dir.mkdir(parents=True, exist_ok=True)
     session_id = session_dir.name if session_dir.name.startswith("sf_") else ""
-    included, missing = _gather_session_files(session_dir, export_dir, redact=redact)
+    report = RedactionReport() if redact else None
+    included, missing = _gather_session_files(session_dir, export_dir, redact=redact, report=report)
     return _finalize_export(
         export_dir=export_dir,
         export_id=export_id,
@@ -422,6 +546,7 @@ def export_from_session(
         included=included,
         missing=missing,
         redact=redact,
+        redaction_report=report,
     )
 
 
@@ -504,20 +629,23 @@ def _export_proposal_object(
 
     included: list[str] = []
     missing: list[str] = []
+    report = RedactionReport() if redact else None
 
     session_dir = _resolve_session_dir_for_proposal(proposal)
     if session_dir is not None and session_dir.is_dir():
-        sess_inc, sess_miss = _gather_session_files(session_dir, export_dir, redact=redact)
+        sess_inc, sess_miss = _gather_session_files(
+            session_dir, export_dir, redact=redact, report=report
+        )
         included.extend(sess_inc)
         missing.extend(sess_miss)
     else:
         missing.extend(list(SESSION_OPTIONAL_FILES))
 
-    included.append(_write_proposal_file(proposal, export_dir, redact=redact))
+    included.append(_write_proposal_file(proposal, export_dir, redact=redact, report=report))
 
     bundle_dir = _resolve_bundle_for_proposal(data_dir, proposal.proposal_id)
     if bundle_dir is not None:
-        b_inc, b_miss = _gather_bundle_files(bundle_dir, export_dir, redact=redact)
+        b_inc, b_miss = _gather_bundle_files(bundle_dir, export_dir, redact=redact, report=report)
         included.extend(b_inc)
         missing.extend(b_miss)
     else:
@@ -535,6 +663,7 @@ def _export_proposal_object(
         included=included,
         missing=missing,
         redact=redact,
+        redaction_report=report,
     )
 
 
@@ -551,6 +680,7 @@ def _finalize_export(
     included: list[str],
     missing: list[str],
     redact: bool,
+    redaction_report: RedactionReport | None = None,
 ) -> ExportResult:
     created_at = datetime.now(timezone.utc).isoformat()
     summary_text = _render_export_summary(
@@ -565,13 +695,35 @@ def _finalize_export(
         included=included,
         missing=missing,
         redact=redact,
+        redaction_report=redaction_report,
     )
     summary_path = export_dir / "export-summary.md"
     summary_path.write_text(summary_text, encoding="utf-8")
 
     # Compute checksums over included files + summary.md so the
     # manifest can embed them.
-    rel_for_checksum = sorted(set(included + ["export-summary.md"]))
+    redaction_report_path: Path | None = None
+    if redact and redaction_report is not None:
+        redaction_report_path = export_dir / "redaction-report.json"
+        payload = {
+            "schema_version": "1",
+            "redaction_applied": True,
+            "created_at": created_at,
+            "files_scanned": redaction_report.files_scanned,
+            "files_redacted": redaction_report.files_redacted,
+            "total_replacements": redaction_report.total_replacements,
+            "patterns": sorted(redaction_report.patterns),
+            "files": redaction_report.files,
+            "warnings": redaction_report.warnings,
+        }
+        redaction_report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    rel_for_checksum = sorted(
+        set(
+            included
+            + ["export-summary.md"]
+            + (["redaction-report.json"] if redaction_report_path else [])
+        )
+    )
     checksums_path, checksums = write_checksums(export_dir, rel_for_checksum)
 
     manifest = _build_manifest(
@@ -587,6 +739,7 @@ def _finalize_export(
         session_dir=session_dir,
         bundle_dir=bundle_dir,
         redact=redact,
+        redaction_report_path="redaction-report.json" if redaction_report_path else "",
     )
     manifest_path = export_dir / "export-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -602,6 +755,7 @@ def _finalize_export(
         source_type=source_type,
         source_session_id=source_session_id,
         source_proposal_id=source_proposal_id,
+        redaction_report_path=redaction_report_path,
     )
 
 
@@ -666,6 +820,26 @@ def validate_export(target: Path) -> ValidationResult:
         errors.append("manifest execution_allowed must be false")
     if manifest.get("execution_status") not in (None, "", "not_executed"):
         errors.append("manifest execution_status must be 'not_executed'")
+    redaction_applied = bool(manifest.get("redaction_applied"))
+    if redaction_applied:
+        if manifest.get("redaction_report") != "redaction-report.json":
+            errors.append("manifest redaction_report must reference redaction-report.json")
+        rpath = export_dir / "redaction-report.json"
+        if not rpath.exists():
+            errors.append("redaction-report.json missing")
+        else:
+            try:
+                report = json.loads(rpath.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                errors.append(f"malformed redaction-report.json: {exc}")
+            else:
+                if report.get("redaction_applied") is not True:
+                    errors.append("redaction-report.json redaction_applied must be true")
+                text = json.dumps(report).lower()
+                for marker in ("hunter2", "abc123", "eyj"):
+                    if marker in text:
+                        errors.append("redaction-report.json appears to contain raw secret values")
+                        break
 
     included = list(manifest.get("included_files") or [])
     info["file_count"] = len(included)
@@ -733,6 +907,12 @@ _EXPORT_INTENT_TOKENS = (
     "export latest approved",
     "audit pack",
     "handoff pack",
+    "create a redacted audit pack",
+    "export this safely",
+    "package this for external sharing",
+    "make a sanitized change-review pack",
+    "export latest with secrets removed",
+    "redact and export the approved proposal",
 )
 
 
@@ -748,6 +928,7 @@ _EXPORT_APPROVED_HINT_TOKENS = (
 class ExportAskIntent:
     matched: bool
     prefer_approved: bool = False
+    use_redaction: bool = False
 
 
 def is_export_intent(text: str) -> ExportAskIntent:
@@ -756,4 +937,15 @@ def is_export_intent(text: str) -> ExportAskIntent:
     if not matched:
         return ExportAskIntent(matched=False)
     prefer = any(tok in raw for tok in _EXPORT_APPROVED_HINT_TOKENS)
-    return ExportAskIntent(matched=True, prefer_approved=prefer)
+    redaction = any(
+        tok in raw
+        for tok in (
+            "redact",
+            "redacted",
+            "sanitized",
+            "safely",
+            "secrets removed",
+            "external sharing",
+        )
+    )
+    return ExportAskIntent(matched=True, prefer_approved=prefer, use_redaction=redaction)

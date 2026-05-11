@@ -344,3 +344,14 @@ Run local validation without Docker daemon, root, or service mutation:
 - `python -m compileall src`
 - `env -u PYTHONPATH pytest -q`
 - `pytest -q tests -k "export or audit or approval or apply or runbook"`
+
+
+## Redaction export validation flow (PR35)
+
+Use fixtures/mocks only:
+
+- `pytest -q tests -k "export or redact or redaction"`
+- `shellforgeai export --latest --redact`
+- `shellforgeai validate-export <data_dir>/exports/<export_id>`
+
+Confirm `redaction-report.json` exists and `export-manifest.json` has `redaction_applied=true`.

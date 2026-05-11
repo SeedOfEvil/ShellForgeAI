@@ -170,3 +170,6 @@ files, checksum mismatches, or an `apply-preflight.json` claiming
 `execution_allowed=true` cause validation to fail. **Approved does not mean
 applied**, and **exported does not mean applied**. `apply` remains
 validation-only.
+
+
+Export redaction is best-effort only: originals are never modified, and operators must review packs before sharing externally.

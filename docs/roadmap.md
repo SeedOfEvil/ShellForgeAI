@@ -72,3 +72,5 @@
   re-checks manifest, files, checksums, and the apply-preflight
   execution invariants. Export only copies/reads files — no execution,
   no mutation. `apply` remains validation-only.
+
+- PR35: export redaction hardening milestone with deterministic placeholders, `redaction-report.json`, and validate-export redaction checks for safer shareable audit packs.
