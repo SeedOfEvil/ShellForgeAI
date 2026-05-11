@@ -338,6 +338,23 @@ exit 2
 """
 
 
+LABEL_PREFIXES = ("OPERATOR-RUN:", "REQUIRES APPROVAL:", "SERVICE-IMPACTING:")
+
+
+def _normalize_label_prefix(text: str) -> str:
+    out = str(text).strip()
+    changed = True
+    while changed:
+        changed = False
+        upper = out.upper()
+        for pref in LABEL_PREFIXES:
+            if upper.startswith(pref):
+                out = out[len(pref) :].strip()
+                changed = True
+                break
+    return out
+
+
 def _shell_comment(text: str) -> list[str]:
     out: list[str] = []
     for line in str(text).splitlines() or [str(text)]:
@@ -367,7 +384,7 @@ def _render_operator_script(proposal: Proposal, *, kind: str) -> str:
         if not proposal.proposed_steps:
             lines.append("# (no commands)")
         for s in proposal.proposed_steps:
-            lines.extend(_shell_comment(f"OPERATOR-RUN: {s}"))
+            lines.extend(_shell_comment(f"OPERATOR-RUN: {_normalize_label_prefix(s)}"))
         lines.append("")
         lines.append("# ---- Post-fix verification (read-only suggestions) ----")
         for v in proposal.verification or []:
@@ -377,7 +394,7 @@ def _render_operator_script(proposal: Proposal, *, kind: str) -> str:
         if not proposal.rollback:
             lines.append("# (no rollback recorded)")
         for r in proposal.rollback:
-            lines.extend(_shell_comment(f"ROLLBACK: {r}"))
+            lines.extend(_shell_comment(f"ROLLBACK: {_normalize_label_prefix(r)}"))
     lines.append("")
     lines.append(f"# {SAFETY_LINE}")
     return "\n".join(lines) + "\n"
@@ -411,7 +428,11 @@ def _render_validation_md(proposal: Proposal) -> str:
 
 
 def _render_preflight_json(
-    proposal: Proposal, preflight: PreflightResult, *, bundle_dir: Path
+    proposal: Proposal,
+    preflight: PreflightResult,
+    *,
+    bundle_dir: Path,
+    bundle_status: str = "created",
 ) -> dict[str, Any]:
     return {
         "schema_version": BUNDLE_SCHEMA_VERSION,
@@ -421,6 +442,8 @@ def _render_preflight_json(
         "preflight_status": preflight.status,
         "execution_allowed": EXECUTION_ALLOWED,
         "execution_status": EXECUTION_NOT_EXECUTED,
+        "bundle_status": bundle_status,
+        "proposal_fingerprint": (proposal.fingerprint or {}).get("value", ""),
         "risk": proposal.risk,
         "safety_labels": list(proposal.safety_labels),
         "source_proposal": proposal.source.runbook or proposal.source.evidence or "",
@@ -455,7 +478,9 @@ def generate_bundle(
     if preflight is None:
         preflight = run_preflight(proposal)
     bundle_dir = bundle_dir_for(Path(data_dir), proposal.proposal_id)
+    had_existing = bundle_dir.exists()
     bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_status = "refreshed" if had_existing else "created"
 
     preview = bundle_dir / "apply-preview.md"
     cmds = bundle_dir / "operator-commands.sh"
@@ -467,7 +492,9 @@ def generate_bundle(
     cmds.write_text(_render_operator_script(proposal, kind="commands"), encoding="utf-8")
     rollback.write_text(_render_operator_script(proposal, kind="rollback"), encoding="utf-8")
     validation.write_text(_render_validation_md(proposal), encoding="utf-8")
-    preflight_payload = _render_preflight_json(proposal, preflight, bundle_dir=bundle_dir)
+    preflight_payload = _render_preflight_json(
+        proposal, preflight, bundle_dir=bundle_dir, bundle_status=bundle_status
+    )
     preflight_path.write_text(
         json.dumps(preflight_payload, indent=2),
         encoding="utf-8",
@@ -497,7 +524,9 @@ def write_diagnostic_preflight(
     bundle_dir.mkdir(parents=True, exist_ok=True)
     preflight_path = bundle_dir / "apply-preflight.json"
     pseudo = proposal or Proposal(proposal_id=proposal_id, status="unknown", risk="low")
-    payload = _render_preflight_json(pseudo, preflight, bundle_dir=bundle_dir)
+    payload = _render_preflight_json(
+        pseudo, preflight, bundle_dir=bundle_dir, bundle_status="existing"
+    )
     payload["preflight_status"] = preflight.status
     preflight_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return preflight_path

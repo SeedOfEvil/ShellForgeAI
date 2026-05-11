@@ -166,3 +166,5 @@ make check    # format + lint + type + tests
 ## License
 
 MIT. See `LICENSE`.
+
+- Approval queue is idempotent by proposal fingerprint; apply bundle generation refreshes static files only (no execution).

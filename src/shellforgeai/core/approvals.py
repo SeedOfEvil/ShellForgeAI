@@ -14,6 +14,7 @@ PR33 consumes these proposals to generate an operator execution bundle
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import re
 import shutil
@@ -94,6 +95,7 @@ class Proposal(BaseModel):
     verification: list[str] = Field(default_factory=list)
     safety_labels: list[str] = Field(default_factory=list)
     notes: str = ""
+    fingerprint: dict[str, str] = Field(default_factory=dict)
     execution: ProposalExecution = Field(default_factory=ProposalExecution)
     approval: ProposalApproval = Field(default_factory=ProposalApproval)
 
@@ -296,6 +298,15 @@ def validate_proposal_payload(payload: dict[str, Any]) -> tuple[list[str], list[
     source = payload.get("source") or {}
     if not (source.get("runbook") or source.get("evidence") or source.get("session_id")):
         warnings.append("source has no runbook/evidence/session_id reference")
+    fp = payload.get("fingerprint") or {}
+    if not isinstance(fp, dict) or not fp:
+        errors.append("missing required field: fingerprint")
+    else:
+        if fp.get("algorithm") != "sha256":
+            errors.append("fingerprint.algorithm must be 'sha256'")
+        value = str(fp.get("value") or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", value):
+            errors.append("fingerprint.value must be a 64-char sha256 hex")
     return errors, warnings
 
 
@@ -393,6 +404,47 @@ def _slug(value: str) -> str:
     return s[:64] or "option"
 
 
+def _norm_lines(values: list[str]) -> list[str]:
+    return [" ".join(str(v).split()).strip().lower() for v in values if str(v).strip()]
+
+
+def compute_proposal_fingerprint_payload(
+    *,
+    session_id: str,
+    option_id: str,
+    component: str,
+    kind: str,
+    title: str,
+    risk: str,
+    steps: list[str],
+    rollback: list[str],
+    verification: list[str],
+) -> dict[str, str]:
+    fp_source = {
+        "session_id": session_id,
+        "runbook_option_id": option_id,
+        "component": component,
+        "kind": kind,
+        "title": title,
+        "risk": risk,
+        "proposed_steps": _norm_lines(steps),
+        "rollback": _norm_lines(rollback),
+        "verification": _norm_lines(verification),
+    }
+    digest = hashlib.sha256(
+        json.dumps(fp_source, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "algorithm": "sha256",
+        "value": digest,
+        "source_session_id": session_id,
+        "runbook_option_id": option_id,
+        "component": component,
+        "kind": kind,
+        "title": title,
+    }
+
+
 def make_proposal_id(*, component: str = "", option_id: str = "") -> str:
     """Stable, readable proposal id: ``prop_YYYYMMDD_HHMMSS_<short>``."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -453,6 +505,20 @@ def proposals_from_runbook_payload(
             continue
         labels = _derive_safety_labels(option, steps, risk)
         kind = _derive_kind(option)
+        rollback = [str(r) for r in (option.get("rollback") or [])]
+        verification = [str(v) for v in (option.get("verification") or [])]
+        title = str(option.get("title") or "")
+        fingerprint = compute_proposal_fingerprint_payload(
+            session_id=session_id,
+            option_id=opt_id,
+            component=component,
+            kind=kind,
+            title=title,
+            risk=risk,
+            steps=steps,
+            rollback=rollback,
+            verification=verification,
+        )
         proposal = Proposal(
             proposal_id=make_proposal_id_for(opt_id, component=component, session_id=session_id),
             created_at=now,
@@ -466,18 +532,19 @@ def proposals_from_runbook_payload(
             target=target,
             component=component,
             kind=kind,
-            title=str(option.get("title") or ""),
+            title=title,
             risk=risk,
             impact=str(option.get("impact") or ""),
             confidence=_derive_confidence(option),
             evidence=[str(e) for e in (option.get("evidence") or [])],
             preconditions=[str(p) for p in (option.get("preconditions") or [])],
             proposed_steps=steps,
-            rollback=[str(r) for r in (option.get("rollback") or [])],
-            verification=[str(v) for v in (option.get("verification") or [])],
+            rollback=rollback,
+            verification=verification,
             safety_labels=labels,
             notes=str(option.get("notes") or ""),
             execution=ProposalExecution(),
+            fingerprint=fingerprint,
         )
         out.append(proposal)
     return out
@@ -532,9 +599,19 @@ def create_proposals_for_session(
         include_low=include_low,
     )
     _ensure_dirs(data_dir)
+    existing_by_fp: dict[str, tuple[str, Proposal]] = {}
+    for status, existing in list_proposals(data_dir):
+        value = str((existing.fingerprint or {}).get("value") or "")
+        if value:
+            existing_by_fp[value] = (status, existing)
+    created: list[Proposal] = []
     for p in proposals:
+        fp = str((p.fingerprint or {}).get("value") or "")
+        if fp and fp in existing_by_fp:
+            continue
         write_proposal(data_dir, p)
-    return proposals
+        created.append(p)
+    return created
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ from shellforgeai.core.approvals import (
     ProposalExecution,
     ProposalSource,
     approve_proposal,
+    compute_proposal_fingerprint_payload,
     find_proposal_path,
     proposal_filename,
     write_proposal,
@@ -49,15 +50,48 @@ def _mk_proposal(
     execution_allowed: bool = False,
     execution_status: str = "not_executed",
 ) -> Proposal:
+    component = "sfai-missing-env"
+    kind = "container_env_config_change"
+    title = "Provide REQUIRED_SETTING for sfai-missing-env"
+    resolved_steps = (
+        steps
+        if steps is not None
+        else [
+            "OPERATOR-RUN: edit compose env file and add REQUIRED_SETTING.",
+            "OPERATOR-RUN: docker compose up -d sfai-missing-env   # SERVICE-IMPACTING",
+        ]
+    )
+    resolved_rollback = (
+        rollback
+        if rollback is not None
+        else [
+            "Revert compose/env file change.",
+            "OPERATOR-RUN: docker compose up -d sfai-missing-env",
+        ]
+    )
+    resolved_verification = (
+        verification if verification is not None else ["docker logs --tail 50 sfai-missing-env"]
+    )
+    fingerprint = compute_proposal_fingerprint_payload(
+        session_id="sf_test_001",
+        option_id="opt_test_001",
+        component=component,
+        kind=kind,
+        title=title,
+        risk=risk,
+        steps=resolved_steps,
+        rollback=resolved_rollback,
+        verification=resolved_verification,
+    )
     return Proposal(
         proposal_id=proposal_id,
         created_at="2026-05-11T00:00:00+00:00",
         status=status,
         source=ProposalSource(session_id="sf_test"),
         target="docker",
-        component="sfai-missing-env",
-        kind="container_env_config_change",
-        title="Provide REQUIRED_SETTING for sfai-missing-env",
+        component=component,
+        kind=kind,
+        title=title,
         risk=risk,
         confidence="medium",
         impact="Recreates sfai-missing-env after config change.",
@@ -65,23 +99,12 @@ def _mk_proposal(
         if safety_labels is not None
         else ["OPERATOR-RUN", "REQUIRES APPROVAL", "SERVICE-IMPACTING"],
         preconditions=["Confirm required variable name."],
-        proposed_steps=steps
-        if steps is not None
-        else [
-            "OPERATOR-RUN: edit compose env file and add REQUIRED_SETTING.",
-            "OPERATOR-RUN: docker compose up -d sfai-missing-env   # SERVICE-IMPACTING",
-        ],
-        rollback=rollback
-        if rollback is not None
-        else [
-            "Revert compose/env file change.",
-            "OPERATOR-RUN: docker compose up -d sfai-missing-env",
-        ],
-        verification=verification
-        if verification is not None
-        else ["docker logs --tail 50 sfai-missing-env"],
+        proposed_steps=resolved_steps,
+        rollback=resolved_rollback,
+        verification=resolved_verification,
         notes="",
         execution=ProposalExecution(allowed=execution_allowed, status=execution_status),
+        fingerprint=fingerprint,
         approval=ProposalApproval(
             reason="approved for test",
             approved_at="2026-05-11T00:00:01+00:00",

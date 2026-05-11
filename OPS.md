@@ -307,3 +307,15 @@ sudo docker compose exec -T shellforgeai shellforgeai ask "prepare the approved 
 
 Expected: execution-style asks refuse cleanly; preview/prepare-style asks
 generate the operator preflight bundle. No mutation in either case.
+
+
+## Local validation (fixtures/mocks only)
+
+Run local validation without Docker daemon, root, or service mutation:
+
+- `ruff format .`
+- `ruff check .`
+- `mypy src/shellforgeai tests`
+- `pytest -q`
+- `python -m compileall src`
+- `env -u PYTHONPATH pytest -q`
