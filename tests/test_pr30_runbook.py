@@ -395,10 +395,12 @@ def test_runbook_module_does_not_invoke_subprocess(monkeypatch):
     render_runbook_md(rb)
 
 
-def test_apply_remains_validation_only(tmp_path):
-    """Apply still refuses to execute."""
+def test_apply_remains_validation_only(tmp_path, monkeypatch):
+    """Apply still refuses to execute legacy plan.json files."""
 
-    from shellforgeai.cli import apply
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
     from shellforgeai.core.plans import Plan, PlanStep
 
     p = Plan(
@@ -409,8 +411,12 @@ def test_apply_remains_validation_only(tmp_path):
     )
     plan_file = tmp_path / "plan.json"
     plan_file.write_text(p.model_dump_json(), encoding="utf-8")
-    # Should not raise; returns silently after printing.
-    apply(plan_file)
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path / "sfdata"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    runner = CliRunner()
+    result = runner.invoke(app, ["apply", str(plan_file)])
+    assert result.exit_code == 0, result.output
+    assert "Apply execution is intentionally disabled" in result.output
 
 
 # ---------- Routing ----------

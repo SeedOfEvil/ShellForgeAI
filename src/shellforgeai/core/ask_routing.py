@@ -184,6 +184,140 @@ def is_fix_plan_intent(text: str) -> bool:
     )
 
 
+_CREATE_PROPOSALS_TOKENS = (
+    "create approval proposals",
+    "create approval proposal",
+    "approval proposals from latest runbook",
+    "approval proposals from the latest runbook",
+    "approval proposals from latest",
+    "queue the safe fixes for approval",
+    "queue the safe fixes",
+    "queue safe fixes",
+    "make approval proposals",
+    "make an approval proposal",
+    "prepare changes for approval",
+    "prepare the changes for approval",
+    "stage the remediation plan for approval",
+    "stage the remediation plan",
+    "stage remediation for approval",
+    "create pending fixes",
+    "put those fixes in the approval queue",
+    "put these fixes in the approval queue",
+    "put the fixes in the approval queue",
+    "queue these fixes for approval",
+    "queue those fixes for approval",
+)
+
+
+_IMMEDIATE_FIX_TOKENS = (
+    "approve and run the fix",
+    "approve and run the fixes",
+    "approve and apply",
+    "approve and execute",
+    "fix everything now",
+    "fix it now",
+    "fix this now",
+    "just fix it",
+    "just fix everything",
+    "apply the fix now",
+    "apply the fixes now",
+    "run the fix now",
+    "run the fixes now",
+)
+
+
+@dataclass(frozen=True)
+class CreateProposalsIntent:
+    matched: bool
+
+
+def is_create_proposals_intent(text: str) -> CreateProposalsIntent:
+    """Detect ask phrasing that asks ShellForgeAI to queue proposals."""
+    raw = (text or "").lower()
+    if any(tok in raw for tok in _CREATE_PROPOSALS_TOKENS):
+        return CreateProposalsIntent(matched=True)
+    return CreateProposalsIntent(matched=False)
+
+
+def is_immediate_fix_intent(text: str) -> bool:
+    """Detect 'approve and run / fix everything now' style asks."""
+    raw = (text or "").lower()
+    return any(tok in raw for tok in _IMMEDIATE_FIX_TOKENS)
+
+
+_APPLY_APPROVED_TOKENS = (
+    "apply the approved proposal",
+    "apply approved proposal",
+    "apply the approved fix",
+    "apply approved fix",
+    "run the approved proposal",
+    "run the approved fix",
+    "run approved fix",
+    "can you run the approved",
+    "can you apply the approved",
+    "can you apply the proposal",
+    "execute the approved",
+    "execute approved",
+    "prepare the approved fix bundle",
+    "prepare the approved bundle",
+    "prepare approved bundle",
+    "prepare the operator bundle",
+    "prepare the apply bundle",
+    "generate operator script for approved",
+    "generate the operator script for approved",
+    "generate operator bundle",
+    "build operator bundle",
+    "dry run the approved proposal",
+    "dry-run the approved proposal",
+    "dry run the approved fix",
+    "dry-run the approved fix",
+)
+
+
+@dataclass(frozen=True)
+class ApplyApprovedIntent:
+    matched: bool
+    dry_run: bool = False
+    execute: bool = False
+
+
+def is_apply_approved_intent(text: str) -> ApplyApprovedIntent:
+    """Detect ask requests about applying/running an approved proposal.
+
+    ShellForgeAI never executes mutation. The CLI uses this to refuse run
+    requests politely and to offer the preflight bundle when appropriate.
+    """
+    raw = (text or "").lower()
+    if not any(tok in raw for tok in _APPLY_APPROVED_TOKENS):
+        return ApplyApprovedIntent(matched=False)
+    dry_run = any(
+        tok in raw
+        for tok in (
+            "dry run",
+            "dry-run",
+            "prepare",
+            "preview",
+            "generate operator",
+            "generate the operator",
+            "build operator",
+        )
+    )
+    execute = any(
+        tok in raw
+        for tok in (
+            "run the approved",
+            "run approved",
+            "execute the approved",
+            "execute approved",
+            "apply the approved",
+            "apply approved",
+            "can you run",
+            "can you apply",
+        )
+    )
+    return ApplyApprovedIntent(matched=True, dry_run=dry_run, execute=execute)
+
+
 def is_network_reachability_intent(text: str) -> bool:
     """Detect questions that focus on app/network reachability or upstream failures."""
     lowered = _normalize_intent_text(text or "")

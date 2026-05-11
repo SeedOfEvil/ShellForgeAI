@@ -21,6 +21,23 @@
   `_DATE` env vars; surfaced by `--version`, `version`, and `doctor`.
 - PR30: evidence-backed operator runbooks. `shellforgeai runbook` (and
 - PR31: formal runbook validation (`validate-runbook`), schema-versioned `runbook.json`, and stricter advisory risk scoring.
+- PR32: mutation proposal objects and approval queue.
+  `shellforgeai approvals create [--from-runbook PATH] [--latest] [--include-low]`
+  / `list` / `show` / `approve` / `reject` / `cancel` / `archive` /
+  `validate`. Proposals live under
+  `<data_dir>/approvals/{pending,approved,rejected,canceled,archived}/`
+  with a schema-versioned JSON payload (`source`, `kind`, `risk`,
+  `confidence`, `safety_labels`, `proposed_steps`, `rollback`,
+  `verification`, `execution.allowed=false`). Approval is a paper
+  trail — it does not execute anything; ask phrases like "approve
+  and run the fix" / "fix everything now" are refused cleanly.
+- PR33: apply preflight + operator execution bundle export.
+  `shellforgeai apply <approved-proposal>` runs deterministic preflight
+  checks and writes `apply-preview.md`, `operator-commands.sh`,
+  `rollback.sh`, `validation.md`, and `apply-preflight.json` under
+  `<data_dir>/apply_bundles/<id>/`. The generated shell scripts contain
+  an early `exit 2` before any operator-run command. ShellForgeAI still
+  does not execute anything; `apply` remains validation-only.
   `diagnose --with-runbook`, fix-plan asks) turn existing read-only
   evidence into a labelled operator-run remediation plan with
   prechecks, options, rollback, and post-fix validation. ShellForgeAI

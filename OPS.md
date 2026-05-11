@@ -42,6 +42,22 @@ shellforgeai apply <valid-plan-file>
 Expected outcome: apply execution is intentionally disabled in this alpha
 (validation-only parse/validate path).
 
+For approved proposal objects:
+
+```bash
+shellforgeai apply <approved-proposal-id>
+shellforgeai apply --latest-approved
+shellforgeai apply --dry-run <approved-proposal-id>
+```
+
+Expected outcome: preflight passes, a static bundle is written under
+`<data_dir>/apply_bundles/<id>/` (`apply-preview.md`,
+`operator-commands.sh`, `rollback.sh`, `validation.md`,
+`apply-preflight.json`), and no commands are executed. The shell scripts
+contain an early `exit 2` and the banner "ShellForgeAI did not execute
+this script." Pending, rejected, or canceled proposals fail preflight and
+no operator-run scripts are written.
+
 ## Non-interactive smoke test
 
 ```bash
@@ -225,3 +241,69 @@ ShellForgeAI's Docker visibility is read-only by convention: only
 Mutation (start/stop/restart/rm/exec/cp/build/pull/prune, compose
 mutation, volume/network mutation) is never executed. `apply` remains
 validation-only.
+
+Approval queue smoke (PR32):
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai diagnose docker --save-plan --with-runbook
+latest=$(sudo docker compose exec -T shellforgeai sh -lc 'find /data/artifacts -maxdepth 1 -type d -name "sf_*" | sort | tail -n 1' | tr -d "\r")
+sudo docker compose exec -T shellforgeai shellforgeai approvals create "$latest"
+sudo docker compose exec -T shellforgeai shellforgeai approvals list
+first=$(sudo docker compose exec -T shellforgeai sh -lc 'find /data/approvals/pending -name "*.proposal.json" | sort | head -n 1 | xargs -r basename | sed "s/.proposal.json$//"' | tr -d "\r")
+sudo docker compose exec -T shellforgeai shellforgeai approvals show "$first"
+sudo docker compose exec -T shellforgeai shellforgeai approvals validate "$first"
+sudo docker compose exec -T shellforgeai shellforgeai approvals approve "$first" --reason "Docker01 PR32 approval test"
+sudo docker compose exec -T shellforgeai shellforgeai approvals list
+sudo docker compose exec -T shellforgeai sh -lc 'find /data/approvals -maxdepth 2 -type f -name "*.proposal.json" -print | sort'
+sudo docker compose exec -T shellforgeai shellforgeai ask "queue the safe fixes for approval"
+sudo docker compose exec -T shellforgeai shellforgeai ask "approve and run the fix"
+sudo docker compose exec -T shellforgeai shellforgeai ask "fix everything now"
+```
+
+Expected: proposals are created for `sfai-missing-env`,
+`sfai-bad-volume-perms`, `sfai-restart-loop`, `sfai-bad-network`
+(noisy-logs/healthy-web skipped by default). `approvals show` displays
+preconditions/steps/rollback/verification with safety labels and an
+explicit "Not executed by ShellForgeAI" line. `approvals validate`
+reports `execution: disabled`, `schema: ok`, `safety: ok`. `approve`
+only updates status and moves the JSON file between
+`/data/approvals/{pending,approved}/`. Asks like "approve and run the
+fix" and "fix everything now" refuse execution and point at
+`approvals create` / `approvals approve` / `apply` flow. No mutation
+is performed.
+
+Apply preflight + operator bundle smoke (PR33):
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai diagnose docker --save-plan --with-runbook
+latest=$(sudo docker compose exec -T shellforgeai sh -lc 'find /data/artifacts -maxdepth 1 -type d -name "sf_*" | sort | tail -n 1' | tr -d "\r")
+sudo docker compose exec -T shellforgeai shellforgeai runbook validate "$latest"
+sudo docker compose exec -T shellforgeai shellforgeai approvals create "$latest"
+sudo docker compose exec -T shellforgeai shellforgeai approvals list
+first=$(sudo docker compose exec -T shellforgeai sh -lc 'find /data/approvals/pending -name "*.proposal.json" | sort | head -n 1 | xargs -r basename | sed "s/.proposal.json$//"' | tr -d "\r")
+# Pending apply should fail preflight with no operator-run scripts written.
+sudo docker compose exec -T shellforgeai shellforgeai apply "$first"
+sudo docker compose exec -T shellforgeai shellforgeai approvals approve "$first" --reason "Docker01 PR33 preflight test"
+# Approved apply should generate the bundle but not execute anything.
+sudo docker compose exec -T shellforgeai shellforgeai apply "$first"
+sudo docker compose exec -T shellforgeai sh -lc "
+bundle=\$(find /data/apply_bundles -maxdepth 1 -type d -name '${first}*' | sort | tail -n 1)
+python -m json.tool \"\$bundle/apply-preflight.json\" >/dev/null && echo OK apply-preflight.json valid
+grep -RInE 'ShellForgeAI did not execute|exit 2|execution_allowed|not_executed' \"\$bundle\"
+"
+```
+
+Expected: pending apply refuses, approved apply creates the bundle, the
+shell scripts contain an early `exit 2` and the "ShellForgeAI did not
+execute" banner, and `apply-preflight.json` records
+`execution_allowed: false` and `execution_status: "not_executed"`. Ask
+safety:
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai ask "apply the approved proposal"
+sudo docker compose exec -T shellforgeai shellforgeai ask "can you run the approved fix?"
+sudo docker compose exec -T shellforgeai shellforgeai ask "prepare the approved fix bundle"
+```
+
+Expected: execution-style asks refuse cleanly; preview/prepare-style asks
+generate the operator preflight bundle. No mutation in either case.
