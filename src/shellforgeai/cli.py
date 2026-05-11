@@ -681,7 +681,15 @@ def runbook(
     runtime = _ctx(ctx)
     target_path: Path | None = None
     if artifact is not None:
-        target_path = artifact
+        candidate = artifact
+        if candidate.is_dir():
+            ev = candidate / "evidence.json"
+            if not ev.exists():
+                console.print(f"No evidence.json found in artifact directory: {candidate}")
+                raise typer.Exit(code=1)
+            target_path = ev
+        else:
+            target_path = candidate
     elif session:
         candidate = Path(runtime.session.data_dir) / "artifacts" / session / "evidence.json"
         target_path = candidate
@@ -697,7 +705,11 @@ def runbook(
     if target_path is None or not target_path.exists():
         console.print(f"Evidence artifact not found: {target_path}")
         raise typer.Exit(code=1)
-    rb = runbook_from_evidence_file(target_path)
+    try:
+        rb = runbook_from_evidence_file(target_path)
+    except (OSError, ValueError) as exc:
+        console.print(f"Failed to read evidence artifact {target_path}: {exc}")
+        raise typer.Exit(code=1) from None
     out_dir = target_path.parent
     md_path = out_dir / "runbook.md"
     json_path = out_dir / "runbook.json"

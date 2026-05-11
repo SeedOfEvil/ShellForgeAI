@@ -535,6 +535,64 @@ def test_runbook_cli_writes_artifacts(tmp_path):
     assert "operator_steps" in rb_json
 
 
+def test_runbook_cli_accepts_session_directory(tmp_path):
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
+
+    sess_dir = tmp_path / "sf_test_dir"
+    sess_dir.mkdir()
+    _write_evidence_bundle(sess_dir)
+    runner = CliRunner()
+    result = runner.invoke(app, ["runbook", str(sess_dir)])
+    assert result.exit_code == 0, result.output
+    assert (sess_dir / "runbook.md").exists()
+    assert (sess_dir / "runbook.json").exists()
+    assert "Operator runbook written" in result.output
+
+
+def test_runbook_cli_accepts_session_directory_trailing_slash(tmp_path):
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
+
+    sess_dir = tmp_path / "sf_test_trailing"
+    sess_dir.mkdir()
+    _write_evidence_bundle(sess_dir)
+    runner = CliRunner()
+    result = runner.invoke(app, ["runbook", str(sess_dir) + "/"])
+    assert result.exit_code == 0, result.output
+    assert (sess_dir / "runbook.md").exists()
+    assert (sess_dir / "runbook.json").exists()
+
+
+def test_runbook_cli_missing_directory_clean_error(tmp_path):
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
+
+    missing = tmp_path / "sf_does_not_exist"
+    runner = CliRunner()
+    result = runner.invoke(app, ["runbook", str(missing)])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "Evidence artifact not found" in result.output
+
+
+def test_runbook_cli_directory_missing_evidence_clean_error(tmp_path):
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
+
+    sess_dir = tmp_path / "sf_empty_session"
+    sess_dir.mkdir()
+    runner = CliRunner()
+    result = runner.invoke(app, ["runbook", str(sess_dir)])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "No evidence.json found in artifact directory" in result.output
+
+
 def test_runbook_cli_requires_an_input(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
