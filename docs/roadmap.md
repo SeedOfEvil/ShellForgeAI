@@ -60,3 +60,6 @@
 - Becoming a shell.
 - Hidden mutation under workspace trust.
 - Auto-apply of model-generated plans.
+
+
+- PR33: approval/apply hardening milestone: proposal fingerprints + create idempotency, approvals list filters, show/validate polish, idempotent apply bundle refresh status, and script label normalization; apply remains validation-only.

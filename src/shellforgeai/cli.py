@@ -1093,34 +1093,52 @@ def approvals_create(
 
 
 @approvals_app.command("list")
-def approvals_list(ctx: typer.Context) -> None:
-    """List proposals across pending/approved/rejected/canceled/archived."""
+def approvals_list(
+    ctx: typer.Context,
+    status: str = typer.Option("pending", "--status"),
+    all_statuses: bool = typer.Option(False, "--all"),
+    component: str = typer.Option("", "--component"),
+    session: str = typer.Option("", "--session"),
+) -> None:
+    """List proposals with status/component/session filters."""
     runtime = _ctx(ctx)
     entries = list_proposals(Path(runtime.session.data_dir))
-    if not entries:
-        console.print("No pending approval proposals.")
-        return
-    pending = [(s, p) for s, p in entries if s == "pending"]
-    if pending:
-        console.print("Pending approval proposals:")
-        console.print(f"{'ID':<48} {'Risk':<8} {'Component':<24} Title")
-        for _, p in pending:
-            console.print(f"{p.proposal_id:<48} {p.risk:<8} {p.component:<24} {p.title}")
+    if all_statuses:
+        filtered = entries
+        scope = "All approval proposals"
     else:
-        console.print("No pending approval proposals.")
-    other = [(s, p) for s, p in entries if s != "pending"]
-    if other:
-        console.print("")
-        console.print("Other proposals:")
-        for status, p in other:
-            console.print(
-                f"[{status}] {p.proposal_id} risk={p.risk} component={p.component} title={p.title}"
-            )
+        filtered = [(s, p) for s, p in entries if s == status]
+        scope = f"{status.capitalize()} approval proposals"
+    if component:
+        filtered = [(s, p) for s, p in filtered if p.component == component]
+    if session:
+        filtered = [(s, p) for s, p in filtered if p.source.session_id == session]
+    if not filtered:
+        console.print(f"No {status if not all_statuses else 'matching'} approval proposals.")
+        return
+    console.print(f"{scope}:")
+    header = (
+        f"{'ID':<36} {'Status':<10} {'Risk':<8} "
+        f"{'Component':<20} {'Fingerprint':<12} {'Created':<20} Title"
+    )
+    console.print(header)
+    for s, p in filtered:
+        fp = str((p.fingerprint or {}).get("value") or "")[:8]
+        created = (p.created_at or "")[:19]
+        row = (
+            f"{p.proposal_id:<36} {s:<10} {p.risk:<8} "
+            f"{p.component:<20} {fp:<12} {created:<20} {p.title}"
+        )
+        console.print(row)
 
 
 def _print_proposal_show(proposal: Proposal, status: str, path: Path) -> None:
     console.print(f"Proposal: {proposal.proposal_id}")
     console.print(f"- status: {status}")
+    fp = proposal.fingerprint or {}
+    if fp:
+        console.print(f"- fingerprint.short: {str(fp.get('value') or '')[:8]}")
+        console.print(f"- fingerprint.full: {fp.get('value')}")
     console.print(f"- risk: {proposal.risk}")
     if proposal.confidence:
         console.print(f"- confidence: {proposal.confidence}")

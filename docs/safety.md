@@ -151,3 +151,7 @@ asks like "approve and run the fix" or "fix everything now" are
 refused cleanly; ShellForgeAI offers to stage proposals for approval
 instead.
 
+
+
+- Proposal replay protection: ShellForgeAI computes a stable SHA-256 proposal fingerprint from runbook/session content and skips duplicates by default to prevent queue spam.
+- Approval transitions and apply preflight remain non-executing; execution fields stay `execution_allowed=false` and `execution_status=not_executed`.
