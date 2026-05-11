@@ -69,6 +69,33 @@ def _make_session(data_dir: Path, session_id: str, *, with_runbook: bool = True)
     return sess
 
 
+def _write_secret_fixtures(sess: Path) -> None:
+    payload = {
+        "password": "abc123",
+        "api_key": "abc123",
+        "authorization": "Bearer abc123",
+        "database_url": "postgres://user:pass@db.example/app",
+        "redis_url": "redis://:pass@redis:6379/0",
+        "mongo_uri": "mongodb://user:pass@mongo/db",
+        "normal": "REQUIRED_SETTING",
+    }
+    (sess / "evidence.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (sess / "summary.md").write_text(
+        'PASSWORD: abc123\ncurl -H "Authorization: Bearer abc123" https://example.invalid\n',
+        encoding="utf-8",
+    )
+    (sess / "plan.json").write_text(json.dumps({"token": "abc123"}, indent=2), encoding="utf-8")
+    (sess / "runbook.md").write_text(
+        "Cookie: sessionid=abc123\nSet-Cookie: sessionid=abc123\n", encoding="utf-8"
+    )
+    (sess / "runbook.json").write_text(
+        json.dumps(
+            {"private_key": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"}, indent=2
+        ),
+        encoding="utf-8",
+    )
+
+
 def _make_proposal(
     proposal_id: str = "prop_test_pr34_001",
     *,
@@ -178,6 +205,41 @@ def test_export_proposal_includes_bundle_when_present(data_env):
     assert "apply-preflight.json" in res.included_files
     assert "operator-commands.sh" in res.included_files
     assert "rollback.sh" in res.included_files
+
+
+def test_redacted_proposal_export_redacts_bundle_files(data_env):
+    sess = _make_session(data_env, "sf_pr35_prop_redact_001")
+    _write_secret_fixtures(sess)
+    proposal = _make_proposal(
+        proposal_id="prop_pr35_prop_redact_001",
+        session_id=sess.name,
+        runbook_path=str(sess / "runbook.json"),
+        evidence_path=str(sess / "evidence.json"),
+    )
+    write_proposal(data_env, proposal)
+    generate_bundle(proposal, data_dir=data_env)
+    # inject fake secret into bundle text artifacts
+    for name in ("apply-preview.md", "operator-commands.sh", "rollback.sh", "validation.md"):
+        p = data_env / "apply-bundles" / proposal.proposal_id / name
+        if not p.exists():
+            continue
+        p.write_text(
+            p.read_text(encoding="utf-8") + "\nAuthorization: Bearer abc123\n", encoding="utf-8"
+        )
+    res = export_from_proposal(data_env, proposal.proposal_id, redact=True)
+    for name in (
+        "proposal.json",
+        "apply-preview.md",
+        "operator-commands.sh",
+        "rollback.sh",
+        "validation.md",
+        "apply-preflight.json",
+    ):
+        if not (res.export_dir / name).exists():
+            continue
+        text = (res.export_dir / name).read_text(encoding="utf-8")
+        assert "abc123" not in text
+    assert validate_export(res.export_dir).ok
 
 
 def test_export_latest_session_picks_newest(data_env):
@@ -338,6 +400,17 @@ def test_redact_text_private_key_block_and_preserve_normal_text():
     assert "[REDACTED_PRIVATE_KEY_BLOCK]" in out
 
 
+def test_redact_text_cookies_and_json_and_export_syntax():
+    txt = (
+        "Cookie: sessionid=abc123\nSet-Cookie: sessionid=abc123\n"
+        'export API_KEY=abc123\n{"database_url":"postgres://user:pass@db/app"}\n'
+    )
+    out = redact_text(txt)
+    assert "abc123" not in out
+    assert "postgres://user:pass@db/app" not in out
+    assert "[REDACTED]" in out
+
+
 def test_redact_flag_redacts_copied_summary(data_env):
     sess = _make_session(data_env, "sf_pr34_redact_001")
     res = export_from_session(data_env, sess, redact=True)
@@ -350,6 +423,31 @@ def test_redact_flag_redacts_copied_summary(data_env):
     report = json.loads((res.export_dir / "redaction-report.json").read_text(encoding="utf-8"))
     assert report["redaction_applied"] is True
     assert "hunter2" not in json.dumps(report)
+
+
+def test_redacted_export_removes_probe_values_and_preserves_originals(data_env):
+    sess = _make_session(data_env, "sf_pr35_probe_001")
+    _write_secret_fixtures(sess)
+    res = export_from_session(data_env, sess, redact=True)
+    probes = [
+        "abc123",
+        "sessionid=abc123",
+        "postgres://user:pass@db.example/app",
+        "redis://:pass@redis:6379/0",
+        "mongodb://user:pass@mongo/db",
+    ]
+    for fname in ("evidence.json", "summary.md", "plan.json", "runbook.md", "runbook.json"):
+        text = (res.export_dir / fname).read_text(encoding="utf-8")
+        for probe in probes:
+            assert probe not in text
+        assert "[REDACTED]" in text or "[REDACTED_PRIVATE_KEY_BLOCK]" in text
+    # originals unchanged
+    assert "abc123" in (sess / "summary.md").read_text(encoding="utf-8")
+    manifest = json.loads((res.export_dir / "export-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["redaction_applied"] is True
+    assert manifest["redaction_report"] == "redaction-report.json"
+    assert "Redaction: on" in (res.export_dir / "export-summary.md").read_text(encoding="utf-8")
+    assert validate_export(res.export_dir).ok
 
 
 # ---------------------------------------------------------------------------

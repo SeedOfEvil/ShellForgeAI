@@ -96,13 +96,26 @@ _PRIVATE_KEY_BLOCK_RE = re.compile(
     r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
     re.IGNORECASE | re.DOTALL,
 )
-_KV_RE = re.compile(
-    r'(?im)(["\']?(?:'
-    + "|".join(re.escape(k) for k in _SECRET_KEYS)
-    + r')["\']?\s*[:=]\s*)(["\']?)([^"\n\r]*?)\2(?=\s*(?:,|$))'
-)
+_KEYS_ALT = "|".join(re.escape(k) for k in _SECRET_KEYS)
+_KV_RE = re.compile(r'(?im)(["\']?(?:' + _KEYS_ALT + r')["\']?\s*[:=]\s*)(["\']?)([^,\n\r}]*)\2')
 _AUTH_BEARER_RE = re.compile(r"(?im)(authorization\s*:\s*)bearer\s+\S+")
 _URI_RE = re.compile(r"(?i)\b(?:postgres(?:ql)?|redis|mongodb)://\S+")
+_COOKIE_RE = re.compile(r"(?im)((?:set-cookie|cookie)\s*:\s*)[^\n\r]+")
+_CURL_AUTH_RE = re.compile(r'(?i)(authorization:\s*bearer\s+)([^"\']+)')
+_TEXTLIKE_SUFFIXES = {
+    ".json",
+    ".md",
+    ".txt",
+    ".log",
+    ".env",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".conf",
+    ".cfg",
+    ".sh",
+}
 
 
 @dataclass
@@ -175,6 +188,14 @@ def apply_redaction(text: str) -> RedactionOutcome:
     if n:
         replacements += n
         matched_kinds.add("connection_uri")
+    out, n = _COOKIE_RE.subn(r"\1[REDACTED]", out)
+    if n:
+        replacements += n
+        matched_kinds.add("cookie")
+    out, n = _CURL_AUTH_RE.subn(r"\1[REDACTED]", out)
+    if n:
+        replacements += n
+        matched_kinds.add("authorization")
 
     def _kv_sub(m: re.Match[str]) -> str:
         nonlocal replacements
@@ -257,7 +278,10 @@ def _copy_if_exists(
     if redact:
         if report is not None:
             report.files_scanned += 1
+        suffix = src.suffix.lower()
         try:
+            if suffix and suffix not in _TEXTLIKE_SUFFIXES:
+                raise UnicodeDecodeError("utf-8", b"", 0, 1, "unsupported extension")
             text = src.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             shutil.copy2(src, dst)
@@ -840,6 +864,9 @@ def validate_export(target: Path) -> ValidationResult:
                     if marker in text:
                         errors.append("redaction-report.json appears to contain raw secret values")
                         break
+        summary_text = (export_dir / "export-summary.md").read_text(encoding="utf-8").lower()
+        if "redaction: off" in summary_text:
+            errors.append("export-summary.md says redaction off while manifest says true")
 
     included = list(manifest.get("included_files") or [])
     info["file_count"] = len(included)
