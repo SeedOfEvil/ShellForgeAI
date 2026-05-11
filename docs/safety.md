@@ -13,7 +13,17 @@ treats model output as advisory.
   follow-on shell fragments after a multi-line paste; `/help` and `/exit`
   still work.
 - **`apply` is validation-only.** It parses and validates plan JSON and
-  exits. It never executes plan steps in this alpha.
+  exits. For approved proposal objects it runs preflight checks and writes
+  a static operator execution bundle on disk (`apply-preview.md`,
+  `operator-commands.sh`, `rollback.sh`, `validation.md`,
+  `apply-preflight.json`) but does **not** run any command. The generated
+  shell scripts contain an early `exit 2` before any operator-run command,
+  so accidental invocation is a no-op until a human removes the guard.
+  `apply-preflight.json` always records `execution_allowed: false` and
+  `execution_status: "not_executed"`.
+- **Approval is a paper trail.** Marking a proposal `approved` does not
+  execute anything. Approval transitions only move proposal metadata
+  between `approvals/{pending,approved,rejected,canceled}/` directories.
 - **No package installs, no service restarts** initiated by the runtime.
   Service-impacting commands are described as approval-required and
   operator-run.
@@ -117,4 +127,14 @@ Every mutating command in the runbook is shown as a labelled hint
 explicitly states "ShellForgeAI did not execute these steps. This is an
 operator-run plan." Risk levels are advisory; ShellForgeAI does not act
 on them.
+
+`shellforgeai apply <approved-proposal>` writes a static operator
+execution bundle under `<data_dir>/apply_bundles/<proposal-id>/` but
+does not run anything. The bundle's `operator-commands.sh` and
+`rollback.sh` both contain a deliberate `exit 2` *before* any
+operator-run command, with an explicit "ShellForgeAI did not execute
+this script." banner. Pending, rejected, or canceled proposals fail
+preflight and no operator-run scripts are written. `approved` is
+strictly a paper trail; it does not enable execution. ShellForgeAI's
+apply remains validation-only in this alpha.
 

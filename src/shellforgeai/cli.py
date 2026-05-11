@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import platform
 import re
 import sys
@@ -11,12 +12,30 @@ import typer
 from rich.console import Console
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.core.apply_bundle import (
+    generate_bundle,
+    run_preflight,
+    write_diagnostic_preflight,
+)
+from shellforgeai.core.approvals import (
+    Proposal,
+    approve_proposal,
+    cancel_proposal,
+    create_proposals_for_session,
+    find_proposal_path,
+    latest_approved_proposal,
+    list_proposals,
+    load_proposal_from_path,
+    reject_proposal,
+    validate_proposal_payload,
+)
 from shellforgeai.core.ask_routing import (
     EVIDENCE_BACKED,
     PLAIN,
     AskRoute,
     evidence_brief,
     extract_container_target,
+    is_apply_approved_intent,
     network_reachability_brief,
     route_ask_intent,
     target_container_status,
@@ -53,10 +72,12 @@ inspect_app = typer.Typer()
 tools_app = typer.Typer()
 audit_app = typer.Typer()
 model_app = typer.Typer()
+approvals_app = typer.Typer(help="Manage mutation proposal objects (read-only metadata).")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
 app.add_typer(model_app, name="model")
+app.add_typer(approvals_app, name="approvals")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -785,15 +806,370 @@ def validate_runbook_cmd(
     )
 
 
+def _resolve_apply_input(
+    runtime: RuntimeContext,
+    target: str | None,
+    *,
+    latest_approved: bool,
+) -> tuple[str, Path | None, Proposal | None, Path | None]:
+    """Resolve the apply argument to ``(kind, plan_path, proposal, proposal_path)``.
+
+    ``kind`` is one of ``"plan"`` (legacy plan.json), ``"proposal"`` (from disk),
+    or ``"missing"``. Plan files keep the existing validation-only behavior;
+    proposals route to the new PR33 apply preflight + bundle path.
+    """
+    data_dir = Path(runtime.session.data_dir)
+    if latest_approved:
+        proposal = latest_approved_proposal(data_dir)
+        if proposal is None:
+            return "missing", None, None, None
+        path, _status = find_proposal_path(data_dir, proposal.proposal_id)
+        return "proposal", None, proposal, path
+    if not target:
+        return "missing", None, None, None
+    # Try filesystem path first.
+    p = Path(target)
+    if p.exists() and p.is_file():
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            obj = None
+        if isinstance(obj, dict):
+            if "proposal_id" in obj:
+                try:
+                    proposal = load_proposal_from_path(p)
+                except (OSError, ValueError):
+                    return "missing", None, None, None
+                return "proposal", None, proposal, p
+            if "plan_id" in obj:
+                return "plan", p, None, None
+        # Fall through; not JSON we recognize.
+    # Otherwise treat as proposal id and search.
+    proposal_path, _status = find_proposal_path(data_dir, target)
+    if proposal_path is None:
+        return "missing", None, None, None
+    try:
+        proposal = load_proposal_from_path(proposal_path)
+    except (OSError, ValueError):
+        return "missing", None, None, None
+    return "proposal", None, proposal, proposal_path
+
+
+def _print_apply_bundle_success(proposal: Proposal, files: list[Path]) -> None:
+    console.print("Apply preflight passed. Execution remains disabled in this alpha.")
+    console.print(f"- proposal: {proposal.proposal_id}")
+    console.print(f"- status: {proposal.status}")
+    console.print(f"- risk: {proposal.risk}")
+    console.print("- execution: not_executed")
+    console.print("- bundle:")
+    for f in files:
+        console.print(f"  - {f}")
+    console.print("")
+    console.print("No commands were executed.")
+
+
+def _print_apply_preflight_failure(proposal: Proposal | None, errors: list[str]) -> None:
+    console.print("Apply preflight failed:")
+    if proposal is not None:
+        console.print(f"- proposal: {proposal.proposal_id}")
+        console.print(f"- status: {proposal.status}")
+    for err in errors or ["unknown error"]:
+        console.print(f"- {err}")
+    console.print("- no commands executed")
+
+
 @app.command()
-def apply(plan_file: Path) -> None:
-    if not plan_file.exists():
-        raise typer.BadParameter("plan file missing")
-    Plan.model_validate_json(plan_file.read_text(encoding="utf-8"))
-    console.print(
-        "Apply execution is intentionally disabled in this alpha. "
-        "Plan validation is available; execution will be introduced after safety hardening."
+def apply(
+    ctx: typer.Context,
+    target: Annotated[str | None, typer.Argument()] = None,
+    latest_approved: bool = typer.Option(
+        False, "--latest-approved", help="Apply the newest approved proposal."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Run preflight only; do not write bundle files."
+    ),
+) -> None:
+    """Validate a plan or generate an operator execution bundle for a proposal.
+
+    ShellForgeAI does not execute commands. For approved proposals this command
+    runs deterministic preflight checks and writes a static bundle:
+    apply-preview.md, operator-commands.sh, rollback.sh, validation.md,
+    apply-preflight.json. The shell scripts contain an early ``exit 2`` so they
+    cannot run if accidentally invoked.
+    """
+    runtime = _ctx(ctx)
+    if not target and not latest_approved:
+        raise typer.BadParameter(
+            "Provide a proposal id, a proposal JSON path, a plan.json path, or --latest-approved."
+        )
+    kind, plan_path, proposal, _proposal_path = _resolve_apply_input(
+        runtime, target, latest_approved=latest_approved
     )
+
+    if kind == "plan" and plan_path is not None:
+        # Preserve legacy plan.json validation-only behavior.
+        Plan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+        console.print(
+            "Apply execution is intentionally disabled in this alpha. "
+            "Plan validation is available; execution will be introduced after safety hardening."
+        )
+        return
+
+    if kind == "missing" or proposal is None:
+        if latest_approved:
+            console.print(
+                "Apply preflight failed:\n"
+                "- no approved proposals found\n"
+                "- run `shellforgeai approvals create <session>` then "
+                "`shellforgeai approvals approve <id> --reason '...'`\n"
+                "- no commands executed"
+            )
+        elif target is None:
+            raise typer.BadParameter("missing proposal/plan target")
+        else:
+            console.print(
+                "Apply preflight failed:\n"
+                f"- proposal/plan not found: {target}\n"
+                "- no commands executed"
+            )
+        raise typer.Exit(code=1)
+
+    preflight = run_preflight(proposal)
+    data_dir = Path(runtime.session.data_dir)
+
+    if not preflight.passed:
+        _print_apply_preflight_failure(proposal, preflight.errors)
+        # Always write a diagnostic apply-preflight.json so the operator can
+        # see the refusal record. No operator-run scripts are emitted.
+        if not dry_run:
+            preflight_path = write_diagnostic_preflight(
+                proposal,
+                data_dir=data_dir,
+                preflight=preflight,
+                proposal_id=proposal.proposal_id,
+            )
+            console.print(f"- preflight record: {preflight_path}")
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        console.print("Apply preflight passed (dry-run). Execution remains disabled in this alpha.")
+        console.print(f"- proposal: {proposal.proposal_id}")
+        console.print(f"- status: {proposal.status}")
+        console.print(f"- risk: {proposal.risk}")
+        console.print("- execution: not_executed")
+        console.print("- bundle: not written (dry-run)")
+        console.print("- no commands executed")
+        return
+
+    result = generate_bundle(proposal, data_dir=data_dir, preflight=preflight)
+    _print_apply_bundle_success(proposal, result.files)
+
+
+# ---------------------------------------------------------------------------
+# Approvals subcommands (PR32 scaffolding consumed by PR33 apply)
+
+
+def _resolve_session_dir(runtime: RuntimeContext, target: str) -> Path:
+    """Accept a session id (``sf_*``) or a path to a session directory."""
+    candidate = Path(target)
+    if candidate.is_dir():
+        return candidate
+    if str(target).startswith("sf_"):
+        return Path(runtime.session.data_dir) / "artifacts" / target
+    return candidate
+
+
+@approvals_app.command("create")
+def approvals_create(ctx: typer.Context, session: str) -> None:
+    """Create pending proposal objects from a runbook session directory."""
+    runtime = _ctx(ctx)
+    sess_dir = _resolve_session_dir(runtime, session)
+    if not sess_dir.exists():
+        console.print(f"Session not found: {sess_dir}")
+        raise typer.Exit(code=1)
+    try:
+        proposals = create_proposals_for_session(Path(runtime.session.data_dir), sess_dir)
+    except FileNotFoundError as exc:
+        console.print(f"Cannot create proposals: {exc}")
+        raise typer.Exit(code=1) from None
+    if not proposals:
+        console.print("No proposals created (no remediation_options in runbook.json).")
+        return
+    console.print(f"Created {len(proposals)} pending proposal(s):")
+    for p in proposals:
+        console.print(f"- {p.proposal_id} ({p.risk}) {p.title}")
+
+
+@approvals_app.command("list")
+def approvals_list(ctx: typer.Context) -> None:
+    runtime = _ctx(ctx)
+    entries = list_proposals(Path(runtime.session.data_dir))
+    if not entries:
+        console.print("No proposals on disk. Run `shellforgeai approvals create <session>`.")
+        return
+    for status, p in entries:
+        console.print(f"[{status}] {p.proposal_id} risk={p.risk} title={p.title}")
+
+
+@approvals_app.command("show")
+def approvals_show(ctx: typer.Context, proposal_id: str) -> None:
+    runtime = _ctx(ctx)
+    path, status = find_proposal_path(Path(runtime.session.data_dir), proposal_id)
+    if path is None:
+        console.print(f"Proposal not found: {proposal_id}")
+        raise typer.Exit(code=1)
+    proposal = load_proposal_from_path(path)
+    console.print(f"Proposal: {proposal.proposal_id}")
+    console.print(f"- status: {status}")
+    console.print(f"- risk: {proposal.risk}")
+    console.print(f"- title: {proposal.title}")
+    if proposal.component:
+        console.print(f"- component: {proposal.component}")
+    if proposal.safety_labels:
+        console.print(f"- safety_labels: {', '.join(proposal.safety_labels)}")
+    console.print(f"- execution.allowed: {proposal.execution.allowed}")
+    console.print(f"- execution.status: {proposal.execution.status}")
+    console.print(f"- path: {path}")
+
+
+@approvals_app.command("approve")
+def approvals_approve(
+    ctx: typer.Context,
+    proposal_id: str,
+    reason: str = typer.Option(..., "--reason", help="Why this proposal is approved."),
+) -> None:
+    runtime = _ctx(ctx)
+    try:
+        proposal = approve_proposal(Path(runtime.session.data_dir), proposal_id, reason=reason)
+    except FileNotFoundError as exc:
+        console.print(f"Cannot approve: {exc}")
+        raise typer.Exit(code=1) from None
+    console.print(
+        "Approval recorded (no commands executed):\n"
+        f"- proposal: {proposal.proposal_id}\n"
+        f"- status: {proposal.status}\n"
+        f"- reason: {reason}\n"
+        "- execution: not_executed"
+    )
+
+
+@approvals_app.command("reject")
+def approvals_reject(
+    ctx: typer.Context,
+    proposal_id: str,
+    reason: str = typer.Option(..., "--reason"),
+) -> None:
+    runtime = _ctx(ctx)
+    try:
+        proposal = reject_proposal(Path(runtime.session.data_dir), proposal_id, reason=reason)
+    except FileNotFoundError as exc:
+        console.print(f"Cannot reject: {exc}")
+        raise typer.Exit(code=1) from None
+    console.print(
+        "Rejection recorded:\n"
+        f"- proposal: {proposal.proposal_id}\n"
+        f"- status: {proposal.status}\n"
+        f"- reason: {reason}"
+    )
+
+
+@approvals_app.command("cancel")
+def approvals_cancel(
+    ctx: typer.Context,
+    proposal_id: str,
+    reason: str = typer.Option("", "--reason"),
+) -> None:
+    runtime = _ctx(ctx)
+    try:
+        proposal = cancel_proposal(Path(runtime.session.data_dir), proposal_id, reason=reason)
+    except FileNotFoundError as exc:
+        console.print(f"Cannot cancel: {exc}")
+        raise typer.Exit(code=1) from None
+    console.print(
+        "Cancellation recorded:\n"
+        f"- proposal: {proposal.proposal_id}\n"
+        f"- status: {proposal.status}\n"
+        f"- reason: {reason}"
+    )
+
+
+@approvals_app.command("validate")
+def approvals_validate(ctx: typer.Context, proposal_id: str) -> None:
+    runtime = _ctx(ctx)
+    path, _status = find_proposal_path(Path(runtime.session.data_dir), proposal_id)
+    if path is None:
+        console.print(f"Proposal not found: {proposal_id}")
+        raise typer.Exit(code=1)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        console.print(f"Malformed proposal JSON: {exc}")
+        raise typer.Exit(code=1) from None
+    errors, warnings = validate_proposal_payload(payload)
+    if errors:
+        console.print("Proposal validation failed:")
+        for err in errors:
+            console.print(f"- {err}")
+        raise typer.Exit(code=1)
+    console.print(
+        "Proposal validation passed:\n"
+        f"- proposal: {proposal_id}\n"
+        f"- status: {payload.get('status')}\n"
+        f"- risk: {payload.get('risk')}\n"
+        f"- mutation execution: none\n"
+        f"- warnings: {len(warnings)}"
+    )
+
+
+def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
+    """Intercept apply/run-approved ask requests. Returns True if handled.
+
+    ShellForgeAI never executes mutation. For ``execute`` phrasing we refuse
+    cleanly. For ``dry-run`` / ``prepare`` phrasing we offer (and optionally
+    generate) an operator preflight bundle for the latest approved proposal.
+    """
+    intent = is_apply_approved_intent(question)
+    if not intent.matched:
+        return False
+    proposal = latest_approved_proposal(Path(runtime.session.data_dir))
+    if intent.execute and not intent.dry_run:
+        console.print(
+            "Refusing to execute: ShellForgeAI never runs mutation commands. "
+            "apply remains validation-only."
+        )
+        if proposal is None:
+            console.print(
+                "No approved proposal found. Use `shellforgeai approvals approve "
+                "<id> --reason ...` first, then `shellforgeai apply <id>` to "
+                "generate an operator preflight bundle."
+            )
+        else:
+            console.print(
+                f"To prepare an operator bundle for the approved proposal, run:\n"
+                f"  shellforgeai apply {proposal.proposal_id}"
+            )
+        return True
+    # dry-run / prepare / preview path: generate bundle if approved proposal exists.
+    if proposal is None:
+        console.print(
+            "No approved proposal found. Use `shellforgeai approvals approve "
+            "<id> --reason ...` first to record approval (no execution)."
+        )
+        return True
+    preflight = run_preflight(proposal)
+    if not preflight.passed:
+        _print_apply_preflight_failure(proposal, preflight.errors)
+        return True
+    result = generate_bundle(proposal, data_dir=Path(runtime.session.data_dir), preflight=preflight)
+    console.print("Prepared operator preflight bundle (no commands executed):")
+    console.print(f"- proposal: {proposal.proposal_id}")
+    console.print(f"- status: {proposal.status}")
+    console.print(f"- risk: {proposal.risk}")
+    console.print("- execution: not_executed")
+    console.print("- bundle:")
+    for f in result.files:
+        console.print(f"  - {f}")
+    return True
 
 
 @app.command()
@@ -809,6 +1185,8 @@ def ask(
     since: str = typer.Option("30m", "--since"),
 ) -> None:
     runtime = _ctx(ctx)
+    if not no_evidence and _handle_apply_approved_ask(runtime, question):
+        return
     provider = build_provider(runtime.settings)
     ctx_mode = "full" if full_context else context
 
