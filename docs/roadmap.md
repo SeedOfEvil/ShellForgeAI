@@ -105,3 +105,5 @@
   records `execution_allowed=false` and `execution_status=not_executed`.
   Guard checks are read-only — no remediation, no host mutation. `apply`
   remains validation-only.
+
+- PR39: guard-aware audit timeline milestone (`audit timeline/show/validate`) for chronological operator incident trails with explicit no-execution safety state.

@@ -66,6 +66,7 @@ shellforgeai inspect host
 shellforgeai tools list
 shellforgeai diagnose disk --save-plan
 shellforgeai audit list
+shellforgeai audit timeline
 ```
 
 ## Restricted containers
