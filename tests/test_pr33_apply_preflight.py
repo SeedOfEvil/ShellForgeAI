@@ -8,6 +8,7 @@ as the data dir so nothing escapes the test sandbox.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -85,7 +86,7 @@ def _mk_proposal(
     )
     return Proposal(
         proposal_id=proposal_id,
-        created_at="2026-05-11T00:00:00+00:00",
+        created_at=datetime.now(timezone.utc).isoformat(),
         status=status,
         source=ProposalSource(session_id="sf_test"),
         target="docker",

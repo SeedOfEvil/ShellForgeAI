@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -99,7 +100,7 @@ def _make_proposal(
     )
     return Proposal(
         proposal_id=proposal_id,
-        created_at="2026-05-11T00:00:00+00:00",
+        created_at=datetime.now(timezone.utc).isoformat(),
         status=status,
         source=ProposalSource(
             session_id=session_id,

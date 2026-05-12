@@ -86,3 +86,22 @@
   re-checks manifest, files, checksums, and the apply-preflight
   execution invariants. Export only copies/reads files — no execution,
   no mutation. `apply` remains validation-only.
+- PR38: stale-evidence and drift guard milestone. `shellforgeai guard
+  check|check-actions|check-export|show` runs deterministic freshness
+  and source-hash drift checks against proposals, compiled actions,
+  apply preflight bundles, and export packs. Guard reports are written
+  under `<data_dir>/guards/<source-id>/` as `guard-report.json` and
+  `guard-report.md`, with decisions `fresh`, `warning`, `stale`,
+  `drift_detected`, or `blocked`. Default max ages: proposals/actions/apply
+  bundles 24h, exports 7d; `--max-age-hours` overrides per call. Newly
+  generated proposals and compiled actions record optional `source_hashes`
+  so a later guard call can detect post-creation tampering of the
+  underlying `evidence.json`, `runbook.json`, `summary.md`, or
+  `proposal.json`; older artifacts without recorded hashes validate cleanly
+  with `source_hash_status=unknown`. `apply` runs the guard internally and
+  refuses by default when the proposal is stale or drifted; `--allow-stale`
+  bypasses stale (drift is never bypassed) and `apply-preflight.json`
+  records `guard_status` and the guard report path. Every guard report
+  records `execution_allowed=false` and `execution_status=not_executed`.
+  Guard checks are read-only — no remediation, no host mutation. `apply`
+  remains validation-only.

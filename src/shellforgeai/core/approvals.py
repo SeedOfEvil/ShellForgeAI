@@ -96,6 +96,7 @@ class Proposal(BaseModel):
     safety_labels: list[str] = Field(default_factory=list)
     notes: str = ""
     fingerprint: dict[str, str] = Field(default_factory=dict)
+    source_hashes: dict[str, str] = Field(default_factory=dict)
     execution: ProposalExecution = Field(default_factory=ProposalExecution)
     approval: ProposalApproval = Field(default_factory=ProposalApproval)
 
@@ -519,6 +520,13 @@ def proposals_from_runbook_payload(
             rollback=rollback,
             verification=verification,
         )
+        from shellforgeai.core.guards import compute_proposal_source_hashes
+
+        source_hashes = compute_proposal_source_hashes(
+            evidence_path=source_evidence,
+            runbook_path=source_runbook,
+            summary_path=source_summary,
+        )
         proposal = Proposal(
             proposal_id=make_proposal_id_for(opt_id, component=component, session_id=session_id),
             created_at=now,
@@ -545,6 +553,7 @@ def proposals_from_runbook_payload(
             notes=str(option.get("notes") or ""),
             execution=ProposalExecution(),
             fingerprint=fingerprint,
+            source_hashes=source_hashes,
         )
         out.append(proposal)
     return out
