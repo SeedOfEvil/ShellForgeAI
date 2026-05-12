@@ -220,6 +220,13 @@ def _ensure_artifact_dir(runtime: RuntimeContext) -> None:
     runtime.session.artifact_dir.mkdir(parents=True, exist_ok=True)
 
 
+def _append_audit_event(runtime: RuntimeContext, **kwargs) -> None:
+    try:
+        AuditStorage(runtime.session.data_dir).write_event(**kwargs)
+    except Exception as exc:
+        console.print(f"Warning: failed to append audit event ({exc})")
+
+
 def _network_reachability_hints(findings, items) -> list[str]:
     """Build prioritized synthesis hints for network reachability questions.
 
@@ -480,13 +487,63 @@ def audit_list(ctx: typer.Context) -> None:
         console.print(sid)
 
 
-@audit_app.command("show")
-def audit_show(ctx: typer.Context, session_id: str) -> None:
+@audit_app.command("timeline")
+def audit_timeline(
+    ctx: typer.Context,
+    latest: bool = typer.Option(False, "--latest"),
+    session: str | None = typer.Option(None, "--session"),
+    proposal: str | None = typer.Option(None, "--proposal"),
+    kind: str | None = typer.Option(None, "--kind"),
+    since: str | None = typer.Option(None, "--since"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
     runtime = _ctx(ctx)
-    val = AuditStorage(runtime.session.data_dir).show(session_id)
+    events = AuditStorage(runtime.session.data_dir).query_events(
+        session_id=session, proposal_id=proposal, kind=kind, since=since, latest=latest
+    )
+    if json_output:
+        console.print_json(data=events)
+        return
+    if not events:
+        console.print("No audit events.")
+        return
+    console.print(
+        "Time                  Kind             Action      Status   Reference              Summary"
+    )
+    for e in events:
+        ref = e.get("proposal_id") or e.get("session_id") or "-"
+        ts = str(e.get("timestamp", ""))[:19].replace("T", " ")
+        line = (
+            f"{ts:<21} {e.get('kind', ''):<16} {e.get('action', ''):<11} "
+            f"{e.get('status', ''):<8} {ref:<22} {e.get('summary', '')}"
+        )
+        console.print(line)
+
+
+@audit_app.command("show")
+def audit_show(ctx: typer.Context, event_id: str) -> None:
+    runtime = _ctx(ctx)
+    val = AuditStorage(runtime.session.data_dir).get_event(event_id)
     if val is None:
+        console.print(f"Audit event not found: {event_id}")
         raise typer.Exit(code=1)
-    console.print(val)
+    console.print_json(data=val)
+
+
+@audit_app.command("validate")
+def audit_validate(ctx: typer.Context) -> None:
+    runtime = _ctx(ctx)
+    result = AuditStorage(runtime.session.data_dir).validate_events()
+    if result.ok:
+        console.print("Audit validation passed:")
+        console.print(f"- events: {result.event_count}")
+        console.print("- execution: none")
+        console.print("- safety: ok")
+        return
+    console.print("Audit validation failed:")
+    for err in result.errors:
+        console.print(f"- {err}")
+    raise typer.Exit(code=1)
 
 
 _LAB_NAME_ALIASES = {
@@ -602,6 +659,17 @@ def diagnose(
         "summary": f"diagnosed {target}",
     }
     audit.append(rec)
+    _append_audit_event(
+        runtime,
+        kind="diagnose",
+        action="created",
+        status="success",
+        session_id=runtime.session.session_id,
+        target=target,
+        summary=f"diagnose complete for {target}",
+        artifacts=artifacts_list + [str(summary_path)],
+        details={"finding_count": len(result.findings), "warning_count": len(result.warnings)},
+    )
     if model:
         _ensure_artifact_dir(runtime)
         provider = build_provider(runtime.settings)

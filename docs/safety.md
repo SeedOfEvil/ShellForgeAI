@@ -202,3 +202,8 @@ manual steps default to `manual_only`. Every record carries
 `execution_allowed=false` and the top-level file carries
 `execution_status=not_executed`. **Compiled does not mean applied.** The
 action compiler does not execute anything; `apply` remains validation-only.
+
+
+## Audit timeline safety invariants
+
+`<data_dir>/audit/events.jsonl` records ShellForgeAI timeline events only. Every event records `execution_allowed=false`, `execution_status=not_executed`, and `mutation_performed=false`. Audit events prove ShellForgeAI actions/refusals, not external operator execution.
