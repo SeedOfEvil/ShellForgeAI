@@ -418,15 +418,14 @@ def _has_substantive_response(text: str) -> bool:
 def _confirm_workspace(console: Console, runtime: RuntimeContext, no_trust_cache: bool) -> bool:
     store = WorkspaceTrustStore(runtime.session.data_dir)
     workspace = Path.cwd()
-    if not no_trust_cache and store.is_trusted(workspace):
-        return True
+    already_trusted = (not no_trust_cache) and store.is_trusted(workspace)
     console.print("Trust this workspace?\n")
     console.print(f"Path:\n  {workspace}\n")
-    trust = typer.confirm(f"Trust {workspace}?", default=False)
+    trust = typer.confirm(f"Trust {workspace}?", default=already_trusted)
     if not trust:
         console.print("Workspace not trusted. Exiting interactive mode.")
         return False
-    if not no_trust_cache:
+    if not no_trust_cache and not already_trusted:
         store.trust(workspace, get_build_info().version)
     return True
 

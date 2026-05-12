@@ -62,12 +62,48 @@ BUNDLE_OPTIONAL_FILES = (
 ALL_OPTIONAL_FILES = SESSION_OPTIONAL_FILES + ("proposal.json",) + BUNDLE_OPTIONAL_FILES
 
 
-_REDACT_PATTERNS = (
-    re.compile(r"(?i)(password\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(token\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(secret\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"),
+REDACTION_WARNING = (
+    "This export was generated with best-effort redaction, "
+    "but operators should still review before sharing."
+)
+TEXT_EXTENSIONS = {
+    ".json",
+    ".md",
+    ".txt",
+    ".log",
+    ".env",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".conf",
+    ".cfg",
+    ".sh",
+}
+_KV_KEYS = (
+    "password|passwd|pwd|token|access_token|refresh_token|api_key|apikey|api-key|secret|"
+    "client_secret|private_key|ssh_key|bearer|authorization|cookie|set-cookie|session|"
+    "connection_string|database_url|db_password|redis_url|mongo_uri|webhook_url|"
+    "aws_secret_access_key|aws_access_key_id|slack_token|github_token|openai_api_key|"
+    "stripe_secret_key|stripe_api_key"
+)
+_PRIVATE_KEY_BLOCK = re.compile(
+    r"-----BEGIN [A-Z0-9_ -]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9_ -]*PRIVATE KEY-----"
+)
+_KV_RE = re.compile(
+    rf"(?im)((?:\bexport\s+)?[\"']?(?:{_KV_KEYS})[\"']?\s*[:=]\s*)([\"']?)([^\n\"',]+)(\2)"
+)
+_AUTH_RE = re.compile(r"(?im)(\bauthorization\s*:\s*)(bearer\s+[^\s\"']+|[^\n]+)")
+_COOKIE_RE = re.compile(r"(?im)(\b(?:set-cookie|cookie)\s*:\s*)([^\n]+)")
+_GITHUB_TOKENS = re.compile(r"\b(?:ghp|github_pat|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b")
+_AWS_AK = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+_SLACK_TOKENS = re.compile(r"\b(?:xoxb|xoxp|xoxa|xoxr|xapp)-[A-Za-z0-9-]{20,}\b")
+_WEBHOOKS = re.compile(
+    r"https://(?:hooks\.slack\.com/services|discord\.com/api/webhooks)/[^\s\"']+"
+)
+_SK_TOKENS = re.compile(
+    r"\b(?:sk-test-[A-Za-z0-9_-]{8,}|sk-live-[A-Za-z0-9_-]{8,}|"
+    r"sk-proj-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,})\b"
 )
 
 
@@ -83,6 +119,14 @@ class ExportResult:
     source_type: str = ""
     source_session_id: str = ""
     source_proposal_id: str = ""
+
+
+@dataclass
+class RedactionFileResult:
+    path: str
+    redacted: bool
+    replacements: int
+    matched_kinds: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -104,10 +148,42 @@ def exports_root(data_dir: Path) -> Path:
 
 
 def redact_text(text: str) -> str:
-    out = text
-    for pat in _REDACT_PATTERNS:
-        out = pat.sub(r"\1<redacted>", out)
+    out, _stats = redact_text_with_report(text)
     return out
+
+
+def redact_text_with_report(text: str) -> tuple[str, dict[str, int]]:
+    counts: dict[str, int] = {}
+
+    def _inc(kind: str, n: int = 1) -> None:
+        if n > 0:
+            counts[kind] = counts.get(kind, 0) + n
+
+    out, n = _PRIVATE_KEY_BLOCK.subn("[REDACTED_PRIVATE_KEY_BLOCK]", text)
+    _inc("private_key_block", n)
+
+    def _kv_replace(m: re.Match[str]) -> str:
+        key = m.group(1).split(":")[0].split("=")[0].replace("export", "").strip().lower()
+        kind = key.replace("-", "_")
+        _inc(kind if kind in {"database_url", "redis_url", "mongo_uri", "cookie"} else kind)
+        return f"{m.group(1)}{m.group(2)}[REDACTED]{m.group(4)}"
+
+    out = _KV_RE.sub(_kv_replace, out)
+    out, n = _AUTH_RE.subn(r"\1[REDACTED]", out)
+    _inc("authorization", n)
+    out, n = _COOKIE_RE.subn(r"\1[REDACTED]", out)
+    _inc("cookie", n)
+    out, n = _GITHUB_TOKENS.subn("[REDACTED_TOKEN]", out)
+    _inc("github_token", n)
+    out, n = _AWS_AK.subn("[REDACTED_AWS_ACCESS_KEY]", out)
+    _inc("aws_access_key", n)
+    out, n = _SLACK_TOKENS.subn("[REDACTED_TOKEN]", out)
+    _inc("slack_token", n)
+    out, n = _WEBHOOKS.subn("[REDACTED_WEBHOOK_URL]", out)
+    _inc("webhook_url", n)
+    out, n = _SK_TOKENS.subn("[REDACTED_TOKEN]", out)
+    _inc("bearer_token", n)
+    return out, counts
 
 
 # ---------------------------------------------------------------------------
@@ -170,30 +246,55 @@ def latest_session_dir(data_dir: Path) -> Path | None:
 # Copy helpers
 
 
-def _copy_if_exists(src: Path, dst: Path, *, redact: bool) -> bool:
+def _copy_if_exists(
+    src: Path,
+    dst: Path,
+    *,
+    redact: bool,
+    report_files: list[RedactionFileResult],
+    warnings: list[str],
+) -> bool:
     if not src.exists() or not src.is_file():
         return False
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if redact and src.suffix.lower() in {".md", ".json", ".sh", ".txt", ".log"}:
+    if redact and (src.suffix.lower() in TEXT_EXTENSIONS or src.suffix == ""):
         try:
             text = src.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
+            if src.suffix == "":
+                warnings.append(f"treated as binary/unsupported text decode: {src.name}")
             shutil.copy2(src, dst)
             return True
-        dst.write_text(redact_text(text), encoding="utf-8")
+        redacted, counts = redact_text_with_report(text)
+        dst.write_text(redacted, encoding="utf-8")
+        report_files.append(
+            RedactionFileResult(
+                path=dst.name,
+                redacted=bool(counts),
+                replacements=sum(counts.values()),
+                matched_kinds=sorted(counts.keys()),
+            )
+        )
         return True
     shutil.copy2(src, dst)
     return True
 
 
 def _gather_session_files(
-    session_dir: Path, export_dir: Path, *, redact: bool
+    session_dir: Path,
+    export_dir: Path,
+    *,
+    redact: bool,
+    report_files: list[RedactionFileResult],
+    warnings: list[str],
 ) -> tuple[list[str], list[str]]:
     included: list[str] = []
     missing: list[str] = []
     for name in SESSION_OPTIONAL_FILES:
         src = session_dir / name
-        if _copy_if_exists(src, export_dir / name, redact=redact):
+        if _copy_if_exists(
+            src, export_dir / name, redact=redact, report_files=report_files, warnings=warnings
+        ):
             included.append(name)
         else:
             missing.append(name)
@@ -201,13 +302,20 @@ def _gather_session_files(
 
 
 def _gather_bundle_files(
-    bundle_dir: Path, export_dir: Path, *, redact: bool
+    bundle_dir: Path,
+    export_dir: Path,
+    *,
+    redact: bool,
+    report_files: list[RedactionFileResult],
+    warnings: list[str],
 ) -> tuple[list[str], list[str]]:
     included: list[str] = []
     missing: list[str] = []
     for name in BUNDLE_OPTIONAL_FILES:
         src = bundle_dir / name
-        if _copy_if_exists(src, export_dir / name, redact=redact):
+        if _copy_if_exists(
+            src, export_dir / name, redact=redact, report_files=report_files, warnings=warnings
+        ):
             included.append(name)
         else:
             missing.append(name)
@@ -255,6 +363,8 @@ def _render_export_summary(
     if bundle_dir is not None:
         lines.append(f"- Apply bundle dir: {bundle_dir}")
     lines.append(f"- Redaction: {'on' if redact else 'off (raw copies preserved)'}")
+    if redact:
+        lines.append(f"- Redaction warning: {REDACTION_WARNING}")
     lines.append("- Execution status: not_executed")
     lines.append("- Execution allowed: false")
     lines.append("")
@@ -314,7 +424,7 @@ def _render_export_summary(
     lines.append("## Safety")
     lines.append("")
     lines.append(f"- {SAFETY_NOTE}")
-    lines.append(f"- {RAW_EVIDENCE_WARNING}")
+    lines.append(f"- {REDACTION_WARNING if redact else RAW_EVIDENCE_WARNING}")
     lines.append("- apply remains validation-only. No commands were executed.")
     return "\n".join(lines) + "\n"
 
@@ -350,7 +460,7 @@ def _build_manifest(
         "execution_allowed": False,
         "execution_status": "not_executed",
         "redaction_applied": bool(redact),
-        "raw_evidence_warning": RAW_EVIDENCE_WARNING,
+        "raw_evidence_warning": REDACTION_WARNING if redact else RAW_EVIDENCE_WARNING,
         "safety_note": SAFETY_NOTE,
         "shellforgeai_version": build.display_version,
     }
@@ -368,6 +478,8 @@ def _build_manifest(
                 else (proposal.approval.reason or "")
             ),
         }
+    if redact:
+        manifest["redaction_report"] = "redaction-report.json"
     return manifest
 
 
@@ -409,7 +521,11 @@ def export_from_session(
     export_dir = output or (exports_root(Path(data_dir)) / export_id)
     export_dir.mkdir(parents=True, exist_ok=True)
     session_id = session_dir.name if session_dir.name.startswith("sf_") else ""
-    included, missing = _gather_session_files(session_dir, export_dir, redact=redact)
+    report_files: list[RedactionFileResult] = []
+    warnings: list[str] = []
+    included, missing = _gather_session_files(
+        session_dir, export_dir, redact=redact, report_files=report_files, warnings=warnings
+    )
     return _finalize_export(
         export_dir=export_dir,
         export_id=export_id,
@@ -422,6 +538,8 @@ def export_from_session(
         included=included,
         missing=missing,
         redact=redact,
+        report_files=report_files,
+        warnings=warnings,
     )
 
 
@@ -504,10 +622,14 @@ def _export_proposal_object(
 
     included: list[str] = []
     missing: list[str] = []
+    report_files: list[RedactionFileResult] = []
+    warnings: list[str] = []
 
     session_dir = _resolve_session_dir_for_proposal(proposal)
     if session_dir is not None and session_dir.is_dir():
-        sess_inc, sess_miss = _gather_session_files(session_dir, export_dir, redact=redact)
+        sess_inc, sess_miss = _gather_session_files(
+            session_dir, export_dir, redact=redact, report_files=report_files, warnings=warnings
+        )
         included.extend(sess_inc)
         missing.extend(sess_miss)
     else:
@@ -517,7 +639,9 @@ def _export_proposal_object(
 
     bundle_dir = _resolve_bundle_for_proposal(data_dir, proposal.proposal_id)
     if bundle_dir is not None:
-        b_inc, b_miss = _gather_bundle_files(bundle_dir, export_dir, redact=redact)
+        b_inc, b_miss = _gather_bundle_files(
+            bundle_dir, export_dir, redact=redact, report_files=report_files, warnings=warnings
+        )
         included.extend(b_inc)
         missing.extend(b_miss)
     else:
@@ -535,6 +659,8 @@ def _export_proposal_object(
         included=included,
         missing=missing,
         redact=redact,
+        report_files=report_files,
+        warnings=warnings,
     )
 
 
@@ -551,6 +677,8 @@ def _finalize_export(
     included: list[str],
     missing: list[str],
     redact: bool,
+    report_files: list[RedactionFileResult],
+    warnings: list[str],
 ) -> ExportResult:
     created_at = datetime.now(timezone.utc).isoformat()
     summary_text = _render_export_summary(
@@ -571,7 +699,24 @@ def _finalize_export(
 
     # Compute checksums over included files + summary.md so the
     # manifest can embed them.
-    rel_for_checksum = sorted(set(included + ["export-summary.md"]))
+    if redact:
+        redaction_payload = {
+            "schema_version": "1",
+            "redaction_applied": True,
+            "created_at": created_at,
+            "files_scanned": len(report_files),
+            "files_redacted": len([f for f in report_files if f.redacted]),
+            "total_replacements": sum(f.replacements for f in report_files),
+            "patterns": sorted({k for f in report_files for k in f.matched_kinds}),
+            "files": [f.__dict__ for f in report_files],
+            "warnings": warnings,
+        }
+        (export_dir / "redaction-report.json").write_text(
+            json.dumps(redaction_payload, indent=2), encoding="utf-8"
+        )
+    rel_for_checksum = sorted(
+        set(included + ["export-summary.md"] + (["redaction-report.json"] if redact else []))
+    )
     checksums_path, checksums = write_checksums(export_dir, rel_for_checksum)
 
     manifest = _build_manifest(
@@ -666,6 +811,25 @@ def validate_export(target: Path) -> ValidationResult:
         errors.append("manifest execution_allowed must be false")
     if manifest.get("execution_status") not in (None, "", "not_executed"):
         errors.append("manifest execution_status must be 'not_executed'")
+    redaction_applied = bool(manifest.get("redaction_applied"))
+    if redaction_applied:
+        report_name = str(manifest.get("redaction_report") or "redaction-report.json")
+        report_path = export_dir / report_name
+        if not report_path.exists():
+            errors.append("redaction-report.json not found for redacted export")
+        else:
+            try:
+                report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                errors.append(f"malformed redaction-report.json: {exc}")
+            else:
+                if report_payload.get("redaction_applied") is not True:
+                    errors.append("redaction-report.json must set redaction_applied=true")
+        summary = export_dir / "export-summary.md"
+        if summary.exists():
+            summary_text = summary.read_text(encoding="utf-8").lower()
+            if "redaction: off" in summary_text:
+                errors.append("export-summary.md claims redaction off while manifest says true")
 
     included = list(manifest.get("included_files") or [])
     info["file_count"] = len(included)
@@ -727,6 +891,12 @@ _EXPORT_INTENT_TOKENS = (
     "make a handoff pack",
     "create change ticket evidence",
     "create change ticket evidence pack",
+    "package this for external sharing",
+    "export this safely",
+    "create a redacted audit pack",
+    "make a sanitized change-review pack",
+    "export latest with secrets removed",
+    "redact and export the approved proposal",
     "export the approved proposal",
     "export approved proposal",
     "export the latest approved",
@@ -742,12 +912,22 @@ _EXPORT_APPROVED_HINT_TOKENS = (
     "change review",
     "change ticket",
 )
+_EXPORT_REDACT_HINT_TOKENS = (
+    "redact",
+    "redacted",
+    "safely",
+    "sanitized",
+    "sharing",
+    "secrets removed",
+    "external",
+)
 
 
 @dataclass(frozen=True)
 class ExportAskIntent:
     matched: bool
     prefer_approved: bool = False
+    prefer_redact: bool = False
 
 
 def is_export_intent(text: str) -> ExportAskIntent:
@@ -756,4 +936,5 @@ def is_export_intent(text: str) -> ExportAskIntent:
     if not matched:
         return ExportAskIntent(matched=False)
     prefer = any(tok in raw for tok in _EXPORT_APPROVED_HINT_TOKENS)
-    return ExportAskIntent(matched=True, prefer_approved=prefer)
+    redact = any(tok in raw for tok in _EXPORT_REDACT_HINT_TOKENS)
+    return ExportAskIntent(matched=True, prefer_approved=prefer, prefer_redact=redact)

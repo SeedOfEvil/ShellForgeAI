@@ -318,7 +318,33 @@ def test_redact_text_masks_common_secrets():
     assert "abc123" not in out
     assert "xyz789" not in out
     assert "eyJ" not in out
-    assert "<redacted>" in out
+    assert "[REDACTED]" in out
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '"api_key": "sk-test-abc-1234567890"',
+        '"API_KEY": "sk-test-abc-1234567890"',
+        '"openai_api_key": "sk-proj-abc-1234567890"',
+        '"stripe_secret_key": "sk_live_abc-1234567890"',
+        "api_key=sk-test-abc-1234567890",
+        "API_KEY=sk-test-abc-1234567890",
+        "api_key: sk-test-abc-1234567890",
+        "export API_KEY=sk-test-abc-1234567890",
+        'log="api_key=sk-test-abc-1234567890"',
+    ],
+)
+def test_redact_api_key_forms_cover_sk_shapes(line):
+    out = redact_text(line)
+    assert "sk-test-abc-1234567890" not in out
+    assert "sk-proj-abc-1234567890" not in out
+    assert "[REDACTED]" in out or "[REDACTED_TOKEN]" in out
+
+
+def test_diagnostic_strings_not_over_redacted():
+    raw = "REQUIRED_SETTING OPERATOR-RUN SERVICE-IMPACTING /usr/local/bin/docker root:root"
+    assert redact_text(raw) == raw
 
 
 def test_redact_flag_redacts_copied_summary(data_env):
@@ -326,7 +352,58 @@ def test_redact_flag_redacts_copied_summary(data_env):
     res = export_from_session(data_env, sess, redact=True)
     summary_copy = (res.export_dir / "summary.md").read_text(encoding="utf-8")
     assert "hunter2" not in summary_copy
-    assert "<redacted>" in summary_copy
+    assert "[REDACTED]" in summary_copy
+    manifest = json.loads((res.export_dir / "export-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["redaction_applied"] is True
+    assert (res.export_dir / "redaction-report.json").exists()
+
+
+def test_validate_fails_when_redaction_report_missing(data_env):
+    sess = _make_session(data_env, "sf_pr34_redact_missing_report_001")
+    res = export_from_session(data_env, sess, redact=True)
+    (res.export_dir / "redaction-report.json").unlink()
+    v = validate_export(res.export_dir)
+    assert not v.ok
+    assert any("redaction-report.json not found" in e for e in v.errors)
+
+
+def test_validate_fails_when_redaction_report_malformed(data_env):
+    sess = _make_session(data_env, "sf_pr34_redact_bad_report_001")
+    res = export_from_session(data_env, sess, redact=True)
+    (res.export_dir / "redaction-report.json").write_text("{bad", encoding="utf-8")
+    v = validate_export(res.export_dir)
+    assert not v.ok
+    assert any("malformed redaction-report.json" in e for e in v.errors)
+
+
+def test_export_redact_scrubs_sk_api_key_from_evidence_json(data_env):
+    probe = "sk-test-shellforge-redaction-probe-1234567890"
+    sess = data_env / "artifacts" / "sf_pr35_sk_probe_001"
+    sess.mkdir(parents=True, exist_ok=True)
+    (sess / "evidence.json").write_text(
+        json.dumps(
+            {
+                "api_key": probe,
+                "nested": {"log": f"Authorization input api_key={probe}"},
+                "normal": "REQUIRED_SETTING",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (sess / "summary.md").write_text("ok\n", encoding="utf-8")
+    (sess / "plan.json").write_text("{}", encoding="utf-8")
+    res = export_from_session(data_env, sess, redact=True)
+    exported_evidence = (res.export_dir / "evidence.json").read_text(encoding="utf-8")
+    assert probe not in exported_evidence
+    assert "[REDACTED]" in exported_evidence or "[REDACTED_TOKEN]" in exported_evidence
+    redaction_report = (res.export_dir / "redaction-report.json").read_text(encoding="utf-8")
+    assert probe not in redaction_report
+    for file_path in res.export_dir.rglob("*"):
+        if file_path.is_file():
+            assert probe not in file_path.read_text(encoding="utf-8", errors="ignore")
+    assert probe in (sess / "evidence.json").read_text(encoding="utf-8")
+    assert validate_export(res.export_dir).ok
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +503,12 @@ def test_is_export_intent_prefers_approved():
     out = is_export_intent("export the approved proposal")
     assert out.matched
     assert out.prefer_approved
+
+
+def test_is_export_intent_prefers_redaction_for_safe_share():
+    out = is_export_intent("package this for external sharing safely")
+    assert out.matched
+    assert out.prefer_redact
 
 
 def test_ask_create_audit_pack_creates_export(data_env):

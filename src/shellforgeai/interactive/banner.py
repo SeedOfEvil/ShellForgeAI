@@ -31,7 +31,7 @@ def build_banner(runtime, trusted: bool, chooser=random.choice) -> Panel:
         f"Mode/Profile: {runtime.session.mode}/{runtime.profile.name}\n"
         f"Model: {runtime.settings.model.provider}/{runtime.settings.model.model}\n"
         f"Workspace: {Path.cwd()}\n"
-        f"Trust: {'trusted' if trusted else 'untrusted'}\n"
+        f"Trust status: {'trusted' if trusted else 'untrusted'}\n"
         f"Quote: {quote}"
     )
     if build.build_line():
