@@ -84,12 +84,15 @@ _KV_KEYS = (
     "password|passwd|pwd|token|access_token|refresh_token|api_key|apikey|api-key|secret|"
     "client_secret|private_key|ssh_key|bearer|authorization|cookie|set-cookie|session|"
     "connection_string|database_url|db_password|redis_url|mongo_uri|webhook_url|"
-    "aws_secret_access_key|aws_access_key_id|slack_token|github_token"
+    "aws_secret_access_key|aws_access_key_id|slack_token|github_token|openai_api_key|"
+    "stripe_secret_key|stripe_api_key"
 )
 _PRIVATE_KEY_BLOCK = re.compile(
     r"-----BEGIN [A-Z0-9_ -]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9_ -]*PRIVATE KEY-----"
 )
-_KV_RE = re.compile(rf"(?im)(\b(?:export\s+)?(?:{_KV_KEYS})\b\s*[:=]\s*)([\"']?)([^\n\"']+)(\2)")
+_KV_RE = re.compile(
+    rf"(?im)((?:\bexport\s+)?[\"']?(?:{_KV_KEYS})[\"']?\s*[:=]\s*)([\"']?)([^\n\"',]+)(\2)"
+)
 _AUTH_RE = re.compile(r"(?im)(\bauthorization\s*:\s*)(bearer\s+[^\s\"']+|[^\n]+)")
 _COOKIE_RE = re.compile(r"(?im)(\b(?:set-cookie|cookie)\s*:\s*)([^\n]+)")
 _GITHUB_TOKENS = re.compile(r"\b(?:ghp|github_pat|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b")
@@ -97,6 +100,10 @@ _AWS_AK = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
 _SLACK_TOKENS = re.compile(r"\b(?:xoxb|xoxp|xoxa|xoxr|xapp)-[A-Za-z0-9-]{20,}\b")
 _WEBHOOKS = re.compile(
     r"https://(?:hooks\.slack\.com/services|discord\.com/api/webhooks)/[^\s\"']+"
+)
+_SK_TOKENS = re.compile(
+    r"\b(?:sk-test-[A-Za-z0-9_-]{8,}|sk-live-[A-Za-z0-9_-]{8,}|"
+    r"sk-proj-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,})\b"
 )
 
 
@@ -174,6 +181,8 @@ def redact_text_with_report(text: str) -> tuple[str, dict[str, int]]:
     _inc("slack_token", n)
     out, n = _WEBHOOKS.subn("[REDACTED_WEBHOOK_URL]", out)
     _inc("webhook_url", n)
+    out, n = _SK_TOKENS.subn("[REDACTED_TOKEN]", out)
+    _inc("bearer_token", n)
     return out, counts
 
 
