@@ -170,3 +170,18 @@ files, checksum mismatches, or an `apply-preflight.json` claiming
 `execution_allowed=true` cause validation to fail. **Approved does not mean
 applied**, and **exported does not mean applied**. `apply` remains
 validation-only.
+
+`shellforgeai actions compile` (PR37) compiles an approved proposal into
+structured, review-only action records under
+`<data_dir>/actions/<proposal-id>/`. Classification is deterministic
+string/regex matching — no LLM call, no shell execution. Mutation steps
+(restart/recreate, chmod/chown/rm, package install/remove,
+iptables/ufw/nft/firewall-cmd, ip route, resolvectl dns) are classified
+`blocked` with the appropriate `SERVICE-IMPACTING` / `FILESYSTEM-MUTATION` /
+`PACKAGE-MUTATION` / `NETWORK-MUTATION` / `FIREWALL-MUTATION` labels.
+Read-only inspection (`docker logs|inspect|ps`, `systemctl status`,
+`journalctl`, `cat`, `grep`, `stat`) is `read_only_review`. Unrecognized or
+manual steps default to `manual_only`. Every record carries
+`execution_allowed=false` and the top-level file carries
+`execution_status=not_executed`. **Compiled does not mean applied.** The
+action compiler does not execute anything; `apply` remains validation-only.

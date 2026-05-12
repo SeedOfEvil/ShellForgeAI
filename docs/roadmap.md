@@ -63,6 +63,20 @@
 
 
 - PR33: approval/apply hardening milestone: proposal fingerprints + create idempotency, approvals list filters, show/validate polish, idempotent apply bundle refresh status, and script label normalization; apply remains validation-only.
+- PR37: policy-gated action compiler milestone. `shellforgeai actions compile`
+  turns an approved proposal's operator-run steps into structured, review-only
+  action records under `<data_dir>/actions/<proposal-id>/` (`actions.json`,
+  `actions.md`). Classification is deterministic string/regex — no LLM call,
+  no shell execution. Mutation steps are classified `blocked` with
+  `SERVICE-IMPACTING` / `FILESYSTEM-MUTATION` / `PACKAGE-MUTATION` /
+  `NETWORK-MUTATION` / `FIREWALL-MUTATION` labels; read-only inspection is
+  `read_only_review`; everything else defaults to `manual_only`. `actions
+  validate` enforces the review-only invariants (every action carries
+  `execution_allowed=false`, top-level `execution_status=not_executed`,
+  summary counts match, blocked mutations are never marked read-only). `apply
+  <approved-proposal>` also writes the same `actions.json`/`actions.md`
+  alongside the static bundle. Compiled does not mean applied; `apply`
+  remains validation-only.
 - PR34: audit/export pack milestone. `shellforgeai export` packages
   evidence/summary/plan/runbook/proposal/apply-preflight artifacts into
   `<data_dir>/exports/<export_id>/` with `export-manifest.json`,

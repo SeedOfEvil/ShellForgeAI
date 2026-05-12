@@ -12,6 +12,13 @@ import typer
 from rich.console import Console
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.core.actions import (
+    compile_and_write,
+    is_actions_ask_intent,
+    load_actions_file,
+    resolve_proposal_arg,
+    validate_actions_payload,
+)
 from shellforgeai.core.apply_bundle import (
     generate_bundle,
     run_preflight,
@@ -87,11 +94,13 @@ tools_app = typer.Typer()
 audit_app = typer.Typer()
 model_app = typer.Typer()
 approvals_app = typer.Typer(help="Manage mutation proposal objects (read-only metadata).")
+actions_app = typer.Typer(help="Compile approved proposals into review-only action records.")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
 app.add_typer(model_app, name="model")
 app.add_typer(approvals_app, name="approvals")
+app.add_typer(actions_app, name="actions")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -976,7 +985,160 @@ def apply(
         return
 
     result = generate_bundle(proposal, data_dir=data_dir, preflight=preflight)
-    _print_apply_bundle_success(proposal, result.files)
+    # PR37: compile actions alongside the bundle. Review-only; no execution.
+    try:
+        actions_result = compile_and_write(proposal, data_dir=data_dir)
+        files = list(result.files) + [actions_result.actions_json, actions_result.actions_md]
+        # Inject PR37 fields into apply-preflight.json without rewriting bundle logic.
+        try:
+            preflight_payload = json.loads(result.preflight_path.read_text(encoding="utf-8"))
+            preflight_payload["actions_compiled"] = True
+            preflight_payload["actions_path"] = str(actions_result.actions_json)
+            summary = actions_result.compiled.summary()
+            preflight_payload["blocked_actions"] = summary["blocked"]
+            preflight_payload["manual_only_actions"] = summary["manual_only"]
+            result.preflight_path.write_text(
+                json.dumps(preflight_payload, indent=2), encoding="utf-8"
+            )
+        except (OSError, ValueError):
+            pass
+    except Exception:
+        files = list(result.files)
+    _print_apply_bundle_success(proposal, files)
+
+
+# ---------------------------------------------------------------------------
+# Actions (PR37) - policy-gated action compiler
+
+
+def _print_compile_result(result, *, proposal_status: str | None = None) -> None:
+    compiled = result.compiled
+    summary = compiled.summary()
+    console.print("Compiled actions (review-only; ShellForgeAI did not execute anything):")
+    console.print(f"- proposal: {compiled.proposal_id}")
+    if proposal_status:
+        console.print(f"- proposal status: {proposal_status}")
+    console.print(f"- total actions: {summary['total_actions']}")
+    console.print(f"- blocked: {summary['blocked']}")
+    console.print(f"- manual_only: {summary['manual_only']}")
+    console.print(f"- read_only_review: {summary['read_only']}")
+    console.print(f"- service_impacting: {summary['service_impacting']}")
+    console.print(f"- destructive: {summary['destructive']}")
+    console.print("- execution_allowed: false")
+    console.print("- execution_status: not_executed")
+    console.print(f"- actions.json: {result.actions_json}")
+    console.print(f"- actions.md: {result.actions_md}")
+
+
+@actions_app.command("compile")
+def actions_compile(
+    ctx: typer.Context,
+    target: Annotated[str | None, typer.Argument()] = None,
+    latest_approved: bool = typer.Option(
+        False, "--latest-approved", help="Compile actions for the newest approved proposal."
+    ),
+    allow_pending: bool = typer.Option(
+        False,
+        "--allow-pending",
+        help="Allow compiling a pending proposal for review (default: approved only).",
+    ),
+) -> None:
+    """Compile an approved proposal's steps into structured action records.
+
+    Output is written under ``<data_dir>/actions/<proposal_id>/``. No commands
+    are executed. ``apply`` remains validation-only.
+    """
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    if not target and not latest_approved:
+        raise typer.BadParameter(
+            "Provide a proposal id, a proposal JSON path, or --latest-approved."
+        )
+    from shellforgeai.core.approvals import STATUS_APPROVED, STATUS_PENDING
+
+    allowed = (STATUS_APPROVED, STATUS_PENDING) if allow_pending else (STATUS_APPROVED,)
+    resolved = resolve_proposal_arg(
+        data_dir, target, latest_approved=latest_approved, allow_statuses=allowed
+    )
+    if resolved.proposal is None or resolved.error:
+        console.print("Action compile failed:")
+        console.print(f"- {resolved.error or 'proposal not found'}")
+        console.print("- no commands executed")
+        raise typer.Exit(code=1)
+    result = compile_and_write(resolved.proposal, data_dir=data_dir)
+    _print_compile_result(result, proposal_status=resolved.proposal_status)
+
+
+@actions_app.command("show")
+def actions_show(
+    ctx: typer.Context,
+    target: Annotated[str, typer.Argument(help="Path to actions.json or a proposal id.")],
+) -> None:
+    """Show compiled actions for a proposal id or actions.json path."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    path = Path(target)
+    if not (path.exists() and path.is_file()):
+        from shellforgeai.core.actions import find_actions_for_proposal
+
+        cand = find_actions_for_proposal(data_dir, target)
+        if cand is None:
+            console.print("Action show failed:")
+            console.print(f"- no compiled actions found for: {target}")
+            raise typer.Exit(code=1)
+        path = cand
+    payload, err = load_actions_file(path)
+    if payload is None:
+        console.print("Action show failed:")
+        console.print(f"- {err}")
+        raise typer.Exit(code=1)
+    summary = payload.get("summary") or {}
+    console.print(f"Compiled actions: {path}")
+    console.print(f"- proposal: {payload.get('proposal_id', '')}")
+    console.print(f"- status: {payload.get('status', '')}")
+    console.print(f"- execution_allowed: {payload.get('execution_allowed')}")
+    console.print(f"- execution_status: {payload.get('execution_status', '')}")
+    console.print(f"- total actions: {summary.get('total_actions', 0)}")
+    console.print(f"- blocked: {summary.get('blocked', 0)}")
+    console.print(f"- manual_only: {summary.get('manual_only', 0)}")
+    console.print(f"- read_only_review: {summary.get('read_only', 0)}")
+    actions = payload.get("actions") or []
+    for a in actions:
+        if not isinstance(a, dict):
+            continue
+        console.print(
+            f"  - {a.get('action_id', '?')} [{a.get('source_section', '?')}] "
+            f"{a.get('kind', '?')}/{a.get('operation', '?')} "
+            f"decision={a.get('decision', '?')} risk={a.get('risk', '?')}"
+        )
+
+
+@actions_app.command("validate")
+def actions_validate(
+    ctx: typer.Context,
+    target: Annotated[Path, typer.Argument(help="Path to actions.json")],
+) -> None:
+    """Validate a compiled actions.json file."""
+    _ = _ctx(ctx)
+    payload, err = load_actions_file(target)
+    if payload is None:
+        console.print("Action validation failed:")
+        console.print(f"- {err}")
+        raise typer.Exit(code=1)
+    result = validate_actions_payload(payload)
+    if not result.ok:
+        console.print("Action validation failed:")
+        for e in result.errors or ["unknown error"]:
+            console.print(f"- {e}")
+        raise typer.Exit(code=1)
+    info = result.info
+    console.print("Action validation passed:")
+    console.print(f"- proposal: {info.get('proposal_id', '')}")
+    console.print(f"- actions: {info.get('total_actions', 0)}")
+    console.print(f"- blocked: {info.get('blocked', 0)}")
+    console.print(f"- manual_only: {info.get('manual_only', 0)}")
+    console.print(f"- read_only_review: {info.get('read_only', 0)}")
+    console.print("- execution: none")
 
 
 # ---------------------------------------------------------------------------
@@ -1581,6 +1743,38 @@ def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _handle_actions_ask(runtime: RuntimeContext, question: str) -> bool:
+    """Handle actions compile/show/run asks. No execution."""
+    intent = is_actions_ask_intent(question)
+    if not intent.matched:
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    if intent.run and not (intent.compile or intent.show):
+        console.print(
+            "Refusing to execute: ShellForgeAI never runs mutation commands. "
+            "apply remains validation-only."
+        )
+        console.print(
+            "Compiled actions are review-only. Run "
+            "`shellforgeai actions compile --latest-approved` to inspect them."
+        )
+        return True
+    proposal = latest_approved_proposal(data_dir)
+    if proposal is None:
+        console.print(
+            "No approved proposal found. Use `shellforgeai approvals approve "
+            "<id> --reason ...` first to record approval (no execution)."
+        )
+        return True
+    result = compile_and_write(proposal, data_dir=data_dir)
+    _print_compile_result(result, proposal_status=proposal.status)
+    if intent.run:
+        console.print(
+            "Note: ShellForgeAI did NOT execute any action. Compiled records are review-only."
+        )
+    return True
+
+
 @app.command()
 def ask(
     ctx: typer.Context,
@@ -1600,6 +1794,8 @@ def ask(
         if _handle_export_ask(runtime, question):
             return
         if _handle_apply_approved_ask(runtime, question):
+            return
+        if _handle_actions_ask(runtime, question):
             return
         if _handle_create_proposals_ask(runtime, question):
             return
