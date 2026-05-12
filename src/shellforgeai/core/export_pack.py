@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from shellforgeai.core.actions import actions_dir_for
 from shellforgeai.core.apply_bundle import bundle_dir_for
 from shellforgeai.core.approvals import (
     Proposal,
@@ -58,8 +59,16 @@ BUNDLE_OPTIONAL_FILES = (
     "apply-preflight.json",
 )
 
+# Files we look for in compiled-actions directories (PR37).
+ACTIONS_OPTIONAL_FILES = (
+    "actions.json",
+    "actions.md",
+)
+
 # Full optional-file roster for the export pack.
-ALL_OPTIONAL_FILES = SESSION_OPTIONAL_FILES + ("proposal.json",) + BUNDLE_OPTIONAL_FILES
+ALL_OPTIONAL_FILES = (
+    SESSION_OPTIONAL_FILES + ("proposal.json",) + BUNDLE_OPTIONAL_FILES + ACTIONS_OPTIONAL_FILES
+)
 
 
 REDACTION_WARNING = (
@@ -313,6 +322,28 @@ def _gather_bundle_files(
     missing: list[str] = []
     for name in BUNDLE_OPTIONAL_FILES:
         src = bundle_dir / name
+        if _copy_if_exists(
+            src, export_dir / name, redact=redact, report_files=report_files, warnings=warnings
+        ):
+            included.append(name)
+        else:
+            missing.append(name)
+    return included, missing
+
+
+def _gather_actions_files(
+    actions_dir: Path,
+    export_dir: Path,
+    *,
+    redact: bool,
+    report_files: list[RedactionFileResult],
+    warnings: list[str],
+) -> tuple[list[str], list[str]]:
+    """Copy compiled action files (PR37) into the export dir if present."""
+    included: list[str] = []
+    missing: list[str] = []
+    for name in ACTIONS_OPTIONAL_FILES:
+        src = actions_dir / name
         if _copy_if_exists(
             src, export_dir / name, redact=redact, report_files=report_files, warnings=warnings
         ):
@@ -646,6 +677,17 @@ def _export_proposal_object(
         missing.extend(b_miss)
     else:
         missing.extend(list(BUNDLE_OPTIONAL_FILES))
+
+    # PR37: include compiled actions if present (review-only).
+    actions_dir = actions_dir_for(Path(data_dir), proposal.proposal_id)
+    if actions_dir.exists() and actions_dir.is_dir():
+        a_inc, a_miss = _gather_actions_files(
+            actions_dir, export_dir, redact=redact, report_files=report_files, warnings=warnings
+        )
+        included.extend(a_inc)
+        missing.extend(a_miss)
+    else:
+        missing.extend(list(ACTIONS_OPTIONAL_FILES))
 
     return _finalize_export(
         export_dir=export_dir,
