@@ -363,6 +363,34 @@ overriding `--max-age-hours` to a very small value flips the decision to
 `apply-preflight.json` and refuses by default when the proposal is stale
 or drifted. ShellForgeAI does not execute any remediation.
 
+## Audit-aware incident index/search smoke (PR40)
+
+Repo-local fixture flow (no Docker, no root, no host mutation, no network):
+
+```
+shellforgeai audit index
+shellforgeai audit index --rebuild
+shellforgeai audit index validate
+shellforgeai audit search bad-network
+shellforgeai audit search --component sfai-bad-network
+shellforgeai audit search --kind guard_check --status refused
+shellforgeai audit search --risk medium --type proposal
+shellforgeai audit search --proposal <id>
+shellforgeai audit search --session <sf_*>
+shellforgeai audit search --json
+shellforgeai ask "search audit for bad-network"
+shellforgeai ask "find drift refusals"
+shellforgeai ask "did anything execute?"
+```
+
+Expected: `audit index` writes only
+`<data_dir>/audit/incident-index.json` (no source artifact is modified)
+and prints per-source counts plus `execution: none`. `audit search`
+prints a table or `--json` array of matching items. Every indexed item
+records `execution_allowed=false`, `execution_status=not_executed`,
+`mutation_performed=false`; `audit index validate` re-asserts those
+invariants. ShellForgeAI does not execute any remediation.
+
 ## Local validation (fixtures/mocks only)
 
 Run local validation without Docker daemon, root, or service mutation:
@@ -375,3 +403,4 @@ Run local validation without Docker daemon, root, or service mutation:
 - `env -u PYTHONPATH pytest -q`
 - `pytest -q tests -k "export or audit or approval or apply or runbook"`
 - `pytest -q tests -k "guard or stale or drift or apply or actions"`
+- `pytest -q tests -k "audit or index or search or timeline"`
