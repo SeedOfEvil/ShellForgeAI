@@ -65,6 +65,32 @@ from shellforgeai.core.export_pack import (
     resolve_session_dir,
     validate_export,
 )
+from shellforgeai.core.guards import (
+    DECISION_BLOCKED as GUARD_DECISION_BLOCKED,
+)
+from shellforgeai.core.guards import (
+    DECISION_DRIFT as GUARD_DECISION_DRIFT,
+)
+from shellforgeai.core.guards import (
+    DECISION_FRESH as GUARD_DECISION_FRESH,
+)
+from shellforgeai.core.guards import (
+    DECISION_STALE as GUARD_DECISION_STALE,
+)
+from shellforgeai.core.guards import (
+    DECISION_WARNING as GUARD_DECISION_WARNING,
+)
+from shellforgeai.core.guards import (
+    GuardReport,
+    check_actions_file,
+    check_export_dir,
+    check_proposal_file,
+    check_proposal_payload,
+    is_guard_ask_intent,
+    load_guard_report,
+    max_age_from_hours,
+    write_guard_report,
+)
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.runbook import (
@@ -95,12 +121,16 @@ audit_app = typer.Typer()
 model_app = typer.Typer()
 approvals_app = typer.Typer(help="Manage mutation proposal objects (read-only metadata).")
 actions_app = typer.Typer(help="Compile approved proposals into review-only action records.")
+guard_app = typer.Typer(
+    help="Stale-evidence / drift guard for proposals, actions, and export packs (read-only).",
+)
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
 app.add_typer(model_app, name="model")
 app.add_typer(approvals_app, name="approvals")
 app.add_typer(actions_app, name="actions")
+app.add_typer(guard_app, name="guard")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -911,6 +941,19 @@ def apply(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Run preflight only; do not write bundle files."
     ),
+    allow_stale: bool = typer.Option(
+        False,
+        "--allow-stale",
+        help=(
+            "Allow apply to proceed even if the PR38 guard reports stale evidence. "
+            "Drift (changed source artifacts) is always refused."
+        ),
+    ),
+    max_age_hours: float | None = typer.Option(
+        None,
+        "--max-age-hours",
+        help="Override the stale-evidence guard max age (proposals: 24h).",
+    ),
 ) -> None:
     """Validate a plan or generate an operator execution bundle for a proposal.
 
@@ -960,6 +1003,72 @@ def apply(
     preflight = run_preflight(proposal)
     data_dir = Path(runtime.session.data_dir)
 
+    # PR38: run the stale-evidence / drift guard against the proposal so apply
+    # never produces a bundle from a stale or drifted source by default.
+    guard_max_age = max_age_from_hours(max_age_hours, source_type="proposal")
+    guard_payload = json.loads(proposal.model_dump_json())
+    guard_proposal_path, _gs = find_proposal_path(data_dir, proposal.proposal_id)
+    guard_report = check_proposal_payload(
+        guard_payload,
+        source_path=str(guard_proposal_path or ""),
+        max_age_seconds=guard_max_age,
+    )
+    guard_written = write_guard_report(guard_report, data_dir=data_dir)
+
+    guard_blocks = guard_report.decision in (
+        GUARD_DECISION_BLOCKED,
+        GUARD_DECISION_DRIFT,
+    ) or (guard_report.decision == GUARD_DECISION_STALE and not allow_stale)
+
+    if guard_blocks:
+        if guard_report.decision == GUARD_DECISION_STALE:
+            console.print(
+                "Apply refused: proposal evidence is stale.\n"
+                f"- proposal: {proposal.proposal_id}\n"
+                f"- age_seconds: {guard_report.age.age_seconds} "
+                f"(max {guard_report.age.max_age_seconds})\n"
+                f"- guard report: {guard_written.json_path}\n"
+                "- next step: regenerate evidence/runbook/proposal "
+                "(or pass --allow-stale to bypass; drift is never bypassed).\n"
+                "- no commands executed"
+            )
+        elif guard_report.decision == GUARD_DECISION_DRIFT:
+            console.print(
+                "Apply refused: source artifacts changed after the proposal was created.\n"
+                f"- proposal: {proposal.proposal_id}\n"
+                f"- changed: {', '.join(guard_report.drift.changed_files) or 'n/a'}\n"
+                f"- missing: {', '.join(guard_report.drift.missing_files) or 'n/a'}\n"
+                f"- guard report: {guard_written.json_path}\n"
+                "- next step: regenerate the proposal from current evidence.\n"
+                "- no commands executed"
+            )
+        else:
+            console.print(
+                "Apply refused: guard check blocked.\n"
+                f"- proposal: {proposal.proposal_id}\n"
+                f"- guard report: {guard_written.json_path}\n"
+                "- no commands executed"
+            )
+        if not dry_run:
+            preflight_path = write_diagnostic_preflight(
+                proposal,
+                data_dir=data_dir,
+                preflight=preflight,
+                proposal_id=proposal.proposal_id,
+            )
+            # Inject guard status into the diagnostic preflight record.
+            try:
+                payload = json.loads(preflight_path.read_text(encoding="utf-8"))
+                payload["guard_status"] = guard_report.decision
+                payload["guard_report"] = str(guard_written.json_path)
+                payload["execution_allowed"] = False
+                payload["execution_status"] = "not_executed"
+                preflight_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            except (OSError, ValueError):
+                pass
+            console.print(f"- preflight record: {preflight_path}")
+        raise typer.Exit(code=1)
+
     if not preflight.passed:
         _print_apply_preflight_failure(proposal, preflight.errors)
         # Always write a diagnostic apply-preflight.json so the operator can
@@ -971,6 +1080,13 @@ def apply(
                 preflight=preflight,
                 proposal_id=proposal.proposal_id,
             )
+            try:
+                payload = json.loads(preflight_path.read_text(encoding="utf-8"))
+                payload["guard_status"] = guard_report.decision
+                payload["guard_report"] = str(guard_written.json_path)
+                preflight_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            except (OSError, ValueError):
+                pass
             console.print(f"- preflight record: {preflight_path}")
         raise typer.Exit(code=1)
 
@@ -979,6 +1095,7 @@ def apply(
         console.print(f"- proposal: {proposal.proposal_id}")
         console.print(f"- status: {proposal.status}")
         console.print(f"- risk: {proposal.risk}")
+        console.print(f"- guard status: {guard_report.decision}")
         console.print("- execution: not_executed")
         console.print("- bundle: not written (dry-run)")
         console.print("- no commands executed")
@@ -989,7 +1106,7 @@ def apply(
     try:
         actions_result = compile_and_write(proposal, data_dir=data_dir)
         files = list(result.files) + [actions_result.actions_json, actions_result.actions_md]
-        # Inject PR37 fields into apply-preflight.json without rewriting bundle logic.
+        # Inject PR37/PR38 fields into apply-preflight.json without rewriting bundle logic.
         try:
             preflight_payload = json.loads(result.preflight_path.read_text(encoding="utf-8"))
             preflight_payload["actions_compiled"] = True
@@ -997,6 +1114,10 @@ def apply(
             summary = actions_result.compiled.summary()
             preflight_payload["blocked_actions"] = summary["blocked"]
             preflight_payload["manual_only_actions"] = summary["manual_only"]
+            preflight_payload["guard_status"] = guard_report.decision
+            preflight_payload["guard_report"] = str(guard_written.json_path)
+            preflight_payload["execution_allowed"] = False
+            preflight_payload["execution_status"] = "not_executed"
             result.preflight_path.write_text(
                 json.dumps(preflight_payload, indent=2), encoding="utf-8"
             )
@@ -1004,7 +1125,21 @@ def apply(
             pass
     except Exception:
         files = list(result.files)
+        try:
+            preflight_payload = json.loads(result.preflight_path.read_text(encoding="utf-8"))
+            preflight_payload["guard_status"] = guard_report.decision
+            preflight_payload["guard_report"] = str(guard_written.json_path)
+            result.preflight_path.write_text(
+                json.dumps(preflight_payload, indent=2), encoding="utf-8"
+            )
+        except (OSError, ValueError):
+            pass
     _print_apply_bundle_success(proposal, files)
+    if guard_report.decision == GUARD_DECISION_WARNING:
+        console.print("- guard: warning (see report)")
+    elif guard_report.decision == GUARD_DECISION_FRESH:
+        console.print("- guard: fresh")
+    console.print(f"- guard report: {guard_written.json_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -1139,6 +1274,207 @@ def actions_validate(
     console.print(f"- manual_only: {info.get('manual_only', 0)}")
     console.print(f"- read_only_review: {info.get('read_only', 0)}")
     console.print("- execution: none")
+
+
+# ---------------------------------------------------------------------------
+# Guard (PR38) - stale-evidence / drift checks
+
+
+_GUARD_EXIT_CODES = {
+    GUARD_DECISION_FRESH: 0,
+    GUARD_DECISION_WARNING: 0,
+    GUARD_DECISION_STALE: 2,
+    GUARD_DECISION_DRIFT: 3,
+    GUARD_DECISION_BLOCKED: 1,
+}
+
+
+def _print_guard_report(report: GuardReport, *, write_paths: tuple[Path, Path] | None) -> None:
+    console.print("Guard check (read-only; ShellForgeAI did not execute anything):")
+    console.print(f"- source type: {report.source_type}")
+    console.print(f"- source id: {report.source_id}")
+    if report.source_path:
+        console.print(f"- source path: {report.source_path}")
+    console.print(f"- decision: {report.decision}")
+    console.print(f"- age status: {report.age.status}")
+    if report.age.status != "unknown":
+        console.print(
+            f"  - age_seconds: {report.age.age_seconds} (max {report.age.max_age_seconds})"
+        )
+    console.print(f"- source_hash_status: {report.drift.source_hash_status}")
+    if report.drift.changed_files:
+        console.print(f"  - changed: {', '.join(report.drift.changed_files)}")
+    if report.drift.missing_files:
+        console.print(f"  - missing: {', '.join(report.drift.missing_files)}")
+    console.print("- execution_allowed: false")
+    console.print("- execution_status: not_executed")
+    if report.warnings:
+        console.print(f"- warnings: {len(report.warnings)}")
+        for w in report.warnings:
+            console.print(f"  - {w}")
+    if report.errors:
+        console.print(f"- errors: {len(report.errors)}")
+        for e in report.errors:
+            console.print(f"  - {e}")
+    if write_paths is not None:
+        json_path, md_path = write_paths
+        console.print(f"- report json: {json_path}")
+        console.print(f"- report md: {md_path}")
+    if report.decision == GUARD_DECISION_STALE:
+        console.print(
+            "- next step: re-run `shellforgeai diagnose <target> --with-runbook` and "
+            "regenerate the proposal so evidence is fresh."
+        )
+    elif report.decision == GUARD_DECISION_DRIFT:
+        console.print(
+            "- next step: source artifacts changed after creation; regenerate the "
+            "proposal/actions/export from current evidence before any apply."
+        )
+    elif report.decision == GUARD_DECISION_BLOCKED:
+        console.print("- next step: source is missing or malformed; nothing was executed.")
+
+
+def _guard_resolve_proposal_target(
+    data_dir: Path, target: str | None, *, latest_approved: bool
+) -> tuple[Path | None, str | None]:
+    """Resolve a target into a proposal JSON path. Returns (path, error)."""
+    if latest_approved:
+        proposal = latest_approved_proposal(data_dir)
+        if proposal is None:
+            return None, "no approved proposals found"
+        path, _status = find_proposal_path(data_dir, proposal.proposal_id)
+        if path is None:
+            return None, f"approved proposal file not found: {proposal.proposal_id}"
+        return path, None
+    if not target:
+        return None, "missing proposal target"
+    p = Path(target)
+    if p.exists() and p.is_file():
+        return p, None
+    path, _status = find_proposal_path(data_dir, target)
+    if path is None:
+        return None, f"proposal not found: {target}"
+    return path, None
+
+
+@guard_app.command("check")
+def guard_check(
+    ctx: typer.Context,
+    target: Annotated[str | None, typer.Argument()] = None,
+    latest_approved: bool = typer.Option(
+        False, "--latest-approved", help="Guard-check the newest approved proposal."
+    ),
+    max_age_hours: float | None = typer.Option(
+        None, "--max-age-hours", help="Override the default max age (proposals: 24h)."
+    ),
+) -> None:
+    """Run a stale-evidence / drift guard check on a proposal.
+
+    Accepts a proposal id, a proposal JSON path, or ``--latest-approved``.
+    Writes ``guard-report.json`` and ``guard-report.md`` under
+    ``<data_dir>/guards/<proposal-id>/``. Execution remains disabled.
+    """
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    if not target and not latest_approved:
+        raise typer.BadParameter(
+            "Provide a proposal id, a proposal JSON path, or --latest-approved."
+        )
+    path, err = _guard_resolve_proposal_target(data_dir, target, latest_approved=latest_approved)
+    if path is None:
+        console.print("Guard check failed:")
+        console.print(f"- {err or 'unknown error'}")
+        console.print("- no commands executed")
+        raise typer.Exit(code=1)
+    max_age = max_age_from_hours(max_age_hours, source_type="proposal")
+    report = check_proposal_file(path, max_age_seconds=max_age)
+    written = write_guard_report(report, data_dir=data_dir)
+    _print_guard_report(report, write_paths=(written.json_path, written.md_path))
+    code = _GUARD_EXIT_CODES.get(report.decision, 1)
+    if code != 0:
+        raise typer.Exit(code=code)
+
+
+@guard_app.command("check-actions")
+def guard_check_actions(
+    ctx: typer.Context,
+    target: Annotated[Path, typer.Argument(help="Path to actions.json")],
+    max_age_hours: float | None = typer.Option(
+        None, "--max-age-hours", help="Override the default max age (actions: 24h)."
+    ),
+) -> None:
+    """Run a guard check against a compiled actions.json file."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    max_age = max_age_from_hours(max_age_hours, source_type="actions")
+    report = check_actions_file(target, data_dir=data_dir, max_age_seconds=max_age)
+    written = write_guard_report(report, data_dir=data_dir)
+    _print_guard_report(report, write_paths=(written.json_path, written.md_path))
+    code = _GUARD_EXIT_CODES.get(report.decision, 1)
+    if code != 0:
+        raise typer.Exit(code=code)
+
+
+@guard_app.command("check-export")
+def guard_check_export(
+    ctx: typer.Context,
+    target: Annotated[Path, typer.Argument(help="Path to an export directory")],
+    max_age_hours: float | None = typer.Option(
+        None, "--max-age-hours", help="Override the default max age (exports: 7d)."
+    ),
+) -> None:
+    """Run a guard check against an export pack directory."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    max_age = max_age_from_hours(max_age_hours, source_type="export")
+    report = check_export_dir(target, max_age_seconds=max_age)
+    written = write_guard_report(report, data_dir=data_dir)
+    _print_guard_report(report, write_paths=(written.json_path, written.md_path))
+    code = _GUARD_EXIT_CODES.get(report.decision, 1)
+    if code != 0:
+        raise typer.Exit(code=code)
+
+
+@guard_app.command("show")
+def guard_show(
+    ctx: typer.Context,
+    target: Annotated[Path, typer.Argument(help="Path to guard-report.json or guard dir")],
+) -> None:
+    """Pretty-print a previously written guard-report.json."""
+    _ = _ctx(ctx)
+    payload, err = load_guard_report(target)
+    if payload is None:
+        console.print("Guard show failed:")
+        console.print(f"- {err}")
+        raise typer.Exit(code=1)
+    console.print(f"Guard report: {target}")
+    console.print(f"- source type: {payload.get('source_type', '')}")
+    console.print(f"- source id: {payload.get('source_id', '')}")
+    if payload.get("source_path"):
+        console.print(f"- source path: {payload.get('source_path')}")
+    console.print(f"- decision: {payload.get('decision', '')}")
+    age = payload.get("age") or {}
+    console.print(f"- age status: {age.get('status', '')}")
+    if age.get("status") != "unknown":
+        console.print(
+            f"  - age_seconds: {age.get('age_seconds')} (max {age.get('max_age_seconds')})"
+        )
+    drift = payload.get("drift") or {}
+    console.print(f"- source_hash_status: {drift.get('source_hash_status', '')}")
+    if drift.get("changed_files"):
+        console.print(f"  - changed: {', '.join(drift.get('changed_files') or [])}")
+    if drift.get("missing_files"):
+        console.print(f"  - missing: {', '.join(drift.get('missing_files') or [])}")
+    console.print(f"- execution_allowed: {payload.get('execution_allowed')}")
+    console.print(f"- execution_status: {payload.get('execution_status')}")
+    if payload.get("warnings"):
+        console.print(f"- warnings: {len(payload['warnings'])}")
+        for w in payload["warnings"]:
+            console.print(f"  - {w}")
+    if payload.get("errors"):
+        console.print(f"- errors: {len(payload['errors'])}")
+        for e in payload["errors"]:
+            console.print(f"  - {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1743,6 +2079,72 @@ def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _handle_guard_ask(runtime: RuntimeContext, question: str) -> bool:
+    """Handle stale-evidence / drift guard ask intents. No execution."""
+    intent = is_guard_ask_intent(question)
+    if not intent.matched:
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    if intent.run_anyway:
+        console.print(
+            "Refusing to execute: ShellForgeAI never runs mutation commands. "
+            "apply remains validation-only."
+        )
+        console.print(
+            "If you want to re-check freshness, run `shellforgeai guard check --latest-approved`."
+        )
+        return True
+    if intent.check_export:
+        latest = latest_session_dir(data_dir)
+        console.print(
+            "Export pack guard checks need an export directory path:\n"
+            "  shellforgeai guard check-export <export-dir>\n"
+            "- read-only; no commands executed."
+        )
+        if latest is not None:
+            console.print(f"- hint: latest session dir is {latest}")
+        return True
+    if intent.check_actions:
+        proposal = latest_approved_proposal(data_dir)
+        if proposal is None:
+            console.print(
+                "No approved proposal found to guard-check actions for. "
+                "Run `shellforgeai approvals approve <id> --reason ...` first."
+            )
+            return True
+        from shellforgeai.core.actions import find_actions_for_proposal
+
+        actions_path = find_actions_for_proposal(data_dir, proposal.proposal_id)
+        if actions_path is None:
+            console.print(
+                "No compiled actions for the latest approved proposal yet. "
+                "Run `shellforgeai actions compile --latest-approved` first; "
+                "no commands were executed."
+            )
+            return True
+        report = check_actions_file(actions_path, data_dir=data_dir)
+        written = write_guard_report(report, data_dir=data_dir)
+        _print_guard_report(report, write_paths=(written.json_path, written.md_path))
+        return True
+    # Default: check the latest approved proposal (most common ask).
+    proposal = latest_approved_proposal(data_dir)
+    if proposal is None:
+        console.print(
+            "No approved proposal found to guard-check. "
+            "Use `shellforgeai approvals approve <id> --reason ...` first "
+            "(no commands executed)."
+        )
+        return True
+    path, _status = find_proposal_path(data_dir, proposal.proposal_id)
+    if path is None:
+        console.print("Approved proposal file not found on disk; no commands executed.")
+        return True
+    report = check_proposal_file(path)
+    written = write_guard_report(report, data_dir=data_dir)
+    _print_guard_report(report, write_paths=(written.json_path, written.md_path))
+    return True
+
+
 def _handle_actions_ask(runtime: RuntimeContext, question: str) -> bool:
     """Handle actions compile/show/run asks. No execution."""
     intent = is_actions_ask_intent(question)
@@ -1789,6 +2191,8 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _handle_guard_ask(runtime, question):
+            return
         if _handle_immediate_fix_ask(runtime, question):
             return
         if _handle_export_ask(runtime, question):

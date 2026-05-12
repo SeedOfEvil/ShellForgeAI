@@ -438,6 +438,7 @@ class CompiledActions:
     proposal_component: str = ""
     proposal_risk: str = ""
     proposal_status: str = ""
+    source_hashes: dict[str, str] = field(default_factory=dict)
 
     def summary(self) -> dict[str, int]:
         total = len(self.actions)
@@ -480,6 +481,7 @@ class CompiledActions:
             "proposal_status": self.proposal_status,
             "source_proposal": self.source_proposal,
             "source_runbook": self.source_runbook,
+            "source_hashes": dict(self.source_hashes),
             "status": COMPILED_STATUS,
             "execution_allowed": EXECUTION_ALLOWED,
             "execution_status": EXECUTION_STATUS_NOT_EXECUTED,
@@ -556,8 +558,19 @@ def _compile_section(
     return out
 
 
-def compile_actions(proposal: Proposal) -> CompiledActions:
-    """Compile a proposal's steps into structured action records."""
+def compile_actions(
+    proposal: Proposal,
+    *,
+    proposal_path: str | Path | None = None,
+) -> CompiledActions:
+    """Compile a proposal's steps into structured action records.
+
+    When ``proposal_path`` is provided we record source hashes for the
+    on-disk proposal (and its referenced runbook) so PR38's drift guard
+    can detect post-compile changes to the source artifacts.
+    """
+    from shellforgeai.core.guards import compute_actions_source_hashes
+
     seq = [0]
     actions: list[Action] = []
     actions.extend(_compile_section(seq, "precondition", list(proposal.preconditions or [])))
@@ -567,6 +580,10 @@ def compile_actions(proposal: Proposal) -> CompiledActions:
     fingerprint = ""
     if isinstance(proposal.fingerprint, dict):
         fingerprint = str(proposal.fingerprint.get("value", ""))
+    source_hashes = compute_actions_source_hashes(
+        proposal_path=str(proposal_path) if proposal_path else "",
+        runbook_path=proposal.source.runbook or "",
+    )
     return CompiledActions(
         proposal_id=proposal.proposal_id,
         proposal_fingerprint=fingerprint,
@@ -578,6 +595,7 @@ def compile_actions(proposal: Proposal) -> CompiledActions:
         proposal_component=proposal.component or "",
         proposal_risk=proposal.risk or "",
         proposal_status=proposal.status or "",
+        source_hashes=source_hashes,
     )
 
 
@@ -696,8 +714,19 @@ def write_compiled_actions(
     )
 
 
-def compile_and_write(proposal: Proposal, *, data_dir: Path) -> CompileResult:
-    compiled = compile_actions(proposal)
+def compile_and_write(
+    proposal: Proposal,
+    *,
+    data_dir: Path,
+    proposal_path: str | Path | None = None,
+) -> CompileResult:
+    if proposal_path is None:
+        try:
+            cand, _status = find_proposal_path(Path(data_dir), proposal.proposal_id)
+            proposal_path = cand
+        except Exception:
+            proposal_path = None
+    compiled = compile_actions(proposal, proposal_path=proposal_path)
     return write_compiled_actions(compiled, data_dir=Path(data_dir))
 
 

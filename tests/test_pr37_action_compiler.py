@@ -6,6 +6,7 @@ Deterministic, fixture-based. No Docker, no systemd, no network, no root.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 from typer.testing import CliRunner
@@ -76,7 +77,7 @@ def _mk_proposal(
     )
     return Proposal(
         proposal_id=proposal_id,
-        created_at="2026-05-12T00:00:00+00:00",
+        created_at=datetime.now(timezone.utc).isoformat(),
         status=status,
         source=ProposalSource(session_id="sf_pr37_test"),
         target="docker",

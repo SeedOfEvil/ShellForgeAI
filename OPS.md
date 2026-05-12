@@ -333,6 +333,35 @@ that exist for the source. Missing optional files are recorded in the
 manifest. `validate-export` reports `safety: ok` and `execution: none`.
 ShellForgeAI does not execute any remediation.
 
+## Stale/drift guard smoke (PR38)
+
+Repo-local fixture flow (no Docker, no root, no host mutation):
+
+```
+shellforgeai diagnose docker --save-plan --with-runbook
+shellforgeai approvals create --latest
+shellforgeai approvals approve <id> --reason "PR38 guard smoke"
+shellforgeai guard check --latest-approved
+shellforgeai guard check --latest-approved --max-age-hours 1
+shellforgeai actions compile --latest-approved
+shellforgeai guard check-actions <data_dir>/actions/<id>/actions.json
+shellforgeai export --latest-approved
+shellforgeai guard check-export <data_dir>/exports/<export_id>
+shellforgeai guard show <data_dir>/guards/<id>/guard-report.json
+shellforgeai apply --latest-approved
+shellforgeai ask "is the approved proposal still fresh?"
+shellforgeai ask "check drift before apply"
+shellforgeai ask "run it anyway"
+```
+
+Expected: each guard call writes `guard-report.json` and `guard-report.md`
+under `<data_dir>/guards/<source-id>/` with `execution_allowed=false` and
+`execution_status=not_executed`. Fresh artifacts return `decision: fresh`;
+overriding `--max-age-hours` to a very small value flips the decision to
+`stale`. `apply` records `guard_status` and `guard_report` in
+`apply-preflight.json` and refuses by default when the proposal is stale
+or drifted. ShellForgeAI does not execute any remediation.
+
 ## Local validation (fixtures/mocks only)
 
 Run local validation without Docker daemon, root, or service mutation:
@@ -344,3 +373,4 @@ Run local validation without Docker daemon, root, or service mutation:
 - `python -m compileall src`
 - `env -u PYTHONPATH pytest -q`
 - `pytest -q tests -k "export or audit or approval or apply or runbook"`
+- `pytest -q tests -k "guard or stale or drift or apply or actions"`

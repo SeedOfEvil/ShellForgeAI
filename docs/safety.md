@@ -171,6 +171,23 @@ files, checksum mismatches, or an `apply-preflight.json` claiming
 applied**, and **exported does not mean applied**. `apply` remains
 validation-only.
 
+`shellforgeai guard check|check-actions|check-export|show` (PR38) provides
+stale-evidence and drift protection for proposals, compiled actions, apply
+preflight bundles, and export packs. The guard reads source files, computes
+SHA-256 hashes, compares against hashes recorded at creation time, and writes
+a `guard-report.json` / `guard-report.md` pair under
+`<data_dir>/guards/<source-id>/`. Decisions are `fresh`, `warning`, `stale`,
+`drift_detected`, or `blocked`. Default max ages are 24h for
+proposals/actions/apply bundles and 7d for exports; `--max-age-hours`
+overrides per-call. The guard is **read-only**: it never executes
+remediation, never restarts/reloads/installs/deletes, never mutates
+proposals/approvals/actions/exports, and never edits source artifacts. Every
+guard report records `execution_allowed=false` and
+`execution_status=not_executed`. `apply` runs the guard internally and
+refuses to generate an operator bundle from a stale or drifted proposal by
+default; `--allow-stale` bypasses a stale decision but drift is never
+bypassed. `apply` remains validation-only.
+
 `shellforgeai actions compile` (PR37) compiles an approved proposal into
 structured, review-only action records under
 `<data_dir>/actions/<proposal-id>/`. Classification is deterministic
