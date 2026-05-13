@@ -222,3 +222,5 @@ item preserves `execution_allowed=false`, `execution_status=not_executed`,
 that claims otherwise. The index proves ShellForgeAI's own session/proposal/
 export/guard/refusal trail — it does not prove external operator execution.
 `apply` remains validation/preflight-only.
+
+- PR41 metadata housekeeping: `audit prune` only targets ShellForgeAI-owned metadata roots under `<data_dir>` and defaults to dry-run. Deletion requires explicit `--execute`; no remediation execution is performed.

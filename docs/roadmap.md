@@ -124,3 +124,5 @@
   index itself, and every indexed item preserves `execution_allowed=false`,
   `execution_status=not_executed`, `mutation_performed=false`. `apply`
   remains validation/preflight-only.
+
+- PR41 completed: audit/index/export retention reporting, dry-run prune planning, explicit `--execute` metadata prune, and compact archive export/validation.
