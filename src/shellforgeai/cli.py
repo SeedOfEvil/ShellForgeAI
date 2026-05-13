@@ -6,6 +6,7 @@ import re
 import sys
 import tarfile
 from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -2774,6 +2775,193 @@ def _handle_incident_search_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _is_status_ask(question: str) -> bool:
+    q = (question or "").strip().lower()
+    return any(
+        p in q
+        for p in (
+            "shellforgeai status",
+            "operator status",
+            "show me the dashboard",
+            "is shellforgeai healthy",
+            "what should i check next",
+            "any pending approvals",
+            "any guard failures",
+            "how much metadata do i have",
+        )
+    )
+
+
+def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool = False) -> dict:
+    data_dir = Path(runtime.session.data_dir)
+    audit = AuditStorage(data_dir)
+    build = get_build_info()
+    provider = build_provider(runtime.settings)
+    model_info = provider.doctor()
+    proposals = list_proposals(data_dir)
+    counts = {k: 0 for k in ("pending", "approved", "rejected", "canceled", "archived")}
+    pending: list[Proposal] = []
+    for status, p in proposals:
+        counts[status] = counts.get(status, 0) + 1
+        if status == "pending":
+            pending.append(p)
+    risk_rank = {"low": 1, "medium": 2, "high": 3}
+    highest_pending = None
+    if pending:
+        highest_pending = max(pending, key=lambda x: risk_rank.get(x.risk, 0)).risk
+    newest_pending = None
+    if pending:
+        newest = max(pending, key=lambda x: x.created_at or "")
+        newest_pending = newest.proposal_id
+    latest_run = latest_runbook(data_dir)
+    latest_prop = pending and max(pending, key=lambda x: x.created_at or "") or None
+    latest_export = latest_session_dir(data_dir)
+    events = audit.query_events(latest=False)
+    latest_evt = events[-1] if events else None
+    suspicious = []
+    for evt in events:
+        safety = evt.get("safety") if isinstance(evt, dict) else None
+        if not isinstance(safety, dict):
+            continue
+        if (
+            safety.get("execution_allowed") is True
+            or safety.get("mutation_performed") is True
+            or safety.get("execution_status") not in (None, "not_executed")
+        ):
+            suspicious.append(evt)
+    level = "ok"
+    if suspicious:
+        level = "attention"
+    elif counts["pending"] > 0:
+        level = "warning"
+    if not model_info:
+        level = "unknown"
+    retention: dict[str, object] = {"total_bytes": None, "categories": None}
+    if include_retention:
+        cats = build_categories(data_dir)
+        rows = []
+        total = 0
+        for name in (
+            "artifacts",
+            "approvals",
+            "apply-bundles",
+            "actions",
+            "exports",
+            "audit-events",
+        ):
+            items = collect_category(cats[name])
+            sz = sum(file_size(p) for p in items)
+            total += sz
+            rows.append({"category": name, "items": len(items), "bytes": sz})
+        retention = {"total_bytes": total, "categories": rows}
+    return {
+        "schema_version": "1",
+        "created_at": (
+            latest_evt.get("timestamp")
+            if isinstance(latest_evt, dict)
+            else datetime.now(timezone.utc).isoformat()
+        ),
+        "health_level": level,
+        "shellforgeai": {
+            "version": build.display_version,
+            "profile": runtime.profile.name,
+            "mode": runtime.session.mode,
+            "data_dir": str(data_dir),
+            "audit_dir": str(audit.sessions_dir),
+            "platform": platform.platform(),
+        },
+        "model": {
+            "provider": runtime.settings.model.provider,
+            "model": runtime.settings.model.model,
+            "timeout_seconds": runtime.settings.model.timeout_seconds,
+            "fallback_enabled": bool(runtime.settings.model.allow_model_fallback),
+            "codex_found": model_info.get("codex_found"),
+            "auth_cache_present": model_info.get("auth_cache_present"),
+            "status": "ok" if model_info.get("auth_cache_present") else "warning",
+        },
+        "safety": {
+            "apply_mode": "validation-only",
+            "execution_allowed": False,
+            "execution_status": "not_executed",
+            "mutation_performed": False,
+            "message": "No ShellForgeAI remediation execution recorded."
+            if not suspicious
+            else "Attention: unexpected execution safety markers found in audit metadata.",
+        },
+        "latest": {
+            "runbook": str(latest_run) if latest_run else None,
+            "proposal": latest_prop.proposal_id if latest_prop else None,
+            "export_session_dir": str(latest_export) if latest_export else None,
+            "audit_event_id": latest_evt.get("event_id") if isinstance(latest_evt, dict) else None,
+            "guard_refusal": suspicious[-1].get("event_id") if suspicious else None,
+        },
+        "approvals": {
+            **counts,
+            "highest_risk_pending": highest_pending,
+            "newest_pending": newest_pending,
+        },
+        "guards": {"recent_refusals": len(suspicious)},
+        "audit": {
+            "events_count": len(events),
+            "latest_event": latest_evt.get("event_id") if latest_evt else None,
+        },
+        "retention": retention,
+        "recommendations": [
+            "shellforgeai audit timeline --latest",
+            "shellforgeai approvals list --status pending",
+            "shellforgeai audit retention",
+            "shellforgeai audit search <query>",
+            "shellforgeai model doctor",
+        ],
+    }
+
+
+@app.command()
+def status(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json"),
+    verbose: bool = typer.Option(False, "--verbose"),
+    since: str | None = typer.Option(None, "--since"),
+    include_retention: bool = typer.Option(False, "--include-retention"),
+    include_index: bool = typer.Option(False, "--include-index"),
+    include_audit: bool = typer.Option(False, "--include-audit"),
+    include_approvals: bool = typer.Option(False, "--include-approvals"),
+) -> None:
+    _ = (verbose, since, include_index, include_audit, include_approvals)
+    runtime = _ctx(ctx)
+    payload = _collect_status_payload(runtime, include_retention=include_retention)
+    if json_output:
+        console.print_json(data=payload)
+        return
+    console.print("ShellForgeAI")
+    for k, v in payload["shellforgeai"].items():
+        console.print(f"- {k}: {v}")
+    console.print("Model")
+    for k, v in payload["model"].items():
+        console.print(f"- {k}: {v}")
+    console.print("Safety")
+    for k, v in payload["safety"].items():
+        console.print(f"- {k}: {v}")
+    console.print("Latest activity")
+    for k, v in payload["latest"].items():
+        console.print(f"- {k}: {v}")
+    console.print("Approvals")
+    for k, v in payload["approvals"].items():
+        console.print(f"- {k}: {v}")
+    console.print("Guards / drift")
+    for k, v in payload["guards"].items():
+        console.print(f"- {k}: {v}")
+    console.print("Audit / index")
+    for k, v in payload["audit"].items():
+        console.print(f"- {k}: {v}")
+    if include_retention:
+        console.print("Retention")
+        console.print(f"- total_bytes: {payload['retention']['total_bytes']}")
+    console.print("Next suggested read-only actions")
+    for r in payload["recommendations"][:6]:
+        console.print(f"- {r}")
+
+
 @app.command()
 def ask(
     ctx: typer.Context,
@@ -2788,6 +2976,15 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _is_status_ask(question):
+            p = _collect_status_payload(runtime, include_retention=True)
+            console.print("ShellForgeAI status dashboard (read-only):")
+            console.print(f"- health_level: {p.get('health_level')}")
+            console.print(f"- execution: {p['safety']['message']}")
+            console.print(f"- pending approvals: {p['approvals'].get('pending', 0)}")
+            console.print(f"- recent guard refusals: {p['guards'].get('recent_refusals', 0)}")
+            console.print("- next: shellforgeai status --json")
+            return
         if _handle_retention_ask(runtime, question):
             return
         if _handle_incident_search_ask(runtime, question):

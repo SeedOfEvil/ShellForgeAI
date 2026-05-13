@@ -410,3 +410,9 @@ Run local validation without Docker daemon, root, or service mutation:
 
 ## Repo-local fixture validation only
 - PR validation for ask-routing changes must run with repo fixtures/mocks only (no Docker daemon, no systemd/journal dependencies, no root-only setup).
+
+
+## PR43 status dashboard validation
+
+- Run status/dashboard tests with repo-local fixtures only (tmp_path/mocks).
+- Do not require Docker, root, systemd/journal, or internet for status validation.

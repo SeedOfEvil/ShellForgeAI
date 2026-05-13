@@ -230,3 +230,9 @@ export/guard/refusal trail — it does not prove external operator execution.
 - Ask routing never executes remediation commands; apply remains validation/preflight-only.
 - Ask cleanup/prune phrasing defaults to retention report or prune dry-run; deletion requires explicit CLI `--execute`.
 - Ambiguous wording is disambiguated: ShellForgeAI metadata phrases route to ShellForgeAI audit/retention/export commands, while host-audit wording (`auditd`, `ausearch`, `/var/log/audit`, `journalctl`) stays in host diagnostics.
+
+## Status dashboard safety
+
+`shellforgeai status` is strictly read-only. It summarizes ShellForgeAI-owned metadata (audit events, approvals, bundles, exports, indexes, and optional retention counts) and does **not** execute operator commands, run apply, approve/reject proposals, prune/delete/archive metadata, or rebuild indexes.
+
+The status safety block is invariant: `apply_mode=validation-only`, `execution_allowed=false`, `execution_status=not_executed`, and `mutation_performed=false`. The message “No ShellForgeAI remediation execution recorded” means no ShellForgeAI execution markers appear in ShellForgeAI audit metadata; it is not proof of external operator behavior outside ShellForgeAI.
