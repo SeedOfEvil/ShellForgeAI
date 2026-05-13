@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import tarfile
 import uuid
 from dataclasses import dataclass
@@ -15,6 +16,9 @@ class RetentionCategory:
     name: str
     roots: tuple[Path, ...]
     patterns: tuple[str, ...]
+
+
+DEFAULT_PRUNE_CATEGORIES = ("exports", "apply-bundles", "actions", "audit-exports", "indexes")
 
 
 def _walk_matching(root: Path, patterns: tuple[str, ...]) -> list[Path]:
@@ -83,13 +87,31 @@ def safe_under_roots(path: Path, roots: list[Path]) -> bool:
     return False
 
 
+def ensure_safe_delete_target(path: Path, allowed_roots: list[Path]) -> str | None:
+    try:
+        rp = path.resolve(strict=True)
+    except FileNotFoundError:
+        return "target missing"
+    protected = {Path("/"), Path("/data"), *[r.resolve() for r in allowed_roots]}
+    if rp in protected:
+        return f"refused protected path: {rp}"
+    if not safe_under_roots(path, allowed_roots):
+        return f"refused outside allowed roots: {path}"
+    if path.is_symlink():
+        target = rp
+        if not any(root.resolve() in target.parents for root in allowed_roots):
+            return f"refused symlink outside allowed roots: {path}"
+    return None
+
+
 def delete_paths(paths: list[Path], allowed_roots: list[Path]) -> tuple[list[Path], list[str], int]:
     deleted: list[Path] = []
     errors: list[str] = []
     bytes_removed = 0
     for p in paths:
-        if not safe_under_roots(p, allowed_roots):
-            errors.append(f"refused outside allowed roots: {p}")
+        refusal = ensure_safe_delete_target(p, allowed_roots)
+        if refusal:
+            errors.append(refusal)
             continue
         try:
             size = file_size(p)
@@ -138,10 +160,78 @@ def create_archive(
                 digest = hashlib.sha256(p.read_bytes()).hexdigest()
                 checksum_map[str(p)] = digest
                 checksums.append(f"{digest}  {p}")
-            tf.add(p, arcname=f"payload/{p.name}")
+                tf.add(p, arcname=f"payload/{p.name}")
+            elif p.is_dir():
+                for child in sorted(p.rglob("*")):
+                    if child.is_file():
+                        digest = hashlib.sha256(child.read_bytes()).hexdigest()
+                        rel = f"payload/{p.name}/{child.relative_to(p)}"
+                        checksum_map[str(child)] = digest
+                        checksums.append(f"{digest}  {child}")
+                        tf.add(child, arcname=rel)
         manifest["checksums"] = checksum_map
-        manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+        manifest_bytes = json.dumps(manifest, indent=2).encode()
         m_info = tarfile.TarInfo("archive-manifest.json")
         m_info.size = len(manifest_bytes)
         tf.addfile(m_info, fileobj=io.BytesIO(manifest_bytes))
+        checksums_bytes = ("\n".join(checksums) + "\n").encode()
+        c_info = tarfile.TarInfo("checksums.sha256")
+        c_info.size = len(checksums_bytes)
+        tf.addfile(c_info, fileobj=io.BytesIO(checksums_bytes))
+        summary = (
+            f"# Archive Summary\n\n- archive_id: {archive_id}\n- source: {source}\n"
+            f"- files_hashed: {len(checksum_map)}\n- execution: none\n"
+        ).encode()
+        s_info = tarfile.TarInfo("archive-summary.md")
+        s_info.size = len(summary)
+        tf.addfile(s_info, fileobj=io.BytesIO(summary))
     return out
+
+
+def validate_archive(path: Path) -> tuple[bool, list[str], int]:
+    errors: list[str] = []
+    file_count = 0
+    try:
+        with tarfile.open(path, "r:gz") as tf:
+            names = set(tf.getnames())
+            for required in ("archive-manifest.json", "checksums.sha256", "archive-summary.md"):
+                if required not in names:
+                    errors.append(f"missing {required}")
+            if errors:
+                return False, errors, file_count
+            mf = tf.extractfile("archive-manifest.json")
+            cs = tf.extractfile("checksums.sha256")
+            if mf is None or cs is None:
+                return False, ["missing manifest/checksums content"], file_count
+            manifest = json.loads(mf.read().decode("utf-8"))
+            if manifest.get("execution_allowed") is not False:
+                errors.append("execution_allowed must be false")
+            if manifest.get("execution_status") != "not_executed":
+                errors.append("execution_status must be not_executed")
+            if manifest.get("mutation_performed") is not False:
+                errors.append("mutation_performed must be false")
+            checksum_lines = [
+                ln.strip() for ln in cs.read().decode("utf-8").splitlines() if ln.strip()
+            ]
+            for line in checksum_lines:
+                expected, _, src = line.partition("  ")
+                src = src.strip()
+                member = None
+                for n in names:
+                    if n.endswith(os.path.basename(src)) and n.startswith("payload/"):
+                        member = n
+                        break
+                if member is None:
+                    errors.append(f"missing payload for checksum entry: {src}")
+                    continue
+                fileobj = tf.extractfile(member)
+                if fileobj is None:
+                    errors.append(f"missing payload stream: {member}")
+                    continue
+                actual = hashlib.sha256(fileobj.read()).hexdigest()
+                file_count += 1
+                if actual != expected:
+                    errors.append(f"checksum mismatch: {src}")
+    except Exception as exc:
+        return False, [str(exc)], file_count
+    return (not errors), errors, file_count
