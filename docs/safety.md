@@ -207,3 +207,18 @@ action compiler does not execute anything; `apply` remains validation-only.
 ## Audit timeline safety invariants
 
 `<data_dir>/audit/events.jsonl` records ShellForgeAI timeline events only. Every event records `execution_allowed=false`, `execution_status=not_executed`, and `mutation_performed=false`. Audit events prove ShellForgeAI actions/refusals, not external operator execution.
+
+## Audit incident index / search safety (PR40)
+
+`shellforgeai audit index|search|index validate` is read-only metadata
+navigation over `<data_dir>` only. The index file
+(`<data_dir>/audit/incident-index.json`) is the single file these commands
+write; rebuilding the index never mutates any source artifact, never executes
+operator commands, never restarts/reloads services, never installs/removes
+packages, never changes Docker/firewall/route/DNS state, and never edits files
+outside ShellForgeAI's configured data/audit/index directories. Each indexed
+item preserves `execution_allowed=false`, `execution_status=not_executed`,
+`mutation_performed=false`; `audit index validate` rejects any index payload
+that claims otherwise. The index proves ShellForgeAI's own session/proposal/
+export/guard/refusal trail — it does not prove external operator execution.
+`apply` remains validation/preflight-only.

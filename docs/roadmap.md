@@ -107,3 +107,20 @@
   remains validation-only.
 
 - PR39: guard-aware audit timeline milestone (`audit timeline/show/validate`) for chronological operator incident trails with explicit no-execution safety state.
+- PR40: audit-aware incident index / search milestone. `shellforgeai audit
+  index [--rebuild]` builds a compact deterministic index
+  (`<data_dir>/audit/incident-index.json`) from audit events, artifact
+  sessions, approval proposals, apply bundles, exports, and compiled
+  actions. `shellforgeai audit search [<query>] [--component/--target/
+  --kind/--status/--risk/--proposal/--session/--type/--since] [--json]`
+  filters the index with case-insensitive token AND across
+  title/summary/component/target/kind/status/session_id/proposal_id/
+  tags/paths plus exact-match filters. `shellforgeai audit index validate`
+  re-validates the on-disk index (unique `item_id`, required fields,
+  numeric `source_counts`, string paths, and safety invariants). The ask
+  router (`search audit for ...`, `find drift refusals`, `find approved
+  proposals`, `did anything execute?`) routes to the same index. The
+  index is read-only metadata navigation: the only file written is the
+  index itself, and every indexed item preserves `execution_allowed=false`,
+  `execution_status=not_executed`, `mutation_performed=false`. `apply`
+  remains validation/preflight-only.

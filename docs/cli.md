@@ -39,6 +39,7 @@ Running with no `<command>` enters interactive mode (see
 | `audit timeline [--latest] [--session <id>] [--proposal <id>] [--kind <kind>] [--since <ts>] [--json]` | Show chronological audit operator trail with guard/refusal states. |
 | `audit show <event_id>` | Show one structured audit event. |
 | `audit validate` | Validate `audit/events.jsonl` schema and non-execution safety invariants. |
+| `audit index [--rebuild]` / `audit index validate` / `audit search [<query>] [--component C] [--target T] [--kind K] [--status S] [--risk R] [--proposal P] [--session SID] [--type T] [--since TS] [--json]` | Audit-aware incident index / search (PR40). `audit index` builds `<data_dir>/audit/incident-index.json` from audit events, artifact sessions, approvals, apply bundles, exports, and actions. `--rebuild` overwrites the existing index file (no source artifact is modified). `audit search` filters with case-insensitive substring (AND across whitespace-separated tokens) over title/summary/component/target/kind/status/session_id/proposal_id/tags/paths and combines with exact-match `--component/--target/--kind/--status/--risk/--type/--proposal/--session/--since` filters. `--json` emits the matching item objects. Every indexed item preserves `execution_allowed=false`, `execution_status=not_executed`, `mutation_performed=false`; no operator commands are executed. `audit index validate` re-reads the index, checks the schema/safety invariants (unique `item_id`, required fields, paths are strings, safety fields are still false), and exits 0/1. |
 | `export <session-id\|session-dir>` / `export --latest` / `export --proposal <id>` / `export --latest-approved` / `export --approved` (refused) / `export --output PATH` / `export --redact` | Bundle evidence/summary/plan/runbook/proposal/apply-preflight artifacts into a portable audit pack under `<data_dir>/exports/<export_id>/`. Writes `export-manifest.json`, `export-summary.md`, `checksums.sha256`, and copies any optional artifact files that exist (`evidence.json`, `summary.md`, `plan.json`, `runbook.md`, `runbook.json`, `proposal.json`, `apply-preview.md`, `operator-commands.sh`, `rollback.sh`, `validation.md`, `apply-preflight.json`). Missing optional files are recorded in the manifest. `--approved` is intentionally refused; use `--proposal <id>` or `--latest-approved`. `--redact` best-effort masks common secrets in text-like files, writes `redaction-report.json`, and sets manifest `redaction_applied=true` with a review-before-sharing warning. Export only reads/copies files — no commands are executed. |
 | `validate-export <export-dir\|export-manifest.json>` | Validate an export pack: manifest exists, included files present, checksums match, safety note present, and `apply-preflight.json` (when included) records `execution_allowed=false` / `execution_status=not_executed`. For redacted exports (`redaction_applied=true`), validates `redaction-report.json` exists/parsable and summary/manifest redaction state is consistent. Exit `0` valid, `1` invalid/missing. |
 | `guard check <proposal-id\|proposal.json>` / `guard check --latest-approved [--max-age-hours N]` / `guard check-actions <actions.json> [--max-age-hours N]` / `guard check-export <export-dir> [--max-age-hours N]` / `guard show <guard-report.json\|dir>` | Stale-evidence / drift guard (PR38). Reads source artifacts, computes hashes, compares against the source hashes recorded at creation time, and writes `guard-report.json` + `guard-report.md` under `<data_dir>/guards/<source-id>/`. Decisions: `fresh` (exit 0), `warning` (exit 0), `stale` (exit 2), `drift_detected` (exit 3), `blocked` (exit 1). Default max ages: proposals/actions/apply bundles 24h, exports 7d; override with `--max-age-hours`. The guard never executes anything: `execution_allowed=false` and `execution_status=not_executed` are recorded in every report. |
@@ -75,3 +76,28 @@ When `--json` is used (for commands that support it), stdout is machine-readable
 - `approvals create` is idempotent by fingerprint: repeated creation from the same runbook skips existing proposals across pending/approved/rejected/canceled/archived and reports created vs skipped_existing counts.
 - `approvals list` supports `--status`, `--all`, `--component`, and `--session` filters and shows fingerprint short ids for queue clarity.
 - Re-running `apply <approved-proposal>` refreshes deterministic files in the same `<data_dir>/apply_bundles/<proposal-id>/` directory and records `bundle_status` in `apply-preflight.json`.
+
+## Audit incident index examples (PR40)
+
+```
+# Build / rebuild the incident index from audit events + artifacts.
+shellforgeai audit index
+shellforgeai audit index --rebuild
+
+# Search the index.
+shellforgeai audit search bad-network
+shellforgeai audit search --component sfai-bad-network
+shellforgeai audit search --kind guard_check --status refused
+shellforgeai audit search --risk medium --type proposal
+shellforgeai audit search --proposal prop_pr40_001
+shellforgeai audit search --session sf_pr40_001
+shellforgeai audit search --since 2026-05-12 --json
+
+# Validate the on-disk index.
+shellforgeai audit index validate
+```
+
+`audit search` is read-only. It does not run operator commands, mutate
+proposals/approvals/apply bundles/exports/actions, or change any source
+artifact. The only file `audit index` writes is
+`<data_dir>/audit/incident-index.json`.

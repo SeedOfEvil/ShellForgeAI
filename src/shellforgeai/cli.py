@@ -12,6 +12,7 @@ import typer
 from rich.console import Console
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.core import incident_index as incident_index_mod
 from shellforgeai.core.actions import (
     compile_and_write,
     is_actions_ask_intent,
@@ -118,6 +119,12 @@ app = typer.Typer(
 inspect_app = typer.Typer()
 tools_app = typer.Typer()
 audit_app = typer.Typer()
+audit_index_app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help="Audit-aware incident index (PR40). Read-only metadata search; no execution.",
+)
+audit_app.add_typer(audit_index_app, name="index")
 model_app = typer.Typer()
 approvals_app = typer.Typer(help="Manage mutation proposal objects (read-only metadata).")
 actions_app = typer.Typer(help="Compile approved proposals into review-only action records.")
@@ -544,6 +551,145 @@ def audit_validate(ctx: typer.Context) -> None:
     for err in result.errors:
         console.print(f"- {err}")
     raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# PR40: audit-aware incident index / search
+
+
+def _print_index_summary(path: Path, index) -> None:
+    counts = index.source_counts
+    console.print("Audit index written:")
+    console.print(f"- index: {path}")
+    console.print(f"- events: {counts.get('events', 0)}")
+    console.print(f"- sessions: {counts.get('sessions', 0)}")
+    console.print(f"- proposals: {counts.get('proposals', 0)}")
+    console.print(f"- exports: {counts.get('exports', 0)}")
+    console.print(f"- apply_bundles: {counts.get('apply_bundles', 0)}")
+    console.print(f"- actions: {counts.get('actions', 0)}")
+    console.print(f"- warnings: {len(index.warnings)}")
+    for w in index.warnings:
+        console.print(f"  - {w}")
+    console.print("- execution: none")
+
+
+@audit_index_app.callback()
+def audit_index_main(
+    ctx: typer.Context,
+    rebuild: bool = typer.Option(
+        False, "--rebuild", help="Explicitly rebuild the index from source files."
+    ),
+) -> None:
+    """Build or rebuild the audit-aware incident index (PR40).
+
+    Read-only over source artifacts; writes only ``<data_dir>/audit/incident-index.json``.
+    ShellForgeAI does not execute any command.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    index = incident_index_mod.build_index(data_dir)
+    path = incident_index_mod.write_index(data_dir, index)
+    if rebuild:
+        console.print("Audit index rebuilt (overwrote existing index file).")
+    _print_index_summary(path, index)
+    console.print("- No commands executed.")
+    console.print("- No remediation performed.")
+
+
+@audit_index_app.command("validate")
+def audit_index_validate(ctx: typer.Context) -> None:
+    """Validate the on-disk incident index file."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    payload, err = incident_index_mod.load_index(data_dir)
+    if payload is None:
+        console.print("Audit index validation failed:")
+        console.print(f"- {err or 'index file missing'}")
+        raise typer.Exit(code=1)
+    result = incident_index_mod.validate_index_payload(payload)
+    if not result.ok:
+        console.print("Audit index validation failed:")
+        for e in result.errors:
+            console.print(f"- {e}")
+        raise typer.Exit(code=1)
+    console.print("Audit index validation passed:")
+    console.print(f"- index: {incident_index_mod.index_path(data_dir)}")
+    console.print(f"- items: {result.item_count}")
+    console.print("- safety: ok")
+    console.print("- execution: none")
+
+
+def _print_search_results(matches: list[dict]) -> None:
+    if not matches:
+        console.print("No matching audit/index records found.")
+        return
+    console.print(f"Results: {len(matches)}")
+    console.print(
+        "Time                  Type           Status      Risk      Reference"
+        "             Component             Summary"
+    )
+    for item in matches:
+        ts = str(item.get("created_at") or "")[:19].replace("T", " ")
+        itype = str(item.get("item_type") or "")
+        status = str(item.get("status") or "-")
+        risk = str(item.get("risk") or "-")
+        ref = str(item.get("proposal_id") or item.get("session_id") or item.get("item_id") or "-")
+        component = str(item.get("component") or item.get("target") or "-")
+        summary = str(item.get("summary") or "")
+        paths = item.get("paths") or []
+        path_count = len(paths) if isinstance(paths, list) else 0
+        console.print(
+            f"{ts:<21} {itype:<14} {status:<11} {risk:<9} {ref:<20} "
+            f"{component:<21} {summary} ({path_count} path{'s' if path_count != 1 else ''})"
+        )
+
+
+@audit_app.command("search")
+def audit_search(
+    ctx: typer.Context,
+    query: Annotated[str | None, typer.Argument()] = None,
+    component: str | None = typer.Option(None, "--component"),
+    target: str | None = typer.Option(None, "--target"),
+    kind: str | None = typer.Option(None, "--kind"),
+    status: str | None = typer.Option(None, "--status"),
+    risk: str | None = typer.Option(None, "--risk"),
+    proposal: str | None = typer.Option(None, "--proposal"),
+    session: str | None = typer.Option(None, "--session"),
+    item_type: str | None = typer.Option(None, "--type"),
+    since: str | None = typer.Option(None, "--since"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Search the audit-aware incident index (read-only; no execution)."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    payload, err = incident_index_mod.load_index(data_dir)
+    if payload is None:
+        if json_output:
+            console.print_json(data=[])
+            return
+        console.print("No matching audit/index records found.")
+        console.print(f"- {err or 'index file missing'}")
+        console.print("- hint: run `shellforgeai audit index` to build the index.")
+        return
+    items = payload.get("items") or []
+    filters = incident_index_mod.SearchFilters(
+        component=component,
+        target=target,
+        kind=kind,
+        status=status,
+        risk=risk,
+        proposal=proposal,
+        session=session,
+        item_type=item_type,
+        since=since,
+    )
+    matches = incident_index_mod.search_items(items, query=query, filters=filters)
+    if json_output:
+        console.print_json(data=matches)
+        return
+    _print_search_results(matches)
 
 
 _LAB_NAME_ALIASES = {
@@ -2245,6 +2391,97 @@ def _handle_actions_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _handle_incident_search_ask(runtime: RuntimeContext, question: str) -> bool:
+    """Handle PR40 incident-search asks against the audit-aware index.
+
+    No execution; no mutation of artifacts. The index file may be created on
+    demand if missing because building it only reads ShellForgeAI's own
+    metadata directories.
+    """
+    if incident_index_mod.is_did_anything_execute_intent(question):
+        data_dir = Path(runtime.session.data_dir)
+        payload, _err = incident_index_mod.load_index(data_dir)
+        if payload is None:
+            console.print(
+                "No, ShellForgeAI did not execute anything. apply remains validation-only."
+            )
+            console.print(
+                "- hint: run `shellforgeai audit index` to build the incident index, "
+                "then `shellforgeai audit search` to inspect refusals."
+            )
+            return True
+        items = payload.get("items") or []
+        executed = 0
+        mutated = 0
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            safety = it.get("safety") or {}
+            if isinstance(safety, dict):
+                if safety.get("execution_allowed") is True:
+                    executed += 1
+                if safety.get("mutation_performed") is True:
+                    mutated += 1
+        if executed == 0 and mutated == 0:
+            console.print(
+                "No, ShellForgeAI did not execute anything. All indexed records show "
+                "execution_allowed=false, execution_status=not_executed, "
+                "mutation_performed=false."
+            )
+            console.print(f"- indexed items inspected: {len(items)}")
+            console.print("- apply remains validation-only; no commands were executed.")
+            return True
+        # Should never happen given safety invariants, but report defensively.
+        console.print(
+            "Audit index reported one or more items where execution_allowed or "
+            "mutation_performed was unexpectedly true. Run "
+            "`shellforgeai audit index validate` and `shellforgeai audit validate`."
+        )
+        console.print(f"- suspicious_execution_allowed: {executed}")
+        console.print(f"- suspicious_mutation_performed: {mutated}")
+        return True
+
+    intent = incident_index_mod.is_incident_search_ask_intent(question)
+    if not intent.matched:
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    payload, err = incident_index_mod.load_index(data_dir)
+    if payload is None:
+        # Index missing is fine: build it (writes only ShellForgeAI's own
+        # index file under <data_dir>/audit/incident-index.json).
+        index = incident_index_mod.build_index(data_dir)
+        incident_index_mod.write_index(data_dir, index)
+        payload = index.to_dict()
+        console.print(
+            f"- note: incident index was missing ({err}); built it from current artifacts. "
+            "No commands executed."
+        )
+    items = payload.get("items") or []
+    filters = incident_index_mod.SearchFilters(
+        risk=intent.risk,
+        kind=intent.kind,
+        status=intent.status,
+        item_type=intent.item_type,
+    )
+    matches = incident_index_mod.search_items(items, query=intent.query, filters=filters)
+    if not matches:
+        console.print("No matching audit/index records found.")
+        console.print("- index searched over read-only metadata; no commands executed.")
+        return True
+    console.print(
+        "Incident-search results from the audit-aware index "
+        "(read-only; ShellForgeAI did not execute anything):"
+    )
+    _print_search_results(matches[:20])
+    if len(matches) > 20:
+        console.print(f"- showing first 20 of {len(matches)} matches")
+    console.print(
+        "- next step: run `shellforgeai audit search <query>` for filtered views "
+        "or `--json` for raw records. No remediation was executed."
+    )
+    return True
+
+
 @app.command()
 def ask(
     ctx: typer.Context,
@@ -2259,6 +2496,8 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _handle_incident_search_ask(runtime, question):
+            return
         if _handle_guard_ask(runtime, question):
             return
         if _handle_immediate_fix_ask(runtime, question):
