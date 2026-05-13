@@ -833,6 +833,9 @@ def search_items(
 
 _INCIDENT_SEARCH_TOKENS = (
     "search audit",
+    "show audit timeline",
+    "show operator trail",
+    "what happened in this incident",
     "search incident",
     "search incidents",
     "search the audit",

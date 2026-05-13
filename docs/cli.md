@@ -103,3 +103,15 @@ artifact. The only file `audit index` writes is
 `<data_dir>/audit/incident-index.json`.
 
 | `audit retention [--json]` / `audit prune [--dry-run] [--execute] [--max-age-days N] [--keep-latest N] [--category exports|apply-bundles|actions|audit-exports|indexes|artifacts|all] [--archive]` / `audit archive [--older-than-days N] [--output PATH]` / `audit archive-validate <archive.tar.gz>` | PR41 housekeeping commands for ShellForgeAI-owned metadata only. `audit prune` defaults to dry-run and does not delete unless `--execute` is explicitly set. `--archive` creates a compact archive before deletion. |
+
+
+Ask routing examples for ShellForgeAI-owned workflows:
+
+```bash
+shellforgeai ask "audit retention status"
+shellforgeai ask "dry run audit cleanup"
+shellforgeai ask "search audit for bad-network"
+shellforgeai ask "did anything execute"
+shellforgeai ask "create a redacted audit pack"
+shellforgeai ask "check drift before apply"
+```

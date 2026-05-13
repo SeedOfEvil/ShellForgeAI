@@ -152,18 +152,61 @@ app.add_typer(guard_app, name="guard")
 console = Console(markup=False)
 
 
+_HOST_AUDIT_HINTS = (
+    "auditd",
+    "linux audit",
+    "ausearch",
+    "auditctl",
+    "/var/log/audit",
+    "journalctl",
+    "syslog",
+    "systemd unit",
+    "kernel audit",
+    "os audit logs",
+    "host audit service",
+)
+
+
 def _is_retention_ask(question: str) -> bool:
     q = (question or "").lower()
+    if any(h in q for h in _HOST_AUDIT_HINTS):
+        return False
     return any(
         t in q
         for t in [
+            "audit retention status",
+            "show audit retention",
+            "show retention report",
             "retention report",
-            "safely prune",
+            "how much audit data do i have",
+            "how much shellforgeai metadata do i have",
+            "shellforgeai retention",
+            "shellforgeai audit retention",
+            "audit cleanup dry run",
             "dry run audit cleanup",
-            "archive old exports",
+            "what can i prune",
+            "what can i safely prune",
             "clean up old shellforgeai metadata",
+            "prune old export packs",
+            "archive old exports",
+            "safely prune",
             "how much shellforgeai audit data",
         ]
+    )
+
+
+def _is_prune_dry_run_ask(question: str) -> bool:
+    q = (question or "").lower()
+    return any(
+        t in q
+        for t in (
+            "audit cleanup dry run",
+            "dry run audit cleanup",
+            "what can i prune",
+            "what can i safely prune",
+            "clean up old shellforgeai metadata",
+            "prune old export packs",
+        )
     )
 
 
@@ -179,11 +222,28 @@ def _handle_retention_ask(runtime: RuntimeContext, question: str) -> bool:
         sz = sum(file_size(p) for p in items)
         total += sz
         rows.append((name, len(items), sz))
-    console.print("Retention report (safe dry-run only):")
+    if _is_prune_dry_run_ask(question):
+        selected = []
+        for name in ("exports", "apply-bundles", "actions", "audit-exports", "indexes"):
+            selected.extend(
+                prune_select(collect_category(cats[name]), max_age_days=None, keep_latest=None)
+            )
+        bytes_total = sum(file_size(p) for p in selected)
+        console.print(
+            "Dry-run only. Selected "
+            f"{len(selected)} ShellForgeAI-owned metadata items ({bytes_total} bytes). "
+            "No deletion was performed."
+        )
+        console.print("Equivalent CLI: shellforgeai audit prune --dry-run")
+        console.print("To actually delete, use explicit CLI --execute.")
+        return True
+
+    console.print("ShellForgeAI audit retention report (safe report-only):")
     for n, c, b in rows:
         console.print(f"- {n}: {c} items, {b} bytes")
     console.print(f"- total: {total} bytes")
-    console.print("- use `shellforgeai audit prune --execute` to delete selected metadata")
+    console.print("No deletion was performed. Equivalent CLI: shellforgeai audit retention")
+    console.print("To actually delete, use explicit CLI: shellforgeai audit prune --execute")
     return True
 
 

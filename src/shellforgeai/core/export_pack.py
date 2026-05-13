@@ -936,6 +936,10 @@ _EXPORT_INTENT_TOKENS = (
     "package this for external sharing",
     "export this safely",
     "create a redacted audit pack",
+    "create audit pack",
+    "validate latest export",
+    "validate approved proposal export",
+    "create a redacted audit pack",
     "make a sanitized change-review pack",
     "export latest with secrets removed",
     "redact and export the approved proposal",
@@ -960,6 +964,7 @@ _EXPORT_REDACT_HINT_TOKENS = (
     "safely",
     "sanitized",
     "sharing",
+    "external sharing",
     "secrets removed",
     "external",
 )
