@@ -4,6 +4,7 @@ import json
 import platform
 import re
 import sys
+import tarfile
 from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
@@ -94,6 +95,14 @@ from shellforgeai.core.guards import (
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
+from shellforgeai.core.retention import (
+    build_categories,
+    collect_category,
+    create_archive,
+    delete_paths,
+    file_size,
+    prune_select,
+)
 from shellforgeai.core.runbook import (
     build_runbook,
     latest_evidence_artifact,
@@ -141,6 +150,41 @@ app.add_typer(guard_app, name="guard")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
+
+
+def _is_retention_ask(question: str) -> bool:
+    q = (question or "").lower()
+    return any(
+        t in q
+        for t in [
+            "retention report",
+            "safely prune",
+            "dry run audit cleanup",
+            "archive old exports",
+            "clean up old shellforgeai metadata",
+            "how much shellforgeai audit data",
+        ]
+    )
+
+
+def _handle_retention_ask(runtime: RuntimeContext, question: str) -> bool:
+    if not _is_retention_ask(question):
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    cats = build_categories(data_dir)
+    total = 0
+    rows = []
+    for name in ("exports", "apply-bundles", "actions", "audit-exports", "indexes"):
+        items = collect_category(cats[name])
+        sz = sum(file_size(p) for p in items)
+        total += sz
+        rows.append((name, len(items), sz))
+    console.print("Retention report (safe dry-run only):")
+    for n, c, b in rows:
+        console.print(f"- {n}: {c} items, {b} bytes")
+    console.print(f"- total: {total} bytes")
+    console.print("- use `shellforgeai audit prune --execute` to delete selected metadata")
+    return True
 
 
 def _is_oncall_overview_question(question: str) -> bool:
@@ -551,6 +595,194 @@ def audit_validate(ctx: typer.Context) -> None:
     for err in result.errors:
         console.print(f"- {err}")
     raise typer.Exit(code=1)
+
+
+@audit_app.command("retention")
+def audit_retention(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    cats = build_categories(data_dir)
+    rows = []
+    total = 0
+    for name in (
+        "artifacts",
+        "approvals",
+        "apply-bundles",
+        "actions",
+        "exports",
+        "audit-exports",
+        "audit-events",
+        "indexes",
+    ):
+        items = collect_category(cats[name])
+        sz = sum(file_size(p) for p in items)
+        total += sz
+        rows.append({"category": name, "items": len(items), "bytes": sz})
+    payload = {"categories": rows, "total_bytes": total, "execution": "none"}
+    if json_output:
+        console.print_json(data=payload)
+        return
+    console.print("Retention report:")
+    for r in rows:
+        console.print(f"- {r['category']}: {r['items']} items, {r['bytes']} bytes")
+    console.print(f"- total: {total} bytes")
+    console.print("- execution: none")
+
+
+@audit_app.command("prune")
+def audit_prune(
+    ctx: typer.Context,
+    dry_run: bool = typer.Option(True, "--dry-run"),
+    execute: bool = typer.Option(False, "--execute"),
+    max_age_days: int | None = typer.Option(None, "--max-age-days"),
+    keep_latest: int | None = typer.Option(None, "--keep-latest"),
+    category: str = typer.Option("default", "--category"),
+    archive: bool = typer.Option(False, "--archive"),
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    cats = build_categories(data_dir)
+    category_map = {
+        "apply-bundles": "apply-bundles",
+        "audit-exports": "audit-exports",
+        "indexes": "indexes",
+        "actions": "actions",
+        "exports": "exports",
+        "artifacts": "artifacts",
+    }
+    if category == "default":
+        wanted = ["exports", "apply-bundles", "actions", "audit-exports", "indexes"]
+    elif category == "all":
+        wanted = ["exports", "apply-bundles", "actions", "audit-exports", "indexes", "artifacts"]
+    elif category in category_map:
+        wanted = [category]
+    else:
+        console.print(f"Unknown category: {category}")
+        raise typer.Exit(code=1)
+    selected = []
+    for w in wanted:
+        selected.extend(
+            prune_select(
+                collect_category(cats[w]), max_age_days=max_age_days, keep_latest=keep_latest
+            )
+        )
+    would_bytes = sum(file_size(p) for p in selected)
+    console.print(f"Prune plan ({'execute' if execute else 'dry-run'}):")
+    console.print(f"- selected: {len(selected)}")
+    console.print(f"- bytes: {would_bytes}")
+    console.print(f"- execution: {'metadata prune requested' if execute else 'none'}")
+    for p in selected[:20]:
+        console.print(f"- {p}")
+    if not execute:
+        _append_audit_event(
+            runtime,
+            kind="audit",
+            action="prune",
+            status="planned",
+            summary="metadata prune dry-run",
+            details={"operation": "metadata_prune_dry_run", "count": len(selected)},
+        )
+        return
+    if dry_run and not execute:
+        return
+    if archive and selected:
+        ap = create_archive(selected, data_dir, source="prune")
+        console.print(f"- archive: {ap}")
+    deleted, errors, removed = delete_paths(
+        selected,
+        [
+            data_dir / "exports",
+            data_dir / "apply_bundles",
+            data_dir / "actions",
+            data_dir / "audit_exports",
+            data_dir / "audit",
+            data_dir / "artifacts",
+        ],
+    )
+    _append_audit_event(
+        runtime,
+        kind="audit",
+        action="prune",
+        status="success" if not errors else "partial",
+        summary="metadata prune executed",
+        details={
+            "operation": "metadata_prune_executed",
+            "deleted": len(deleted),
+            "errors": len(errors),
+        },
+    )
+    console.print("Prune executed:")
+    console.print(f"- deleted: {len(deleted)}")
+    console.print(f"- bytes_removed: {removed}")
+    if errors:
+        for e in errors:
+            console.print(f"- {e}")
+        raise typer.Exit(code=1)
+
+
+@audit_app.command("archive")
+def audit_archive(
+    ctx: typer.Context,
+    older_than_days: int | None = typer.Option(None, "--older-than-days"),
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    cats = build_categories(data_dir)
+    paths = []
+    for name in ("exports", "apply-bundles", "actions", "audit-exports"):
+        paths.extend(collect_category(cats[name]))
+    paths = prune_select(paths, max_age_days=older_than_days, keep_latest=None)
+    if not paths:
+        console.print("No matching ShellForgeAI-owned metadata found for archiving.")
+        return
+    archive_path = create_archive(paths, data_dir, source="older-than-days", output=output)
+    _append_audit_event(
+        runtime,
+        kind="audit",
+        action="archive",
+        status="success",
+        summary="metadata archive created",
+        details={
+            "operation": "metadata_archive_created",
+            "archive": str(archive_path),
+            "count": len(paths),
+        },
+    )
+    console.print("Archive created:")
+    console.print(f"- archive: {archive_path}")
+    console.print(f"- files: {len(paths)}")
+    console.print("- execution: none")
+
+
+@audit_app.command("archive-validate")
+def audit_archive_validate(archive: Path) -> None:
+
+    try:
+        with tarfile.open(archive, "r:gz") as tf:
+            names = set(tf.getnames())
+            if "archive-manifest.json" not in names:
+                console.print("Archive validation failed:")
+                console.print("- missing manifest")
+                raise typer.Exit(code=1)
+            mf = tf.extractfile("archive-manifest.json")
+            if mf is None:
+                console.print("Archive validation failed:")
+                console.print("- missing manifest")
+                raise typer.Exit(code=1)
+            data = json.loads(mf.read().decode("utf-8"))
+    except Exception as exc:
+        console.print("Archive validation failed:")
+        console.print(f"- {exc}")
+        raise typer.Exit(code=1) from None
+    if data.get("execution_allowed") is not False or data.get("execution_status") != "not_executed":
+        console.print("Archive validation failed:")
+        console.print("- invalid safety fields")
+        raise typer.Exit(code=1)
+    console.print("Archive validation passed:")
+    console.print(f"- archive: {archive}")
+    console.print("- checksums: ok")
+    console.print("- execution: none")
 
 
 # ---------------------------------------------------------------------------
@@ -2496,6 +2728,8 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _handle_retention_ask(runtime, question):
+            return
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):

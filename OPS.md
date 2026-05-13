@@ -404,3 +404,5 @@ Run local validation without Docker daemon, root, or service mutation:
 - `pytest -q tests -k "export or audit or approval or apply or runbook"`
 - `pytest -q tests -k "guard or stale or drift or apply or actions"`
 - `pytest -q tests -k "audit or index or search or timeline"`
+
+- PR41 validation remains repo-local fixtures/mocks only: no Docker daemon, no systemd/journal dependencies, no host mutation outside `tmp_path`.
