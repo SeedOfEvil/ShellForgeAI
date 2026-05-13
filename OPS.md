@@ -406,3 +406,7 @@ Run local validation without Docker daemon, root, or service mutation:
 - `pytest -q tests -k "audit or index or search or timeline"`
 
 - PR41 validation remains repo-local fixtures/mocks only: no Docker daemon, no systemd/journal dependencies, no host mutation outside `tmp_path`.
+
+
+## Repo-local fixture validation only
+- PR validation for ask-routing changes must run with repo fixtures/mocks only (no Docker daemon, no systemd/journal dependencies, no root-only setup).

@@ -224,3 +224,9 @@ export/guard/refusal trail — it does not prove external operator execution.
 `apply` remains validation/preflight-only.
 
 - PR41 metadata housekeeping: `audit prune` only targets ShellForgeAI-owned metadata roots under `<data_dir>` and defaults to dry-run. Deletion requires explicit `--execute`; no remediation execution is performed.
+
+
+### Ask-routing hardening for ShellForgeAI-owned workflows
+- Ask routing never executes remediation commands; apply remains validation/preflight-only.
+- Ask cleanup/prune phrasing defaults to retention report or prune dry-run; deletion requires explicit CLI `--execute`.
+- Ambiguous wording is disambiguated: ShellForgeAI metadata phrases route to ShellForgeAI audit/retention/export commands, while host-audit wording (`auditd`, `ausearch`, `/var/log/audit`, `journalctl`) stays in host diagnostics.
