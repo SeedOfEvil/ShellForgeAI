@@ -137,9 +137,40 @@ def _seed_allowlist(
 
 
 def _patch_fake_executor(monkeypatch, fake: FakeCommandExecutor) -> FakeCommandExecutor:
+    """Install a fake docker-restart executor and a benign fake inspector.
+
+    PR48 added post-mutation verification, so the CLI also asks the inspector
+    for before/after state. Tests that don't care about verification get a
+    pass-y default (StartedAt advances between before and after).
+    """
     from shellforgeai import cli as cli_mod
+    from shellforgeai.core import lab_restart as lab_restart_mod
 
     monkeypatch.setattr(cli_mod, "_lab_restart_executor_factory", lambda: fake)
+    # Default inspector: before -> StartedAt A, after -> StartedAt B (running).
+    before_payload = lab_restart_mod.make_inspect_payload(
+        started_at="2026-05-14T12:00:00.000000000Z"
+    )
+    after_payload = lab_restart_mod.make_inspect_payload(
+        started_at="2026-05-14T12:00:05.000000000Z"
+    )
+    fake_inspector = lab_restart_mod.FakeContainerInspector(
+        results=[
+            lab_restart_mod.InspectResult(ok=True, exists=True, raw=before_payload),
+            lab_restart_mod.InspectResult(ok=True, exists=True, raw=after_payload),
+        ]
+    )
+    monkeypatch.setattr(cli_mod, "_lab_restart_inspector_factory", lambda: fake_inspector)
+    monkeypatch.setattr(
+        cli_mod,
+        "_lab_restart_verification_config",
+        lambda: lab_restart_mod.VerificationConfig(
+            post_restart_wait_seconds=0,
+            health_wait_seconds=0,
+            health_poll_interval_seconds=0,
+        ),
+    )
+    monkeypatch.setattr(cli_mod, "_lab_restart_verification_sleep", lambda _s: None)
     return fake
 
 
