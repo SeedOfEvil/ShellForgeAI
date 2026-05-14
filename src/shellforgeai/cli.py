@@ -4,7 +4,6 @@ import json
 import platform
 import re
 import sys
-import tarfile
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,12 +96,14 @@ from shellforgeai.core.guards import (
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.retention import (
+    DEFAULT_PRUNE_CATEGORIES,
     build_categories,
     collect_category,
     create_archive,
     delete_paths,
     file_size,
     prune_select,
+    validate_archive,
 )
 from shellforgeai.core.runbook import (
     build_runbook,
@@ -698,6 +699,8 @@ def audit_prune(
     max_age_days: int | None = typer.Option(None, "--max-age-days"),
     keep_latest: int | None = typer.Option(None, "--keep-latest"),
     category: str = typer.Option("default", "--category"),
+    session_id: str | None = typer.Option(None, "--session"),
+    proposal_id: str | None = typer.Option(None, "--proposal"),
     archive: bool = typer.Option(False, "--archive"),
 ) -> None:
     runtime = _ctx(ctx)
@@ -712,7 +715,7 @@ def audit_prune(
         "artifacts": "artifacts",
     }
     if category == "default":
-        wanted = ["exports", "apply-bundles", "actions", "audit-exports", "indexes"]
+        wanted = list(DEFAULT_PRUNE_CATEGORIES)
     elif category == "all":
         wanted = ["exports", "apply-bundles", "actions", "audit-exports", "indexes", "artifacts"]
     elif category in category_map:
@@ -727,6 +730,11 @@ def audit_prune(
                 collect_category(cats[w]), max_age_days=max_age_days, keep_latest=keep_latest
             )
         )
+    if session_id:
+        selected = [p for p in selected if session_id in p.name or session_id in str(p)]
+    if proposal_id:
+        selected = [p for p in selected if proposal_id in p.name or proposal_id in str(p)]
+    selected = sorted(set(selected))
     would_bytes = sum(file_size(p) for p in selected)
     console.print(f"Prune plan ({'execute' if execute else 'dry-run'}):")
     console.print(f"- selected: {len(selected)}")
@@ -785,6 +793,8 @@ def audit_prune(
 def audit_archive(
     ctx: typer.Context,
     older_than_days: int | None = typer.Option(None, "--older-than-days"),
+    session_id: str | None = typer.Option(None, "--session"),
+    proposal_id: str | None = typer.Option(None, "--proposal"),
     output: Annotated[Path | None, typer.Option("--output")] = None,
 ) -> None:
     runtime = _ctx(ctx)
@@ -794,6 +804,10 @@ def audit_archive(
     for name in ("exports", "apply-bundles", "actions", "audit-exports"):
         paths.extend(collect_category(cats[name]))
     paths = prune_select(paths, max_age_days=older_than_days, keep_latest=None)
+    if session_id:
+        paths = [p for p in paths if session_id in p.name or session_id in str(p)]
+    if proposal_id:
+        paths = [p for p in paths if proposal_id in p.name or proposal_id in str(p)]
     if not paths:
         console.print("No matching ShellForgeAI-owned metadata found for archiving.")
         return
@@ -818,30 +832,15 @@ def audit_archive(
 
 @audit_app.command("archive-validate")
 def audit_archive_validate(archive: Path) -> None:
-
-    try:
-        with tarfile.open(archive, "r:gz") as tf:
-            names = set(tf.getnames())
-            if "archive-manifest.json" not in names:
-                console.print("Archive validation failed:")
-                console.print("- missing manifest")
-                raise typer.Exit(code=1)
-            mf = tf.extractfile("archive-manifest.json")
-            if mf is None:
-                console.print("Archive validation failed:")
-                console.print("- missing manifest")
-                raise typer.Exit(code=1)
-            data = json.loads(mf.read().decode("utf-8"))
-    except Exception as exc:
+    ok, errors, files = validate_archive(archive)
+    if not ok:
         console.print("Archive validation failed:")
-        console.print(f"- {exc}")
-        raise typer.Exit(code=1) from None
-    if data.get("execution_allowed") is not False or data.get("execution_status") != "not_executed":
-        console.print("Archive validation failed:")
-        console.print("- invalid safety fields")
+        for err in errors:
+            console.print(f"- {err}")
         raise typer.Exit(code=1)
     console.print("Archive validation passed:")
     console.print(f"- archive: {archive}")
+    console.print(f"- files: {files}")
     console.print("- checksums: ok")
     console.print("- execution: none")
 
