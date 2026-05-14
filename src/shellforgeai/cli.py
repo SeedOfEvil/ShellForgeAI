@@ -489,8 +489,43 @@ def version_cmd() -> None:
 def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")) -> None:
     runtime = _ctx(ctx)
     audit = AuditStorage(runtime.session.data_dir)
-    console.print("ShellForgeAI")
     build = get_build_info()
+    pid1 = "unknown"
+    with suppress(Exception):
+        pid1 = Path("/proc/1/comm").read_text(encoding="utf-8").strip()
+    ps = run_command(["ps", "-eo", "stat=,comm="], timeout=5)
+    defunct_codex = 0
+    if ps.exit_code == 0:
+        for line in ps.stdout.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2 and "Z" in parts[0] and parts[1] == "codex":
+                defunct_codex += 1
+    init_reaper = "yes" if pid1 in {"tini", "dumb-init", "systemd", "init"} else "no"
+    hygiene: dict[str, Any] = scan_metadata_hygiene(Path(runtime.session.data_dir))
+    payload = {
+        "shellforgeai": {
+            "version": build.display_version,
+            "python": sys.version.split()[0],
+            "platform": platform.system(),
+            "profile": runtime.profile.name,
+            "mode": runtime.session.mode,
+            "data_dir": str(runtime.session.data_dir),
+            "audit_dir": str(audit.sessions_dir),
+            "tools": len(registry.list_tools()),
+            "model": f"{runtime.settings.model.provider}/{runtime.settings.model.model}",
+        },
+        "runtime_hygiene": {
+            "pid1": pid1,
+            "init_reaper": init_reaper,
+            "defunct_codex": defunct_codex,
+        },
+        "metadata_hygiene": hygiene,
+    }
+    if json_output:
+        console.print_json(data=payload)
+        return
+
+    console.print("ShellForgeAI")
     console.print(
         " ".join(
             [
@@ -512,39 +547,6 @@ def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
             ]
         )
     )
-    pid1 = "unknown"
-    with suppress(Exception):
-        pid1 = Path("/proc/1/comm").read_text(encoding="utf-8").strip()
-    ps = run_command(["ps", "-eo", "stat=,comm="], timeout=5)
-    defunct_codex = 0
-    if ps.exit_code == 0:
-        for line in ps.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2 and "Z" in parts[0] and parts[1] == "codex":
-                defunct_codex += 1
-    init_reaper = "yes" if pid1 in {"tini", "dumb-init", "systemd", "init"} else "no"
-    hygiene: dict[str, Any] = scan_metadata_hygiene(Path(runtime.session.data_dir))
-    if json_output:
-        console.print_json(
-            data={
-                "shellforgeai": {
-                    "version": build.display_version,
-                    "python": sys.version.split()[0],
-                    "platform": platform.system(),
-                    "profile": runtime.profile.name,
-                    "mode": runtime.session.mode,
-                    "data_dir": str(runtime.session.data_dir),
-                    "audit_dir": str(audit.sessions_dir),
-                },
-                "runtime_hygiene": {
-                    "pid1": pid1,
-                    "init_reaper": init_reaper,
-                    "defunct_codex": defunct_codex,
-                },
-                "metadata_hygiene": hygiene,
-            }
-        )
-        return
     console.print(
         f"runtime_hygiene pid1={pid1} init_reaper={init_reaper} defunct_codex={defunct_codex}"
     )

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -66,3 +67,27 @@ def test_ask_clean_now_refuses_mutation(tmp_path: Path, monkeypatch) -> None:
     assert out.exit_code == 0
     assert "Refusing automatic deletion" in out.stdout
     assert f.exists()
+
+
+def test_doctor_json_severity_and_no_contamination(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SHELLFORGEAI_METADATA_WARN_BYTES", "1")
+    (tmp_path / "exports").mkdir(parents=True)
+    (tmp_path / "exports" / "huge.bin").write_text("x" * 32)
+    out = runner.invoke(app, ["doctor", "--json"])
+    assert out.exit_code == 0
+    text = out.stdout.strip()
+    assert text.startswith("{")
+    parsed = json.loads(text)
+    assert parsed["metadata_hygiene"]["severity"] in {"warning", "critical"}
+    assert parsed["metadata_hygiene"]["recommendations"]
+    assert "Metadata hygiene" not in out.stdout
+
+
+def test_retention_json_is_strict_json(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    (tmp_path / "exports").mkdir(parents=True)
+    out = runner.invoke(app, ["audit", "retention", "--json"])
+    assert out.exit_code == 0
+    payload = json.loads(out.stdout)
+    assert payload["execution"] == "none"
