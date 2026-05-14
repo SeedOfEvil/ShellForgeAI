@@ -419,3 +419,24 @@ Run local validation without Docker daemon, root, or service mutation:
 
 ## Disk growth operational note
 When ShellForgeAI metadata grows, run `shellforgeai audit retention` first, then run dry-run prune/archive commands to review impact before any explicit execution.
+
+## Safe cleanup flow (PR46)
+
+The first guarded mutation step is limited to ShellForgeAI-owned metadata
+cleanup. Follow this sequence:
+
+1. `shellforgeai doctor` — review metadata hygiene severity and totals.
+2. `shellforgeai audit retention --top 20` — see the largest categories/items.
+3. `shellforgeai audit prune --category exports --max-age-days 30` — dry-run
+   (the default); deletes nothing and prints the plan plus the next-step
+   command.
+4. (Optional) `shellforgeai audit archive --older-than-days 30` — create a
+   compact archive before pruning.
+5. `shellforgeai audit prune --category exports --max-age-days 30 --execute
+   --confirm` — execute only after reviewing the dry-run. Writes a receipt
+   under `<data_dir>/prune_receipts/` and an audit event marked
+   `metadata_cleanup_executed=true`, `remediation_execution=false`.
+
+PR46 does not execute remediation, Docker/systemd/package commands, firewall
+changes, or generated operator scripts. `apply` remains
+validation/preflight-only.

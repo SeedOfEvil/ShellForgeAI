@@ -20,6 +20,77 @@ class RetentionCategory:
 
 DEFAULT_PRUNE_CATEGORIES = ("exports", "apply-bundles", "actions", "audit-exports", "indexes")
 
+ALLOWED_PRUNE_CATEGORIES = (
+    "exports",
+    "apply-bundles",
+    "actions",
+    "audit-exports",
+    "indexes",
+    "artifacts",
+)
+
+PROTECTED_PRUNE_CATEGORIES = ("approvals", "audit-events")
+
+
+def write_prune_receipt(
+    data_dir: Path,
+    *,
+    mode: str,
+    category: str,
+    selection: list[Path],
+    deleted: list[Path],
+    failed: list[str],
+    bytes_removed: int,
+    max_age_days: int | None,
+    keep_latest: int | None,
+) -> tuple[Path, Path]:
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    short = uuid.uuid4().hex[:6]
+    receipt_id = f"prune_{ts}_{short}"
+    out_dir = data_dir / "prune_receipts"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    json_path = out_dir / f"{receipt_id}.json"
+    md_path = out_dir / f"{receipt_id}.md"
+    payload = {
+        "schema_version": "1",
+        "receipt_id": receipt_id,
+        "created_at": datetime.now(UTC).isoformat(),
+        "mode": mode,
+        "category": category,
+        "selection": {
+            "count": len(selection),
+            "paths": [str(p) for p in selection],
+            "max_age_days": max_age_days,
+            "keep_latest": keep_latest,
+        },
+        "deleted": [str(p) for p in deleted],
+        "failed": list(failed),
+        "bytes_removed": int(bytes_removed),
+        "safety": {
+            "shellforgeai_metadata_only": True,
+            "remediation_execution": False,
+            "docker_mutation": False,
+            "service_mutation": False,
+            "package_mutation": False,
+        },
+    }
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    md_lines = [
+        f"# Prune Receipt {receipt_id}",
+        "",
+        f"- mode: {mode}",
+        f"- category: {category}",
+        f"- selected: {len(selection)}",
+        f"- deleted: {len(deleted)}",
+        f"- failed: {len(failed)}",
+        f"- bytes_removed: {bytes_removed}",
+        "- scope: ShellForgeAI-owned metadata only",
+        "- remediation_execution: false",
+        "",
+    ]
+    md_path.write_text("\n".join(md_lines), encoding="utf-8")
+    return json_path, md_path
+
 
 def _walk_matching(root: Path, patterns: tuple[str, ...]) -> list[Path]:
     if not root.exists():

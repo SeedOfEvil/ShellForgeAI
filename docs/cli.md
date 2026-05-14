@@ -103,7 +103,66 @@ proposals/approvals/apply bundles/exports/actions, or change any source
 artifact. The only file `audit index` writes is
 `<data_dir>/audit/incident-index.json`.
 
-| `audit retention [--json]` / `audit prune [--dry-run] [--execute] [--max-age-days N] [--keep-latest N] [--category exports|apply-bundles|actions|audit-exports|indexes|artifacts|all] [--archive]` / `audit archive [--older-than-days N] [--output PATH]` / `audit archive-validate <archive.tar.gz>` | PR41 housekeeping commands for ShellForgeAI-owned metadata only. `audit prune` defaults to dry-run and does not delete unless `--execute` is explicitly set. `--archive` creates a compact archive before deletion. |
+| `audit retention [--json]` / `audit prune [--dry-run] [--execute] [--confirm] [--max-age-days N] [--keep-latest N] [--category exports\|apply-bundles\|actions\|audit-exports\|indexes\|artifacts\|all] [--archive]` / `audit archive [--older-than-days N] [--output PATH]` / `audit archive-validate <archive.tar.gz>` | PR41 housekeeping commands for ShellForgeAI-owned metadata only. `audit prune` defaults to dry-run and does not delete. PR46 adds a second explicit gate: `--execute` only deletes when `--confirm` is also passed. `--archive` writes a compact archive before deletion. Refuses unknown or protected categories (`approvals`, `audit-events`) and any path outside `<data_dir>` allowed roots. |
+
+### PR46 — first guarded mutation gate
+
+`audit prune` is the only mutation step ShellForgeAI executes. It is strictly
+limited to deleting ShellForgeAI-owned metadata under `<data_dir>` and
+`<data_dir>/audit`. It does not execute remediation, touch Docker containers,
+restart services, install packages, modify firewall/routes/DNS, run generated
+operator scripts, or change `apply` (which remains validation/preflight-only).
+
+Dry-run is the default:
+
+```bash
+shellforgeai audit prune --category exports --max-age-days 30
+```
+
+Output:
+
+```
+Prune plan (dry-run):
+- selected: 5
+- would_delete: 5
+- bytes: 1.2 MB
+- execution: none
+- next step: rerun with --execute --confirm after review
+```
+
+Execution requires both `--execute` and `--confirm`:
+
+```bash
+shellforgeai audit prune --category exports --max-age-days 30 --execute --confirm
+```
+
+Output:
+
+```
+Prune executed:
+- deleted: 5
+- failed: 0
+- bytes_removed: 1.2 MB
+- audit event: evt_...
+- scope: ShellForgeAI-owned metadata only
+- remediation_execution: false
+- receipt: <data_dir>/prune_receipts/prune_<timestamp>_<shortid>.json
+```
+
+A JSON + markdown receipt is written under `<data_dir>/prune_receipts/`.
+The receipt records the mode, category, selection, deleted paths,
+`bytes_removed`, and a `safety` block asserting metadata-only scope and
+`remediation_execution: false`.
+
+The execute path refuses, deletes nothing, and exits non-zero when any of:
+
+- `--execute` is provided without `--confirm`
+- the selection is empty
+- a candidate path resolves outside the allowed roots
+- a candidate is a protected root (`/`, `<data_dir>`, `<data_dir>/audit`)
+- a candidate symlink escapes the allowed roots
+- the category is unknown
+- the category is protected (`approvals`, `audit-events`)
 
 
 Ask routing examples for ShellForgeAI-owned workflows:

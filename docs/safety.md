@@ -241,4 +241,50 @@ The status safety block is invariant: `apply_mode=validation-only`, `execution_a
 - Doctor/status metadata hygiene is report-and-guidance only.
 - No automatic cleanup is performed.
 - `shellforgeai audit prune` remains dry-run by default.
-- Deletion still requires explicit `--execute`.
+- Deletion still requires explicit `--execute --confirm` (PR46).
+
+## PR46 — first guarded mutation gate
+
+PR46 introduces the first intentional mutation step ShellForgeAI will execute.
+Scope is strictly bounded:
+
+- The only allowed mutation is deletion of ShellForgeAI-owned metadata under
+  `<data_dir>` and `<data_dir>/audit`, selected by the existing retention/prune
+  planner.
+- Deletion requires both `--execute` and `--confirm` on the `audit prune` CLI.
+  Either flag alone refuses, deletes nothing, and exits non-zero.
+- Every candidate path is validated against the allowed roots before any
+  deletion. Targets that resolve outside the allowed roots, that equal a
+  protected root (`/`, `<data_dir>`, `<data_dir>/audit`), or whose symlink
+  escapes the allowed roots are refused.
+- Protected categories (`approvals`, `audit-events`) are refused; default
+  prune excludes artifacts/approvals/audit events.
+- Each execute writes a JSON + markdown receipt under
+  `<data_dir>/prune_receipts/` recording mode, category, selection, deleted
+  paths, `bytes_removed`, and a `safety` block asserting metadata-only scope
+  and `remediation_execution: false`.
+- Audit events for prune carry `details.metadata_cleanup_executed`,
+  `details.remediation_execution=false`, and
+  `details.shellforgeai_owned_paths_only=true`. The audit safety block
+  remains `execution_allowed=false`, `execution_status=not_executed`,
+  `mutation_performed=false`; ShellForgeAI does not claim service or system
+  remediation.
+
+Metadata cleanup is **not** remediation execution. PR46 does **not**:
+
+- run Docker commands or mutate containers/volumes,
+- run `systemctl`/service control,
+- run apt/yum/dnf/apk/pip,
+- chmod/chown arbitrary paths,
+- run `rm` against arbitrary host paths,
+- change firewall/routes/DNS,
+- run generated operator scripts,
+- change `apply`, which remains validation/preflight-only.
+
+### Natural language cannot delete
+
+Ask routing for cleanup phrasing (`clean up old metadata`, `delete old exports
+now`, `cleanup now`, `free up shellforgeai disk`) only returns a retention
+report and a dry-run recommendation, and prints the explicit CLI command
+needed for execution. Ask refuses to delete and points operators to
+`shellforgeai audit prune ... --execute --confirm`.
