@@ -416,3 +416,6 @@ Run local validation without Docker daemon, root, or service mutation:
 
 - Run status/dashboard tests with repo-local fixtures only (tmp_path/mocks).
 - Do not require Docker, root, systemd/journal, or internet for status validation.
+
+## Disk growth operational note
+When ShellForgeAI metadata grows, run `shellforgeai audit retention` first, then run dry-run prune/archive commands to review impact before any explicit execution.

@@ -7,7 +7,7 @@ import sys
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -93,6 +93,7 @@ from shellforgeai.core.guards import (
     max_age_from_hours,
     write_guard_report,
 )
+from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.retention import (
@@ -190,9 +191,17 @@ def _is_retention_ask(question: str) -> bool:
             "what can i safely prune",
             "clean up old shellforgeai metadata",
             "prune old export packs",
+            "what can i safely clean",
             "archive old exports",
             "safely prune",
             "how much shellforgeai audit data",
+            "why is shellforgeai using disk",
+            "what can i safely clean",
+            "show metadata hygiene",
+            "cleanup recommendations",
+            "is shellforgeai data getting large",
+            "how do i prune old exports safely",
+            "clean it now",
         ]
     )
 
@@ -208,6 +217,7 @@ def _is_prune_dry_run_ask(question: str) -> bool:
             "what can i safely prune",
             "clean up old shellforgeai metadata",
             "prune old export packs",
+            "what can i safely clean",
         )
     )
 
@@ -216,36 +226,40 @@ def _handle_retention_ask(runtime: RuntimeContext, question: str) -> bool:
     if not _is_retention_ask(question):
         return False
     data_dir = Path(runtime.session.data_dir)
-    cats = build_categories(data_dir)
-    total = 0
-    rows = []
-    for name in ("exports", "apply-bundles", "actions", "audit-exports", "indexes"):
-        items = collect_category(cats[name])
-        sz = sum(file_size(p) for p in items)
-        total += sz
-        rows.append((name, len(items), sz))
-    if _is_prune_dry_run_ask(question):
-        selected = []
-        for name in ("exports", "apply-bundles", "actions", "audit-exports", "indexes"):
-            selected.extend(
-                prune_select(collect_category(cats[name]), max_age_days=None, keep_latest=None)
-            )
-        bytes_total = sum(file_size(p) for p in selected)
+    hygiene: dict[str, Any] = scan_metadata_hygiene(data_dir)
+    rows = [
+        (name, row["count"], row["bytes"], row["human"], row["severity"])
+        for name, row in hygiene["categories"].items()
+    ]
+    rows.sort(key=lambda x: int(x[2]), reverse=True)
+    q = (question or "").lower()
+    if "clean it now" in q:
+        console.print("Refusing automatic deletion from ask mode.")
         console.print(
-            "Dry-run only. Selected "
-            f"{len(selected)} ShellForgeAI-owned metadata items ({bytes_total} bytes). "
-            "No deletion was performed."
+            "Run a dry-run first: shellforgeai audit prune --dry-run "
+            "--category exports --max-age-days 30"
         )
-        console.print("Equivalent CLI: shellforgeai audit prune --dry-run")
-        console.print("To actually delete, use explicit CLI --execute.")
+        console.print(
+            "After reviewing the dry-run and archive, an operator may rerun with --execute."
+        )
+        return True
+    if _is_prune_dry_run_ask(question):
+        console.print(
+            "Dry-run only. ShellForgeAI metadata: "
+            f"{hygiene['total_human']} across {hygiene['total_items']} items."
+        )
+        for rec in hygiene["recommendations"][:4]:
+            console.print(f"- {rec}")
         return True
 
-    console.print("ShellForgeAI audit retention report (safe report-only):")
-    for n, c, b in rows:
-        console.print(f"- {n}: {c} items, {b} bytes")
-    console.print(f"- total: {total} bytes")
+    console.print("ShellForgeAI metadata hygiene summary (safe report-only):")
+    console.print(f"- severity: {hygiene['severity']}")
+    console.print(f"- total: {hygiene['total_human']} ({hygiene['total_bytes']} bytes)")
+    for n, c, b, h, sev in rows[:5]:
+        console.print(f"- {n}: {c} items, {h} ({b} bytes) [{sev}]")
+    for rec in hygiene["recommendations"][:4]:
+        console.print(f"- recommendation: {rec}")
     console.print("No deletion was performed. Equivalent CLI: shellforgeai audit retention")
-    console.print("To actually delete, use explicit CLI: shellforgeai audit prune --execute")
     return True
 
 
@@ -472,7 +486,7 @@ def version_cmd() -> None:
 
 
 @app.command()
-def doctor(ctx: typer.Context) -> None:
+def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")) -> None:
     runtime = _ctx(ctx)
     audit = AuditStorage(runtime.session.data_dir)
     console.print("ShellForgeAI")
@@ -509,9 +523,47 @@ def doctor(ctx: typer.Context) -> None:
             if len(parts) == 2 and "Z" in parts[0] and parts[1] == "codex":
                 defunct_codex += 1
     init_reaper = "yes" if pid1 in {"tini", "dumb-init", "systemd", "init"} else "no"
+    hygiene: dict[str, Any] = scan_metadata_hygiene(Path(runtime.session.data_dir))
+    if json_output:
+        console.print_json(
+            data={
+                "shellforgeai": {
+                    "version": build.display_version,
+                    "python": sys.version.split()[0],
+                    "platform": platform.system(),
+                    "profile": runtime.profile.name,
+                    "mode": runtime.session.mode,
+                    "data_dir": str(runtime.session.data_dir),
+                    "audit_dir": str(audit.sessions_dir),
+                },
+                "runtime_hygiene": {
+                    "pid1": pid1,
+                    "init_reaper": init_reaper,
+                    "defunct_codex": defunct_codex,
+                },
+                "metadata_hygiene": hygiene,
+            }
+        )
+        return
     console.print(
         f"runtime_hygiene pid1={pid1} init_reaper={init_reaper} defunct_codex={defunct_codex}"
     )
+    console.print("Metadata hygiene")
+    console.print(
+        "- severity: "
+        f"{hygiene['severity']} | ShellForgeAI metadata: "
+        f"{hygiene['total_human']} across {hygiene['total_items']} items"
+    )
+    cats = sorted(hygiene["categories"].items(), key=lambda kv: int(kv[1]["bytes"]), reverse=True)
+    console.print("- Largest categories:")
+    for name, row in cats[:3]:
+        console.print(f"  - {name}: {row['human']} / {row['count']} items")
+    if hygiene["warnings"]:
+        console.print(f"- Warning: {hygiene['warnings'][0]}")
+    if hygiene["recommendations"]:
+        console.print(f"- Suggested next step: {hygiene['recommendations'][0]}")
+        if len(hygiene["recommendations"]) > 1:
+            console.print(f"- Dry-run cleanup: {hygiene['recommendations'][1]}")
 
 
 @model_app.command("doctor")
@@ -660,34 +712,72 @@ def audit_validate(ctx: typer.Context) -> None:
 
 
 @audit_app.command("retention")
-def audit_retention(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")) -> None:
+def audit_retention(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json"),
+    top: int = typer.Option(0, "--top"),
+) -> None:
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
-    cats = build_categories(data_dir)
-    rows = []
-    total = 0
-    for name in (
-        "artifacts",
-        "approvals",
-        "apply-bundles",
-        "actions",
-        "exports",
-        "audit-exports",
-        "audit-events",
-        "indexes",
-    ):
-        items = collect_category(cats[name])
-        sz = sum(file_size(p) for p in items)
-        total += sz
-        rows.append({"category": name, "items": len(items), "bytes": sz})
-    payload = {"categories": rows, "total_bytes": total, "execution": "none"}
+    hygiene: dict[str, Any] = scan_metadata_hygiene(data_dir)
+    rows = [
+        {
+            "category": name.replace("_", "-"),
+            "items": int(entry["count"]),
+            "bytes": int(entry["bytes"]),
+            "human": entry["human"],
+            "severity": entry["severity"],
+        }
+        for name, entry in hygiene["categories"].items()
+    ]
+    rows.sort(key=lambda r: r["bytes"], reverse=True)
+    top_items: list[dict[str, int | str]] = []
+    if top > 0:
+        cats = build_categories(data_dir)
+        for cat_name, cat in cats.items():
+            for item in collect_category(cat):
+                try:
+                    rp = item.resolve(strict=True)
+                except FileNotFoundError:
+                    continue
+                if data_dir.resolve() not in rp.parents:
+                    continue
+                top_items.append(
+                    {"path": str(item), "category": cat_name, "bytes": file_size(item)}
+                )
+        top_items.sort(key=lambda r: int(r["bytes"]), reverse=True)
+        top_items = top_items[:top]
+    payload = {
+        "categories": rows,
+        "total_bytes": hygiene["total_bytes"],
+        "total_human": hygiene["total_human"],
+        "severity": hygiene["severity"],
+        "warnings": hygiene["warnings"],
+        "recommendations": hygiene["recommendations"],
+        "top": top_items,
+        "execution": "none",
+    }
     if json_output:
         console.print_json(data=payload)
         return
     console.print("Retention report:")
+    console.print(f"- severity: {payload['severity']}")
     for r in rows:
-        console.print(f"- {r['category']}: {r['items']} items, {r['bytes']} bytes")
-    console.print(f"- total: {total} bytes")
+        console.print(
+            f"- {r['category']}: {r['items']} items, {r['human']} "
+            f"({r['bytes']} bytes) [{r['severity']}]"
+        )
+    console.print(f"- total: {payload['total_human']} ({payload['total_bytes']} bytes)")
+    if top_items:
+        console.print(f"- top {len(top_items)} largest metadata items:")
+        for top_item in top_items:
+            console.print(
+                f"  - {top_item['category']}: {top_item['path']} ({top_item['bytes']} bytes)"
+            )
+    for w in payload["warnings"][:3]:
+        console.print(f"- warning: {w}")
+    for rec in payload["recommendations"][:3]:
+        console.print(f"- suggestion: {rec}")
     console.print("- execution: none")
 
 
@@ -2835,7 +2925,7 @@ def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool 
         level = "warning"
     if not model_info:
         level = "unknown"
-    retention: dict[str, object] = {"total_bytes": None, "categories": None}
+    retention: dict[str, Any] = {"total_bytes": None, "categories": None}
     if include_retention:
         cats = build_categories(data_dir)
         rows = []
