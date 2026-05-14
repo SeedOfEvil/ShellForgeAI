@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import os
 import tarfile
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from posixpath import normpath
 
 
 @dataclass
@@ -143,7 +143,7 @@ def create_archive(
         "archive_id": archive_id,
         "created_at": datetime.now(UTC).isoformat(),
         "source": source,
-        "included_paths": [str(p) for p in paths],
+        "included_paths": [],
         "checksums": {},
         "redaction_applied": False,
         "execution_allowed": False,
@@ -152,23 +152,31 @@ def create_archive(
     }
     checksum_map: dict[str, str] = {}
     checksums: list[str] = []
+    included_paths: list[str] = []
     with tarfile.open(out, "w:gz") as tf:
         for p in paths:
             if not p.exists():
                 continue
+            base = p.parent if p.parent != Path("/") else p
             if p.is_file():
                 digest = hashlib.sha256(p.read_bytes()).hexdigest()
-                checksum_map[str(p)] = digest
-                checksums.append(f"{digest}  {p}")
-                tf.add(p, arcname=f"payload/{p.name}")
+                rel = p.relative_to(base).as_posix()
+                payload_rel = f"payload/{rel}"
+                checksum_map[payload_rel] = digest
+                checksums.append(f"{digest}  {payload_rel}")
+                included_paths.append(payload_rel)
+                tf.add(p, arcname=payload_rel)
             elif p.is_dir():
                 for child in sorted(p.rglob("*")):
                     if child.is_file():
                         digest = hashlib.sha256(child.read_bytes()).hexdigest()
-                        rel = f"payload/{p.name}/{child.relative_to(p)}"
-                        checksum_map[str(child)] = digest
-                        checksums.append(f"{digest}  {child}")
-                        tf.add(child, arcname=rel)
+                        rel = child.relative_to(base).as_posix()
+                        payload_rel = f"payload/{rel}"
+                        checksum_map[payload_rel] = digest
+                        checksums.append(f"{digest}  {payload_rel}")
+                        included_paths.append(payload_rel)
+                        tf.add(child, arcname=payload_rel)
+        manifest["included_paths"] = included_paths
         manifest["checksums"] = checksum_map
         manifest_bytes = json.dumps(manifest, indent=2).encode()
         m_info = tarfile.TarInfo("archive-manifest.json")
@@ -189,6 +197,67 @@ def create_archive(
 
 
 def validate_archive(path: Path) -> tuple[bool, list[str], int]:
+    if path.is_dir():
+        return _validate_archive_dir(path)
+    return _validate_archive_tar(path)
+
+
+def _normalize_member_path(raw: str) -> str | None:
+    p = raw.strip().replace("\\", "/")
+    if not p:
+        return None
+    if p.startswith("/"):
+        return None
+    n = normpath(p)
+    if n == "." or n.startswith("../") or "/../" in n:
+        return None
+    return n
+
+
+def _validate_archive_dir(path: Path) -> tuple[bool, list[str], int]:
+    errors: list[str] = []
+    file_count = 0
+    manifest_path = path / "archive-manifest.json"
+    checksums_path = path / "checksums.sha256"
+    summary_path = path / "archive-summary.md"
+    for required in (manifest_path, checksums_path, summary_path):
+        if not required.exists():
+            errors.append(f"missing {required.name}")
+    if errors:
+        return False, errors, file_count
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("execution_allowed") is not False:
+        errors.append("execution_allowed must be false")
+    if manifest.get("execution_status") != "not_executed":
+        errors.append("execution_status must be not_executed")
+    if manifest.get("mutation_performed") is not False:
+        errors.append("mutation_performed must be false")
+    for line in checksums_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        expected, sep, src = line.partition("  ")
+        if not sep:
+            errors.append(f"invalid checksum line: {line}")
+            continue
+        rel = _normalize_member_path(src)
+        if rel is None:
+            errors.append(f"invalid checksum path: {src.strip()}")
+            continue
+        target = (path / rel).resolve()
+        if path.resolve() not in target.parents:
+            errors.append(f"path escapes archive root: {rel}")
+            continue
+        if not target.exists():
+            errors.append(f"missing payload for checksum entry: {rel}")
+            continue
+        actual = hashlib.sha256(target.read_bytes()).hexdigest()
+        file_count += 1
+        if actual != expected:
+            errors.append(f"checksum mismatch: {rel}")
+    return (not errors), errors, file_count
+
+
+def _validate_archive_tar(path: Path) -> tuple[bool, list[str], int]:
     errors: list[str] = []
     file_count = 0
     try:
@@ -213,16 +282,19 @@ def validate_archive(path: Path) -> tuple[bool, list[str], int]:
             checksum_lines = [
                 ln.strip() for ln in cs.read().decode("utf-8").splitlines() if ln.strip()
             ]
+            members = {n: n for n in names}
             for line in checksum_lines:
-                expected, _, src = line.partition("  ")
-                src = src.strip()
-                member = None
-                for n in names:
-                    if n.endswith(os.path.basename(src)) and n.startswith("payload/"):
-                        member = n
-                        break
+                expected, sep, src = line.partition("  ")
+                if not sep:
+                    errors.append(f"invalid checksum line: {line}")
+                    continue
+                member = _normalize_member_path(src)
                 if member is None:
-                    errors.append(f"missing payload for checksum entry: {src}")
+                    errors.append(f"invalid checksum path: {src.strip()}")
+                    continue
+                member = members.get(member)
+                if member is None:
+                    errors.append(f"missing payload for checksum entry: {src.strip()}")
                     continue
                 fileobj = tf.extractfile(member)
                 if fileobj is None:
@@ -231,7 +303,7 @@ def validate_archive(path: Path) -> tuple[bool, list[str], int]:
                 actual = hashlib.sha256(fileobj.read()).hexdigest()
                 file_count += 1
                 if actual != expected:
-                    errors.append(f"checksum mismatch: {src}")
+                    errors.append(f"checksum mismatch: {src.strip()}")
     except Exception as exc:
         return False, [str(exc)], file_count
     return (not errors), errors, file_count
