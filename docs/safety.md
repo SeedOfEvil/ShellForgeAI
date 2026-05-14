@@ -236,3 +236,9 @@ export/guard/refusal trail — it does not prove external operator execution.
 `shellforgeai status` is strictly read-only. It summarizes ShellForgeAI-owned metadata (audit events, approvals, bundles, exports, indexes, and optional retention counts) and does **not** execute operator commands, run apply, approve/reject proposals, prune/delete/archive metadata, or rebuild indexes.
 
 The status safety block is invariant: `apply_mode=validation-only`, `execution_allowed=false`, `execution_status=not_executed`, and `mutation_performed=false`. The message “No ShellForgeAI remediation execution recorded” means no ShellForgeAI execution markers appear in ShellForgeAI audit metadata; it is not proof of external operator behavior outside ShellForgeAI.
+
+## Metadata hygiene safety
+- Doctor/status metadata hygiene is report-and-guidance only.
+- No automatic cleanup is performed.
+- `shellforgeai audit prune` remains dry-run by default.
+- Deletion still requires explicit `--execute`.

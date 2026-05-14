@@ -116,3 +116,10 @@ shellforgeai ask "did anything execute"
 shellforgeai ask "create a redacted audit pack"
 shellforgeai ask "check drift before apply"
 ```
+
+## Metadata hygiene and cleanup guidance
+- `shellforgeai doctor` now includes a concise metadata hygiene summary (severity, totals, largest categories) and safe dry-run recommendations.
+- `shellforgeai doctor --json` includes `metadata_hygiene` with category counts/bytes/severity, warnings, and recommendations.
+- `shellforgeai audit retention` now reports total human-readable size and category severities, sorted largest-first.
+- Use `shellforgeai audit retention --top N` to list the largest ShellForgeAI-owned metadata items.
+- Cleanup guidance remains read-only by default; start with dry-run prune/archive commands.

@@ -41,7 +41,7 @@ def test_ask_retention_status_shows_cli_hint(tmp_path: Path, monkeypatch) -> Non
     (tmp_path / "exports" / "e1.json").write_text("x", encoding="utf-8")
     out = runner.invoke(app, ["ask", "audit retention status"])
     assert out.exit_code == 0
-    assert "ShellForgeAI audit retention report" in out.stdout
+    assert "ShellForgeAI metadata hygiene summary" in out.stdout
     assert "shellforgeai audit retention" in out.stdout
     assert "No deletion was performed" in out.stdout
 
