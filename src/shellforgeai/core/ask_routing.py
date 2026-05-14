@@ -175,6 +175,56 @@ def is_mutation_request(text: str) -> bool:
     return any(p in lowered for p in _MUTATION_PHRASES)
 
 
+_LAB_RESTART_ASK_TOKENS = (
+    "restart the container",
+    "restart container",
+    "restart that container",
+    "restart this container",
+    "restart the lab container",
+    "restart lab container",
+    "run the approved restart",
+    "run approved restart",
+    "apply the approved restart",
+    "apply approved restart",
+    "execute the approved restart",
+    "execute approved restart",
+    "perform the restart",
+    "perform restart",
+    "do the restart",
+    "kick the container",
+    "bounce the container",
+    "bounce container",
+)
+
+
+@dataclass(frozen=True)
+class LabRestartAskIntent:
+    matched: bool
+    container: str = ""
+
+
+def is_lab_restart_ask_intent(text: str) -> LabRestartAskIntent:
+    """Detect natural-language requests to actually run a (lab) container restart.
+
+    PR47 lab restart can only happen through explicit CLI gates
+    (``apply --execute --confirm``). Ask must refuse and direct the operator
+    to the CLI.
+    """
+    raw = (text or "").lower()
+    if not raw:
+        return LabRestartAskIntent(matched=False)
+    if any(tok in raw for tok in _LAB_RESTART_ASK_TOKENS):
+        return LabRestartAskIntent(matched=True, container=extract_container_target(text))
+    # Also catch "restart sfai-<name>" / "docker restart sfai-<name>" phrasings.
+    # Scoped to the ShellForgeAI lab container prefix so we do not hijack
+    # generic phrasings like "can you restart nginx?" which should fall
+    # through to evidence-backed diagnose routing.
+    m = re.search(r"\brestart\s+(sfai[-_][a-zA-Z0-9_.\-]{1,127})\b", raw)
+    if m:
+        return LabRestartAskIntent(matched=True, container=m.group(1).strip())
+    return LabRestartAskIntent(matched=False)
+
+
 def is_fix_plan_intent(text: str) -> bool:
     """Detect questions asking for an operator-run fix plan / runbook."""
     lowered = _normalize_intent_text(text or "")

@@ -51,6 +51,26 @@ class AuditStorage:
             f.write(json.dumps(record) + "\n")
 
     def write_event(self, **kwargs: Any) -> dict[str, Any]:
+        # PR47: allow a single scoped mutation event. Callers must pass an
+        # explicit ``safety`` block to opt in; every other event keeps the
+        # historical strict no-execution invariant.
+        safety_override = kwargs.get("safety")
+        safety: dict[str, Any]
+        if isinstance(safety_override, dict):
+            safety = {
+                "execution_allowed": bool(safety_override.get("execution_allowed", False)),
+                "execution_status": str(safety_override.get("execution_status", "not_executed")),
+                "mutation_performed": bool(safety_override.get("mutation_performed", False)),
+            }
+            scope = safety_override.get("mutation_scope")
+            if scope:
+                safety["mutation_scope"] = str(scope)
+        else:
+            safety = {
+                "execution_allowed": False,
+                "execution_status": "not_executed",
+                "mutation_performed": False,
+            }
         event = {
             "schema_version": "1",
             "event_id": kwargs.get("event_id") or self._new_event_id(),
@@ -65,11 +85,7 @@ class AuditStorage:
             "risk": kwargs.get("risk"),
             "summary": kwargs.get("summary", ""),
             "artifacts": list(kwargs.get("artifacts", [])),
-            "safety": {
-                "execution_allowed": False,
-                "execution_status": "not_executed",
-                "mutation_performed": False,
-            },
+            "safety": safety,
             "details": dict(kwargs.get("details", {})),
         }
         self.events_path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,12 +162,35 @@ class AuditStorage:
                 errors.append(f"duplicate event_id: {eid}")
             seen.add(eid)
             safety = event.get("safety", {})
-            if safety.get("execution_allowed") is not False:
-                errors.append(f"event {eid} execution_allowed must be false")
-            if safety.get("execution_status") != "not_executed":
-                errors.append(f"event {eid} execution_status must be not_executed")
-            if safety.get("mutation_performed") is not False:
-                errors.append(f"event {eid} mutation_performed must be false")
+            # PR47: a single, narrowly-scoped real mutation event type is
+            # allowed. Audit validation accepts it only when the kind, action,
+            # scope, and status all line up exactly; every other event must
+            # remain strict no-execution.
+            is_allowed_mutation_event = (
+                event.get("kind") == "execution"
+                and event.get("action") == "lab_container_restart"
+                and safety.get("mutation_scope") == "lab_container_restart_only"
+            )
+            if is_allowed_mutation_event:
+                if safety.get("execution_allowed") is not True:
+                    errors.append(
+                        f"event {eid} lab_container_restart execution_allowed must be true"
+                    )
+                if safety.get("execution_status") != "executed":
+                    errors.append(
+                        f"event {eid} lab_container_restart execution_status must be 'executed'"
+                    )
+                if safety.get("mutation_performed") is not True:
+                    errors.append(
+                        f"event {eid} lab_container_restart mutation_performed must be true"
+                    )
+            else:
+                if safety.get("execution_allowed") is not False:
+                    errors.append(f"event {eid} execution_allowed must be false")
+                if safety.get("execution_status") != "not_executed":
+                    errors.append(f"event {eid} execution_status must be not_executed")
+                if safety.get("mutation_performed") is not False:
+                    errors.append(f"event {eid} mutation_performed must be false")
         return ValidationResult(ok=not errors, errors=errors, event_count=count)
 
     def list_sessions(self) -> list[str]:

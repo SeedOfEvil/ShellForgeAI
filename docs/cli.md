@@ -165,6 +165,106 @@ The execute path refuses, deletes nothing, and exits non-zero when any of:
 - the category is protected (`approvals`, `audit-events`)
 
 
+### PR47 — first non-metadata mutation gate (lab container restart)
+
+PR47 adds the *first and only* non-metadata mutation gate: restarting an
+explicitly allowlisted lab Docker container from an approved, fresh,
+guard-passing proposal. Every other Docker/service/package/filesystem/firewall
+operation remains review-only. `apply` is still validation/preflight-only
+unless every PR47 gate is satisfied.
+
+The only allowed real mutation is exactly:
+
+```
+docker restart <explicitly-allowlisted-lab-container>
+```
+
+No `docker compose`, no `docker stop|start|rm|exec|run`, no
+`systemctl/service`, no package install/remove, no filesystem/firewall/network
+changes, no operator-bundle scripts.
+
+Lab restart allowlist policy file (disabled by default):
+
+```
+<data_dir>/policy/lab-container-restart-allowlist.json
+```
+
+```json
+{
+  "schema_version": "1",
+  "enabled": false,
+  "allowed_containers": ["sfai-healthy-web", "sfai-restart-loop"],
+  "notes": "Lab-only restart allowlist. No production containers."
+}
+```
+
+To opt in, the operator must also set both env vars:
+
+```
+SHELLFORGEAI_MUTATION_MODE=lab
+SHELLFORGEAI_ALLOW_LAB_CONTAINER_RESTART=1
+```
+
+CLI:
+
+```bash
+# Dry-run (default): refresh bundle, no restart.
+shellforgeai apply <approved-proposal-id>
+
+# Wrong gates: refused with non-zero exit, no commands executed.
+shellforgeai apply <approved-proposal-id> --execute
+shellforgeai apply <approved-proposal-id> --confirm
+
+# Execute the one allowed lab restart (all gates must pass):
+shellforgeai apply <approved-proposal-id> --execute --confirm
+
+# When more than one restart action exists, select one explicitly:
+shellforgeai apply <approved-proposal-id> --execute --confirm --action-id act_002
+```
+
+Success output:
+
+```
+Guarded lab container restart executed:
+- proposal: prop_...
+- action: act_...
+- container: sfai-healthy-web
+- command: docker restart sfai-healthy-web
+- executor: docker
+- mutation_scope: lab_container_restart_only
+- audit event: evt_...
+- receipt: <data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json
+- rollback: none automatic
+- verification suggested: docker inspect / docker ps / shellforgeai diagnose
+```
+
+Refusal output (`failed gate` is one of `execute_flag_missing`,
+`confirm_flag_missing`, `mutation_mode_disabled`, `allowlist_missing`,
+`allowlist_disabled`, `allowlist_empty`, `container_not_allowlisted`,
+`container_name_unsafe`, `proposal_not_approved`, `guard_failed`,
+`no_restart_action_found`, `multiple_restart_actions_require_action_id`,
+`action_not_found`, `action_not_lab_container_restart`,
+`command_preview_mismatch`):
+
+```
+Execution refused:
+- failed gate: allowlist_disabled
+- mutation_scope: lab_container_restart_only
+- no commands executed
+- receipt: <data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json
+```
+
+Audit events for the one allowed mutation carry
+`safety.mutation_scope=lab_container_restart_only`,
+`safety.execution_allowed=true`,
+`safety.execution_status=executed`, and
+`safety.mutation_performed=true`. Every other audit event continues to assert
+`execution_allowed=false`/`execution_status=not_executed`/`mutation_performed=false`.
+
+`ask` cannot execute the restart. Natural-language phrasings such as "restart
+sfai-healthy-web", "run the approved restart", or "perform the restart" are
+refused and print the explicit `--execute --confirm` CLI guidance.
+
 Ask routing examples for ShellForgeAI-owned workflows:
 
 ```bash
