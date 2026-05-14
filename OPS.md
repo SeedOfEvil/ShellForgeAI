@@ -440,3 +440,51 @@ cleanup. Follow this sequence:
 PR46 does not execute remediation, Docker/systemd/package commands, firewall
 changes, or generated operator scripts. `apply` remains
 validation/preflight-only.
+
+## Lab container restart flow (PR47)
+
+PR47 adds the *first non-metadata* mutation gate: one Docker container
+restart, only for explicitly allowlisted lab containers, only behind every
+gate. Validation is repo-local fixtures/mocks only — no live Docker, no root,
+no systemd/journal, no internet.
+
+Operational sequence:
+
+1. `shellforgeai diagnose <target>` — collect read-only evidence.
+2. `shellforgeai runbook` — render the operator runbook.
+3. `shellforgeai approvals create <session>` — stage proposals (no execution).
+4. `shellforgeai approvals approve <id> --reason "..."` — record approval
+   (no execution).
+5. `shellforgeai actions compile <id>` — compile review-only actions; docker
+   restart is classified `docker/restart`, decision `blocked`,
+   `SERVICE-IMPACTING`. `execution_allowed` stays `false` here.
+6. `shellforgeai guard check <id>` — confirm freshness and no drift.
+7. Configure the lab restart allowlist (disabled by default):
+   ```bash
+   mkdir -p <data_dir>/policy
+   cat > <data_dir>/policy/lab-container-restart-allowlist.json <<'EOF'
+   {
+     "schema_version": "1",
+     "enabled": true,
+     "allowed_containers": ["sfai-healthy-web"],
+     "notes": "Lab-only restart allowlist."
+   }
+   EOF
+   export SHELLFORGEAI_MUTATION_MODE=lab
+   export SHELLFORGEAI_ALLOW_LAB_CONTAINER_RESTART=1
+   ```
+8. `shellforgeai apply <approved-proposal-id> --execute --confirm` — runs
+   exactly one `docker restart <allowlisted-container>` if every gate passes.
+   Writes a JSON receipt under `<data_dir>/execution_receipts/` and a scoped
+   audit event (`kind=execution`, `action=lab_container_restart`,
+   `safety.mutation_scope=lab_container_restart_only`).
+
+PR47 does not execute `docker compose`, `docker stop|start|kill|rm|exec|run`,
+docker volume/image/network commands, `systemctl`/service control,
+apt/yum/dnf/apk/pip, chmod/chown/rm/mv/cp, firewall/routes/DNS changes,
+generated operator scripts, or arbitrary shell strings. `apply` remains
+validation/preflight-only for every other action kind.
+
+PR47 validation remains repo-local fixtures/mocks only: no Docker daemon, no
+systemd/journal, no root, no internet. Tests use the `FakeCommandExecutor`
+exposed by `shellforgeai.core.lab_restart`.

@@ -288,3 +288,60 @@ now`, `cleanup now`, `free up shellforgeai disk`) only returns a retention
 report and a dry-run recommendation, and prints the explicit CLI command
 needed for execution. Ask refuses to delete and points operators to
 `shellforgeai audit prune ... --execute --confirm`.
+
+## PR47 — first non-metadata mutation gate (lab container restart)
+
+PR47 introduces the *first and only* non-metadata mutation step ShellForgeAI
+may execute. Scope is intentionally tiny:
+
+- The only allowed mutation is `docker restart <container>` where
+  `<container>` is in the explicit lab allowlist at
+  `<data_dir>/policy/lab-container-restart-allowlist.json` (disabled by
+  default) **and** every gate below passes.
+- Required gates: explicit `--execute`, explicit `--confirm`, env
+  `SHELLFORGEAI_MUTATION_MODE=lab` and
+  `SHELLFORGEAI_ALLOW_LAB_CONTAINER_RESTART=1`, allowlist file present and
+  `enabled=true` with a non-empty `allowed_containers`, proposal status
+  `approved`, the PR38 guard reports `fresh` (or `warning`) — never `stale`,
+  `drift`, or `blocked`, the compiled action is exactly one
+  `docker restart <safe-name>` (or operator selects via `--action-id`), the
+  container name passes the safe-name regex
+  `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$` and contains no shell metacharacters.
+- Execution goes through an executor abstraction with `shell=False`, list-form
+  `argv` only (`["docker", "restart", "<safe-name>"]`), and a required
+  timeout. Tests use a fake executor; no live Docker is required.
+- Each execute (and each refusal) writes a JSON receipt under
+  `<data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json` recording
+  the proposal_id, action_id, container, exact argv, gates dict, exit code,
+  short stdout/stderr previews, and a `safety` block asserting
+  `scope=lab_container_restart_only`, `arbitrary_command_execution=false`,
+  `package_mutation=false`, `filesystem_mutation=false`,
+  `firewall_mutation=false`.
+- The audit event for a successful lab restart is the first event in
+  ShellForgeAI history with `safety.execution_allowed=true`,
+  `safety.execution_status=executed`, `safety.mutation_performed=true`, and
+  `safety.mutation_scope=lab_container_restart_only`. Every other audit event
+  continues to assert `execution_allowed=false`/`execution_status=not_executed`/
+  `mutation_performed=false`. Audit validation accepts the new event only
+  with this exact kind/action/scope combination.
+
+PR47 explicitly does **not**:
+
+- run `docker compose up/down/restart/recreate`, `docker stop|start|kill|rm`,
+  `docker exec`, `docker run`, or docker volume/image/network commands,
+- run `systemctl`/service control,
+- run apt/yum/dnf/apk/pip,
+- chmod/chown/rm/mv/cp anything,
+- change firewall/routes/DNS,
+- execute generated operator scripts or arbitrary shell strings,
+- accept `shell=True`,
+- allow wildcards or regex in the allowlist,
+- batch multiple actions into one execution.
+
+### Natural language cannot restart
+
+Ask routing for restart phrasing (`restart sfai-healthy-web`, `run the
+approved restart`, `apply the approved restart`, `perform the restart`,
+`bounce the container`) refuses to execute, surfaces the lab allowlist
+state, and prints the explicit CLI command needed:
+`shellforgeai apply <approved-proposal-id> --execute --confirm`.

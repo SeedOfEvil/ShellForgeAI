@@ -1,0 +1,593 @@
+"""PR47: first non-metadata mutation gate — lab-allowlisted Docker container restart.
+
+ShellForgeAI is a Tier-3 triage tool, not a remediation platform. This module is
+the *only* place that may execute a non-metadata mutation, and the *only*
+mutation it may perform is::
+
+    docker restart <explicitly-allowlisted-lab-container>
+
+Every other Docker/service/package/filesystem/firewall operation remains
+review-only. The executor abstraction never accepts ``shell=True`` and never
+accepts arbitrary command strings: only an exact list-form ``argv`` of
+``["docker", "restart", "<safe-name>"]``.
+
+Tests use :class:`FakeCommandExecutor` exclusively; no live Docker is required.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import uuid
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+LAB_RESTART_SCHEMA_VERSION = "1"
+
+# Allowed mutation scope label. Audit/receipt code anchors on this exact value.
+MUTATION_SCOPE = "lab_container_restart_only"
+
+# Allowed audit event kind/action for the one allowed real mutation.
+AUDIT_KIND_EXECUTION = "execution"
+AUDIT_ACTION_LAB_RESTART = "lab_container_restart"
+
+# Action-compiler policy-override decision name.
+EXECUTION_POLICY_ALLOWED = "allowed_lab_container_restart"
+
+# Allowlist policy file location (relative to data_dir).
+POLICY_DIR = "policy"
+POLICY_FILE = "lab-container-restart-allowlist.json"
+
+# Safe container name (Docker container names use this character set).
+SAFE_CONTAINER_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$")
+
+# Hard-block any shell metacharacters even if regex above happened to admit one.
+FORBIDDEN_CHARS = set(" \t\n\r\f\v;&|`$<>()'\"\\/*?[]{}")
+
+# Refusal gate names. The CLI surfaces these verbatim.
+GATE_EXECUTE_FLAG = "execute_flag_missing"
+GATE_CONFIRM_FLAG = "confirm_flag_missing"
+GATE_MUTATION_MODE = "mutation_mode_disabled"
+GATE_ALLOWLIST_MISSING = "allowlist_missing"
+GATE_ALLOWLIST_DISABLED = "allowlist_disabled"
+GATE_ALLOWLIST_EMPTY = "allowlist_empty"
+GATE_CONTAINER_NOT_ALLOWLISTED = "container_not_allowlisted"
+GATE_CONTAINER_NAME_UNSAFE = "container_name_unsafe"
+GATE_PROPOSAL_NOT_APPROVED = "proposal_not_approved"
+GATE_GUARD_FAILED = "guard_failed"
+GATE_NO_RESTART_ACTION = "no_restart_action_found"
+GATE_MULTIPLE_RESTART_ACTIONS = "multiple_restart_actions_require_action_id"
+GATE_ACTION_NOT_FOUND = "action_not_found"
+GATE_ACTION_NOT_RESTART = "action_not_lab_container_restart"
+GATE_COMMAND_PREVIEW_MISMATCH = "command_preview_mismatch"
+
+# Env overrides — explicit, not authoritative. The on-disk allowlist is the
+# source of truth in tests.
+ENV_MUTATION_MODE = "SHELLFORGEAI_MUTATION_MODE"
+ENV_ALLOW_LAB_RESTART = "SHELLFORGEAI_ALLOW_LAB_CONTAINER_RESTART"
+
+
+# ---------------------------------------------------------------------------
+# Allowlist
+
+
+@dataclass(frozen=True)
+class Allowlist:
+    enabled: bool
+    containers: tuple[str, ...]
+    source_path: Path | None
+    notes: str = ""
+
+    def contains(self, name: str) -> bool:
+        return name in self.containers
+
+
+def policy_path(data_dir: Path) -> Path:
+    return Path(data_dir) / POLICY_DIR / POLICY_FILE
+
+
+def load_allowlist(data_dir: Path) -> Allowlist | None:
+    """Load the lab restart allowlist from disk.
+
+    Returns ``None`` when the policy file is missing. Returns an
+    :class:`Allowlist` with ``enabled=False`` for any other parse problem so
+    callers can refuse with a precise gate name.
+    """
+    p = policy_path(Path(data_dir))
+    if not p.exists() or not p.is_file():
+        return None
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return Allowlist(enabled=False, containers=(), source_path=p, notes="malformed JSON")
+    if not isinstance(payload, dict):
+        return Allowlist(enabled=False, containers=(), source_path=p, notes="not a JSON object")
+    enabled = bool(payload.get("enabled", False))
+    raw_list = payload.get("allowed_containers") or []
+    if not isinstance(raw_list, list):
+        raw_list = []
+    containers: list[str] = []
+    for item in raw_list:
+        if (
+            isinstance(item, str)
+            and item
+            and is_safe_container_name(item)
+            and item not in containers
+        ):
+            containers.append(item)
+    notes = str(payload.get("notes", "") or "")
+    return Allowlist(enabled=enabled, containers=tuple(containers), source_path=p, notes=notes)
+
+
+def write_default_allowlist(
+    data_dir: Path, *, containers: list[str], enabled: bool = False
+) -> Path:
+    """Write a starter allowlist policy file. Used for tests + operator setup."""
+    p = policy_path(Path(data_dir))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": LAB_RESTART_SCHEMA_VERSION,
+        "enabled": bool(enabled),
+        "allowed_containers": list(containers),
+        "notes": "Lab-only restart allowlist. No production containers.",
+    }
+    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return p
+
+
+def is_safe_container_name(name: str) -> bool:
+    if not isinstance(name, str) or not name:
+        return False
+    if any(ch in FORBIDDEN_CHARS for ch in name):
+        return False
+    return bool(SAFE_CONTAINER_RE.match(name))
+
+
+def mutation_mode_enabled(env: dict[str, str] | None = None) -> bool:
+    """Return True only when the env opt-ins are explicitly set.
+
+    The on-disk allowlist's ``enabled=true`` is still required separately. The
+    env vars only express operator intent; they cannot substitute for the
+    policy file.
+    """
+    env = env if env is not None else dict(os.environ)
+    mode = env.get(ENV_MUTATION_MODE, "").strip().lower()
+    allow = env.get(ENV_ALLOW_LAB_RESTART, "").strip().lower()
+    if mode != "lab":
+        return False
+    return allow in ("1", "true", "yes", "on")
+
+
+# ---------------------------------------------------------------------------
+# Executor abstraction
+
+
+@dataclass(frozen=True)
+class ExecResult:
+    ok: bool
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+class CommandExecutor(ABC):
+    """Minimal executor interface. Only ``["docker", "restart", "<name>"]`` argv
+    is accepted by the production implementation."""
+
+    @abstractmethod
+    def run(self, argv: list[str], *, timeout_seconds: int) -> ExecResult: ...
+
+
+class SubprocessExecutor(CommandExecutor):
+    """Real executor. Refuses anything other than ``docker restart <safe-name>``."""
+
+    def run(self, argv: list[str], *, timeout_seconds: int) -> ExecResult:
+        ok, reason = is_valid_restart_argv(argv)
+        if not ok:
+            return ExecResult(ok=False, exit_code=2, stdout="", stderr=reason)
+        try:
+            cp = subprocess.run(  # noqa: S603 - argv is validated above; never shell=True
+                argv,
+                shell=False,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=int(timeout_seconds),
+            )
+        except subprocess.TimeoutExpired as exc:
+            return ExecResult(ok=False, exit_code=124, stdout="", stderr=f"timeout: {exc}")
+        except FileNotFoundError as exc:
+            return ExecResult(ok=False, exit_code=127, stdout="", stderr=str(exc))
+        except OSError as exc:
+            return ExecResult(ok=False, exit_code=1, stdout="", stderr=str(exc))
+        return ExecResult(
+            ok=cp.returncode == 0,
+            exit_code=cp.returncode,
+            stdout=cp.stdout or "",
+            stderr=cp.stderr or "",
+        )
+
+
+@dataclass
+class FakeCommandExecutor(CommandExecutor):
+    """Test executor: records argv and returns a configurable result. No subprocess."""
+
+    result: ExecResult = field(
+        default_factory=lambda: ExecResult(ok=True, exit_code=0, stdout="restarted", stderr="")
+    )
+    calls: list[list[str]] = field(default_factory=list)
+    last_timeout: int | None = None
+
+    def run(self, argv: list[str], *, timeout_seconds: int) -> ExecResult:
+        self.calls.append(list(argv))
+        self.last_timeout = int(timeout_seconds)
+        ok, reason = is_valid_restart_argv(argv)
+        if not ok:
+            return ExecResult(ok=False, exit_code=2, stdout="", stderr=reason)
+        return self.result
+
+
+def is_valid_restart_argv(argv: list[str]) -> tuple[bool, str]:
+    if not isinstance(argv, list):
+        return False, "argv must be a list"
+    if len(argv) != 3:
+        return False, "argv must be exactly ['docker', 'restart', '<container>']"
+    if argv[0] != "docker" or argv[1] != "restart":
+        return False, "argv prefix must be ['docker', 'restart']"
+    if not is_safe_container_name(argv[2]):
+        return False, "argv[2] is not a safe container name"
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
+# Action selection
+
+
+_RESTART_RE = re.compile(r"^\s*docker\s+restart\s+(\S+)\s*$", re.IGNORECASE)
+
+
+def parse_restart_command(text: str) -> str | None:
+    """Return the container name from ``docker restart <name>`` lines only.
+
+    Refuses any extra arguments, flags, pipes, or alternative verbs.
+    """
+    if not isinstance(text, str):
+        return None
+    m = _RESTART_RE.match(text)
+    if not m:
+        return None
+    name = m.group(1)
+    if not is_safe_container_name(name):
+        return None
+    return name
+
+
+@dataclass(frozen=True)
+class RestartCandidate:
+    action_id: str
+    container: str
+    command_argv: tuple[str, ...]
+    source_section: str
+
+
+def find_restart_candidates(actions_payload: dict[str, Any]) -> list[RestartCandidate]:
+    """Pick out ``docker restart <safe-name>`` actions from a compiled actions payload."""
+    out: list[RestartCandidate] = []
+    for action in actions_payload.get("actions", []) or []:
+        if not isinstance(action, dict):
+            continue
+        text = action.get("normalized_text") or action.get("command_preview") or ""
+        name = parse_restart_command(str(text))
+        if name is None:
+            continue
+        out.append(
+            RestartCandidate(
+                action_id=str(action.get("action_id", "")),
+                container=name,
+                command_argv=("docker", "restart", name),
+                source_section=str(action.get("source_section", "")),
+            )
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Gate evaluation
+
+
+@dataclass
+class GateResult:
+    allowed: bool
+    failed_gate: str = ""
+    message: str = ""
+    container: str = ""
+    action_id: str = ""
+    candidate: RestartCandidate | None = None
+    allowlist: Allowlist | None = None
+    mutation_mode: str = "disabled"
+
+    def gates_dict(self) -> dict[str, Any]:
+        return {
+            "execute_flag": self.allowed or self.failed_gate != GATE_EXECUTE_FLAG,
+            "confirm_flag": self.allowed or self.failed_gate != GATE_CONFIRM_FLAG,
+            "mutation_mode": self.mutation_mode,
+            "allowlisted": self.allowed,
+            "container_name_safe": bool(self.container) and is_safe_container_name(self.container),
+        }
+
+
+def evaluate_gates(
+    *,
+    execute: bool,
+    confirm: bool,
+    proposal_status: str,
+    guard_decision: str,
+    actions_payload: dict[str, Any],
+    allowlist: Allowlist | None,
+    action_id: str | None,
+    env: dict[str, str] | None = None,
+) -> GateResult:
+    """Run every required gate. Returns the first failing gate, or success."""
+    if not execute:
+        return GateResult(allowed=False, failed_gate=GATE_EXECUTE_FLAG, message="--execute missing")
+    if not confirm:
+        return GateResult(allowed=False, failed_gate=GATE_CONFIRM_FLAG, message="--confirm missing")
+
+    mode_on = mutation_mode_enabled(env)
+    if not mode_on:
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_MUTATION_MODE,
+            message=(
+                f"mutation mode is disabled. Set {ENV_MUTATION_MODE}=lab and "
+                f"{ENV_ALLOW_LAB_RESTART}=1 to opt in."
+            ),
+            mutation_mode="disabled",
+        )
+
+    if allowlist is None:
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_ALLOWLIST_MISSING,
+            message="lab restart allowlist not configured",
+            mutation_mode="lab",
+        )
+    if not allowlist.enabled:
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_ALLOWLIST_DISABLED,
+            message="lab restart allowlist is disabled (enabled=false)",
+            allowlist=allowlist,
+            mutation_mode="lab",
+        )
+    if not allowlist.containers:
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_ALLOWLIST_EMPTY,
+            message="lab restart allowlist contains no containers",
+            allowlist=allowlist,
+            mutation_mode="lab",
+        )
+
+    if proposal_status != "approved":
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_PROPOSAL_NOT_APPROVED,
+            message=f"proposal status '{proposal_status}' is not approved",
+            allowlist=allowlist,
+            mutation_mode="lab",
+        )
+
+    if guard_decision not in ("fresh", "warning"):
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_GUARD_FAILED,
+            message=f"guard decision '{guard_decision}' blocks execution",
+            allowlist=allowlist,
+            mutation_mode="lab",
+        )
+
+    candidates = find_restart_candidates(actions_payload)
+    if action_id:
+        match = next((c for c in candidates if c.action_id == action_id), None)
+        if match is None:
+            # Maybe it's a non-restart action_id — distinguish for the operator.
+            for action in actions_payload.get("actions", []) or []:
+                if isinstance(action, dict) and action.get("action_id") == action_id:
+                    return GateResult(
+                        allowed=False,
+                        failed_gate=GATE_ACTION_NOT_RESTART,
+                        message=(
+                            f"action {action_id} is not a `docker restart <container>` action"
+                        ),
+                        allowlist=allowlist,
+                        mutation_mode="lab",
+                    )
+            return GateResult(
+                allowed=False,
+                failed_gate=GATE_ACTION_NOT_FOUND,
+                message=f"action {action_id} not found in compiled actions",
+                allowlist=allowlist,
+                mutation_mode="lab",
+            )
+        candidate = match
+    else:
+        if not candidates:
+            return GateResult(
+                allowed=False,
+                failed_gate=GATE_NO_RESTART_ACTION,
+                message="no `docker restart <container>` action present in compiled actions",
+                allowlist=allowlist,
+                mutation_mode="lab",
+            )
+        if len(candidates) > 1:
+            return GateResult(
+                allowed=False,
+                failed_gate=GATE_MULTIPLE_RESTART_ACTIONS,
+                message=(
+                    "multiple restart actions present; rerun with --action-id <act_xxx> "
+                    "to select exactly one"
+                ),
+                allowlist=allowlist,
+                mutation_mode="lab",
+            )
+        candidate = candidates[0]
+
+    if not is_safe_container_name(candidate.container):
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_CONTAINER_NAME_UNSAFE,
+            message=f"container name failed safety regex: {candidate.container!r}",
+            container=candidate.container,
+            action_id=candidate.action_id,
+            allowlist=allowlist,
+            mutation_mode="lab",
+        )
+
+    if candidate.container not in allowlist.containers:
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_CONTAINER_NOT_ALLOWLISTED,
+            message=(f"container {candidate.container!r} is not in the lab restart allowlist"),
+            container=candidate.container,
+            action_id=candidate.action_id,
+            allowlist=allowlist,
+            mutation_mode="lab",
+        )
+
+    expected_argv = ["docker", "restart", candidate.container]
+    if list(candidate.command_argv) != expected_argv:
+        return GateResult(
+            allowed=False,
+            failed_gate=GATE_COMMAND_PREVIEW_MISMATCH,
+            message="compiled command preview does not match docker restart <container>",
+            container=candidate.container,
+            action_id=candidate.action_id,
+            allowlist=allowlist,
+            mutation_mode="lab",
+        )
+
+    return GateResult(
+        allowed=True,
+        container=candidate.container,
+        action_id=candidate.action_id,
+        candidate=candidate,
+        allowlist=allowlist,
+        mutation_mode="lab",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Receipts
+
+
+def receipts_dir(data_dir: Path) -> Path:
+    return Path(data_dir) / "execution_receipts"
+
+
+def _short_id() -> str:
+    return uuid.uuid4().hex[:8]
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def write_execution_receipt(
+    data_dir: Path,
+    *,
+    proposal_id: str,
+    action_id: str,
+    container: str,
+    command_argv: list[str],
+    gates: dict[str, Any],
+    status: str,
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+    failed_gate: str = "",
+) -> Path:
+    receipts = receipts_dir(Path(data_dir))
+    receipts.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    out = receipts / f"exec_{stamp}_{_short_id()}.json"
+    payload: dict[str, Any] = {
+        "schema_version": LAB_RESTART_SCHEMA_VERSION,
+        "created_at": _now(),
+        "proposal_id": proposal_id,
+        "action_id": action_id,
+        "kind": AUDIT_ACTION_LAB_RESTART,
+        "container": container,
+        "command_argv": list(command_argv),
+        "gates": dict(gates),
+        "result": {
+            "status": status,
+            "exit_code": int(exit_code),
+            "stdout_preview": (stdout or "")[:400],
+            "stderr_preview": (stderr or "")[:400],
+        },
+        "safety": {
+            "scope": MUTATION_SCOPE,
+            "docker_mutation": status == "success",
+            "service_impacting": True,
+            "package_mutation": False,
+            "filesystem_mutation": False,
+            "firewall_mutation": False,
+            "arbitrary_command_execution": False,
+        },
+    }
+    if failed_gate:
+        payload["result"]["failed_gate"] = failed_gate
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return out
+
+
+__all__ = [
+    "AUDIT_ACTION_LAB_RESTART",
+    "AUDIT_KIND_EXECUTION",
+    "Allowlist",
+    "CommandExecutor",
+    "EXECUTION_POLICY_ALLOWED",
+    "ENV_ALLOW_LAB_RESTART",
+    "ENV_MUTATION_MODE",
+    "ExecResult",
+    "FakeCommandExecutor",
+    "GATE_ACTION_NOT_FOUND",
+    "GATE_ACTION_NOT_RESTART",
+    "GATE_ALLOWLIST_DISABLED",
+    "GATE_ALLOWLIST_EMPTY",
+    "GATE_ALLOWLIST_MISSING",
+    "GATE_COMMAND_PREVIEW_MISMATCH",
+    "GATE_CONFIRM_FLAG",
+    "GATE_CONTAINER_NAME_UNSAFE",
+    "GATE_CONTAINER_NOT_ALLOWLISTED",
+    "GATE_EXECUTE_FLAG",
+    "GATE_GUARD_FAILED",
+    "GATE_MULTIPLE_RESTART_ACTIONS",
+    "GATE_MUTATION_MODE",
+    "GATE_NO_RESTART_ACTION",
+    "GATE_PROPOSAL_NOT_APPROVED",
+    "GateResult",
+    "LAB_RESTART_SCHEMA_VERSION",
+    "MUTATION_SCOPE",
+    "POLICY_DIR",
+    "POLICY_FILE",
+    "RestartCandidate",
+    "SubprocessExecutor",
+    "evaluate_gates",
+    "find_restart_candidates",
+    "is_safe_container_name",
+    "is_valid_restart_argv",
+    "load_allowlist",
+    "mutation_mode_enabled",
+    "parse_restart_command",
+    "policy_path",
+    "receipts_dir",
+    "write_default_allowlist",
+    "write_execution_receipt",
+]

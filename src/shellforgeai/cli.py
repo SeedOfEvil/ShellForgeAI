@@ -14,6 +14,7 @@ from rich.console import Console
 
 from shellforgeai.audit.storage import AuditStorage
 from shellforgeai.core import incident_index as incident_index_mod
+from shellforgeai.core import lab_restart as lab_restart_mod
 from shellforgeai.core.actions import (
     compile_and_write,
     is_actions_ask_intent,
@@ -49,6 +50,7 @@ from shellforgeai.core.ask_routing import (
     is_apply_approved_intent,
     is_create_proposals_intent,
     is_immediate_fix_intent,
+    is_lab_restart_ask_intent,
     network_reachability_brief,
     route_ask_intent,
     target_container_status,
@@ -1717,6 +1719,27 @@ def apply(
         "--max-age-hours",
         help="Override the stale-evidence guard max age (proposals: 24h).",
     ),
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help=(
+            "PR47: opt in to the first non-metadata mutation gate "
+            "(docker restart <allowlisted-lab-container> only). Requires --confirm."
+        ),
+    ),
+    confirm: bool = typer.Option(
+        False,
+        "--confirm",
+        help="PR47: required alongside --execute to actually perform the lab restart.",
+    ),
+    action_id: str | None = typer.Option(
+        None,
+        "--action-id",
+        help=(
+            "PR47: select a specific compiled action id when more than one restart "
+            "candidate is present."
+        ),
+    ),
 ) -> None:
     """Validate a plan or generate an operator execution bundle for a proposal.
 
@@ -1866,8 +1889,10 @@ def apply(
 
     result = generate_bundle(proposal, data_dir=data_dir, preflight=preflight)
     # PR37: compile actions alongside the bundle. Review-only; no execution.
+    actions_json_path: Path | None = None
     try:
         actions_result = compile_and_write(proposal, data_dir=data_dir)
+        actions_json_path = actions_result.actions_json
         files = list(result.files) + [actions_result.actions_json, actions_result.actions_md]
         # Inject PR37/PR38 fields into apply-preflight.json without rewriting bundle logic.
         try:
@@ -1903,6 +1928,181 @@ def apply(
     elif guard_report.decision == GUARD_DECISION_FRESH:
         console.print("- guard: fresh")
     console.print(f"- guard report: {guard_written.json_path}")
+
+    # PR47: first non-metadata mutation gate. The only allowed mutation is
+    # ``docker restart <allowlisted-lab-container>``. The bundle was generated
+    # above only after preflight + guard passed; if --execute --confirm were
+    # also supplied, we may now invoke the lab restart executor.
+    if execute or confirm:
+        actions_payload: dict[str, Any] = {}
+        if actions_json_path is not None:
+            try:
+                actions_payload = json.loads(actions_json_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                actions_payload = {}
+        _run_lab_restart_gate(
+            runtime,
+            proposal=proposal,
+            actions_payload=actions_payload,
+            guard_decision=guard_report.decision,
+            execute=execute,
+            confirm=confirm,
+            action_id=action_id,
+        )
+
+
+def _lab_restart_executor_factory() -> lab_restart_mod.CommandExecutor:
+    """Return the default executor. Tests monkeypatch this symbol to inject a fake."""
+    return lab_restart_mod.SubprocessExecutor()
+
+
+def _run_lab_restart_gate(
+    runtime: RuntimeContext,
+    *,
+    proposal: Proposal,
+    actions_payload: dict[str, Any],
+    guard_decision: str,
+    execute: bool,
+    confirm: bool,
+    action_id: str | None,
+    executor: lab_restart_mod.CommandExecutor | None = None,
+    timeout_seconds: int = 30,
+) -> None:
+    """Evaluate every PR47 gate; on success run the (mocked or real) executor.
+
+    Refusals exit non-zero and write a refusal audit event + receipt.
+    """
+    data_dir = Path(runtime.session.data_dir)
+    allowlist = lab_restart_mod.load_allowlist(data_dir)
+    gate = lab_restart_mod.evaluate_gates(
+        execute=execute,
+        confirm=confirm,
+        proposal_status=proposal.status,
+        guard_decision=guard_decision,
+        actions_payload=actions_payload,
+        allowlist=allowlist,
+        action_id=action_id,
+    )
+
+    if not gate.allowed:
+        console.print("")
+        console.print("Execution refused:")
+        console.print(f"- failed gate: {gate.failed_gate}")
+        if gate.message:
+            console.print(f"- detail: {gate.message}")
+        console.print(f"- mutation_scope: {lab_restart_mod.MUTATION_SCOPE}")
+        console.print("- no commands executed")
+        receipt = lab_restart_mod.write_execution_receipt(
+            data_dir,
+            proposal_id=proposal.proposal_id,
+            action_id=gate.action_id,
+            container=gate.container,
+            command_argv=(["docker", "restart", gate.container] if gate.container else []),
+            gates=gate.gates_dict(),
+            status="refused",
+            exit_code=2,
+            stdout="",
+            stderr=gate.message,
+            failed_gate=gate.failed_gate,
+        )
+        _append_audit_event(
+            runtime,
+            kind=lab_restart_mod.AUDIT_KIND_EXECUTION,
+            action=lab_restart_mod.AUDIT_ACTION_LAB_RESTART,
+            status="refused",
+            proposal_id=proposal.proposal_id,
+            proposal_fingerprint=(proposal.fingerprint or {}).get("value", ""),
+            target=gate.container or None,
+            risk=proposal.risk,
+            summary=f"lab container restart refused: {gate.failed_gate}",
+            artifacts=[str(receipt)],
+            details={
+                "operation": "lab_container_restart_refused",
+                "failed_gate": gate.failed_gate,
+                "container": gate.container,
+                "action_id": gate.action_id,
+                "mutation_scope": lab_restart_mod.MUTATION_SCOPE,
+                "remediation_execution": False,
+                "mutation_performed": False,
+                "receipt": str(receipt),
+            },
+        )
+        console.print(f"- receipt: {receipt}")
+        raise typer.Exit(code=1)
+
+    # Gate passed. Run the executor (fake in tests, subprocess in production).
+    if executor is None:
+        executor = _lab_restart_executor_factory()
+    argv = ["docker", "restart", gate.container]
+    result = executor.run(argv, timeout_seconds=timeout_seconds)
+    status = "success" if result.ok else "failed"
+    receipt = lab_restart_mod.write_execution_receipt(
+        data_dir,
+        proposal_id=proposal.proposal_id,
+        action_id=gate.action_id,
+        container=gate.container,
+        command_argv=argv,
+        gates=gate.gates_dict(),
+        status=status,
+        exit_code=result.exit_code,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
+    event = _append_audit_event_returning(
+        runtime,
+        kind=lab_restart_mod.AUDIT_KIND_EXECUTION,
+        action=lab_restart_mod.AUDIT_ACTION_LAB_RESTART,
+        status=status,
+        proposal_id=proposal.proposal_id,
+        proposal_fingerprint=(proposal.fingerprint or {}).get("value", ""),
+        target=gate.container,
+        risk=proposal.risk,
+        summary=f"lab container restart {status}: {gate.container}",
+        artifacts=[str(receipt)],
+        safety={
+            "execution_allowed": True,
+            "execution_status": "executed",
+            "mutation_performed": result.ok,
+            "mutation_scope": lab_restart_mod.MUTATION_SCOPE,
+        },
+        details={
+            "operation": "lab_container_restart",
+            "container": gate.container,
+            "action_id": gate.action_id,
+            "command_argv": list(argv),
+            "exit_code": result.exit_code,
+            "mutation_scope": lab_restart_mod.MUTATION_SCOPE,
+            "remediation_execution": True,
+            "mutation_performed": result.ok,
+            "docker_mutation": result.ok,
+            "service_mutation": False,
+            "package_mutation": False,
+            "filesystem_mutation": False,
+            "firewall_mutation": False,
+            "arbitrary_command_execution": False,
+            "receipt": str(receipt),
+        },
+    )
+    console.print("")
+    if result.ok:
+        console.print("Guarded lab container restart executed:")
+    else:
+        console.print("Guarded lab container restart failed:")
+    console.print(f"- proposal: {proposal.proposal_id}")
+    console.print(f"- action: {gate.action_id}")
+    console.print(f"- container: {gate.container}")
+    console.print(f"- command: docker restart {gate.container}")
+    console.print("- executor: docker")
+    console.print(f"- mutation_scope: {lab_restart_mod.MUTATION_SCOPE}")
+    if event and event.get("event_id"):
+        console.print(f"- audit event: {event['event_id']}")
+    console.print(f"- receipt: {receipt}")
+    console.print("- rollback: none automatic")
+    console.print("- verification suggested: docker inspect / docker ps / shellforgeai diagnose")
+    if not result.ok:
+        if result.stderr:
+            console.print(f"- stderr: {result.stderr[:200]}")
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
@@ -2791,6 +2991,57 @@ def _handle_create_proposals_ask(runtime: RuntimeContext, question: str) -> bool
     return True
 
 
+def _handle_lab_restart_ask(runtime: RuntimeContext, question: str) -> bool:
+    """PR47: refuse any natural-language request to actually restart a container.
+
+    The only path to execute a lab container restart is the explicit CLI:
+    ``shellforgeai apply <approved-proposal-id> --execute --confirm``.
+    """
+    intent = is_lab_restart_ask_intent(question)
+    if not intent.matched:
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    allowlist = lab_restart_mod.load_allowlist(data_dir)
+    proposal = latest_approved_proposal(data_dir)
+    console.print("Refusing to execute: ShellForgeAI cannot run a container restart from ask.")
+    console.print("- mutation_scope: " + lab_restart_mod.MUTATION_SCOPE)
+    console.print("- only path: shellforgeai apply <approved-proposal-id> --execute --confirm")
+    if proposal is None:
+        console.print(
+            "- no approved proposal found. First: shellforgeai approvals create <session>,"
+            " then approvals approve <id> --reason '...'."
+        )
+    else:
+        console.print(f"- latest approved proposal: {proposal.proposal_id}")
+        cmd = f"  shellforgeai apply {proposal.proposal_id} --execute --confirm"
+        console.print(cmd)
+    if allowlist is None:
+        console.print(
+            f"- next: write a lab restart allowlist at {lab_restart_mod.policy_path(data_dir)}"
+        )
+    elif not allowlist.enabled:
+        console.print("- lab restart allowlist is disabled (enabled=false). No restart possible.")
+    elif not allowlist.containers:
+        console.print("- lab restart allowlist is empty. No restart possible.")
+    elif intent.container and intent.container not in allowlist.containers:
+        console.print(f"- container {intent.container!r} is not in the lab restart allowlist.")
+    _append_audit_event(
+        runtime,
+        kind="ask",
+        action="lab_container_restart_refused",
+        status="refused",
+        summary="ask refused: lab container restart cannot run from natural language",
+        details={
+            "operation": "lab_container_restart_refused",
+            "container": intent.container,
+            "remediation_execution": False,
+            "mutation_performed": False,
+            "mutation_scope": lab_restart_mod.MUTATION_SCOPE,
+        },
+    )
+    return True
+
+
 def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
     """Intercept apply/run-approved ask requests. Returns True if handled.
 
@@ -3246,6 +3497,8 @@ def ask(
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):
+            return
+        if _handle_lab_restart_ask(runtime, question):
             return
         if _handle_immediate_fix_ask(runtime, question):
             return

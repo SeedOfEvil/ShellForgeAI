@@ -144,3 +144,21 @@
   `execution_allowed=false`/`execution_status=not_executed`/`mutation_performed=false`.
   Ask routing for cleanup phrasing refuses to delete and prints the explicit
   `--execute --confirm` CLI guidance. `apply` remains validation/preflight-only.
+
+- PR47 completed: first non-metadata mutation gate. `shellforgeai apply
+  <approved-proposal-id> --execute --confirm` may now execute exactly one
+  `docker restart <container>` for containers in the explicit allowlist at
+  `<data_dir>/policy/lab-container-restart-allowlist.json` (disabled by
+  default) when every gate passes: explicit `--execute`/`--confirm`,
+  `SHELLFORGEAI_MUTATION_MODE=lab` + `SHELLFORGEAI_ALLOW_LAB_CONTAINER_RESTART=1`,
+  allowlist enabled with non-empty entries, proposal status `approved`, PR38
+  guard `fresh`/`warning`, the compiled action is exactly
+  `docker restart <safe-name>`, the container name passes the safe regex.
+  Execution goes through a `CommandExecutor` abstraction with `shell=False`
+  and list-form argv only; tests use the fake executor. Each execute (and
+  refusal) writes a receipt under `<data_dir>/execution_receipts/`. The
+  audit event for a successful lab restart is the first ShellForgeAI event
+  with `safety.execution_allowed=true`/`execution_status=executed`/
+  `mutation_performed=true` and `safety.mutation_scope=lab_container_restart_only`;
+  every other event remains strict no-execution. Ask refuses to execute and
+  prints the explicit `--execute --confirm` CLI guidance.
