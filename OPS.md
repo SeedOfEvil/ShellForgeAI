@@ -488,3 +488,55 @@ validation/preflight-only for every other action kind.
 PR47 validation remains repo-local fixtures/mocks only: no Docker daemon, no
 systemd/journal, no root, no internet. Tests use the `FakeCommandExecutor`
 exposed by `shellforgeai.core.lab_restart`.
+
+## Post-mutation verification flow (PR48)
+
+PR48 does not widen mutation scope. After the PR47 `docker restart
+<allowlisted-container>` exits 0, ShellForgeAI automatically runs bounded
+read-only verification: `docker inspect <container>` before and after the
+restart, plus an optional bounded health-poll loop when the container has a
+healthcheck. There is no second restart attempt and no `docker exec`.
+
+Operational sequence after PR47 step 8:
+
+9. The CLI captures `before-inspect` and `after-inspect` JSON, computes a
+   verification status, and writes everything to:
+   ```
+   <data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json   # receipt + verification block
+   <data_dir>/execution_receipts/exec_<timestamp>_<shortid>.md     # human-readable summary
+   <data_dir>/execution_receipts/exec_<timestamp>_<shortid>/before-inspect.json
+   <data_dir>/execution_receipts/exec_<timestamp>_<shortid>/after-inspect.json
+   ```
+10. The audit event for the restart includes
+    `details.verification_status=passed|warning|failed|skipped`,
+    `details.container_running_after`, `details.started_at_changed`,
+    `details.health_after`, and `details.verification_notes`. Event-level
+    `status` is `success` (verification passed), `warning` (verification
+    warning), or `failed` (verification failed or restart command itself
+    failed).
+11. Inspect the result with read-only tooling:
+    ```bash
+    shellforgeai audit timeline
+    shellforgeai ask "did the restart work?"
+    shellforgeai ask "show post-mutation verification"
+    shellforgeai ask "show last execution receipt"
+    ```
+12. Diagnose if verification failed:
+    - `verification: failed` with `running_after: false` → container exited
+      after restart. Check `<data_dir>/execution_receipts/exec_<id>/after-inspect.json`
+      and the operator runbook. ShellForgeAI does **not** retry the restart.
+    - `verification: warning` with `Healthcheck still starting after timeout`
+      → service is slow to come up; re-run `shellforgeai ask "show
+      verification"` after a longer manual wait, or inspect the container
+      health logs out-of-band.
+    - `verification: warning` with `RestartCount did not change` → expected
+      for manual `docker restart`; not actionable on its own.
+    - `verification: skipped` → restart command itself failed (the receipt's
+      `result.status` is `failed`). Investigate the docker error before
+      proposing a new restart.
+
+PR48 validation remains repo-local fixtures/mocks only: no Docker daemon, no
+real `time.sleep`, no root, no systemd/journal, no internet. Tests use
+`FakeContainerInspector` (read-only) and `FakeCommandExecutor` (only argv
+`["docker", "restart", "<safe-name>"]`) from
+`shellforgeai.core.lab_restart`.

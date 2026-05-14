@@ -162,3 +162,29 @@
   `mutation_performed=true` and `safety.mutation_scope=lab_container_restart_only`;
   every other event remains strict no-execution. Ask refuses to execute and
   prints the explicit `--execute --confirm` CLI guidance.
+
+- PR48 completed: post-mutation verification gate for the PR47 lab container
+  restart. After the allowed `docker restart <allowlisted-container>` exits
+  0, ShellForgeAI automatically runs read-only verification: `docker inspect
+  <container>` before and after the restart (via a `ContainerInspector`
+  abstraction with `shell=False` argv-only subprocess), a bounded
+  post-restart wait, and an optional bounded health-poll loop only when the
+  container declares a healthcheck. The receipt JSON gains a
+  `verification` block (`status` of `passed`/`warning`/`failed`/`skipped`,
+  `started_at_before/after`, `started_at_changed`, `running_after`,
+  `health_before/after`, `restart_count_before/after`, `notes`,
+  `evidence`) and gets a sibling evidence directory
+  `execution_receipts/exec_<id>/{before-inspect.json,after-inspect.json}`
+  plus a human-readable `exec_<id>.md`. The audit event adds
+  `details.verification_status`, `details.container_running_after`,
+  `details.started_at_changed`, `details.health_after`, and
+  `details.verification_notes`; event-level `status` becomes `success`,
+  `warning`, or `failed`. PR48 does not widen mutation scope: no second
+  restart, no `docker exec`, no `docker compose|stop|start|kill|rm|run`,
+  no shell, no arbitrary command strings. Ask gains read-only verification
+  queries (`did the restart work?`, `show restart verification`, `show
+  post-mutation verification`, `show last execution receipt`, `was the
+  container running after restart?`) that summarize the latest receipt
+  without executing anything. `restart it and verify` is still routed to
+  the mutation refusal path with explicit guidance that verification runs
+  automatically after the approved CLI execution.

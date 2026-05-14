@@ -342,6 +342,73 @@ PR47 explicitly does **not**:
 
 Ask routing for restart phrasing (`restart sfai-healthy-web`, `run the
 approved restart`, `apply the approved restart`, `perform the restart`,
-`bounce the container`) refuses to execute, surfaces the lab allowlist
-state, and prints the explicit CLI command needed:
-`shellforgeai apply <approved-proposal-id> --execute --confirm`.
+`bounce the container`, `restart it and verify`) refuses to execute,
+surfaces the lab allowlist state, prints the explicit CLI command needed
+(`shellforgeai apply <approved-proposal-id> --execute --confirm`), and
+notes that PR48 verification will run automatically after that approved
+CLI execution.
+
+## PR48 — post-mutation verification gate (read-only)
+
+PR48 adds **read-only** verification that runs automatically *after* the
+PR47-allowed `docker restart <allowlisted-container>` exits 0. It does not
+widen mutation scope. The set of allowed mutations is unchanged: exactly
+one `docker restart <allowlisted-lab-container>`. PR48's only side effect
+is reading state and writing a verification block, evidence files, and an
+augmented audit event.
+
+What verification may do:
+
+- call `docker inspect <safe-name>` via `subprocess.run(..., shell=False)`
+  on a list-form `argv` only (the `DockerCliInspector` rejects unsafe
+  container names *before* invoking subprocess),
+- bounded sleep between the restart command exit and the post-restart
+  inspect (default 2 s, configurable in code/tests),
+- bounded health-poll loop (default 10 s with 1 s interval) only when the
+  container declares a healthcheck.
+
+What verification must **not** do:
+
+- re-attempt restart of any kind,
+- call `docker exec`, `docker run`, `docker stop|start|kill|rm`, `docker
+  compose ...`, `docker network|volume|image ...`,
+- run any other system command (no `systemctl`, no package managers, no
+  filesystem mutation, no firewall changes),
+- accept `shell=True`,
+- accept arbitrary command strings or operator-written shell scripts,
+- mutate anything outside the receipt directory.
+
+Verification status semantics (recorded in receipt and audit event):
+
+- `passed` — restart exit 0, container exists and is running, `StartedAt`
+  changed, healthcheck (if present) is `healthy`.
+- `warning` — mutation succeeded but a soft signal triggered: `StartedAt`
+  did not change, `RestartCount` did not change, healthcheck still
+  `starting` after the bounded wait, or healthcheck status `unknown`.
+- `failed` — container missing, container not running after restart,
+  inspect failed, or healthcheck `unhealthy` after the bounded wait. The
+  CLI exits non-zero and **does not** retry the restart.
+- `skipped` — restart command itself failed (mutation never happened), so
+  there is nothing to verify post-mutation.
+
+Audit validation continues to accept exactly one mutation event shape:
+`kind=execution`, `action=lab_container_restart`,
+`safety.mutation_scope=lab_container_restart_only`,
+`safety.execution_allowed=true`, `safety.execution_status=executed`,
+`safety.mutation_performed=true`. The PR48 verification fields live in
+`details.verification_status`, `details.container_running_after`,
+`details.started_at_changed`, `details.health_after`, and
+`details.verification_notes`. They never relax the mutation scope or
+introduce new mutation kinds.
+
+### Natural language cannot verify-and-mutate
+
+Ask routing for verification queries (`did the restart work?`, `show
+restart verification`, `show post-mutation verification`, `show last
+execution receipt`, `was the container running after restart?`) is
+read-only: it summarizes the latest receipt's verification block and
+records an `ask` audit event with `mutation_performed=false`. Phrasings
+that ask ShellForgeAI to *both* mutate and verify (`restart it and
+verify`) are routed to the PR47 mutation refusal path and explicitly
+remind the operator that verification runs automatically after the
+approved CLI execution.

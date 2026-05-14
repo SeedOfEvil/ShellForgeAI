@@ -51,6 +51,7 @@ from shellforgeai.core.ask_routing import (
     is_create_proposals_intent,
     is_immediate_fix_intent,
     is_lab_restart_ask_intent,
+    is_lab_restart_verification_ask_intent,
     network_reachability_brief,
     route_ask_intent,
     target_container_status,
@@ -1956,6 +1957,23 @@ def _lab_restart_executor_factory() -> lab_restart_mod.CommandExecutor:
     return lab_restart_mod.SubprocessExecutor()
 
 
+def _lab_restart_inspector_factory() -> lab_restart_mod.ContainerInspector:
+    """Return the default read-only inspector. Tests monkeypatch this symbol."""
+    return lab_restart_mod.DockerCliInspector()
+
+
+def _lab_restart_verification_config() -> lab_restart_mod.VerificationConfig:
+    """Return the default verification timing. Tests may monkeypatch this."""
+    return lab_restart_mod.VerificationConfig()
+
+
+def _lab_restart_verification_sleep(seconds: float) -> None:
+    """Default sleep used by post-mutation verification. Tests replace this."""
+    import time as _time
+
+    _time.sleep(seconds)
+
+
 def _run_lab_restart_gate(
     runtime: RuntimeContext,
     *,
@@ -2030,12 +2048,44 @@ def _run_lab_restart_gate(
         console.print(f"- receipt: {receipt}")
         raise typer.Exit(code=1)
 
-    # Gate passed. Run the executor (fake in tests, subprocess in production).
+    # Gate passed. Capture pre-restart state (read-only inspect), then run
+    # the executor (fake in tests, subprocess in production).
     if executor is None:
         executor = _lab_restart_executor_factory()
+    inspector = _lab_restart_inspector_factory()
+    verification_cfg = _lab_restart_verification_config()
+    sleep_fn = _lab_restart_verification_sleep
+
+    before_inspect = inspector.inspect(gate.container)
+    before_state = lab_restart_mod.capture_container_state_from(before_inspect)
+
     argv = ["docker", "restart", gate.container]
     result = executor.run(argv, timeout_seconds=timeout_seconds)
-    status = "success" if result.ok else "failed"
+
+    # PR48: bounded read-only post-mutation verification. Never restarts again,
+    # never execs, only calls the inspector (which only runs ``docker inspect``).
+    outcome = lab_restart_mod.run_post_restart_verification(
+        inspector=inspector,
+        container=gate.container,
+        before_state=before_state,
+        restart_ok=result.ok,
+        config=verification_cfg,
+        sleep_fn=sleep_fn,
+    )
+    verification = dict(outcome.summary)
+
+    # Operational status (receipt-level): marries restart cmd outcome with verification.
+    if not result.ok:
+        status = "failed"
+    elif verification["status"] == lab_restart_mod.VERIFICATION_STATUS_PASSED:
+        status = "success"
+    elif verification["status"] == lab_restart_mod.VERIFICATION_STATUS_WARNING:
+        status = "warning"
+    else:
+        status = "failed"
+
+    # First write the receipt to fix its path; then persist evidence next to it
+    # and re-emit the receipt with evidence paths embedded.
     receipt = lab_restart_mod.write_execution_receipt(
         data_dir,
         proposal_id=proposal.proposal_id,
@@ -2047,17 +2097,51 @@ def _run_lab_restart_gate(
         exit_code=result.exit_code,
         stdout=result.stdout,
         stderr=result.stderr,
+        verification=verification,
     )
+    evidence_paths = lab_restart_mod.write_verification_evidence(
+        receipt,
+        before_raw=before_inspect.raw if before_inspect.exists else None,
+        after_raw=outcome.after_raw,
+    )
+    if evidence_paths:
+        verification["evidence"] = evidence_paths
+        receipt = lab_restart_mod.write_execution_receipt(
+            data_dir,
+            proposal_id=proposal.proposal_id,
+            action_id=gate.action_id,
+            container=gate.container,
+            command_argv=argv,
+            gates=gate.gates_dict(),
+            status=status,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            verification=verification,
+            receipt_path=receipt,
+        )
+
+    audit_status = (
+        "success"
+        if result.ok and verification["status"] == lab_restart_mod.VERIFICATION_STATUS_PASSED
+        else "warning"
+        if result.ok and verification["status"] == lab_restart_mod.VERIFICATION_STATUS_WARNING
+        else "failed"
+    )
+
     event = _append_audit_event_returning(
         runtime,
         kind=lab_restart_mod.AUDIT_KIND_EXECUTION,
         action=lab_restart_mod.AUDIT_ACTION_LAB_RESTART,
-        status=status,
+        status=audit_status,
         proposal_id=proposal.proposal_id,
         proposal_fingerprint=(proposal.fingerprint or {}).get("value", ""),
         target=gate.container,
         risk=proposal.risk,
-        summary=f"lab container restart {status}: {gate.container}",
+        summary=(
+            f"lab container restart {audit_status}: {gate.container} "
+            f"(verification={verification['status']})"
+        ),
         artifacts=[str(receipt)],
         safety={
             "execution_allowed": True,
@@ -2081,27 +2165,45 @@ def _run_lab_restart_gate(
             "firewall_mutation": False,
             "arbitrary_command_execution": False,
             "receipt": str(receipt),
+            "verification_status": verification["status"],
+            "container_running_after": bool(verification.get("running_after", False)),
+            "started_at_changed": bool(verification.get("started_at_changed", False)),
+            "health_after": str(verification.get("health_after", "")),
+            "verification_notes": list(verification.get("notes", [])),
         },
     )
     console.print("")
-    if result.ok:
-        console.print("Guarded lab container restart executed:")
-    else:
+    vstatus = verification["status"]
+    if not result.ok:
         console.print("Guarded lab container restart failed:")
+    elif vstatus == lab_restart_mod.VERIFICATION_STATUS_PASSED:
+        console.print("Guarded lab container restart executed:")
+    elif vstatus == lab_restart_mod.VERIFICATION_STATUS_WARNING:
+        console.print("Guarded lab container restart executed with verification warning:")
+    else:
+        console.print("Guarded lab container restart executed but verification failed:")
     console.print(f"- proposal: {proposal.proposal_id}")
     console.print(f"- action: {gate.action_id}")
     console.print(f"- container: {gate.container}")
     console.print(f"- command: docker restart {gate.container}")
     console.print("- executor: docker")
     console.print(f"- mutation_scope: {lab_restart_mod.MUTATION_SCOPE}")
+    console.print(f"- verification: {vstatus}")
+    console.print(f"- running_after: {bool(verification.get('running_after', False))}")
+    console.print(f"- started_at_changed: {bool(verification.get('started_at_changed', False))}")
+    console.print(f"- health_after: {verification.get('health_after', '')}")
+    for note in verification.get("notes", []) or []:
+        console.print(f"  - note: {note}")
     if event and event.get("event_id"):
         console.print(f"- audit event: {event['event_id']}")
     console.print(f"- receipt: {receipt}")
     console.print("- rollback: none automatic")
-    console.print("- verification suggested: docker inspect / docker ps / shellforgeai diagnose")
     if not result.ok:
         if result.stderr:
             console.print(f"- stderr: {result.stderr[:200]}")
+        raise typer.Exit(code=1)
+    if vstatus == lab_restart_mod.VERIFICATION_STATUS_FAILED:
+        console.print("- no additional restart attempted")
         raise typer.Exit(code=1)
 
 
@@ -2991,6 +3093,92 @@ def _handle_create_proposals_ask(runtime: RuntimeContext, question: str) -> bool
     return True
 
 
+def _latest_execution_receipt(data_dir: Path) -> Path | None:
+    receipts = lab_restart_mod.receipts_dir(data_dir)
+    if not receipts.exists():
+        return None
+    candidates = sorted(receipts.glob("exec_*.json"))
+    return candidates[-1] if candidates else None
+
+
+def _handle_lab_restart_verification_ask(runtime: RuntimeContext, question: str) -> bool:
+    """PR48: read-only ask — summarize the most recent restart verification.
+
+    Never executes mutation. Reads the most recent execution receipt from
+    ``execution_receipts/`` and the matching audit event, then prints the
+    verification status. If there is no receipt yet, explain how to produce
+    one (still without executing anything).
+    """
+    intent = is_lab_restart_verification_ask_intent(question)
+    if not intent.matched:
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    receipt_path = _latest_execution_receipt(data_dir)
+    console.print("Read-only post-mutation verification (no commands executed):")
+    console.print(f"- mutation_scope: {lab_restart_mod.MUTATION_SCOPE}")
+    if receipt_path is None:
+        console.print("- no execution receipt found yet")
+        console.print(
+            "- to produce one: shellforgeai apply <approved-proposal-id> --execute --confirm"
+        )
+        console.print("  verification runs automatically after the approved CLI execution.")
+        _append_audit_event(
+            runtime,
+            kind="ask",
+            action="lab_container_restart_verification_query",
+            status="success",
+            summary="ask: no execution receipt to summarize",
+            details={
+                "operation": "lab_container_restart_verification_query",
+                "remediation_execution": False,
+                "mutation_performed": False,
+                "verification_status": "absent",
+            },
+        )
+        return True
+    try:
+        payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        console.print(f"- could not read receipt: {exc}")
+        return True
+    verification = payload.get("verification") or {}
+    result = payload.get("result") or {}
+    console.print(f"- receipt: {receipt_path}")
+    console.print(f"- container: {payload.get('container', '')}")
+    console.print(f"- command_argv: {payload.get('command_argv', [])}")
+    console.print(f"- restart status: {result.get('status', '')}")
+    if not verification:
+        console.print("- verification: absent (PR47-era receipt without verification block)")
+    else:
+        console.print(f"- verification: {verification.get('status', '')}")
+        console.print(f"- running_after: {verification.get('running_after', '')}")
+        console.print(f"- started_at_changed: {verification.get('started_at_changed', '')}")
+        console.print(f"- health_after: {verification.get('health_after', '')}")
+        for note in verification.get("notes", []) or []:
+            console.print(f"  - note: {note}")
+        evidence = verification.get("evidence") or {}
+        for key in ("before_inspect_path", "after_inspect_path", "logs_tail_path"):
+            val = evidence.get(key)
+            if val:
+                console.print(f"- {key}: {val}")
+    _append_audit_event(
+        runtime,
+        kind="ask",
+        action="lab_container_restart_verification_query",
+        status="success",
+        summary="ask: summarized post-mutation verification",
+        details={
+            "operation": "lab_container_restart_verification_query",
+            "container": payload.get("container", ""),
+            "verification_status": verification.get("status", "absent"),
+            "remediation_execution": False,
+            "mutation_performed": False,
+            "receipt": str(receipt_path),
+        },
+    )
+    return True
+
+
 def _handle_lab_restart_ask(runtime: RuntimeContext, question: str) -> bool:
     """PR47: refuse any natural-language request to actually restart a container.
 
@@ -3006,6 +3194,7 @@ def _handle_lab_restart_ask(runtime: RuntimeContext, question: str) -> bool:
     console.print("Refusing to execute: ShellForgeAI cannot run a container restart from ask.")
     console.print("- mutation_scope: " + lab_restart_mod.MUTATION_SCOPE)
     console.print("- only path: shellforgeai apply <approved-proposal-id> --execute --confirm")
+    console.print("- post-mutation verification runs automatically after that CLI execution.")
     if proposal is None:
         console.print(
             "- no approved proposal found. First: shellforgeai approvals create <session>,"
@@ -3497,6 +3686,8 @@ def ask(
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):
+            return
+        if _handle_lab_restart_verification_ask(runtime, question):
             return
         if _handle_lab_restart_ask(runtime, question):
             return

@@ -203,6 +203,39 @@ class LabRestartAskIntent:
     container: str = ""
 
 
+_LAB_RESTART_VERIFICATION_TOKENS = (
+    "did the restart work",
+    "did restart work",
+    "did the lab restart work",
+    "did the container restart work",
+    "show restart verification",
+    "show post-mutation verification",
+    "show post mutation verification",
+    "show verification",
+    "show last execution receipt",
+    "show last receipt",
+    "show last restart receipt",
+    "was the container running after restart",
+    "was the container running after the restart",
+    "is the container running after restart",
+    "post-restart verification",
+    "post restart verification",
+    "verify the restart",
+    "verify restart",
+    "verification status",
+    "restart verification",
+)
+
+_RESTART_AND_VERIFY_TOKENS = (
+    "restart it and verify",
+    "restart and verify",
+    "restart then verify",
+    "kick it and verify",
+    "bounce and verify",
+    "restart the container and verify",
+)
+
+
 def is_lab_restart_ask_intent(text: str) -> LabRestartAskIntent:
     """Detect natural-language requests to actually run a (lab) container restart.
 
@@ -213,6 +246,11 @@ def is_lab_restart_ask_intent(text: str) -> LabRestartAskIntent:
     raw = (text or "").lower()
     if not raw:
         return LabRestartAskIntent(matched=False)
+    # PR48: "restart it and verify" still asks ShellForgeAI to mutate from ask.
+    # That falls under restart-execute refusal (verification runs automatically
+    # only after the CLI gate).
+    if any(tok in raw for tok in _RESTART_AND_VERIFY_TOKENS):
+        return LabRestartAskIntent(matched=True, container=extract_container_target(text))
     if any(tok in raw for tok in _LAB_RESTART_ASK_TOKENS):
         return LabRestartAskIntent(matched=True, container=extract_container_target(text))
     # Also catch "restart sfai-<name>" / "docker restart sfai-<name>" phrasings.
@@ -223,6 +261,32 @@ def is_lab_restart_ask_intent(text: str) -> LabRestartAskIntent:
     if m:
         return LabRestartAskIntent(matched=True, container=m.group(1).strip())
     return LabRestartAskIntent(matched=False)
+
+
+@dataclass(frozen=True)
+class LabRestartVerificationAskIntent:
+    """PR48: read-only ask intent — show the most recent restart verification."""
+
+    matched: bool
+
+
+def is_lab_restart_verification_ask_intent(text: str) -> LabRestartVerificationAskIntent:
+    """Detect read-only questions about the last restart verification.
+
+    These never execute mutation; they read the most recent execution receipt
+    and audit event and summarize verification status. ``"restart it and
+    verify"`` is *not* matched here — that is mutation intent and is routed
+    to :func:`is_lab_restart_ask_intent` for refusal.
+    """
+    raw = (text or "").lower().strip()
+    if not raw:
+        return LabRestartVerificationAskIntent(matched=False)
+    # Mutation phrasings ("restart and verify") must not match here.
+    if any(tok in raw for tok in _RESTART_AND_VERIFY_TOKENS):
+        return LabRestartVerificationAskIntent(matched=False)
+    if any(tok in raw for tok in _LAB_RESTART_VERIFICATION_TOKENS):
+        return LabRestartVerificationAskIntent(matched=True)
+    return LabRestartVerificationAskIntent(matched=False)
 
 
 def is_fix_plan_intent(text: str) -> bool:

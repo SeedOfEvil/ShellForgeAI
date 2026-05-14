@@ -222,7 +222,7 @@ shellforgeai apply <approved-proposal-id> --execute --confirm
 shellforgeai apply <approved-proposal-id> --execute --confirm --action-id act_002
 ```
 
-Success output:
+Success output (PR48 — verification ran automatically and passed):
 
 ```
 Guarded lab container restart executed:
@@ -232,10 +232,40 @@ Guarded lab container restart executed:
 - command: docker restart sfai-healthy-web
 - executor: docker
 - mutation_scope: lab_container_restart_only
+- verification: passed
+- running_after: True
+- started_at_changed: True
+- health_after: none
 - audit event: evt_...
 - receipt: <data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json
 - rollback: none automatic
-- verification suggested: docker inspect / docker ps / shellforgeai diagnose
+```
+
+Verification warning output (mutation happened, post-checks raised a soft
+concern such as no `StartedAt` change or healthcheck still in `starting`):
+
+```
+Guarded lab container restart executed with verification warning:
+- verification: warning
+- running_after: True
+- started_at_changed: False
+  - note: StartedAt did not change after restart command exited 0
+  - note: RestartCount did not change; manual docker restart may not increment it.
+```
+
+Verification failure output (mutation happened but post-checks failed —
+container missing, not running, unhealthy after bounded wait, or inspect
+failed). Exit code is non-zero. ShellForgeAI does NOT attempt a second
+restart; the operator must investigate.
+
+```
+Guarded lab container restart executed but verification failed:
+- verification: failed
+- running_after: False
+  - note: container not running after restart; no second restart attempted
+- no additional restart attempted
+- receipt: <data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json
+- audit event: evt_...
 ```
 
 Refusal output (`failed gate` is one of `execute_flag_missing`,
@@ -254,16 +284,66 @@ Execution refused:
 - receipt: <data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json
 ```
 
+PR48 verification block in the receipt JSON:
+
+```
+"verification": {
+  "status": "passed|warning|failed|skipped",
+  "started_at_before": "...",
+  "started_at_after": "...",
+  "started_at_changed": true,
+  "running_after": true,
+  "health_before": "none|healthy|starting|unhealthy|unknown",
+  "health_after":  "none|healthy|starting|unhealthy|unknown",
+  "restart_count_before": 0,
+  "restart_count_after": 0,
+  "notes": [],
+  "evidence": {
+    "before_inspect_path": "<data_dir>/execution_receipts/exec_<id>/before-inspect.json",
+    "after_inspect_path":  "<data_dir>/execution_receipts/exec_<id>/after-inspect.json"
+  }
+}
+```
+
+Evidence files (before/after `docker inspect` JSON) live in a sibling
+directory next to the receipt JSON:
+
+```
+<data_dir>/execution_receipts/exec_<timestamp>_<shortid>.json
+<data_dir>/execution_receipts/exec_<timestamp>_<shortid>.md
+<data_dir>/execution_receipts/exec_<timestamp>_<shortid>/before-inspect.json
+<data_dir>/execution_receipts/exec_<timestamp>_<shortid>/after-inspect.json
+```
+
 Audit events for the one allowed mutation carry
 `safety.mutation_scope=lab_container_restart_only`,
 `safety.execution_allowed=true`,
 `safety.execution_status=executed`, and
-`safety.mutation_performed=true`. Every other audit event continues to assert
+`safety.mutation_performed=true`. PR48 adds verification fields to the
+event details: `verification_status`, `container_running_after`,
+`started_at_changed`, `health_after`, `verification_notes`. Event-level
+`status` is `success` (verification passed), `warning` (verification
+warning), or `failed` (verification failed or restart command failed).
+Every other audit event continues to assert
 `execution_allowed=false`/`execution_status=not_executed`/`mutation_performed=false`.
 
 `ask` cannot execute the restart. Natural-language phrasings such as "restart
-sfai-healthy-web", "run the approved restart", or "perform the restart" are
-refused and print the explicit `--execute --confirm` CLI guidance.
+sfai-healthy-web", "run the approved restart", "perform the restart", or
+"restart it and verify" are refused and print the explicit `--execute
+--confirm` CLI guidance — and remind the operator that verification will run
+automatically after the approved CLI execution.
+
+PR48 also adds read-only `ask` queries that summarize the most recent
+verification block from the latest execution receipt. These never execute
+mutation:
+
+```bash
+shellforgeai ask "did the restart work?"
+shellforgeai ask "show restart verification"
+shellforgeai ask "show post-mutation verification"
+shellforgeai ask "show last execution receipt"
+shellforgeai ask "was the container running after restart?"
+```
 
 Ask routing examples for ShellForgeAI-owned workflows:
 

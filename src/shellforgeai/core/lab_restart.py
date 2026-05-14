@@ -511,11 +511,17 @@ def write_execution_receipt(
     stdout: str,
     stderr: str,
     failed_gate: str = "",
+    verification: dict[str, Any] | None = None,
+    receipt_path: Path | None = None,
 ) -> Path:
     receipts = receipts_dir(Path(data_dir))
     receipts.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    out = receipts / f"exec_{stamp}_{_short_id()}.json"
+    if receipt_path is None:
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        out = receipts / f"exec_{stamp}_{_short_id()}.json"
+    else:
+        out = Path(receipt_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "schema_version": LAB_RESTART_SCHEMA_VERSION,
         "created_at": _now(),
@@ -533,7 +539,9 @@ def write_execution_receipt(
         },
         "safety": {
             "scope": MUTATION_SCOPE,
-            "docker_mutation": status == "success",
+            # The restart command exited 0 if exit_code==0; verification
+            # status is independent and reflected separately.
+            "docker_mutation": int(exit_code) == 0,
             "service_impacting": True,
             "package_mutation": False,
             "filesystem_mutation": False,
@@ -543,8 +551,593 @@ def write_execution_receipt(
     }
     if failed_gate:
         payload["result"]["failed_gate"] = failed_gate
+    if verification is not None:
+        payload["verification"] = dict(verification)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _write_receipt_markdown(out, payload)
     return out
+
+
+def _write_receipt_markdown(json_path: Path, payload: dict[str, Any]) -> None:
+    """Write a human-readable receipt.md next to receipt JSON.
+
+    The markdown is informational only; receipt.json remains the canonical
+    machine-readable artifact.
+    """
+    md_path = json_path.with_suffix(".md")
+    lines: list[str] = []
+    container = payload.get("container", "")
+    result = payload.get("result", {})
+    status = str(result.get("status", ""))
+    lines.append(f"# Lab container restart receipt — {status}")
+    lines.append("")
+    lines.append(f"- container: {container}")
+    lines.append(f"- proposal: {payload.get('proposal_id', '')}")
+    lines.append(f"- action: {payload.get('action_id', '')}")
+    lines.append(f"- command_argv: {payload.get('command_argv', [])}")
+    lines.append(f"- exit_code: {result.get('exit_code', '')}")
+    lines.append(f"- mutation_scope: {payload.get('safety', {}).get('scope', '')}")
+    if result.get("failed_gate"):
+        lines.append(f"- failed_gate: {result['failed_gate']}")
+    verification = payload.get("verification")
+    if isinstance(verification, dict):
+        lines.append("")
+        lines.append("## Verification")
+        lines.append(f"- status: {verification.get('status', '')}")
+        lines.append(f"- running_after: {verification.get('running_after', '')}")
+        lines.append(f"- started_at_before: {verification.get('started_at_before', '')}")
+        lines.append(f"- started_at_after: {verification.get('started_at_after', '')}")
+        lines.append(f"- started_at_changed: {verification.get('started_at_changed', '')}")
+        lines.append(f"- health_before: {verification.get('health_before', '')}")
+        lines.append(f"- health_after: {verification.get('health_after', '')}")
+        lines.append(f"- restart_count_before: {verification.get('restart_count_before', '')}")
+        lines.append(f"- restart_count_after: {verification.get('restart_count_after', '')}")
+        for note in verification.get("notes", []) or []:
+            lines.append(f"  - note: {note}")
+        evidence = verification.get("evidence") or {}
+        if evidence:
+            lines.append("")
+            lines.append("### Evidence")
+            for key in ("before_inspect_path", "after_inspect_path", "logs_tail_path"):
+                val = evidence.get(key)
+                if val:
+                    lines.append(f"- {key}: {val}")
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# PR48: post-mutation verification (read-only)
+#
+# Verification is bounded, read-only, and never re-attempts restart. It never
+# uses ``docker exec``, ``shell=True``, or arbitrary command strings. Only the
+# argv ``["docker", "inspect", "<safe-name>"]`` (and optionally
+# ``["docker", "logs", "--tail", "<N>", "<safe-name>"]``) is allowed.
+
+
+VERIFICATION_STATUS_PASSED = "passed"
+VERIFICATION_STATUS_WARNING = "warning"
+VERIFICATION_STATUS_FAILED = "failed"
+VERIFICATION_STATUS_SKIPPED = "skipped"
+
+HEALTH_NONE = "none"
+HEALTH_HEALTHY = "healthy"
+HEALTH_STARTING = "starting"
+HEALTH_UNHEALTHY = "unhealthy"
+HEALTH_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class VerificationConfig:
+    post_restart_wait_seconds: float = 2.0
+    health_wait_seconds: float = 10.0
+    health_poll_interval_seconds: float = 1.0
+
+
+@dataclass(frozen=True)
+class InspectResult:
+    """Raw result of a ``docker inspect`` call (or fake)."""
+
+    ok: bool
+    exists: bool
+    raw: dict[str, Any] | None
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class ContainerState:
+    """Normalized container state derived from ``docker inspect``."""
+
+    exists: bool
+    container_id: str
+    running: bool
+    status: str
+    started_at: str
+    exit_code: int | None
+    health: str
+    restart_count: int | None
+    has_healthcheck: bool
+
+
+def _normalize_health(raw_health: Any) -> str:
+    if not isinstance(raw_health, str):
+        return HEALTH_UNKNOWN
+    val = raw_health.strip().lower()
+    if val in ("healthy",):
+        return HEALTH_HEALTHY
+    if val in ("starting",):
+        return HEALTH_STARTING
+    if val in ("unhealthy",):
+        return HEALTH_UNHEALTHY
+    if val == "" or val == "none":
+        return HEALTH_NONE
+    return HEALTH_UNKNOWN
+
+
+def parse_inspect_payload(payload: Any) -> ContainerState:
+    """Convert a ``docker inspect`` JSON payload into a :class:`ContainerState`.
+
+    ``docker inspect`` returns a top-level list. Callers may pass either the
+    list or the first object.
+    """
+    obj: dict[str, Any] | None = None
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict):
+            obj = payload[0]
+    elif isinstance(payload, dict):
+        obj = payload
+    if obj is None:
+        return ContainerState(
+            exists=False,
+            container_id="",
+            running=False,
+            status="",
+            started_at="",
+            exit_code=None,
+            health=HEALTH_NONE,
+            restart_count=None,
+            has_healthcheck=False,
+        )
+    state = obj.get("State") or {}
+    health_obj = state.get("Health") if isinstance(state, dict) else None
+    has_health = isinstance(health_obj, dict) and bool(health_obj)
+    health_status = (
+        _normalize_health(health_obj.get("Status")) if isinstance(health_obj, dict) else HEALTH_NONE
+    )
+    restart_count: int | None
+    rc = obj.get("RestartCount")
+    if isinstance(rc, int):
+        restart_count = rc
+    elif isinstance(rc, str) and rc.isdigit():
+        restart_count = int(rc)
+    else:
+        restart_count = None
+    exit_code: int | None
+    ec = state.get("ExitCode") if isinstance(state, dict) else None
+    if isinstance(ec, int):
+        exit_code = ec
+    elif isinstance(ec, str) and ec.lstrip("-").isdigit():
+        exit_code = int(ec)
+    else:
+        exit_code = None
+    return ContainerState(
+        exists=True,
+        container_id=str(obj.get("Id", "") or ""),
+        running=bool(state.get("Running", False)) if isinstance(state, dict) else False,
+        status=str(state.get("Status", "")) if isinstance(state, dict) else "",
+        started_at=str(state.get("StartedAt", "")) if isinstance(state, dict) else "",
+        exit_code=exit_code,
+        health=health_status,
+        restart_count=restart_count,
+        has_healthcheck=has_health,
+    )
+
+
+class ContainerInspector(ABC):
+    """Read-only ``docker inspect`` abstraction. No mutation, no exec."""
+
+    @abstractmethod
+    def inspect(self, container: str) -> InspectResult: ...
+
+
+class DockerCliInspector(ContainerInspector):
+    """Production inspector. Runs ``docker inspect <safe-name>`` via argv only."""
+
+    def __init__(self, *, timeout_seconds: int = 10) -> None:
+        self.timeout_seconds = int(timeout_seconds)
+
+    def inspect(self, container: str) -> InspectResult:
+        if not is_safe_container_name(container):
+            return InspectResult(ok=False, exists=False, raw=None, error="unsafe container name")
+        argv = ["docker", "inspect", container]
+        try:
+            cp = subprocess.run(  # noqa: S603 - argv validated; never shell=True
+                argv,
+                shell=False,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return InspectResult(ok=False, exists=False, raw=None, error=f"timeout: {exc}")
+        except FileNotFoundError as exc:
+            return InspectResult(ok=False, exists=False, raw=None, error=str(exc))
+        except OSError as exc:
+            return InspectResult(ok=False, exists=False, raw=None, error=str(exc))
+        if cp.returncode != 0:
+            return InspectResult(ok=False, exists=False, raw=None, error=(cp.stderr or "").strip())
+        try:
+            data = json.loads(cp.stdout or "[]")
+        except ValueError as exc:
+            return InspectResult(ok=False, exists=False, raw=None, error=f"malformed json: {exc}")
+        if isinstance(data, list) and not data:
+            return InspectResult(ok=True, exists=False, raw=None, error="not found")
+        return InspectResult(ok=True, exists=True, raw=data if isinstance(data, dict) else data[0])
+
+
+@dataclass
+class FakeContainerInspector(ContainerInspector):
+    """Test inspector returning queued :class:`InspectResult` values.
+
+    If ``results`` is non-empty, each call pops the next entry. Otherwise the
+    single ``result`` is returned for every call.
+    """
+
+    result: InspectResult | None = None
+    results: list[InspectResult] = field(default_factory=list)
+    calls: list[str] = field(default_factory=list)
+
+    def inspect(self, container: str) -> InspectResult:
+        self.calls.append(container)
+        if not is_safe_container_name(container):
+            return InspectResult(ok=False, exists=False, raw=None, error="unsafe container name")
+        if self.results:
+            return self.results.pop(0)
+        if self.result is not None:
+            return self.result
+        return InspectResult(ok=False, exists=False, raw=None, error="no fake result configured")
+
+
+def make_inspect_payload(
+    *,
+    container_id: str = "abc123",
+    running: bool = True,
+    status: str = "running",
+    started_at: str = "2026-05-14T12:00:00.000000000Z",
+    exit_code: int | None = 0,
+    restart_count: int | None = 0,
+    health: str | None = None,
+) -> dict[str, Any]:
+    """Build a minimal docker-inspect-shaped payload for tests."""
+    state: dict[str, Any] = {
+        "Running": running,
+        "Status": status,
+        "StartedAt": started_at,
+    }
+    if exit_code is not None:
+        state["ExitCode"] = exit_code
+    if health is not None:
+        state["Health"] = {"Status": health}
+    obj: dict[str, Any] = {"Id": container_id, "State": state}
+    if restart_count is not None:
+        obj["RestartCount"] = restart_count
+    return obj
+
+
+def capture_container_state(inspector: ContainerInspector, container: str) -> ContainerState:
+    """Inspect the container and return a normalized state (or a missing state)."""
+    res = inspector.inspect(container)
+    if not res.ok or not res.exists or res.raw is None:
+        return ContainerState(
+            exists=False,
+            container_id="",
+            running=False,
+            status="",
+            started_at="",
+            exit_code=None,
+            health=HEALTH_NONE,
+            restart_count=None,
+            has_healthcheck=False,
+        )
+    return parse_inspect_payload(res.raw)
+
+
+def _noop_sleep(_seconds: float) -> None:  # pragma: no cover - default in production
+    import time as _time
+
+    _time.sleep(_seconds)
+
+
+@dataclass(frozen=True)
+class VerificationOutcome:
+    """Result of post-mutation verification: a serializable block plus raw after-payload."""
+
+    summary: dict[str, Any]
+    after_raw: dict[str, Any] | None
+
+
+def run_post_restart_verification(
+    *,
+    inspector: ContainerInspector,
+    container: str,
+    before_state: ContainerState,
+    restart_ok: bool,
+    config: VerificationConfig | None = None,
+    sleep_fn: Any = None,
+) -> VerificationOutcome:
+    """Run bounded read-only verification after a restart.
+
+    Returns a :class:`VerificationOutcome` whose ``summary`` is suitable for
+    embedding in the execution receipt and audit event, and whose ``after_raw``
+    is the most recent raw inspect payload (for evidence). Never restarts,
+    never execs, and only calls the injected ``inspector`` (which itself only
+    performs read-only inspect).
+    """
+    cfg = config or VerificationConfig()
+    sleep = sleep_fn or _noop_sleep
+    notes: list[str] = []
+
+    if not restart_ok:
+        return VerificationOutcome(
+            summary={
+                "status": VERIFICATION_STATUS_SKIPPED,
+                "started_at_before": before_state.started_at,
+                "started_at_after": "",
+                "started_at_changed": False,
+                "running_after": False,
+                "health_before": before_state.health,
+                "health_after": HEALTH_UNKNOWN,
+                "restart_count_before": before_state.restart_count,
+                "restart_count_after": None,
+                "has_healthcheck": before_state.has_healthcheck,
+                "notes": ["restart command failed; verification skipped"],
+            },
+            after_raw=None,
+        )
+
+    if cfg.post_restart_wait_seconds > 0:
+        sleep(cfg.post_restart_wait_seconds)
+
+    after_inspect = inspector.inspect(container)
+    if not after_inspect.ok:
+        return VerificationOutcome(
+            summary={
+                "status": VERIFICATION_STATUS_FAILED,
+                "started_at_before": before_state.started_at,
+                "started_at_after": "",
+                "started_at_changed": False,
+                "running_after": False,
+                "health_before": before_state.health,
+                "health_after": HEALTH_UNKNOWN,
+                "restart_count_before": before_state.restart_count,
+                "restart_count_after": None,
+                "has_healthcheck": before_state.has_healthcheck,
+                "notes": [f"inspect failed after restart: {after_inspect.error}"],
+            },
+            after_raw=None,
+        )
+    after = capture_container_state_from(after_inspect)
+    last_raw: dict[str, Any] | None = after_inspect.raw if after_inspect.exists else None
+
+    if not after.exists:
+        return VerificationOutcome(
+            summary={
+                "status": VERIFICATION_STATUS_FAILED,
+                "started_at_before": before_state.started_at,
+                "started_at_after": "",
+                "started_at_changed": False,
+                "running_after": False,
+                "health_before": before_state.health,
+                "health_after": HEALTH_UNKNOWN,
+                "restart_count_before": before_state.restart_count,
+                "restart_count_after": None,
+                "has_healthcheck": before_state.has_healthcheck,
+                "notes": ["container missing after restart"],
+            },
+            after_raw=last_raw,
+        )
+
+    if not after.running:
+        return VerificationOutcome(
+            summary={
+                "status": VERIFICATION_STATUS_FAILED,
+                "started_at_before": before_state.started_at,
+                "started_at_after": after.started_at,
+                "started_at_changed": before_state.started_at != after.started_at,
+                "running_after": False,
+                "health_before": before_state.health,
+                "health_after": after.health,
+                "restart_count_before": before_state.restart_count,
+                "restart_count_after": after.restart_count,
+                "has_healthcheck": after.has_healthcheck,
+                "notes": [
+                    "container not running after restart; no second restart attempted",
+                ],
+            },
+            after_raw=last_raw,
+        )
+
+    started_changed = bool(before_state.started_at) and before_state.started_at != after.started_at
+    if not started_changed:
+        notes.append("StartedAt did not change after restart command exited 0")
+
+    if (
+        before_state.restart_count is not None
+        and after.restart_count is not None
+        and before_state.restart_count == after.restart_count
+    ):
+        notes.append("RestartCount did not change; manual docker restart may not increment it.")
+
+    # Health polling — only when a healthcheck exists.
+    final_health = after.health
+    if after.has_healthcheck:
+        deadline_polls = 0
+        max_polls = 0
+        if cfg.health_poll_interval_seconds > 0:
+            max_polls = int(cfg.health_wait_seconds / cfg.health_poll_interval_seconds)
+        # Initial reading already in after.health; poll further while starting.
+        current = after
+        while current.health == HEALTH_STARTING and deadline_polls < max_polls:
+            sleep(cfg.health_poll_interval_seconds)
+            deadline_polls += 1
+            poll = inspector.inspect(container)
+            if not poll.ok:
+                notes.append(f"health poll inspect failed: {poll.error}")
+                break
+            if poll.exists and poll.raw is not None:
+                last_raw = poll.raw
+            current = capture_container_state_from(poll)
+            if not current.exists or not current.running:
+                return VerificationOutcome(
+                    summary={
+                        "status": VERIFICATION_STATUS_FAILED,
+                        "started_at_before": before_state.started_at,
+                        "started_at_after": current.started_at,
+                        "started_at_changed": before_state.started_at != current.started_at,
+                        "running_after": False,
+                        "health_before": before_state.health,
+                        "health_after": current.health,
+                        "restart_count_before": before_state.restart_count,
+                        "restart_count_after": current.restart_count,
+                        "has_healthcheck": current.has_healthcheck,
+                        "notes": notes + ["container disappeared or stopped during health polling"],
+                    },
+                    after_raw=last_raw,
+                )
+        final_health = current.health
+
+    if after.has_healthcheck:
+        if final_health == HEALTH_UNHEALTHY:
+            return VerificationOutcome(
+                summary={
+                    "status": VERIFICATION_STATUS_FAILED,
+                    "started_at_before": before_state.started_at,
+                    "started_at_after": after.started_at,
+                    "started_at_changed": started_changed,
+                    "running_after": True,
+                    "health_before": before_state.health,
+                    "health_after": final_health,
+                    "restart_count_before": before_state.restart_count,
+                    "restart_count_after": after.restart_count,
+                    "has_healthcheck": True,
+                    "notes": notes + ["healthcheck reports unhealthy after restart"],
+                },
+                after_raw=last_raw,
+            )
+        if final_health == HEALTH_STARTING:
+            notes.append("Healthcheck still starting after timeout.")
+            return VerificationOutcome(
+                summary={
+                    "status": VERIFICATION_STATUS_WARNING,
+                    "started_at_before": before_state.started_at,
+                    "started_at_after": after.started_at,
+                    "started_at_changed": started_changed,
+                    "running_after": True,
+                    "health_before": before_state.health,
+                    "health_after": final_health,
+                    "restart_count_before": before_state.restart_count,
+                    "restart_count_after": after.restart_count,
+                    "has_healthcheck": True,
+                    "notes": notes,
+                },
+                after_raw=last_raw,
+            )
+        if final_health == HEALTH_UNKNOWN:
+            notes.append("Healthcheck status is unknown after restart")
+            return VerificationOutcome(
+                summary={
+                    "status": VERIFICATION_STATUS_WARNING,
+                    "started_at_before": before_state.started_at,
+                    "started_at_after": after.started_at,
+                    "started_at_changed": started_changed,
+                    "running_after": True,
+                    "health_before": before_state.health,
+                    "health_after": final_health,
+                    "restart_count_before": before_state.restart_count,
+                    "restart_count_after": after.restart_count,
+                    "has_healthcheck": True,
+                    "notes": notes,
+                },
+                after_raw=last_raw,
+            )
+
+    # Pass path. Distinguish pass vs warning based on accumulated notes.
+    if not started_changed:
+        return VerificationOutcome(
+            summary={
+                "status": VERIFICATION_STATUS_WARNING,
+                "started_at_before": before_state.started_at,
+                "started_at_after": after.started_at,
+                "started_at_changed": False,
+                "running_after": True,
+                "health_before": before_state.health,
+                "health_after": final_health,
+                "restart_count_before": before_state.restart_count,
+                "restart_count_after": after.restart_count,
+                "has_healthcheck": after.has_healthcheck,
+                "notes": notes,
+            },
+            after_raw=last_raw,
+        )
+
+    return VerificationOutcome(
+        summary={
+            "status": VERIFICATION_STATUS_PASSED,
+            "started_at_before": before_state.started_at,
+            "started_at_after": after.started_at,
+            "started_at_changed": True,
+            "running_after": True,
+            "health_before": before_state.health,
+            "health_after": final_health,
+            "restart_count_before": before_state.restart_count,
+            "restart_count_after": after.restart_count,
+            "has_healthcheck": after.has_healthcheck,
+            "notes": notes,
+        },
+        after_raw=last_raw,
+    )
+
+
+def capture_container_state_from(result: InspectResult) -> ContainerState:
+    if not result.ok or not result.exists or result.raw is None:
+        return ContainerState(
+            exists=False,
+            container_id="",
+            running=False,
+            status="",
+            started_at="",
+            exit_code=None,
+            health=HEALTH_NONE,
+            restart_count=None,
+            has_healthcheck=False,
+        )
+    return parse_inspect_payload(result.raw)
+
+
+def write_verification_evidence(
+    receipt_path: Path,
+    *,
+    before_raw: dict[str, Any] | None,
+    after_raw: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Persist before/after inspect JSON alongside the receipt and return paths.
+
+    Evidence files live in a sibling directory whose name matches the receipt
+    stem. The receipt JSON glob (``execution_receipts/exec_*.json``) does not
+    descend into subdirectories, so PR47 receipts-list tests are unaffected.
+    """
+    evidence_dir = Path(receipt_path).with_suffix("")
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, str] = {}
+    if before_raw is not None:
+        p = evidence_dir / "before-inspect.json"
+        p.write_text(json.dumps(before_raw, indent=2, default=str), encoding="utf-8")
+        paths["before_inspect_path"] = str(p)
+    if after_raw is not None:
+        p = evidence_dir / "after-inspect.json"
+        p.write_text(json.dumps(after_raw, indent=2, default=str), encoding="utf-8")
+        paths["after_inspect_path"] = str(p)
+    return paths
 
 
 __all__ = [
@@ -552,11 +1145,26 @@ __all__ = [
     "AUDIT_KIND_EXECUTION",
     "Allowlist",
     "CommandExecutor",
+    "ContainerInspector",
+    "ContainerState",
+    "DockerCliInspector",
     "EXECUTION_POLICY_ALLOWED",
     "ENV_ALLOW_LAB_RESTART",
     "ENV_MUTATION_MODE",
     "ExecResult",
     "FakeCommandExecutor",
+    "FakeContainerInspector",
+    "HEALTH_HEALTHY",
+    "HEALTH_NONE",
+    "HEALTH_STARTING",
+    "HEALTH_UNHEALTHY",
+    "HEALTH_UNKNOWN",
+    "InspectResult",
+    "VERIFICATION_STATUS_FAILED",
+    "VERIFICATION_STATUS_PASSED",
+    "VERIFICATION_STATUS_SKIPPED",
+    "VERIFICATION_STATUS_WARNING",
+    "VerificationConfig",
     "GATE_ACTION_NOT_FOUND",
     "GATE_ACTION_NOT_RESTART",
     "GATE_ALLOWLIST_DISABLED",
@@ -579,15 +1187,21 @@ __all__ = [
     "POLICY_FILE",
     "RestartCandidate",
     "SubprocessExecutor",
+    "capture_container_state",
+    "capture_container_state_from",
     "evaluate_gates",
     "find_restart_candidates",
     "is_safe_container_name",
     "is_valid_restart_argv",
     "load_allowlist",
+    "make_inspect_payload",
     "mutation_mode_enabled",
+    "parse_inspect_payload",
     "parse_restart_command",
     "policy_path",
     "receipts_dir",
+    "run_post_restart_verification",
     "write_default_allowlist",
     "write_execution_receipt",
+    "write_verification_evidence",
 ]
