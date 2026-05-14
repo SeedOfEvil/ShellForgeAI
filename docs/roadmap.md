@@ -132,3 +132,15 @@
 - PR43 completed: operator status dashboard (`shellforgeai status`) with read-only health/safety summary, JSON schema v1 output, ask-route integration for status questions, and explicit non-execution reporting.
 
 - Metadata hygiene visibility and deterministic dry-run cleanup guidance in doctor/retention/ask flows.
+
+- PR46 completed: first guarded mutation gate. `shellforgeai audit prune`
+  may now execute deletion limited strictly to ShellForgeAI-owned metadata
+  under `<data_dir>` and `<data_dir>/audit`, only after both `--execute` and
+  `--confirm` are passed and per-path safety validation succeeds. Each
+  execute writes a JSON + markdown receipt under
+  `<data_dir>/prune_receipts/`. Audit events for prune carry
+  `metadata_cleanup_executed`/`remediation_execution=false`/`shellforgeai_owned_paths_only=true`
+  in `details`; the audit safety block remains
+  `execution_allowed=false`/`execution_status=not_executed`/`mutation_performed=false`.
+  Ask routing for cleanup phrasing refuses to delete and prints the explicit
+  `--execute --confirm` CLI guidance. `apply` remains validation/preflight-only.

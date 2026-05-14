@@ -34,7 +34,12 @@ def test_audit_prune_execute_and_archive_validate(tmp_path: Path, monkeypatch) -
     f = tmp_path / "exports" / "e1.json"
     f.write_text("x")
 
-    run = runner.invoke(app, ["audit", "prune", "--category", "exports", "--execute"])
+    # PR46: --execute requires --confirm as a second explicit gate.
+    refused = runner.invoke(app, ["audit", "prune", "--category", "exports", "--execute"])
+    assert refused.exit_code == 1
+    assert f.exists()
+
+    run = runner.invoke(app, ["audit", "prune", "--category", "exports", "--execute", "--confirm"])
     assert run.exit_code == 0
     assert not f.exists()
 

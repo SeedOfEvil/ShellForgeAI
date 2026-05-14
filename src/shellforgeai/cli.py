@@ -97,14 +97,18 @@ from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.retention import (
+    ALLOWED_PRUNE_CATEGORIES,
     DEFAULT_PRUNE_CATEGORIES,
+    PROTECTED_PRUNE_CATEGORIES,
     build_categories,
     collect_category,
     create_archive,
     delete_paths,
+    ensure_safe_delete_target,
     file_size,
     prune_select,
     validate_archive,
+    write_prune_receipt,
 )
 from shellforgeai.core.runbook import (
     build_runbook,
@@ -202,6 +206,15 @@ def _is_retention_ask(question: str) -> bool:
             "is shellforgeai data getting large",
             "how do i prune old exports safely",
             "clean it now",
+            "cleanup now",
+            "clean up now",
+            "delete old exports",
+            "delete old exports now",
+            "free up shellforgeai disk",
+            "delete now",
+            "purge now",
+            "clean old metadata",
+            "clean up old metadata",
         ]
     )
 
@@ -233,14 +246,26 @@ def _handle_retention_ask(runtime: RuntimeContext, question: str) -> bool:
     ]
     rows.sort(key=lambda x: int(x[2]), reverse=True)
     q = (question or "").lower()
-    if "clean it now" in q:
+    delete_now_phrases = (
+        "clean it now",
+        "cleanup now",
+        "clean up now",
+        "delete old exports now",
+        "delete old exports",
+        "free up shellforgeai disk",
+        "delete now",
+        "purge now",
+    )
+    if any(t in q for t in delete_now_phrases):
         console.print("Refusing automatic deletion from ask mode.")
+        console.print("Natural language cannot delete ShellForgeAI metadata.")
         console.print(
             "Run a dry-run first: shellforgeai audit prune --dry-run "
             "--category exports --max-age-days 30"
         )
         console.print(
-            "After reviewing the dry-run and archive, an operator may rerun with --execute."
+            "After reviewing the dry-run, an operator must rerun with "
+            "--execute --confirm to actually delete."
         )
         return True
     if _is_prune_dry_run_ask(question):
@@ -352,6 +377,14 @@ def _append_audit_event(runtime: RuntimeContext, **kwargs) -> None:
         AuditStorage(runtime.session.data_dir).write_event(**kwargs)
     except Exception as exc:
         console.print(f"Warning: failed to append audit event ({exc})")
+
+
+def _append_audit_event_returning(runtime: RuntimeContext, **kwargs: Any) -> dict[str, Any] | None:
+    try:
+        return AuditStorage(runtime.session.data_dir).write_event(**kwargs)
+    except Exception as exc:
+        console.print(f"Warning: failed to append audit event ({exc})")
+        return None
 
 
 def _network_reachability_hints(findings, items) -> list[str]:
@@ -788,6 +821,7 @@ def audit_prune(
     ctx: typer.Context,
     dry_run: bool = typer.Option(True, "--dry-run"),
     execute: bool = typer.Option(False, "--execute"),
+    confirm: bool = typer.Option(False, "--confirm"),
     max_age_days: int | None = typer.Option(None, "--max-age-days"),
     keep_latest: int | None = typer.Option(None, "--keep-latest"),
     category: str = typer.Option("default", "--category"),
@@ -798,24 +832,51 @@ def audit_prune(
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
     cats = build_categories(data_dir)
-    category_map = {
-        "apply-bundles": "apply-bundles",
-        "audit-exports": "audit-exports",
-        "indexes": "indexes",
-        "actions": "actions",
-        "exports": "exports",
-        "artifacts": "artifacts",
-    }
+
     if category == "default":
         wanted = list(DEFAULT_PRUNE_CATEGORIES)
     elif category == "all":
-        wanted = ["exports", "apply-bundles", "actions", "audit-exports", "indexes", "artifacts"]
-    elif category in category_map:
+        wanted = list(ALLOWED_PRUNE_CATEGORIES)
+    elif category in PROTECTED_PRUNE_CATEGORIES:
+        console.print(f"Refused: category '{category}' is protected and not eligible for prune.")
+        _append_audit_event(
+            runtime,
+            kind="audit",
+            action="prune",
+            status="refused",
+            summary="metadata prune refused: protected category",
+            details={
+                "operation": "metadata_prune_refused",
+                "reason": "protected_category",
+                "category": category,
+                "metadata_cleanup_executed": False,
+                "remediation_execution": False,
+                "shellforgeai_owned_paths_only": True,
+            },
+        )
+        raise typer.Exit(code=1)
+    elif category in ALLOWED_PRUNE_CATEGORIES:
         wanted = [category]
     else:
-        console.print(f"Unknown category: {category}")
+        console.print(f"Refused: unknown category '{category}'.")
+        _append_audit_event(
+            runtime,
+            kind="audit",
+            action="prune",
+            status="refused",
+            summary="metadata prune refused: unknown category",
+            details={
+                "operation": "metadata_prune_refused",
+                "reason": "unknown_category",
+                "category": category,
+                "metadata_cleanup_executed": False,
+                "remediation_execution": False,
+                "shellforgeai_owned_paths_only": True,
+            },
+        )
         raise typer.Exit(code=1)
-    selected = []
+
+    selected: list[Path] = []
     for w in wanted:
         selected.extend(
             prune_select(
@@ -828,39 +889,127 @@ def audit_prune(
         selected = [p for p in selected if proposal_id in p.name or proposal_id in str(p)]
     selected = sorted(set(selected))
     would_bytes = sum(file_size(p) for p in selected)
-    console.print(f"Prune plan ({'execute' if execute else 'dry-run'}):")
-    console.print(f"- selected: {len(selected)}")
-    console.print(f"- bytes: {would_bytes}")
-    console.print(f"- execution: {'metadata prune requested' if execute else 'none'}")
-    for p in selected[:20]:
-        console.print(f"- {p}")
+
+    if execute and not confirm:
+        console.print("Refused: --execute requires --confirm to perform metadata deletion.")
+        console.print("Rerun: shellforgeai audit prune ... --execute --confirm")
+        _append_audit_event(
+            runtime,
+            kind="audit",
+            action="prune",
+            status="refused",
+            summary="metadata prune refused: missing --confirm",
+            details={
+                "operation": "metadata_prune_refused",
+                "reason": "missing_confirm",
+                "category": category,
+                "selected": len(selected),
+                "metadata_cleanup_executed": False,
+                "remediation_execution": False,
+                "shellforgeai_owned_paths_only": True,
+            },
+        )
+        raise typer.Exit(code=1)
+
     if not execute:
+        console.print("Prune plan (dry-run):")
+        console.print(f"- selected: {len(selected)}")
+        console.print(f"- would_delete: {len(selected)}")
+        console.print(f"- bytes: {would_bytes}")
+        console.print("- execution: none")
+        console.print("- next step: rerun with --execute --confirm after review")
+        for p in selected[:20]:
+            console.print(f"- {p}")
         _append_audit_event(
             runtime,
             kind="audit",
             action="prune",
             status="planned",
             summary="metadata prune dry-run",
-            details={"operation": "metadata_prune_dry_run", "count": len(selected)},
+            details={
+                "operation": "metadata_prune_dry_run",
+                "category": category,
+                "count": len(selected),
+                "bytes": would_bytes,
+                "execution_status": "not_executed",
+                "metadata_cleanup_executed": False,
+                "remediation_execution": False,
+                "shellforgeai_owned_paths_only": True,
+            },
         )
         return
-    if dry_run and not execute:
-        return
+
+    if not selected:
+        console.print("Refused: selection is empty; nothing to prune.")
+        _append_audit_event(
+            runtime,
+            kind="audit",
+            action="prune",
+            status="refused",
+            summary="metadata prune refused: empty selection",
+            details={
+                "operation": "metadata_prune_refused",
+                "reason": "empty_selection",
+                "category": category,
+                "metadata_cleanup_executed": False,
+                "remediation_execution": False,
+                "shellforgeai_owned_paths_only": True,
+            },
+        )
+        raise typer.Exit(code=1)
+
+    allowed_roots = [
+        data_dir / "exports",
+        data_dir / "apply_bundles",
+        data_dir / "actions",
+        data_dir / "audit_exports",
+        data_dir / "audit",
+        data_dir / "artifacts",
+    ]
+    refusals: list[str] = []
+    for p in selected:
+        refusal = ensure_safe_delete_target(p, allowed_roots)
+        if refusal:
+            refusals.append(refusal)
+    if refusals:
+        console.print("Refused: path safety validation failed.")
+        for r in refusals[:20]:
+            console.print(f"- {r}")
+        _append_audit_event(
+            runtime,
+            kind="audit",
+            action="prune",
+            status="refused",
+            summary="metadata prune refused: path safety",
+            details={
+                "operation": "metadata_prune_refused",
+                "reason": "path_safety",
+                "category": category,
+                "refusals": refusals[:50],
+                "metadata_cleanup_executed": False,
+                "remediation_execution": False,
+                "shellforgeai_owned_paths_only": True,
+            },
+        )
+        raise typer.Exit(code=1)
+
     if archive and selected:
         ap = create_archive(selected, data_dir, source="prune")
         console.print(f"- archive: {ap}")
-    deleted, errors, removed = delete_paths(
-        selected,
-        [
-            data_dir / "exports",
-            data_dir / "apply_bundles",
-            data_dir / "actions",
-            data_dir / "audit_exports",
-            data_dir / "audit",
-            data_dir / "artifacts",
-        ],
+
+    deleted, errors, removed = delete_paths(selected, allowed_roots)
+    receipt_json, _receipt_md = write_prune_receipt(
+        data_dir,
+        mode="execute",
+        category=category,
+        selection=selected,
+        deleted=deleted,
+        failed=errors,
+        bytes_removed=removed,
+        max_age_days=max_age_days,
+        keep_latest=keep_latest,
     )
-    _append_audit_event(
+    event = _append_audit_event_returning(
         runtime,
         kind="audit",
         action="prune",
@@ -868,13 +1017,29 @@ def audit_prune(
         summary="metadata prune executed",
         details={
             "operation": "metadata_prune_executed",
+            "category": category,
             "deleted": len(deleted),
-            "errors": len(errors),
+            "failed": len(errors),
+            "bytes_removed": removed,
+            "receipt": str(receipt_json),
+            "execution_status": "not_executed",
+            "metadata_cleanup_executed": True,
+            "remediation_execution": False,
+            "docker_mutation": False,
+            "service_mutation": False,
+            "package_mutation": False,
+            "shellforgeai_owned_paths_only": True,
         },
     )
     console.print("Prune executed:")
     console.print(f"- deleted: {len(deleted)}")
+    console.print(f"- failed: {len(errors)}")
     console.print(f"- bytes_removed: {removed}")
+    if event and event.get("event_id"):
+        console.print(f"- audit event: {event['event_id']}")
+    console.print("- scope: ShellForgeAI-owned metadata only")
+    console.print("- remediation_execution: false")
+    console.print(f"- receipt: {receipt_json}")
     if errors:
         for e in errors:
             console.print(f"- {e}")
