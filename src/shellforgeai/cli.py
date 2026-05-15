@@ -102,6 +102,16 @@ from shellforgeai.core.guards import (
 from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
+from shellforgeai.core.restart_plan import (
+    _resolve_proposal as resolve_restart_plan_proposal,
+)
+from shellforgeai.core.restart_plan import (
+    build_restart_plan,
+    render_restart_plan,
+)
+from shellforgeai.core.restart_plan import (
+    to_json as restart_plan_to_json,
+)
 from shellforgeai.core.retention import (
     ALLOWED_PRUNE_CATEGORIES,
     DEFAULT_PRUNE_CATEGORIES,
@@ -2980,6 +2990,47 @@ def approvals_propose_restart(
     console.print("- execution: disabled")
 
 
+@approvals_app.command("restart-plan")
+def approvals_restart_plan(
+    ctx: typer.Context,
+    proposal_id: Annotated[str | None, typer.Argument()] = None,
+    latest: Annotated[bool, typer.Option("--latest")] = False,
+    from_session: Annotated[str | None, typer.Option("--from-session")] = None,
+    from_evidence: Annotated[Path | None, typer.Option("--from-evidence")] = None,
+    container: Annotated[str | None, typer.Option("--container")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    proposal, _status = resolve_restart_plan_proposal(
+        data_dir,
+        proposal_id,
+        latest=latest,
+        from_session=from_session,
+        from_evidence=from_evidence,
+        container=container,
+    )
+    plan = build_restart_plan(data_dir, proposal, target_hint=(container or ""))
+    payload = plan.payload
+    _append_audit_event(
+        runtime,
+        kind="restart_plan",
+        action="previewed",
+        status="success" if payload["apply_readiness"]["status"] == "ready" else "warning",
+        proposal_id=payload.get("proposal_id") or None,
+        session_id=payload.get("session_id") or None,
+        target=payload.get("target") or None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary="restart plan preview generated",
+        details={"blockers_count": len(payload["apply_readiness"]["blockers"])},
+    )
+    if json_out:
+        typer.echo(restart_plan_to_json(plan))
+        return
+    console.print(render_restart_plan(plan))
+
+
 @approvals_app.command("list")
 def approvals_list(
     ctx: typer.Context,
@@ -3295,6 +3346,25 @@ def _handle_create_restart_proposal_ask(runtime: RuntimeContext, question: str) 
     console.print(f"- proposal: {proposal.proposal_id}")
     console.print(f"- status: {proposal.status}")
     console.print(f"- command_preview: {proposal.proposed_steps[0]}")
+    return True
+
+
+def _handle_restart_plan_ask(runtime: RuntimeContext, question: str) -> bool:
+    raw = (question or "").lower()
+    tokens = (
+        "show restart checklist",
+        "what is needed before restart",
+        "is this restart proposal ready",
+        "why is apply blocked",
+        "show me the safe restart plan",
+        "what commands do i run next",
+    )
+    if not any(t in raw for t in tokens):
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    proposal = latest_approved_proposal(data_dir)
+    plan = build_restart_plan(data_dir, proposal)
+    console.print(render_restart_plan(plan))
     return True
 
 
@@ -3891,6 +3961,8 @@ def ask(
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):
+            return
+        if _handle_restart_plan_ask(runtime, question):
             return
         if _handle_lab_restart_verification_ask(runtime, question):
             return
