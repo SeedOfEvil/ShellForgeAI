@@ -353,6 +353,26 @@ def is_create_proposals_intent(text: str) -> CreateProposalsIntent:
     return CreateProposalsIntent(matched=False)
 
 
+@dataclass(frozen=True)
+class CreateRestartProposalIntent:
+    matched: bool
+    container: str = ""
+
+
+def is_create_restart_proposal_intent(text: str) -> CreateRestartProposalIntent:
+    raw = (text or "").lower()
+    hints = (
+        "propose restart for ",
+        "create restart proposal for ",
+        "prepare safe restart proposal for ",
+        "build a restart approval for ",
+        "can shellforgeai restart ",
+    )
+    if not any(h in raw for h in hints):
+        return CreateRestartProposalIntent(matched=False)
+    return CreateRestartProposalIntent(matched=True, container=extract_container_target(text))
+
+
 def is_immediate_fix_intent(text: str) -> bool:
     """Detect 'approve and run / fix everything now' style asks."""
     raw = (text or "").lower()

@@ -362,3 +362,12 @@ shellforgeai ask "check drift before apply"
 - `shellforgeai audit retention` now reports total human-readable size and category severities, sorted largest-first.
 - Use `shellforgeai audit retention --top N` to list the largest ShellForgeAI-owned metadata items.
 - Cleanup guidance remains read-only by default; start with dry-run prune/archive commands.
+
+
+### PR50 — evidence-to-approved-action restart proposal builder
+
+- New command: `shellforgeai approvals propose-restart <container> --latest` (or `--from-session <id>` / `--from-evidence <path>`).
+- Creates a **pending** proposal only (no approval, no rollback preview generation, no apply execution).
+- Refuses non-allowlisted targets, missing/unsafe targets, and missing evidence.
+- Safety labels include `DOCKER-MUTATION` and either `ALLOWLISTED-LAB-TARGET` or `DISPOSABLE-TARGET`.
+- Next flow: approve -> rollback preview -> apply `--execute --confirm` with existing PR48/PR49 gates.
