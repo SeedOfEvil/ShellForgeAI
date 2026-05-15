@@ -100,6 +100,24 @@ from shellforgeai.core.guards import (
     write_guard_report,
 )
 from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
+from shellforgeai.core.mission import (
+    latest_mission as mission_latest,
+)
+from shellforgeai.core.mission import (
+    load_mission as mission_load,
+)
+from shellforgeai.core.mission import (
+    mission_dir as mission_dir_path,
+)
+from shellforgeai.core.mission import (
+    mission_json_path,
+    prepare_mission,
+    refresh_mission,
+    validate_mission_path,
+)
+from shellforgeai.core.mission import (
+    render_checklist as mission_render_checklist,
+)
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.restart_plan import (
@@ -164,6 +182,13 @@ rollback_app = typer.Typer(help="Rollback preview/validation for service-impacti
 guard_app = typer.Typer(
     help="Stale-evidence / drift guard for proposals, actions, and export packs (read-only).",
 )
+mission_app = typer.Typer(
+    help="Guided safe mission workflows (metadata-only; no mutation by default).",
+)
+mission_restart_app = typer.Typer(
+    help="Guided safe restart mission workflow (PR52). Metadata/checklist only.",
+)
+mission_app.add_typer(mission_restart_app, name="restart")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -172,6 +197,7 @@ app.add_typer(approvals_app, name="approvals")
 app.add_typer(actions_app, name="actions")
 app.add_typer(rollback_app, name="rollback")
 app.add_typer(guard_app, name="guard")
+app.add_typer(mission_app, name="mission")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -3031,6 +3057,269 @@ def approvals_restart_plan(
     console.print(render_restart_plan(plan))
 
 
+def _resolve_mission_id(runtime: RuntimeContext, mission_id: str | None) -> str:
+    data_dir = Path(runtime.session.data_dir)
+    if mission_id:
+        return mission_id
+    latest = mission_latest(data_dir)
+    if latest is None:
+        console.print("No restart missions found.")
+        raise typer.Exit(code=1)
+    return str(latest["mission_id"])
+
+
+@mission_restart_app.command("prepare")
+def mission_restart_prepare(
+    ctx: typer.Context,
+    container: Annotated[str | None, typer.Option("--container")] = None,
+    from_session: Annotated[str | None, typer.Option("--from-session")] = None,
+    from_evidence: Annotated[Path | None, typer.Option("--from-evidence")] = None,
+    latest: Annotated[bool, typer.Option("--latest")] = False,
+    with_rollback_preview: Annotated[bool, typer.Option("--with-rollback-preview")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Prepare a guided safe restart mission record (metadata only)."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    target = (container or "").strip()
+    if not target:
+        raise typer.BadParameter("--container is required.")
+    evidence_path: Path | None = None
+    session_id = ""
+    if from_evidence is not None:
+        evidence_path = from_evidence
+        if evidence_path.parent.name.startswith("sf_"):
+            session_id = evidence_path.parent.name
+    elif from_session:
+        sess_dir = _resolve_session_dir(runtime, from_session)
+        evidence_path = sess_dir / "evidence.json"
+        if sess_dir.name.startswith("sf_"):
+            session_id = sess_dir.name
+    elif latest:
+        evidence_path = latest_evidence_artifact(data_dir)
+        if evidence_path is not None and evidence_path.parent.name.startswith("sf_"):
+            session_id = evidence_path.parent.name
+    else:
+        evidence_path = latest_evidence_artifact(data_dir)
+        if evidence_path is not None and evidence_path.parent.name.startswith("sf_"):
+            session_id = evidence_path.parent.name
+
+    result = prepare_mission(
+        data_dir,
+        container=target,
+        evidence_path=evidence_path,
+        session_id=session_id,
+        with_rollback_preview=with_rollback_preview,
+    )
+    if not result.ok:
+        _append_audit_event(
+            runtime,
+            kind="restart_mission",
+            action="prepared",
+            status="warning",
+            target=target,
+            mutation_performed=False,
+            execution_status="not_executed",
+            summary=f"mission prepare refused: {result.refusal}",
+            details={"refusal": result.refusal},
+        )
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "refusal": result.refusal}, indent=2))
+            raise typer.Exit(code=1)
+        console.print("Restart mission preparation refused:")
+        console.print(f"- reason: {result.refusal}")
+        console.print("- no execution performed")
+        raise typer.Exit(code=1)
+
+    payload = result.payload or {}
+    _append_audit_event(
+        runtime,
+        kind="restart_mission",
+        action="prepared",
+        status="success",
+        proposal_id=payload.get("proposal_id") or None,
+        session_id=payload.get("session_id") or None,
+        target=payload.get("target") or None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary=("mission prepared (deduped)" if result.deduped else "mission prepared"),
+        details={
+            "mission_id": payload.get("mission_id"),
+            "mission_status": payload.get("status"),
+            "deduped": result.deduped,
+        },
+    )
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    console.print("Restart mission deduped:" if result.deduped else "Restart mission prepared:")
+    console.print(f"- mission: {payload.get('mission_id')}")
+    console.print(f"- target: {payload.get('target')}")
+    console.print(f"- proposal: {payload.get('proposal_id')}")
+    console.print(f"- status: {payload.get('status')}")
+    console.print(f"- mission_path: {result.mission_path}")
+    console.print(f"- execution: {payload['safety']['execution_status']}")
+
+
+@mission_restart_app.command("status")
+def mission_restart_status(
+    ctx: typer.Context,
+    mission_id: Annotated[str | None, typer.Argument()] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Refresh and print the current mission status."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    mid = _resolve_mission_id(runtime, mission_id)
+    payload = refresh_mission(data_dir, mid)
+    _append_audit_event(
+        runtime,
+        kind="restart_mission",
+        action="status_viewed",
+        status="success",
+        proposal_id=payload.get("proposal_id") or None,
+        target=payload.get("target") or None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary="restart mission status viewed",
+        details={"mission_id": mid, "mission_status": payload.get("status")},
+    )
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    console.print(f"Mission: {mid}")
+    console.print(f"- target: {payload.get('target')}")
+    console.print(f"- status: {payload.get('status')}")
+    console.print(f"- proposal: {payload.get('proposal_id') or 'missing'}")
+    for key in (
+        "evidence",
+        "proposal",
+        "approval",
+        "rollback",
+        "readiness",
+        "execution",
+        "verification",
+    ):
+        ph = payload["phases"].get(key) or {}
+        console.print(f"- {key}: {ph.get('status')}")
+    console.print(f"- execution: {payload['safety']['execution_status']}")
+
+
+@mission_restart_app.command("checklist")
+def mission_restart_checklist(
+    ctx: typer.Context,
+    mission_id: Annotated[str | None, typer.Argument()] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Print the operator checklist for the mission."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    mid = _resolve_mission_id(runtime, mission_id)
+    payload = refresh_mission(data_dir, mid)
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    typer.echo(mission_render_checklist(payload))
+
+
+@mission_restart_app.command("validate")
+def mission_restart_validate(
+    ctx: typer.Context,
+    mission_id: Annotated[str | None, typer.Argument()] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate the mission record schema and safety invariants."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    mid = _resolve_mission_id(runtime, mission_id)
+    ok, errors, payload = validate_mission_path(mission_json_path(data_dir, mid))
+    _append_audit_event(
+        runtime,
+        kind="restart_mission_validate",
+        action="validated",
+        status="success" if ok else "failure",
+        proposal_id=(payload or {}).get("proposal_id") or None,
+        target=(payload or {}).get("target") or None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary="restart mission validated" if ok else "restart mission validation failed",
+        details={"mission_id": mid, "errors": errors},
+    )
+    if json_out:
+        typer.echo(json.dumps({"ok": ok, "mission_id": mid, "errors": errors}, indent=2))
+        if not ok:
+            raise typer.Exit(code=1)
+        return
+    if ok and payload is not None:
+        console.print("Restart mission validation passed:")
+        console.print(f"- mission: {payload.get('mission_id')}")
+        console.print(f"- target: {payload.get('target')}")
+        console.print(f"- proposal: {payload.get('proposal_id') or 'missing'}")
+        console.print(f"- status: {payload.get('status')}")
+        console.print(f"- execution: {payload['safety']['execution_status']}")
+        console.print("- safety: ok")
+        return
+    console.print("Restart mission validation failed:")
+    for err in errors:
+        console.print(f"- {err}")
+    raise typer.Exit(code=1)
+
+
+@mission_restart_app.command("export")
+def mission_restart_export(
+    ctx: typer.Context,
+    mission_id: Annotated[str | None, typer.Argument()] = None,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+) -> None:
+    """Bundle mission files (and referenced artifacts) into a compact export."""
+    import shutil
+
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    mid = _resolve_mission_id(runtime, mission_id)
+    payload = mission_load(data_dir, mid)
+    src_dir = mission_dir_path(data_dir, mid)
+    out_root = output or (data_dir / "mission_exports" / mid)
+    out_root.mkdir(parents=True, exist_ok=True)
+    included: list[str] = []
+    for name in ("mission.json", "mission.md"):
+        s = src_dir / name
+        if s.exists():
+            shutil.copy2(s, out_root / name)
+            included.append(name)
+    pid = str(payload.get("proposal_id") or "")
+    if pid:
+        path, _status = find_proposal_path(data_dir, pid)
+        if path is not None:
+            shutil.copy2(path, out_root / path.name)
+            included.append(path.name)
+    rb = str(payload.get("rollback_preview_path") or "")
+    if rb and Path(rb).exists():
+        shutil.copy2(rb, out_root / Path(rb).name)
+        included.append(Path(rb).name)
+    src_ev = str(payload.get("source_evidence") or "")
+    if src_ev and Path(src_ev).exists():
+        shutil.copy2(src_ev, out_root / "evidence.json")
+        included.append("evidence.json")
+    manifest = {
+        "schema_version": "1",
+        "mission_id": mid,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "included_files": included,
+        "safety": {
+            "execution_allowed": False,
+            "execution_status": "not_executed",
+            "mutation_performed": False,
+            "arbitrary_command_execution": False,
+        },
+    }
+    (out_root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    console.print("Restart mission exported:")
+    console.print(f"- mission: {mid}")
+    console.print(f"- output: {out_root}")
+    console.print(f"- files: {len(included)}")
+
+
 @approvals_app.command("list")
 def approvals_list(
     ctx: typer.Context,
@@ -3347,6 +3636,103 @@ def _handle_create_restart_proposal_ask(runtime: RuntimeContext, question: str) 
     console.print(f"- status: {proposal.status}")
     console.print(f"- command_preview: {proposal.proposed_steps[0]}")
     return True
+
+
+def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
+    """PR52: ask routing for guided safe restart mission (metadata-only)."""
+    raw = (question or "").lower().strip()
+    if not raw:
+        return False
+    data_dir = Path(runtime.session.data_dir)
+
+    prepare_hints = (
+        "prepare safe restart mission for ",
+        "prepare a safe restart mission for ",
+        "prepare restart mission for ",
+        "create safe restart mission for ",
+        "start safe restart mission for ",
+    )
+    if any(h in raw for h in prepare_hints):
+        container = extract_container_target(question)
+        if not container:
+            console.print("Restart mission preparation refused:")
+            console.print("- reason: missing or ambiguous container target")
+            return True
+        evidence_path = latest_evidence_artifact(data_dir)
+        session_id = ""
+        if evidence_path is not None and evidence_path.parent.name.startswith("sf_"):
+            session_id = evidence_path.parent.name
+        result = prepare_mission(
+            data_dir,
+            container=container,
+            evidence_path=evidence_path,
+            session_id=session_id,
+        )
+        if not result.ok:
+            console.print("Restart mission preparation refused:")
+            console.print(f"- reason: {result.refusal}")
+            console.print("- no execution performed")
+            return True
+        payload = result.payload or {}
+        console.print("Restart mission deduped:" if result.deduped else "Restart mission prepared:")
+        console.print(f"- mission: {payload.get('mission_id')}")
+        console.print(f"- target: {payload.get('target')}")
+        console.print(f"- proposal: {payload.get('proposal_id')}")
+        console.print(f"- status: {payload.get('status')}")
+        console.print(f"- mission_path: {result.mission_path}")
+        console.print(f"- execution: {payload['safety']['execution_status']}")
+        console.print(
+            "Next: shellforgeai mission restart checklist " + str(payload.get("mission_id"))
+        )
+        return True
+
+    status_hints = (
+        "show restart mission status",
+        "what is the restart mission status",
+        "is the restart mission ready",
+        "why is the restart mission blocked",
+        "what is next for the restart mission",
+        "what's next for the restart mission",
+        "show restart mission checklist",
+        "show me the restart mission checklist",
+    )
+    if any(h in raw for h in status_hints):
+        latest = mission_latest(data_dir)
+        if latest is None:
+            console.print("No restart missions found.")
+            console.print(
+                "- to create one: shellforgeai mission restart prepare --container <target>"
+            )
+            return True
+        mid = str(latest["mission_id"])
+        payload = refresh_mission(data_dir, mid)
+        typer.echo(mission_render_checklist(payload))
+        return True
+
+    refuse_hints = (
+        "run the restart mission",
+        "execute the restart mission",
+        "approve and execute the restart mission",
+        "approve and run the restart mission",
+        "restart it now",
+        "fire the restart mission",
+    )
+    if any(h in raw for h in refuse_hints):
+        latest = mission_latest(data_dir)
+        console.print(
+            "Refusing to execute: ShellForgeAI cannot run a restart mission from natural language."
+        )
+        console.print("- mission workflow is metadata/checklist only.")
+        console.print(
+            "- only execution path: shellforgeai apply <approved-proposal-id> --execute --confirm"
+        )
+        if latest is not None:
+            mid = str(latest["mission_id"])
+            payload = refresh_mission(data_dir, mid)
+            console.print("")
+            typer.echo(mission_render_checklist(payload))
+        return True
+    return False
 
 
 def _handle_restart_plan_ask(runtime: RuntimeContext, question: str) -> bool:
@@ -3961,6 +4347,8 @@ def ask(
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):
+            return
+        if _handle_mission_restart_ask(runtime, question):
             return
         if _handle_restart_plan_ask(runtime, question):
             return
