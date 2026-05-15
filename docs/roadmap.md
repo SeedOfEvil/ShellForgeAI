@@ -188,3 +188,8 @@
   without executing anything. `restart it and verify` is still routed to
   the mutation refusal path with explicit guidance that verification runs
   automatically after the approved CLI execution.
+
+
+## PR50 — Evidence-to-proposal restart builder
+
+Adds deterministic proposal creation for allowlisted lab/disposable Docker containers from evidence artifacts, with dedupe by fingerprint. This is proposal metadata only and does not approve, rollback, or execute mutation.

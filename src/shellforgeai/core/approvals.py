@@ -623,6 +623,153 @@ def create_proposals_for_session(
     return created
 
 
+def build_restart_proposal_from_evidence(
+    data_dir: Path,
+    evidence_path: Path,
+    *,
+    container_name: str,
+    source_session_id: str = "",
+) -> tuple[Proposal | None, str]:
+    """Create/dedupe a pending docker-restart proposal from evidence.
+
+    Returns ``(proposal, status)`` where status is one of:
+    ``created``, ``deduped``, ``refused``.
+    """
+    from shellforgeai.core import lab_restart as lab_restart_mod
+    from shellforgeai.core.guards import compute_proposal_source_hashes
+
+    name = (container_name or "").strip()
+    if not lab_restart_mod.is_safe_container_name(name):
+        return None, "refused: unsafe container name"
+    if name in ("shellforgeai", "shellforgeai-agent", "shellforgeai-cli"):
+        return None, "refused: target is shellforgeai itself"
+    if not evidence_path.exists():
+        return None, "refused: evidence not found"
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        return None, "refused: malformed evidence"
+    match: dict[str, Any] | None = None
+    for item in items:
+        if not isinstance(item, dict) or item.get("source") != "docker.containers":
+            continue
+        try:
+            content = json.loads(item.get("content") or "{}")
+        except (TypeError, ValueError):
+            continue
+        rows = content.get("containers") or []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("name") or "") == name:
+                if match is not None:
+                    return None, "refused: ambiguous target"
+                match = row
+    if match is None:
+        return None, "refused: target not found in evidence"
+    labels = match.get("labels") or {}
+    if not isinstance(labels, dict):
+        labels = {}
+    allowlisted = (
+        str(labels.get("shellforgeai.allow_restart", "")).lower() == "true"
+        or str(labels.get("shellforgeai.disposable", "")).lower() == "true"
+        or name.startswith("sfai-pr")
+        or name.startswith("sfai-lab-")
+        or name.startswith("sfai-test-")
+    )
+    if not allowlisted:
+        return None, "refused: container is not allowlisted for ShellForgeAI restart proposal"
+    now = datetime.now(timezone.utc).isoformat()
+    risk = (
+        RISK_LOW
+        if str(labels.get("shellforgeai.disposable", "")).lower() == "true"
+        else RISK_MEDIUM
+    )
+    confidence = "high" if (match.get("id") and match.get("state")) else "medium"
+    safety_target = (
+        "DISPOSABLE-TARGET"
+        if str(labels.get("shellforgeai.disposable", "")).lower() == "true"
+        else "ALLOWLISTED-LAB-TARGET"
+    )
+    step = f"docker restart {name}"
+    evidence_bits = [
+        f"container={name}",
+        f"id={match.get('id') or ''}",
+        f"image={match.get('image') or ''}",
+        f"state={match.get('state') or ''}",
+        f"status={match.get('status') or ''}",
+        f"health={match.get('health') or ''}",
+    ]
+    fingerprint = compute_proposal_fingerprint_payload(
+        session_id=source_session_id or str(payload.get("session_id") or ""),
+        option_id=f"docker-restart:{name}",
+        component=name,
+        kind="docker_restart",
+        title=f"Restart allowlisted lab container {name}",
+        risk=risk,
+        steps=[step],
+        rollback=["Generate rollback preview before execution."],
+        verification=["Confirm running_after=true, started_at_changed=true, health_after=healthy."],
+    )
+    proposal = Proposal(
+        proposal_id=make_proposal_id_for(
+            f"docker-restart:{name}", component=name, session_id=source_session_id
+        ),
+        created_at=now,
+        status=STATUS_PENDING,
+        source=ProposalSource(
+            session_id=source_session_id or str(payload.get("session_id") or ""),
+            evidence=str(evidence_path),
+            summary="docker.containers evidence",
+        ),
+        component=name,
+        kind="docker_restart",
+        title=f"Restart allowlisted lab container {name}",
+        risk=risk,
+        confidence=confidence,
+        evidence=evidence_bits,
+        preconditions=[
+            "Confirm container is allowlisted for restart proposals.",
+            "Confirm latest evidence still matches the target container.",
+            "Confirm rollback preview exists before execution.",
+        ],
+        proposed_steps=[step],
+        rollback=[
+            "Rollback preview is required before apply --execute --confirm.",
+            "Docker restart cannot restore previous in-memory process state.",
+        ],
+        verification=[
+            "Inspect container after restart.",
+            "Confirm running_after=true.",
+            "Confirm started_at_changed=true.",
+            "Confirm health_after=healthy when healthcheck exists.",
+        ],
+        safety_labels=[
+            "OPERATOR-RUN",
+            "REQUIRES APPROVAL",
+            "SERVICE-IMPACTING",
+            "DOCKER-MUTATION",
+            safety_target,
+        ],
+        execution=ProposalExecution(allowed=False, status="not_executed"),
+        fingerprint=fingerprint,
+        source_hashes=compute_proposal_source_hashes(
+            evidence_path=str(evidence_path),
+            runbook_path=None,
+            summary_path=None,
+        ),
+    )
+    _ensure_dirs(data_dir)
+    fp = str((proposal.fingerprint or {}).get("value") or "")
+    for _status, existing in list_proposals(data_dir):
+        if str((existing.fingerprint or {}).get("value") or "") == fp and fp:
+            return existing, "deduped"
+    write_proposal(data_dir, proposal)
+    return proposal, "created"
+
+
 # ---------------------------------------------------------------------------
 # Transitions
 

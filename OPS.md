@@ -540,3 +540,13 @@ real `time.sleep`, no root, no systemd/journal, no internet. Tests use
 `FakeContainerInspector` (read-only) and `FakeCommandExecutor` (only argv
 `["docker", "restart", "<safe-name>"]`) from
 `shellforgeai.core.lab_restart`.
+
+
+## Safe restart proposal workflow (PR50)
+
+1. `shellforgeai diagnose <target> --with-runbook`
+2. `shellforgeai approvals propose-restart <container> --latest`
+3. `shellforgeai approvals approve <id> --reason "..."`
+4. `shellforgeai rollback preview <id>`
+5. `shellforgeai apply <id> --execute --confirm`
+6. verify/audit/export as needed.

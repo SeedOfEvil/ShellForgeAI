@@ -412,3 +412,11 @@ that ask ShellForgeAI to *both* mutate and verify (`restart it and
 verify`) are routed to the PR47 mutation refusal path and explicitly
 remind the operator that verification runs automatically after the
 approved CLI execution.
+
+
+## PR50 restart proposal builder safety
+
+- `approvals propose-restart` is metadata-only and never executes Docker commands.
+- It requires evidence and only proposes for allowlisted/disposable lab targets.
+- Natural-language restart execution requests remain refused.
+- Rollback preview remains required before any `apply --execute --confirm` path.

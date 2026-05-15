@@ -32,6 +32,7 @@ from shellforgeai.core.approvals import (
     Proposal,
     approve_proposal,
     archive_proposal,
+    build_restart_proposal_from_evidence,
     cancel_proposal,
     create_proposals_for_session,
     find_proposal_path,
@@ -50,6 +51,7 @@ from shellforgeai.core.ask_routing import (
     extract_container_target,
     is_apply_approved_intent,
     is_create_proposals_intent,
+    is_create_restart_proposal_intent,
     is_immediate_fix_intent,
     is_lab_restart_ask_intent,
     is_lab_restart_verification_ask_intent,
@@ -2911,6 +2913,59 @@ def approvals_create(
         )
 
 
+@approvals_app.command("propose-restart")
+def approvals_propose_restart(
+    ctx: typer.Context,
+    container: Annotated[str, typer.Argument(help="Allowlisted lab/disposable container name.")],
+    from_session: Annotated[str | None, typer.Option("--from-session")] = None,
+    latest: Annotated[bool, typer.Option("--latest")] = False,
+    from_evidence: Annotated[Path | None, typer.Option("--from-evidence")] = None,
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    evidence_path: Path | None = None
+    session_id = ""
+    if from_evidence is not None:
+        evidence_path = from_evidence
+    elif from_session:
+        sess_dir = _resolve_session_dir(runtime, from_session)
+        evidence_path = sess_dir / "evidence.json"
+        session_id = from_session if from_session.startswith("sf_") else ""
+    elif latest:
+        latest_rb = latest_runbook(data_dir)
+        if latest_rb is not None:
+            evidence_path = latest_rb.parent / "evidence.json"
+            session_id = latest_rb.parent.name
+    if evidence_path is None:
+        console.print("Restart proposal refused:")
+        console.print(
+            "- reason: no evidence source selected "
+            "(use --latest / --from-session / --from-evidence)"
+        )
+        console.print("- no proposal created")
+        console.print("- no commands executed")
+        raise typer.Exit(code=1)
+    proposal, status = build_restart_proposal_from_evidence(
+        data_dir, evidence_path, container_name=container, source_session_id=session_id
+    )
+    if proposal is None:
+        console.print("Restart proposal refused:")
+        console.print(f"- reason: {status}")
+        console.print("- no proposal created")
+        console.print("- no commands executed")
+        raise typer.Exit(code=1)
+    if status == "deduped":
+        console.print("Restart proposal deduped:")
+    else:
+        console.print("Restart proposal created:")
+    console.print(f"- proposal: {proposal.proposal_id}")
+    console.print(f"- status: {proposal.status}")
+    console.print(f"- component: {proposal.component}")
+    console.print(f"- command_preview: {proposal.proposed_steps[0]}")
+    console.print(f"- mutation_kind: {proposal.kind}")
+    console.print("- execution: disabled")
+
+
 @approvals_app.command("list")
 def approvals_list(
     ctx: typer.Context,
@@ -3191,6 +3246,41 @@ def _handle_create_proposals_ask(runtime: RuntimeContext, question: str) -> bool
         for p in proposals:
             labels = " ".join(p.safety_labels) if p.safety_labels else ""
             console.print(f"- {p.proposal_id} {p.component} {p.risk} {labels}".rstrip())
+    return True
+
+
+def _handle_create_restart_proposal_ask(runtime: RuntimeContext, question: str) -> bool:
+    intent = is_create_restart_proposal_intent(question)
+    if not intent.matched:
+        return False
+    container = intent.container
+    if not container:
+        console.print("Restart proposal refused:")
+        console.print("- reason: missing or ambiguous container target")
+        return True
+    data_dir = Path(runtime.session.data_dir)
+    rb = latest_runbook(data_dir)
+    evidence_path = rb.parent / "evidence.json" if rb is not None else None
+    if evidence_path is None or not evidence_path.exists():
+        console.print("Restart proposal refused:")
+        console.print("- reason: no evidence available (run diagnose first)")
+        return True
+    proposal, status = build_restart_proposal_from_evidence(
+        data_dir,
+        evidence_path,
+        container_name=container,
+        source_session_id=rb.parent.name if rb is not None else "",
+    )
+    if proposal is None:
+        console.print("Restart proposal refused:")
+        console.print(f"- reason: {status}")
+        console.print("- no proposal created")
+        console.print("- no commands executed")
+        return True
+    console.print("Restart proposal created from ask (no execution):")
+    console.print(f"- proposal: {proposal.proposal_id}")
+    console.print(f"- status: {proposal.status}")
+    console.print(f"- command_preview: {proposal.proposed_steps[0]}")
     return True
 
 
@@ -3799,6 +3889,8 @@ def ask(
         if _handle_apply_approved_ask(runtime, question):
             return
         if _handle_actions_ask(runtime, question):
+            return
+        if _handle_create_restart_proposal_ask(runtime, question):
             return
         if _handle_create_proposals_ask(runtime, question):
             return
