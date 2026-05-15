@@ -2012,18 +2012,24 @@ def _run_lab_restart_gate(
         preview_dir = rollback_preview_mod.rollback_preview_dir(data_dir, proposal.proposal_id)
         preview_json = preview_dir / "rollback-preview.json"
         if not preview_json.exists():
-            rollback_preview_mod.write_preview(data_dir, proposal)
-        try:
-            rollback_payload = rollback_preview_mod.load_preview(preview_json)
-            rollback_errors = rollback_preview_mod.validate_preview(rollback_payload)
-            if rollback_errors:
-                raise ValueError("; ".join(rollback_errors))
-            rollback_readiness = "passed"
-            rollback_preview_path = str(preview_json)
-        except Exception as exc:
             gate.allowed = False
-            gate.failed_gate = "rollback_preview_invalid"
-            gate.message = f"rollback preview missing or invalid: {exc}"
+            gate.failed_gate = "rollback_preview_missing"
+            gate.message = (
+                "rollback preview missing; run: "
+                f"shellforgeai rollback preview {proposal.proposal_id}"
+            )
+        if gate.allowed:
+            try:
+                rollback_payload = rollback_preview_mod.load_preview(preview_json)
+                rollback_errors = rollback_preview_mod.validate_preview(rollback_payload)
+                if rollback_errors:
+                    raise ValueError("; ".join(rollback_errors))
+                rollback_readiness = "passed"
+                rollback_preview_path = str(preview_json)
+            except Exception as exc:
+                gate.allowed = False
+                gate.failed_gate = "rollback_preview_invalid"
+                gate.message = f"rollback preview missing or invalid: {exc}"
 
     if not gate.allowed:
         console.print("")
@@ -2045,6 +2051,14 @@ def _run_lab_restart_gate(
             stdout="",
             stderr=gate.message,
             failed_gate=gate.failed_gate,
+            rollback={
+                "rollback_preview_path": rollback_preview_path,
+                "rollback_readiness": rollback_readiness,
+                "rollback_status": "preview_only" if rollback_preview_path else "",
+                "rollback_executable_by_shellforgeai": False,
+                "rollback_execution_allowed": False,
+                "rollback_missing": gate.failed_gate == "rollback_preview_missing",
+            },
         )
         _append_audit_event(
             runtime,

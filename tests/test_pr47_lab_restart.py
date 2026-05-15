@@ -46,6 +46,7 @@ from shellforgeai.core.lab_restart import (
     policy_path,
     write_default_allowlist,
 )
+from shellforgeai.core.rollback_preview import write_preview
 
 runner = CliRunner()
 
@@ -70,6 +71,7 @@ def _mk_restart_proposal(
     container: str = "sfai-healthy-web",
     status: str = STATUS_APPROVED,
     extra_steps: list[str] | None = None,
+    with_rollback_preview: bool = True,
 ) -> Proposal:
     steps = [
         f"OPERATOR-RUN: docker restart {container}   # SERVICE-IMPACTING",
@@ -356,6 +358,7 @@ def _seed_for_apply(
     allowlist_enabled: bool = True,
     proposal_id: str = "prop_lab_restart_001",
     extra_steps: list[str] | None = None,
+    with_rollback_preview: bool = True,
 ) -> Proposal:
     proposal = _mk_restart_proposal(
         proposal_id=proposal_id, container=container, status=status, extra_steps=extra_steps
@@ -366,7 +369,27 @@ def _seed_for_apply(
         enabled=allowlist_enabled,
         containers=allowlist_containers if allowlist_containers is not None else [container],
     )
+    if with_rollback_preview:
+        write_preview(tmp_path, proposal)
     return proposal
+
+
+def test_apply_execute_confirm_refuses_when_rollback_preview_missing(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _enable_mutation_env(monkeypatch)
+    fake = _patch_fake_executor(monkeypatch, FakeCommandExecutor())
+    proposal = _seed_for_apply(tmp_path, with_rollback_preview=False)
+    r = runner.invoke(app, ["apply", proposal.proposal_id, "--execute", "--confirm"])
+    assert r.exit_code == 1
+    assert "rollback preview missing" in r.stdout
+    assert "shellforgeai rollback preview" in r.stdout
+    assert fake.calls == []
+    receipts = list((tmp_path / "execution_receipts").glob("exec_*.json"))
+    assert len(receipts) == 1
+    payload = json.loads(receipts[0].read_text())
+    assert payload["result"]["status"] == "refused"
+    assert payload["rollback"]["rollback_readiness"] == "failed"
+    assert payload["rollback"]["rollback_missing"] is True
 
 
 def test_apply_without_execute_runs_dry_run_only(tmp_path: Path, monkeypatch):
