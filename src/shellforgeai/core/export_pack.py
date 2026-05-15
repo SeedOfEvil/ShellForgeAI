@@ -67,7 +67,11 @@ ACTIONS_OPTIONAL_FILES = (
 
 # Full optional-file roster for the export pack.
 ALL_OPTIONAL_FILES = (
-    SESSION_OPTIONAL_FILES + ("proposal.json",) + BUNDLE_OPTIONAL_FILES + ACTIONS_OPTIONAL_FILES
+    SESSION_OPTIONAL_FILES
+    + ("proposal.json",)
+    + BUNDLE_OPTIONAL_FILES
+    + ACTIONS_OPTIONAL_FILES
+    + ("rollback-preview.json", "rollback-preview.md")
 )
 
 
@@ -677,6 +681,17 @@ def _export_proposal_object(
         missing.extend(b_miss)
     else:
         missing.extend(list(BUNDLE_OPTIONAL_FILES))
+
+    rb_dir = Path(data_dir) / "rollback_previews" / proposal.proposal_id
+    for name in ("rollback-preview.json", "rollback-preview.md"):
+        src = rb_dir / name
+        if src.exists() and src.is_file():
+            _copy_if_exists(
+                src, export_dir / name, redact=redact, report_files=report_files, warnings=warnings
+            )
+            included.append(name)
+        else:
+            missing.append(name)
 
     # PR37: include compiled actions if present (review-only).
     actions_dir = actions_dir_for(Path(data_dir), proposal.proposal_id)
