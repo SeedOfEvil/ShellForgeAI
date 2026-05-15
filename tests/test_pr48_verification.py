@@ -53,6 +53,7 @@ from shellforgeai.core.lab_restart import (
     run_post_restart_verification,
     write_default_allowlist,
 )
+from shellforgeai.core.rollback_preview import write_preview
 
 runner = CliRunner()
 
@@ -118,10 +119,13 @@ def _seed_lab(
     *,
     container: str = "sfai-healthy-web",
     proposal_id: str = "prop_pr48_001",
+    with_rollback_preview: bool = True,
 ) -> Proposal:
     proposal = _mk_restart_proposal(proposal_id=proposal_id, container=container)
     write_proposal(tmp_path, proposal)
     write_default_allowlist(tmp_path, containers=[container], enabled=True)
+    if with_rollback_preview:
+        write_preview(tmp_path, proposal)
     return proposal
 
 

@@ -15,6 +15,7 @@ from rich.console import Console
 from shellforgeai.audit.storage import AuditStorage
 from shellforgeai.core import incident_index as incident_index_mod
 from shellforgeai.core import lab_restart as lab_restart_mod
+from shellforgeai.core import rollback_preview as rollback_preview_mod
 from shellforgeai.core.actions import (
     compile_and_write,
     is_actions_ask_intent,
@@ -147,6 +148,7 @@ audit_app.add_typer(audit_index_app, name="index")
 model_app = typer.Typer()
 approvals_app = typer.Typer(help="Manage mutation proposal objects (read-only metadata).")
 actions_app = typer.Typer(help="Compile approved proposals into review-only action records.")
+rollback_app = typer.Typer(help="Rollback preview/validation for service-impacting mutations.")
 guard_app = typer.Typer(
     help="Stale-evidence / drift guard for proposals, actions, and export packs (read-only).",
 )
@@ -156,6 +158,7 @@ app.add_typer(audit_app, name="audit")
 app.add_typer(model_app, name="model")
 app.add_typer(approvals_app, name="approvals")
 app.add_typer(actions_app, name="actions")
+app.add_typer(rollback_app, name="rollback")
 app.add_typer(guard_app, name="guard")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
@@ -2002,6 +2005,32 @@ def _run_lab_restart_gate(
         action_id=action_id,
     )
 
+    # PR49 rollback-readiness gate for service-impacting restart.
+    rollback_readiness = "failed"
+    rollback_preview_path = ""
+    if gate.allowed:
+        preview_dir = rollback_preview_mod.rollback_preview_dir(data_dir, proposal.proposal_id)
+        preview_json = preview_dir / "rollback-preview.json"
+        if not preview_json.exists():
+            gate.allowed = False
+            gate.failed_gate = "rollback_preview_missing"
+            gate.message = (
+                "rollback preview missing; run: "
+                f"shellforgeai rollback preview {proposal.proposal_id}"
+            )
+        if gate.allowed:
+            try:
+                rollback_payload = rollback_preview_mod.load_preview(preview_json)
+                rollback_errors = rollback_preview_mod.validate_preview(rollback_payload)
+                if rollback_errors:
+                    raise ValueError("; ".join(rollback_errors))
+                rollback_readiness = "passed"
+                rollback_preview_path = str(preview_json)
+            except Exception as exc:
+                gate.allowed = False
+                gate.failed_gate = "rollback_preview_invalid"
+                gate.message = f"rollback preview missing or invalid: {exc}"
+
     if not gate.allowed:
         console.print("")
         console.print("Execution refused:")
@@ -2022,6 +2051,14 @@ def _run_lab_restart_gate(
             stdout="",
             stderr=gate.message,
             failed_gate=gate.failed_gate,
+            rollback={
+                "rollback_preview_path": rollback_preview_path,
+                "rollback_readiness": rollback_readiness,
+                "rollback_status": "preview_only" if rollback_preview_path else "",
+                "rollback_executable_by_shellforgeai": False,
+                "rollback_execution_allowed": False,
+                "rollback_missing": gate.failed_gate == "rollback_preview_missing",
+            },
         )
         _append_audit_event(
             runtime,
@@ -2118,6 +2155,13 @@ def _run_lab_restart_gate(
             stdout=result.stdout,
             stderr=result.stderr,
             verification=verification,
+            rollback={
+                "rollback_preview_path": rollback_preview_path,
+                "rollback_readiness": rollback_readiness,
+                "rollback_status": "preview_only" if rollback_preview_path else "",
+                "rollback_executable_by_shellforgeai": False,
+                "rollback_execution_allowed": False,
+            },
             receipt_path=receipt,
         )
 
@@ -2339,6 +2383,63 @@ def actions_validate(
     console.print(f"- manual_only: {info.get('manual_only', 0)}")
     console.print(f"- read_only_review: {info.get('read_only', 0)}")
     console.print("- execution: none")
+
+
+@rollback_app.command("preview")
+def rollback_preview_cmd(
+    ctx: typer.Context,
+    proposal_id: Annotated[str | None, typer.Argument()] = None,
+    latest_approved: bool = typer.Option(False, "--latest-approved"),
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    if latest_approved:
+        proposal = latest_approved_proposal(data_dir)
+    else:
+        if not proposal_id:
+            raise typer.BadParameter("Provide proposal id or --latest-approved")
+        path, _ = find_proposal_path(data_dir, proposal_id)
+        proposal = load_proposal_from_path(path) if path else None
+    if proposal is None:
+        console.print("Rollback preview failed:\n- proposal not found\n- no commands executed")
+        raise typer.Exit(code=1)
+    paths = rollback_preview_mod.write_preview(data_dir, proposal)
+    console.print("Rollback preview written:")
+    console.print(f"- proposal: {proposal.proposal_id}")
+    console.print(f"- rollback: {paths.json_path}")
+    console.print(f"- summary: {paths.md_path}")
+    console.print("- status: preview_only")
+    console.print("- ShellForgeAI will not execute rollback.")
+
+
+@rollback_app.command("validate")
+def rollback_validate_cmd(ctx: typer.Context, target: Annotated[Path, typer.Argument()]) -> None:
+    _ = _ctx(ctx)
+    try:
+        payload = rollback_preview_mod.load_preview(target)
+    except Exception as exc:
+        console.print(f"Rollback preview validation failed:\n- malformed or missing file: {exc}")
+        raise typer.Exit(code=1) from None
+    errs = rollback_preview_mod.validate_preview(payload)
+    if errs:
+        console.print("Rollback preview validation failed:")
+        for e in errs:
+            console.print(f"- {e}")
+        raise typer.Exit(code=1)
+    console.print("Rollback preview validation passed:")
+    console.print(f"- proposal: {payload.get('proposal_id', '')}")
+    console.print(f"- rollback_available: {payload.get('rollback_available')}")
+    console.print(
+        f"- executable_by_shellforgeai: {payload.get('rollback_executable_by_shellforgeai')}"
+    )
+    console.print(f"- status: {payload.get('rollback_status')}")
+    console.print("- safety: ok")
+
+
+@rollback_app.command("show")
+def rollback_show_cmd(ctx: typer.Context, target: Annotated[Path, typer.Argument()]) -> None:
+    _ = _ctx(ctx)
+    console.print(target.read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------

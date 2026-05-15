@@ -512,6 +512,7 @@ def write_execution_receipt(
     stderr: str,
     failed_gate: str = "",
     verification: dict[str, Any] | None = None,
+    rollback: dict[str, Any] | None = None,
     receipt_path: Path | None = None,
 ) -> Path:
     receipts = receipts_dir(Path(data_dir))
@@ -553,6 +554,8 @@ def write_execution_receipt(
         payload["result"]["failed_gate"] = failed_gate
     if verification is not None:
         payload["verification"] = dict(verification)
+    if rollback is not None:
+        payload["rollback"] = dict(rollback)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     _write_receipt_markdown(out, payload)
     return out
@@ -602,6 +605,18 @@ def _write_receipt_markdown(json_path: Path, payload: dict[str, Any]) -> None:
                 val = evidence.get(key)
                 if val:
                     lines.append(f"- {key}: {val}")
+    rollback = payload.get("rollback")
+    if isinstance(rollback, dict):
+        lines.append("")
+        lines.append("## Rollback")
+        lines.append(f"- rollback_preview_path: {rollback.get('rollback_preview_path', '')}")
+        lines.append(f"- rollback_readiness: {rollback.get('rollback_readiness', '')}")
+        lines.append(f"- rollback_status: {rollback.get('rollback_status', '')}")
+        lines.append(
+            f"- rollback_executable_by_shellforgeai: "
+            f"{rollback.get('rollback_executable_by_shellforgeai', '')}"
+        )
+
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
