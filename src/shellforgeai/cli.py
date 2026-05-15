@@ -2916,26 +2916,37 @@ def approvals_create(
 @approvals_app.command("propose-restart")
 def approvals_propose_restart(
     ctx: typer.Context,
-    container: Annotated[str, typer.Argument(help="Allowlisted lab/disposable container name.")],
+    container: Annotated[
+        str | None, typer.Argument(help="Allowlisted lab/disposable container name.")
+    ] = None,
+    container_opt: Annotated[
+        str | None,
+        typer.Option("--container", help="Allowlisted lab/disposable container name."),
+    ] = None,
     from_session: Annotated[str | None, typer.Option("--from-session")] = None,
     latest: Annotated[bool, typer.Option("--latest")] = False,
     from_evidence: Annotated[Path | None, typer.Option("--from-evidence")] = None,
 ) -> None:
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
+    target_container = (container_opt or container or "").strip()
+    if not target_container:
+        raise typer.BadParameter("Provide a container target (positional or --container).")
     evidence_path: Path | None = None
     session_id = ""
     if from_evidence is not None:
         evidence_path = from_evidence
+        if evidence_path.parent.name.startswith("sf_"):
+            session_id = evidence_path.parent.name
     elif from_session:
         sess_dir = _resolve_session_dir(runtime, from_session)
         evidence_path = sess_dir / "evidence.json"
-        session_id = from_session if from_session.startswith("sf_") else ""
+        if sess_dir.name.startswith("sf_"):
+            session_id = sess_dir.name
     elif latest:
-        latest_rb = latest_runbook(data_dir)
-        if latest_rb is not None:
-            evidence_path = latest_rb.parent / "evidence.json"
-            session_id = latest_rb.parent.name
+        evidence_path = latest_evidence_artifact(data_dir)
+        if evidence_path is not None and evidence_path.parent.name.startswith("sf_"):
+            session_id = evidence_path.parent.name
     if evidence_path is None:
         console.print("Restart proposal refused:")
         console.print(
@@ -2946,7 +2957,10 @@ def approvals_propose_restart(
         console.print("- no commands executed")
         raise typer.Exit(code=1)
     proposal, status = build_restart_proposal_from_evidence(
-        data_dir, evidence_path, container_name=container, source_session_id=session_id
+        data_dir,
+        evidence_path,
+        container_name=target_container,
+        source_session_id=session_id,
     )
     if proposal is None:
         console.print("Restart proposal refused:")
