@@ -550,3 +550,15 @@ real `time.sleep`, no root, no systemd/journal, no internet. Tests use
 4. `shellforgeai rollback preview <id>`
 5. `shellforgeai apply <id> --execute --confirm`
 6. verify/audit/export as needed.
+
+
+## Restart plan checklist flow (PR51)
+
+1. `shellforgeai diagnose docker --save-plan`
+2. `shellforgeai approvals propose-restart --latest --container <target>`
+3. `shellforgeai approvals restart-plan <proposal-id>`
+4. `shellforgeai approvals approve <proposal-id> --reason "..."`
+5. `shellforgeai rollback preview <proposal-id>`
+6. `shellforgeai approvals restart-plan <proposal-id>`
+7. `shellforgeai apply <proposal-id> --execute --confirm`
+8. verify/audit/export

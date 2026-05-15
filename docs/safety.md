@@ -420,3 +420,10 @@ approved CLI execution.
 - It requires evidence and only proposes for allowlisted/disposable lab targets.
 - Natural-language restart execution requests remain refused.
 - Rollback preview remains required before any `apply --execute --confirm` path.
+
+
+## PR51 restart-plan safety
+
+- `approvals restart-plan` is read-only and does not approve, restart, rollback-generate, or apply.
+- Readiness evaluation uses existing proposal/evidence/rollback artifacts only and never executes Docker checks.
+- Natural-language restart remains refused; ask routing can only show checklist/next commands.

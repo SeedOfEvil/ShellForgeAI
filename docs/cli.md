@@ -371,3 +371,10 @@ shellforgeai ask "check drift before apply"
 - Refuses non-allowlisted targets, missing/unsafe targets, and missing evidence.
 - Safety labels include `DOCKER-MUTATION` and either `ALLOWLISTED-LAB-TARGET` or `DISPOSABLE-TARGET`.
 - Next flow: approve -> rollback preview -> apply `--execute --confirm` with existing PR48/PR49 gates.
+
+
+### PR51 — restart proposal plan checklist
+
+- New command: `shellforgeai approvals restart-plan <proposal-id>` with `--latest`, `--from-session <id> --container <name>`, `--from-evidence <path> --container <name>`, and `--json`.
+- Read-only preview/checklist: evidence source, target, allowlist status, proposal status, rollback preview status, apply readiness blockers, and exact next safe commands.
+- `--json` emits strict machine-readable payload (schema v1), including `safety.execution_allowed=false` and `execution_status=not_executed`.
