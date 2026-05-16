@@ -200,3 +200,10 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - PR54: mission post-execution report and export pack (`mission restart report`, `mission restart export [--redact]`, `mission restart validate-export`). Read-only. Bundles mission record, mission-report.json/md, proposal, rollback preview, apply receipt, before/after inspect evidence, source evidence, audit events, manifest, and checksums into `<data_dir>/mission_exports/<mission-id>/`. Reuses the PR34 redactor for `--redact`. No new mutation class; report/export commands never execute, apply, approve, or roll back. Manifest carries `safety.execution_status="not_executed_by_export"` and `safety.mutation_performed_by_export=false`.
 
 - PR55 milestone: first-class audit cleanup review workflow (plan/archive/execute/validate/report) for ShellForgeAI-owned metadata only.
+
+## PR56 milestone: Compose ownership/context
+
+- Added read-only Compose project/service ownership detection from Docker labels.
+- Added `compose inspect` and `compose list` context commands.
+- Added advisory Compose context propagation into docker evidence and restart proposal/plan metadata.
+- No `docker compose` mutation path added.

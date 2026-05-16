@@ -16,6 +16,7 @@ import json
 import re
 from typing import Any
 
+from shellforgeai.core.compose_context import parse_compose_context
 from shellforgeai.util.subprocess import run_command
 
 from . import host
@@ -46,6 +47,20 @@ def _redact(text: str) -> str:
 def _docker_available() -> bool:
     r = host.command_exists("docker")
     return bool(r.ok and (r.stdout or "").strip())
+
+
+def _labels_to_dict(raw: str) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for part in (raw or "").split(","):
+        token = part.strip()
+        if not token or "=" not in token:
+            continue
+        k, v = token.split("=", 1)
+        k = k.strip()
+        if not k:
+            continue
+        labels[k] = v.strip()
+    return labels
 
 
 def containers(all_containers: bool = True) -> ToolResult:
@@ -81,7 +96,8 @@ def containers(all_containers: bool = True) -> ToolResult:
         status = parts[3].strip()
         state = parts[4].strip().lower()
         running_for = parts[5].strip() if len(parts) > 5 else ""
-        labels = parts[6].strip() if len(parts) > 6 else ""
+        labels_raw = parts[6].strip() if len(parts) > 6 else ""
+        labels = _labels_to_dict(labels_raw)
         rows.append(
             {
                 "id": cid[:12],
@@ -90,7 +106,8 @@ def containers(all_containers: bool = True) -> ToolResult:
                 "status": status,
                 "state": state,
                 "running_for": running_for,
-                "labels": labels[:500],
+                "labels": labels,
+                "compose": parse_compose_context(labels),
             }
         )
     payload = {"containers": rows, "total": len(rows)}
@@ -147,6 +164,7 @@ def inspect(container: str) -> ToolResult:
     state = info.get("State", {}) or {}
     health_raw = state.get("Health")
     health = health_raw.get("Status") if isinstance(health_raw, dict) else None
+    labels = (info.get("Config") or {}).get("Labels") or {}
     payload = {
         "name": (info.get("Name") or "").lstrip("/"),
         "id": (info.get("Id") or "")[:12],
@@ -160,6 +178,7 @@ def inspect(container: str) -> ToolResult:
         "finished_at": state.get("FinishedAt"),
         "error": state.get("Error") or "",
         "oom_killed": bool(state.get("OOMKilled")),
+        "compose": parse_compose_context(labels if isinstance(labels, dict) else {}),
     }
     summary = (
         f"{payload['name']} status={payload['status']} exit={payload['exit_code']} "
@@ -347,6 +366,9 @@ def problem_summary(log_tail: int = 80) -> ToolResult:
             "oom_killed": oom,
             "log_themes": log_themes,
             "log_sample": (log_text.splitlines()[-5:] if log_text else []),
+            "compose": row.get("compose")
+            if isinstance(row.get("compose"), dict)
+            else parse_compose_context(row.get("labels") or {}),
         }
         if is_failing:
             failing.append(entry)

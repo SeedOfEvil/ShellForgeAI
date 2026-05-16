@@ -176,7 +176,7 @@ from shellforgeai.llm.manager import build_provider
 from shellforgeai.llm.prompts import build_contextual_prompt, build_model_prompt
 from shellforgeai.llm.schemas import ModelRequest
 from shellforgeai.render.summary import write_diagnosis_summary_md
-from shellforgeai.tools import host, journal, registry, systemd
+from shellforgeai.tools import containers, host, journal, registry, systemd
 from shellforgeai.util.subprocess import run_command
 from shellforgeai.version import get_build_info
 
@@ -209,6 +209,7 @@ mission_restart_app = typer.Typer(
     help="Guided safe restart mission workflow (PR52). Metadata/checklist only.",
 )
 mission_app.add_typer(mission_restart_app, name="restart")
+compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -218,6 +219,7 @@ app.add_typer(actions_app, name="actions")
 app.add_typer(rollback_app, name="rollback")
 app.add_typer(guard_app, name="guard")
 app.add_typer(mission_app, name="mission")
+app.add_typer(compose_app, name="compose")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -5084,6 +5086,47 @@ def _handle_lab_restart_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
+    q = (question or "").lower().strip()
+    if "restart compose service" in q:
+        console.print(
+            "Refusing mutation: compose service restart is not supported in ShellForgeAI."
+        )
+        return True
+    compose_tokens = (
+        "compose project",
+        "compose service",
+        "compose-managed",
+        "compose context",
+        "compose file owns",
+    )
+    if not any(tok in q for tok in compose_tokens):
+        return False
+    target = extract_container_target(question) or ""
+    if not target:
+        console.print("No container target found. Try: shellforgeai compose inspect <container>.")
+        return True
+    result = containers.inspect(target)
+    if not result.ok:
+        console.print("Compose context unavailable from current evidence/runtime.")
+        console.print("- Try: shellforgeai diagnose docker --save-plan")
+        console.print(f"- Try: shellforgeai compose inspect {target}")
+        return True
+    payload = json.loads(result.stdout or "{}")
+    compose = payload.get("compose") or {"detected": False}
+    if not compose.get("detected"):
+        console.print(f"{target} appears unmanaged/non-compose (labels not present).")
+    else:
+        project = compose.get("project")
+        service = compose.get("service")
+        console.print(f"{target} belongs to compose project={project} service={service}.")
+        cfg = compose.get("config_files") or []
+        if cfg:
+            console.print("- Config files: " + ", ".join(cfg))
+    console.print("- Safety: read-only context only; no compose command executed.")
+    return True
+
+
 def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
     """Intercept apply/run-approved ask requests. Returns True if handled.
 
@@ -5542,6 +5585,8 @@ def ask(
             return
         if _handle_mission_restart_ask(runtime, question):
             return
+        if _handle_compose_context_ask(runtime, question):
+            return
         if _handle_restart_plan_ask(runtime, question):
             return
         if _handle_lab_restart_verification_ask(runtime, question):
@@ -5782,3 +5827,94 @@ def ask(
         )
     if raw and resp.raw and resp.raw.get("stdout_jsonl"):
         console.print(resp.raw["stdout_jsonl"])
+
+
+@compose_app.command("inspect")
+def compose_inspect(
+    target: Annotated[
+        str | None, typer.Argument(help="Container name/id", show_default=False)
+    ] = None,
+    container: Annotated[str | None, typer.Option("--container", help="Container name/id")] = None,
+    project: Annotated[str | None, typer.Option("--project", help="Compose project filter")] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only")] = False,
+) -> None:
+    """Inspect compose ownership context from Docker labels (read-only)."""
+    ref = (container or target or "").strip()
+    inv = containers.containers(all_containers=True)
+    if not inv.ok:
+        raise typer.Exit(1)
+    payload = json.loads(inv.stdout or "{}")
+    rows = payload.get("containers") or []
+    chosen = None
+    if ref:
+        for row in rows:
+            if row.get("name") == ref or str(row.get("id") or "").startswith(ref):
+                chosen = row
+                break
+        if chosen is None:
+            typer.echo("Container not found.", err=True)
+            raise typer.Exit(1)
+    elif project:
+        for row in rows:
+            compose = row.get("compose") or {}
+            if str(compose.get("project") or "") == project:
+                chosen = row
+                break
+        if chosen is None:
+            typer.echo("Project not found.", err=True)
+            raise typer.Exit(1)
+    else:
+        typer.echo("Provide a container target or --project.", err=True)
+        raise typer.Exit(2)
+    compose = (
+        chosen.get("compose") if isinstance(chosen.get("compose"), dict) else {"detected": False}
+    )
+    out = {
+        "container": chosen.get("name"),
+        "compose": compose,
+        "safety": "read-only; no compose command executed",
+    }
+    if json_out:
+        typer.echo(json.dumps(out))
+        return
+    console.print("Compose context")
+    console.print(f"- Detected: {'yes' if compose.get('detected') else 'no'}")
+    console.print(f"- Container: {chosen.get('name')}")
+    console.print(f"- Project: {compose.get('project') or '-'}")
+    console.print(f"- Service: {compose.get('service') or '-'}")
+    console.print(f"- Working dir: {compose.get('working_dir') or '-'}")
+    console.print("- Config files:")
+    for p in compose.get("config_files") or []:
+        console.print(f"  - {p}")
+    console.print(f"- One-off: {bool(compose.get('oneoff'))}")
+    console.print(f"- Compose version: {compose.get('compose_version') or '-'}")
+    console.print("- Safety: read-only; no compose command executed")
+
+
+@compose_app.command("list")
+def compose_list(json_out: Annotated[bool, typer.Option("--json")] = False) -> None:
+    inv = containers.containers(all_containers=True)
+    if not inv.ok:
+        raise typer.Exit(1)
+    rows = json.loads(inv.stdout or "{}").get("containers") or []
+    projects: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    unmanaged: list[str] = []
+    for row in rows:
+        compose = row.get("compose") or {}
+        if not compose.get("detected"):
+            unmanaged.append(str(row.get("name") or ""))
+            continue
+        proj = str(compose.get("project") or "unknown")
+        svc = str(compose.get("service") or "unknown")
+        projects.setdefault(proj, {}).setdefault(svc, []).append(row)
+    out = {"projects": projects, "unmanaged": unmanaged}
+    if json_out:
+        typer.echo(json.dumps(out))
+        return
+    console.print("Compose projects:")
+    for proj, services_map in projects.items():
+        console.print(f"- {proj}")
+        for svc, members in services_map.items():
+            console.print(f"  - service {svc}: {len(members)} container(s)")
+    if unmanaged:
+        console.print(f"- unmanaged: {len(unmanaged)}")

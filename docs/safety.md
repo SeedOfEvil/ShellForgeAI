@@ -504,3 +504,10 @@ approved CLI execution.
   (PR47) can execute the gated mutation.
 
 - PR55 cleanup review is metadata-only. `audit cleanup plan` and `audit cleanup archive` never delete; `audit cleanup execute` requires `--confirm` and path safety guards.
+
+## PR56 Compose ownership context safety
+
+- Compose context is read-only/advisory only in PR56.
+- ShellForgeAI does not execute `docker compose` commands in PR56.
+- Restart command preview remains exact `docker restart <container>` for allowlisted targets.
+- Future compose service mutations require separate policy gates in a separate PR.

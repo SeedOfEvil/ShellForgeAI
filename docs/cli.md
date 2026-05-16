@@ -523,3 +523,15 @@ shellforgeai audit cleanup execute <cleanup-plan-id> --confirm
 shellforgeai audit cleanup validate <cleanup-receipt-or-dir>
 shellforgeai audit cleanup report <cleanup-receipt-or-dir>
 ```
+
+## Compose ownership context (PR56)
+
+Read-only Compose awareness from Docker container labels.
+
+- `shellforgeai compose inspect <container>`
+- `shellforgeai compose inspect --container <container> --json`
+- `shellforgeai compose inspect --project <project>`
+- `shellforgeai compose list`
+- `shellforgeai compose list --json`
+
+`--json` output is strict JSON only. Compose context is advisory and does not execute any `docker compose` command.
