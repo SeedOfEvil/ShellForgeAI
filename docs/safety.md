@@ -445,3 +445,25 @@ approved CLI execution.
 - Natural-language requests to "run the restart mission" remain refused; the
   only execution path is `apply <approved-proposal-id> --execute --confirm`
   with the existing PR47/PR48/PR49 gates.
+
+
+## PR53 mission execute handoff safety
+
+- `mission restart execute` does not introduce a new executor. It delegates to
+  the same guarded code path used by `apply --execute --confirm`. The actual
+  mutation remains the existing allowlisted `docker restart <target>` only.
+- Without `--execute`, the command is dry-run only and prints the exact apply
+  delegation command. `--execute` without `--confirm` is refused. Mission
+  readiness must be green (approved proposal, exact `docker restart <target>`
+  command preview, valid rollback preview, restart-plan readiness, guard
+  freshness) or the handoff is refused with no mutation.
+- Mission records reference (do not duplicate) the apply receipt under
+  `phases.execution.receipt` and copy verification summary fields into
+  `phases.verification`. `arbitrary_command_execution` remains false.
+- Refusals are audited with `kind=restart_mission`,
+  `action=execute_refused`; successful delegations are audited with
+  `action=execute_delegated`. The actual mutation event remains recorded by
+  the apply gate under `kind=execution` / `action=lab_container_restart` —
+  the mission audit event does not duplicate the mutation safety flags.
+- Natural-language asks ("run/execute the mission", "approve and run the
+  mission") remain refused. `ask` never invokes the apply gate.

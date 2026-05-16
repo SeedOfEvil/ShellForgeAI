@@ -403,3 +403,53 @@ steps into one operator-friendly mission record. Metadata only; no mutation.
 
 Mission records live under `<data_dir>/missions/restart/<mission-id>/` as
 `mission.json` and `mission.md`. Apply remains the only execution path.
+
+### PR53 — mission execute handoff
+
+PR53 adds a mission-level execute command that delegates to the existing
+PR47/PR48/PR49 apply gate. It does **not** introduce a new executor and does
+**not** broaden mutation scope: the actual mutation remains the existing
+allowlisted `docker restart <target>` performed by `apply`.
+
+- `shellforgeai mission restart execute <mission-id>` — dry-run only. Shows
+  readiness and the exact `apply` command that would be delegated. Exits 1 if
+  the mission is not ready, 0 if ready (still no mutation).
+- `shellforgeai mission restart execute <mission-id> --dry-run` — same as above
+  with an explicit flag; never mutates.
+- `shellforgeai mission restart execute <mission-id> --execute` — refuses
+  without `--confirm`. No mutation.
+- `shellforgeai mission restart execute <mission-id> --execute --confirm` —
+  verifies mission readiness (approved proposal whose command preview is exactly
+  `docker restart <target>`, valid rollback preview, restart-plan readiness,
+  guard freshness), then delegates to the existing apply execution path. The
+  apply receipt path is recorded into the mission record and the mission status
+  is refreshed.
+
+Success output:
+
+```
+Mission execution completed through apply gate:
+- mission: mission_restart_...
+- proposal: prop_...
+- apply receipt: <data_dir>/execution_receipts/exec_*.json
+- verification: passed
+- running_after: true
+- started_at_changed: true
+- health_after: healthy
+- arbitrary_command_execution: false
+- execution_path: apply_gate
+```
+
+Refusal output (example):
+
+```
+Mission execution refused:
+- readiness: blocked
+- blocker: rollback preview missing
+- no commands executed
+- next: shellforgeai rollback preview <proposal-id>
+```
+
+`shellforgeai mission restart export <mission-id>` after a delegated execute
+also copies the referenced apply receipt into the export and records it in the
+manifest under `execution_receipt`.

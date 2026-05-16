@@ -196,3 +196,4 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 
 - PR51: restart proposal dry-run checklist/readiness preview (`approvals restart-plan`) with JSON + ask surfacing, read-only safety path before approval/execution.
 - PR52: guided safe restart mission workflow (`mission restart prepare/status/checklist/validate/export`) that ties evidence, proposal, approval, rollback preview, and apply readiness into a single mission record. Metadata only; no new mutation scope.
+- PR53: mission execute handoff (`mission restart execute <mission-id> --execute --confirm`) that verifies mission readiness and delegates to the existing PR47/PR48/PR49 apply gate. No new executor, no broader mutation scope, no natural-language execution. The actual mutation remains the existing allowlisted `docker restart <target>`. The apply receipt path is referenced from the mission record after delegation.
