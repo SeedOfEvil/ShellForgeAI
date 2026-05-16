@@ -55,6 +55,7 @@ class ProposalSource(BaseModel):
     runbook: str = ""
     evidence: str = ""
     summary: str = ""
+    compose: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProposalExecution(BaseModel):
@@ -723,6 +724,17 @@ def build_restart_proposal_from_evidence(
             session_id=source_session_id or str(payload.get("session_id") or ""),
             evidence=str(evidence_path),
             summary="docker.containers evidence",
+            compose=(
+                {
+                    "project": str((match.get("compose") or {}).get("project") or ""),
+                    "service": str((match.get("compose") or {}).get("service") or ""),
+                    "working_dir": str((match.get("compose") or {}).get("working_dir") or ""),
+                    "config_files": list((match.get("compose") or {}).get("config_files") or []),
+                }
+                if isinstance(match.get("compose"), dict)
+                and (match.get("compose") or {}).get("detected")
+                else {}
+            ),
         ),
         component=name,
         kind="docker_restart",

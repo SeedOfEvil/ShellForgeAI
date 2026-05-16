@@ -186,6 +186,7 @@ def build_restart_plan(
         "rollback": {"status": rollback_status, "path": rollback_path, "required": True},
         "apply_readiness": {"status": readiness, "blockers": blockers},
         "command_preview": command_preview,
+        "compose": (proposal.source.compose if proposal else {}),
         "checklist": checklist,
         "next_commands": next_commands,
         "safety": {
@@ -193,6 +194,7 @@ def build_restart_plan(
             "execution_status": "not_executed",
             "mutation_performed": False,
             "arbitrary_command_execution": False,
+            "compose_context_advisory_only": True,
         },
     }
     return RestartPlan(payload=payload)
@@ -211,6 +213,7 @@ def render_restart_plan(plan: RestartPlan) -> str:
         "- Policy: docker_restart / service-impacting / allowlisted lab target",
         f"- Rollback preview: {p.get('rollback', {}).get('status')}",
         f"- Apply readiness: {p.get('apply_readiness', {}).get('status')}",
+        f"- Compose context: {'present' if p.get('compose') else 'not detected'}",
         "- Execution: not executed",
         "",
         "Checklist:",
@@ -219,6 +222,18 @@ def render_restart_plan(plan: RestartPlan) -> str:
     for item in p.get("checklist", []):
         lines.append(f"{sym.get(item.get('status'), '[UNKNOWN]')} {item.get('summary')}")
     lines.append("")
+    if p.get("compose"):
+        c = p.get("compose") or {}
+        lines.extend(
+            [
+                "Compose context:",
+                f"- Project: {c.get('project') or '-'}",
+                f"- Service: {c.get('service') or '-'}",
+                f"- Working dir: {c.get('working_dir') or '-'}",
+                f"- Config files: {', '.join(c.get('config_files') or []) or '-'}",
+                "",
+            ]
+        )
     lines.append("Next safe commands:")
     for i, cmd in enumerate(p.get("next_commands", []), start=1):
         lines.append(f"{i}. {cmd}")
@@ -229,6 +244,7 @@ def render_restart_plan(plan: RestartPlan) -> str:
             "- This command did not restart anything.",
             "- Natural-language restart remains refused.",
             "- ShellForgeAI can only execute the existing allowlisted restart path.",
+            "- Compose context is advisory/read-only in PR56; no docker compose commands are run.",
         ]
     )
     return "\n".join(lines)

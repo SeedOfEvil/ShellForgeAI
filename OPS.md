@@ -642,3 +642,10 @@ gated mutation.
 5. shellforgeai audit cleanup execute <plan-id> --confirm
 6. shellforgeai audit cleanup validate <receipt>
 7. shellforgeai doctor
+
+## Compose ownership check flow (PR56)
+
+1. `shellforgeai diagnose docker --save-plan`
+2. `shellforgeai compose inspect <container>`
+3. Confirm compose project/service ownership before creating restart proposals.
+4. Continue through existing proposal/mission/apply gates only for allowlisted containers.
