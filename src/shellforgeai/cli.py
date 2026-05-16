@@ -4,6 +4,7 @@ import json
 import platform
 import re
 import sys
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -184,12 +185,14 @@ app = typer.Typer(
 inspect_app = typer.Typer()
 tools_app = typer.Typer()
 audit_app = typer.Typer()
+audit_cleanup_app = typer.Typer(help="Plan/review/archive guarded metadata cleanup.")
 audit_index_app = typer.Typer(
     invoke_without_command=True,
     no_args_is_help=False,
     help="Audit-aware incident index (PR40). Read-only metadata search; no execution.",
 )
 audit_app.add_typer(audit_index_app, name="index")
+audit_app.add_typer(audit_cleanup_app, name="cleanup")
 model_app = typer.Typer()
 approvals_app = typer.Typer(help="Manage mutation proposal objects (read-only metadata).")
 actions_app = typer.Typer(help="Compile approved proposals into review-only action records.")
@@ -594,7 +597,7 @@ def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
                 defunct_codex += 1
     init_reaper = "yes" if pid1 in {"tini", "dumb-init", "systemd", "init"} else "no"
     hygiene: dict[str, Any] = scan_metadata_hygiene(Path(runtime.session.data_dir))
-    payload = {
+    payload: dict[str, Any] = {
         "shellforgeai": {
             "version": build.display_version,
             "python": sys.version.split()[0],
@@ -873,6 +876,287 @@ def audit_retention(
     for rec in payload["recommendations"][:3]:
         console.print(f"- suggestion: {rec}")
     console.print("- execution: none")
+
+
+def _cleanup_allowed_roots(data_dir: Path) -> list[Path]:
+    return [
+        data_dir / "exports",
+        data_dir / "audit_exports",
+        data_dir / "apply_bundles",
+        data_dir / "actions",
+        data_dir / "artifacts",
+    ]
+
+
+def _cleanup_plan_dir(data_dir: Path, plan_id: str) -> Path:
+    return data_dir / "cleanup_plans" / plan_id
+
+
+@audit_cleanup_app.command("plan")
+def audit_cleanup_plan(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json"),
+    category: Annotated[list[str] | None, typer.Option("--category")] = None,
+    max_age_days: int | None = typer.Option(None, "--max-age-days"),
+    keep_latest: int | None = typer.Option(None, "--keep-latest"),
+    include_artifacts: bool = typer.Option(False, "--include-artifacts"),
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    allowed = {"exports", "audit-exports", "apply-bundles", "actions", "artifacts"}
+    selected_categories = category or ["exports", "audit-exports", "apply-bundles", "actions"]
+    if not include_artifacts:
+        selected_categories = [c for c in selected_categories if c != "artifacts"]
+    unknown = [c for c in selected_categories if c not in allowed]
+    if unknown:
+        console.print(f"Refused: unknown category '{unknown[0]}'.")
+        raise typer.Exit(code=1)
+    cats = build_categories(data_dir)
+    candidates: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for c in selected_categories:
+        selected = prune_select(
+            collect_category(cats[c]), max_age_days=max_age_days, keep_latest=keep_latest
+        )
+        for p in selected:
+            try:
+                rp = p.resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            if not any(root.resolve() in rp.parents for root in _cleanup_allowed_roots(data_dir)):
+                warnings.append(f"skipped outside allowed roots: {p}")
+                continue
+            age_days = int((datetime.now(timezone.utc).timestamp() - p.stat().st_mtime) // 86400)
+            candidates.append(
+                {
+                    "path": str(p),
+                    "category": c,
+                    "bytes": file_size(p),
+                    "age_days": age_days,
+                    "reason": "older_than_threshold"
+                    if max_age_days is not None
+                    else "selected_by_policy",
+                    "safe_to_delete": True,
+                    "requires_archive_first": c == "artifacts",
+                }
+            )
+    plan_id = (
+        f"cleanup_plan_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_"
+        f"{uuid.uuid4().hex[:6]}"
+    )
+    out_dir = _cleanup_plan_dir(data_dir, plan_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    candidate_bytes = sum(int(c["bytes"]) for c in candidates)
+    payload = {
+        "schema_version": "1",
+        "plan_id": plan_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "mode": "dry_run",
+        "scope": "shellforgeai_metadata",
+        "selection": {
+            "categories": selected_categories,
+            "max_age_days": max_age_days,
+            "keep_latest": keep_latest,
+            "include_artifacts": include_artifacts,
+        },
+        "before": {
+            "total_bytes": sum(
+                file_size(p) for c in selected_categories for p in collect_category(cats[c])
+            ),
+            "total_items": sum(len(collect_category(cats[c])) for c in selected_categories),
+            "categories": {},
+        },
+        "candidates": candidates,
+        "summary": {
+            "candidate_count": len(candidates),
+            "candidate_bytes": candidate_bytes,
+            "would_archive": sum(1 for c in candidates if c["requires_archive_first"]),
+            "would_delete": len(candidates),
+        },
+        "safety": {
+            "dry_run": True,
+            "execution_allowed": False,
+            "mutation_performed": False,
+            "shellforgeai_metadata_only": True,
+            "arbitrary_path_deletion": False,
+        },
+        "next_commands": [
+            f"shellforgeai audit cleanup archive {plan_id}",
+            f"shellforgeai audit cleanup execute {plan_id} --confirm",
+        ],
+        "warnings": warnings,
+    }
+    (out_dir / "cleanup-plan.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (out_dir / "cleanup-plan.md").write_text(
+        (
+            f"# Cleanup Plan {plan_id}\n\n- no deletion performed\n"
+            f"- candidates: {len(candidates)}\n"
+            f"- bytes: {candidate_bytes}\n"
+        ),
+        encoding="utf-8",
+    )
+    _append_audit_event(
+        runtime,
+        kind="audit",
+        action="cleanup-plan",
+        status="planned",
+        summary="cleanup plan created",
+        details={
+            "operation": "cleanup_plan_created",
+            "plan_id": plan_id,
+            "remediation_execution": False,
+            "arbitrary_path_deletion": False,
+            "shellforgeai_metadata_only": True,
+        },
+    )
+    if json_output:
+        console.print_json(data=payload)
+        return
+    console.print(f"Cleanup plan created: {plan_id}")
+    console.print(f"- plan: {out_dir / 'cleanup-plan.json'}")
+
+
+@audit_cleanup_app.command("archive")
+def audit_cleanup_archive(ctx: typer.Context, plan_id: str) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    pdir = _cleanup_plan_dir(data_dir, plan_id)
+    payload = json.loads((pdir / "cleanup-plan.json").read_text(encoding="utf-8"))
+    candidates = [Path(c["path"]) for c in payload.get("candidates", [])]
+    archive_path = create_archive(
+        candidates,
+        data_dir,
+        source=f"cleanup-plan:{plan_id}",
+        output=data_dir
+        / "cleanup_archives"
+        / (
+            f"cleanup_archive_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_"
+            f"{uuid.uuid4().hex[:6]}.tar.gz"
+        ),
+    )
+    _append_audit_event(
+        runtime,
+        kind="audit",
+        action="cleanup-archive",
+        status="success",
+        summary="cleanup archive created",
+        details={
+            "operation": "cleanup_archive_created",
+            "plan_id": plan_id,
+            "archive": str(archive_path),
+            "remediation_execution": False,
+            "arbitrary_path_deletion": False,
+            "shellforgeai_metadata_only": True,
+        },
+    )
+    console.print(f"Cleanup archive created: {archive_path}")
+
+
+@audit_cleanup_app.command("execute")
+def audit_cleanup_execute(
+    ctx: typer.Context, plan_id: str, confirm: bool = typer.Option(False, "--confirm")
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    if not confirm:
+        console.print("Refused: --confirm required.")
+        raise typer.Exit(code=1)
+    payload = json.loads(
+        (_cleanup_plan_dir(data_dir, plan_id) / "cleanup-plan.json").read_text(encoding="utf-8")
+    )
+    candidates = [Path(c["path"]) for c in payload.get("candidates", [])]
+    deleted, failed, bytes_removed = delete_paths(candidates, _cleanup_allowed_roots(data_dir))
+    rid = (
+        f"cleanup_receipt_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_"
+        f"{uuid.uuid4().hex[:6]}"
+    )
+    rdir = data_dir / "cleanup_receipts" / rid
+    rdir.mkdir(parents=True, exist_ok=True)
+    receipt = {
+        "schema_version": "1",
+        "receipt_id": rid,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "plan_id": plan_id,
+        "archive_id": None,
+        "mode": "execute",
+        "deleted": [str(p) for p in deleted],
+        "failed": failed,
+        "bytes_removed": bytes_removed,
+        "before": payload.get("before", {}),
+        "after": {"total_items": 0},
+        "safety": {
+            "shellforgeai_metadata_only": True,
+            "arbitrary_path_deletion": False,
+            "remediation_execution": False,
+            "docker_mutation": False,
+            "service_mutation": False,
+            "package_mutation": False,
+            "firewall_mutation": False,
+        },
+    }
+    (rdir / "cleanup-receipt.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
+    (rdir / "cleanup-receipt.md").write_text(f"# Cleanup Receipt {rid}\n", encoding="utf-8")
+    console.print("Cleanup executed:")
+    console.print(f"- plan: {plan_id}")
+    console.print(f"- deleted: {len(deleted)}")
+    console.print(f"- failed: {len(failed)}")
+    console.print(f"- bytes_removed: {bytes_removed}")
+    console.print(f"- receipt: {rdir / 'cleanup-receipt.json'}")
+    console.print("- remediation_execution: false")
+    if failed:
+        raise typer.Exit(code=1)
+
+
+@audit_cleanup_app.command("validate")
+def audit_cleanup_validate(target: Path) -> None:
+    receipt_path = target / "cleanup-receipt.json" if target.is_dir() else target
+    try:
+        payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except Exception:
+        console.print("Cleanup validation failed:")
+        console.print("- receipt missing or invalid")
+        raise typer.Exit(code=1) from None
+    safety = payload.get("safety")
+    errs: list[str] = []
+    if not isinstance(safety, dict):
+        errs.append("missing safety block")
+    else:
+        for k in ("shellforgeai_metadata_only",):
+            if safety.get(k) is not True:
+                errs.append(f"{k} must be true")
+        for k in (
+            "arbitrary_path_deletion",
+            "remediation_execution",
+            "docker_mutation",
+            "service_mutation",
+            "package_mutation",
+            "firewall_mutation",
+        ):
+            if safety.get(k) is not False:
+                errs.append(f"{k} must be false")
+    if errs:
+        console.print("Cleanup validation failed:")
+        for e in errs:
+            console.print(f"- {e}")
+        raise typer.Exit(code=1)
+    console.print("Cleanup validation passed:")
+    console.print(f"- receipt: {payload.get('receipt_id')}")
+    console.print(f"- deleted: {len(payload.get('deleted', []))}")
+    console.print(f"- bytes_removed: {payload.get('bytes_removed', 0)}")
+    console.print("- safety: ok")
+
+
+@audit_cleanup_app.command("report")
+def audit_cleanup_report(target: Path) -> None:
+    receipt_path = target / "cleanup-receipt.json" if target.is_dir() else target
+    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    console.print("Cleanup report:")
+    console.print(f"- receipt: {receipt_path}")
+    console.print(f"- plan_id: {payload.get('plan_id')}")
+    console.print(f"- deleted: {len(payload.get('deleted', []))}")
+    console.print(f"- failed: {len(payload.get('failed', []))}")
+    console.print(f"- bytes_removed: {payload.get('bytes_removed', 0)}")
+    console.print("- safety: shellforgeai_metadata_only=true")
 
 
 @audit_app.command("prune")
