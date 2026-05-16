@@ -427,3 +427,21 @@ approved CLI execution.
 - `approvals restart-plan` is read-only and does not approve, restart, rollback-generate, or apply.
 - Readiness evaluation uses existing proposal/evidence/rollback artifacts only and never executes Docker checks.
 - Natural-language restart remains refused; ask routing can only show checklist/next commands.
+
+
+## PR52 mission workflow safety
+
+- `mission restart prepare/status/checklist/validate/export` are metadata only.
+- The mission workflow does not approve proposals, generate rollback previews
+  (unless `--with-rollback-preview` is passed, and even then only metadata),
+  apply proposals, or restart anything.
+- Mission records always carry `safety.execution_allowed=false`,
+  `execution_status=not_executed`, `mutation_performed=false`, and
+  `arbitrary_command_execution=false` unless an executed receipt is recorded
+  later through the existing apply gate.
+- `mission restart validate` enforces the schema, allowed phase statuses,
+  exact `docker restart <target>` command preview, and refuses any
+  `next_commands` that contain shell chains.
+- Natural-language requests to "run the restart mission" remain refused; the
+  only execution path is `apply <approved-proposal-id> --execute --confirm`
+  with the existing PR47/PR48/PR49 gates.

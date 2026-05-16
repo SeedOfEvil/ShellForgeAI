@@ -378,3 +378,28 @@ shellforgeai ask "check drift before apply"
 - New command: `shellforgeai approvals restart-plan <proposal-id>` with `--latest`, `--from-session <id> --container <name>`, `--from-evidence <path> --container <name>`, and `--json`.
 - Read-only preview/checklist: evidence source, target, allowlist status, proposal status, rollback preview status, apply readiness blockers, and exact next safe commands.
 - `--json` emits strict machine-readable payload (schema v1), including `safety.execution_allowed=false` and `execution_status=not_executed`.
+
+
+### PR52 — guided safe restart mission workflow
+
+Mission commands stitch the existing diagnose/propose/approve/rollback/restart-plan/apply
+steps into one operator-friendly mission record. Metadata only; no mutation.
+
+- `shellforgeai mission restart prepare --container <name>` — find/use evidence,
+  create or reuse a pending restart proposal, write a mission record, render an
+  operator checklist. Optional sources: `--from-session <sf_*>`,
+  `--from-evidence <path>`, `--latest`. Optional `--with-rollback-preview`
+  generates the metadata-only rollback preview.
+- `shellforgeai mission restart status <mission-id>` — refresh phases from
+  artifacts (proposal, rollback preview, apply readiness) and print the current
+  state. `--json` emits strict JSON.
+- `shellforgeai mission restart checklist <mission-id>` — operator-readable
+  checklist with the exact next CLI commands.
+- `shellforgeai mission restart validate <mission-id>` — schema/safety
+  invariants check. Exits 1 on failure with a punch list (no traceback).
+- `shellforgeai mission restart export <mission-id>` — bundle mission files
+  plus the proposal, rollback preview (if present), and source evidence into
+  `<data_dir>/mission_exports/<mission-id>/` with a manifest.
+
+Mission records live under `<data_dir>/missions/restart/<mission-id>/` as
+`mission.json` and `mission.md`. Apply remains the only execution path.

@@ -562,3 +562,20 @@ real `time.sleep`, no root, no systemd/journal, no internet. Tests use
 6. `shellforgeai approvals restart-plan <proposal-id>`
 7. `shellforgeai apply <proposal-id> --execute --confirm`
 8. verify/audit/export
+
+
+## Safe restart mission flow (PR52)
+
+A guided wrapper that records each step in one mission file. Metadata only.
+
+1. `shellforgeai diagnose docker --save-plan`
+2. `shellforgeai mission restart prepare --container <target>`
+3. `shellforgeai mission restart checklist <mission-id>`
+4. `shellforgeai approvals approve <proposal-id> --reason "..."`
+5. `shellforgeai rollback preview <proposal-id>`
+6. `shellforgeai mission restart checklist <mission-id>`
+7. `shellforgeai apply <proposal-id> --execute --confirm`
+8. `shellforgeai mission restart validate <mission-id>` and audit/export
+
+Mission preparation/status/checklist never restart anything; apply is still the
+only execution gate.
