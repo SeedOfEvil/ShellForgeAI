@@ -243,6 +243,12 @@ Mutation (start/stop/restart/rm/exec/cp/build/pull/prune, compose
 mutation, volume/network mutation) is never executed. `apply` remains
 validation-only.
 
+Compose ownership troubleshooting (PR57 ask polish):
+
+- `shellforgeai ask "compose context for <container>"`
+- `shellforgeai compose inspect <container>`
+- For any restart intent, follow proposal/mission/apply gates; ask will refuse natural-language Compose mutation.
+
 Approval queue smoke (PR32):
 
 ```

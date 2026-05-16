@@ -559,6 +559,63 @@ def extract_container_target(text: str) -> str:
     return ""
 
 
+_COMPOSE_MUTATION_PHRASES = (
+    "docker compose restart",
+    "restart compose service",
+    "compose restart",
+    "compose up",
+    "docker compose up",
+    "compose down",
+    "docker compose down",
+    "recreate compose service",
+    "fix compose service now",
+)
+
+_COMPOSE_TARGET_PATTERNS = (
+    r"\bcompose\s+context\s+for\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
+    r"\bcompose\s+inspect\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
+    r"\bcompose\s+project\s+owns\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
+    r"\bcompose\s+service\s+is\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
+    r"\bis\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?\s+compose\s+managed\b",
+    r"\bcompose\s+file\s+owns\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
+    r"\bcompose\s+labels\s+for\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
+    r"\bcontainer\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
+    r":\s*['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?\s*$",
+)
+
+
+def is_compose_mutation_request(text: str) -> bool:
+    lowered = _normalize_intent_text(text or "")
+    return any(p in lowered for p in _COMPOSE_MUTATION_PHRASES)
+
+
+def extract_compose_target(text: str) -> str:
+    raw = (text or "").strip()
+    if any(ch in raw for ch in (";", "&", "|", "$", "`", ">", "<", "\n", "\r", "\t")):
+        return ""
+    lowered = _normalize_intent_text(raw)
+    for pattern in _COMPOSE_TARGET_PATTERNS:
+        m = re.search(pattern, lowered)
+        if m:
+            target = (m.group(1) or "").strip("'\"")
+            return target if _is_valid_compose_target(target) else ""
+    return ""
+
+
+def _is_valid_compose_target(target: str) -> bool:
+    if not target:
+        return False
+    if any(ch.isspace() for ch in target):
+        return False
+    if any(ch in target for ch in (";", "&", "|", "$", "`", ">", "<", "(", ")")):
+        return False
+    if "/" in target or "\\" in target:
+        return False
+    if target.startswith("-"):
+        return False
+    return re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", target) is not None
+
+
 def network_reachability_brief(
     findings,
     evidence_items,

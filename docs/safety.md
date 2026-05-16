@@ -511,3 +511,8 @@ approved CLI execution.
 - ShellForgeAI does not execute `docker compose` commands in PR56.
 - Restart command preview remains exact `docker restart <container>` for allowlisted targets.
 - Future compose service mutations require separate policy gates in a separate PR.
+
+PR57 extends this with deterministic ask routing for Compose context phrasing
+only. Natural-language Compose mutation requests (for example restart/up/down/
+recreate) are refused and redirected to read-only `compose inspect` plus the
+existing proposal/mission/apply safety gates.

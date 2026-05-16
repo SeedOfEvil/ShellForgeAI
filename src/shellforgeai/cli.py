@@ -53,8 +53,10 @@ from shellforgeai.core.ask_routing import (
     PLAIN,
     AskRoute,
     evidence_brief,
+    extract_compose_target,
     extract_container_target,
     is_apply_approved_intent,
+    is_compose_mutation_request,
     is_create_proposals_intent,
     is_create_restart_proposal_intent,
     is_immediate_fix_intent,
@@ -5088,9 +5090,19 @@ def _handle_lab_restart_ask(runtime: RuntimeContext, question: str) -> bool:
 
 def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
     q = (question or "").lower().strip()
-    if "restart compose service" in q:
+    if is_compose_mutation_request(question):
         console.print(
-            "Refusing mutation: compose service restart is not supported in ShellForgeAI."
+            "Refusing natural-language Compose mutation. Compose context is read-only. "
+            "To inspect ownership, run `shellforgeai compose inspect <container>`. "
+            "For a guarded restart, use the existing proposal/mission workflow."
+        )
+        _append_audit_event(
+            runtime,
+            kind="compose_context",
+            action="viewed",
+            status="refused",
+            summary="ask refused: compose mutation requested",
+            details={"target": "", "mutation_performed": False, "execution_status": "not_executed"},
         )
         return True
     compose_tokens = (
@@ -5102,28 +5114,63 @@ def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
     )
     if not any(tok in q for tok in compose_tokens):
         return False
-    target = extract_container_target(question) or ""
+    target = extract_compose_target(question) or ""
     if not target:
-        console.print("No container target found. Try: shellforgeai compose inspect <container>.")
+        console.print("No compose target found. Try: shellforgeai compose inspect <container>.")
+        _append_audit_event(
+            runtime,
+            kind="compose_context",
+            action="viewed",
+            status="failed",
+            summary="ask failed: compose target extraction failed",
+            details={"target": "", "mutation_performed": False, "execution_status": "not_executed"},
+        )
         return True
     result = containers.inspect(target)
     if not result.ok:
-        console.print("Compose context unavailable from current evidence/runtime.")
-        console.print("- Try: shellforgeai diagnose docker --save-plan")
-        console.print(f"- Try: shellforgeai compose inspect {target}")
+        console.print(
+            f"Compose context target `{target}` was not found in available Docker/Compose context."
+        )
+        console.print("- shellforgeai compose list")
+        console.print("- shellforgeai compose inspect <container>")
         return True
     payload = json.loads(result.stdout or "{}")
+    if payload.get("ambiguous"):
+        console.print(
+            f"Compose target `{target}` is ambiguous. Provide a specific container/service name."
+        )
+        console.print("- shellforgeai compose inspect <container>")
+        return True
     compose = payload.get("compose") or {"detected": False}
     if not compose.get("detected"):
-        console.print(f"{target} appears unmanaged/non-compose (labels not present).")
+        console.print(f"Compose context for `{target}`:")
+        console.print("- Compose-managed: no")
+        console.print("- Reason: compose labels not present")
+        console.print("- Safety: read-only; no docker compose command was executed")
     else:
-        project = compose.get("project")
-        service = compose.get("service")
-        console.print(f"{target} belongs to compose project={project} service={service}.")
-        cfg = compose.get("config_files") or []
-        if cfg:
-            console.print("- Config files: " + ", ".join(cfg))
-    console.print("- Safety: read-only context only; no compose command executed.")
+        console.print(f"Compose context for `{target}`:")
+        console.print("- Compose-managed: yes")
+        console.print(f"- Project: {compose.get('project') or '-'}")
+        console.print(f"- Service: {compose.get('service') or '-'}")
+        console.print(f"- Working dir: {compose.get('working_dir') or '-'}")
+        console.print("- Config files:")
+        for path in compose.get("config_files") or []:
+            console.print(f"  - {path}")
+        console.print(f"- Compose version: {compose.get('compose_version') or '-'}")
+        console.print(f"- One-off: {bool(compose.get('oneoff'))}")
+        console.print("- Safety: read-only; no docker compose command was executed")
+    _append_audit_event(
+        runtime,
+        kind="compose_context",
+        action="viewed",
+        status="success",
+        summary="ask: viewed compose context",
+        details={
+            "target": target,
+            "mutation_performed": False,
+            "execution_status": "not_executed",
+        },
+    )
     return True
 
 

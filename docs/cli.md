@@ -535,3 +535,14 @@ Read-only Compose awareness from Docker container labels.
 - `shellforgeai compose list --json`
 
 `--json` output is strict JSON only. Compose context is advisory and does not execute any `docker compose` command.
+
+Ask-route polish (PR57) also supports deterministic read-only Compose context asks:
+
+- `shellforgeai ask "compose context for shellforgeai"`
+- `shellforgeai ask "what compose project owns shellforgeai?"`
+- `shellforgeai ask "is shellforgeai compose managed?"`
+
+If no safe target token is extracted, ask suggests:
+
+- `shellforgeai compose list`
+- `shellforgeai compose inspect <container>`
