@@ -502,3 +502,5 @@ approved CLI execution.
   remain refused; only the explicit `mission restart execute --execute
   --confirm` (PR53) or `apply <approved-proposal-id> --execute --confirm`
   (PR47) can execute the gated mutation.
+
+- PR55 cleanup review is metadata-only. `audit cleanup plan` and `audit cleanup archive` never delete; `audit cleanup execute` requires `--confirm` and path safety guards.

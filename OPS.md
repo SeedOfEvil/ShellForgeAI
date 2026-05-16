@@ -632,3 +632,13 @@ may describe a prior gated mutation if one occurred. Natural-language asks for
 `mission restart execute --execute --confirm` (PR53) or
 `apply <approved-proposal-id> --execute --confirm` (PR47) can execute the
 gated mutation.
+
+## PR55 cleanup review workflow
+
+1. shellforgeai doctor
+2. shellforgeai audit retention --top 20
+3. shellforgeai audit cleanup plan --category exports --max-age-days 7
+4. shellforgeai audit cleanup archive <plan-id>
+5. shellforgeai audit cleanup execute <plan-id> --confirm
+6. shellforgeai audit cleanup validate <receipt>
+7. shellforgeai doctor

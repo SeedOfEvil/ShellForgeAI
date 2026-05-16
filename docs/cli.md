@@ -513,3 +513,13 @@ Mission export manifest carries `source_type: "mission_restart"`,
 language asks for "run mission and export" remain refused; only the
 explicit `apply --execute --confirm` (or `mission restart execute --execute
 --confirm` handoff from PR53) can execute the gated mutation.
+
+### Cleanup review workflow (PR55)
+
+```bash
+shellforgeai audit cleanup plan --category exports --max-age-days 7
+shellforgeai audit cleanup archive <cleanup-plan-id>
+shellforgeai audit cleanup execute <cleanup-plan-id> --confirm
+shellforgeai audit cleanup validate <cleanup-receipt-or-dir>
+shellforgeai audit cleanup report <cleanup-receipt-or-dir>
+```
