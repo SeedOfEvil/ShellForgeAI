@@ -4,12 +4,14 @@ import json
 import platform
 import re
 import sys
+import tarfile
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
+from posixpath import normpath
 from typing import Annotated, Any
 
 import typer
@@ -892,6 +894,60 @@ def _cleanup_plan_dir(data_dir: Path, plan_id: str) -> Path:
     return data_dir / "cleanup_plans" / plan_id
 
 
+def _is_cleanup_archive_path(path: Path) -> bool:
+    return path.is_file() and "".join(path.suffixes[-2:]) == ".tar.gz"
+
+
+def _cleanup_archive_member_name(raw: str) -> str | None:
+    normed = normpath(raw.strip().replace("\\", "/"))
+    if not normed or normed == ".":
+        return None
+    if normed.startswith("/") or normed.startswith("../") or "/../" in normed:
+        return None
+    return normed
+
+
+def _validate_cleanup_archive_file(path: Path) -> tuple[bool, list[str], int]:
+    ok, errors, files = validate_archive(path)
+    if not ok:
+        return ok, errors, files
+    extra_errors: list[str] = []
+    required = {"cleanup-plan.json", "cleanup-plan.md"}
+    try:
+        with tarfile.open(path, "r:gz") as tf:
+            names = tf.getnames()
+            for raw in names:
+                if _cleanup_archive_member_name(raw) is None:
+                    extra_errors.append(f"invalid archive member path: {raw}")
+            name_set = set(names)
+            for req in required:
+                if req not in name_set and f"payload/{req}" not in name_set:
+                    extra_errors.append(f"missing {req}")
+            mf = tf.extractfile("archive-manifest.json")
+            if mf is None:
+                extra_errors.append("missing archive-manifest.json")
+            else:
+                manifest = json.loads(mf.read().decode("utf-8"))
+                if manifest.get("execution_allowed") is not False:
+                    extra_errors.append("execution_allowed must be false")
+                if manifest.get("execution_status") != "not_executed":
+                    extra_errors.append("execution_status must be not_executed")
+                if manifest.get("mutation_performed") is not False:
+                    extra_errors.append("mutation_performed must be false")
+                for key in (
+                    "remediation_execution",
+                    "docker_mutation",
+                    "service_mutation",
+                    "package_mutation",
+                    "firewall_mutation",
+                ):
+                    if key in manifest and manifest.get(key) is not False:
+                        extra_errors.append(f"{key} must be false")
+    except Exception as exc:
+        return False, [str(exc)], files
+    return (not extra_errors), extra_errors, files
+
+
 @audit_cleanup_app.command("plan")
 def audit_cleanup_plan(
     ctx: typer.Context,
@@ -1023,6 +1079,7 @@ def audit_cleanup_archive(ctx: typer.Context, plan_id: str) -> None:
     pdir = _cleanup_plan_dir(data_dir, plan_id)
     payload = json.loads((pdir / "cleanup-plan.json").read_text(encoding="utf-8"))
     candidates = [Path(c["path"]) for c in payload.get("candidates", [])]
+    candidates.extend([pdir / "cleanup-plan.json", pdir / "cleanup-plan.md"])
     archive_path = create_archive(
         candidates,
         data_dir,
@@ -1109,6 +1166,29 @@ def audit_cleanup_execute(
 
 @audit_cleanup_app.command("validate")
 def audit_cleanup_validate(target: Path) -> None:
+    if _is_cleanup_archive_path(target):
+        ok, errors, files = _validate_cleanup_archive_file(target)
+        if not ok:
+            console.print("Cleanup archive validation failed:")
+            for err in errors:
+                console.print(f"- {err}")
+            raise typer.Exit(code=1)
+        console.print("Cleanup archive validation passed:")
+        console.print(f"- archive: {target}")
+        console.print(f"- files: {files}")
+        console.print("- checksums: ok")
+        console.print("- safety: ok")
+        console.print("- execution: none")
+        return
+    if target.is_file() and target.suffix != ".json":
+        console.print("Cleanup validation failed:")
+        console.print("- expected cleanup receipt directory or cleanup-receipt.json")
+        console.print(f"- got archive file: {target}")
+        console.print(
+            "- to validate cleanup archives, run:"
+            " shellforgeai audit cleanup validate <archive.tar.gz>"
+        )
+        raise typer.Exit(code=1)
     receipt_path = target / "cleanup-receipt.json" if target.is_dir() else target
     try:
         payload = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -1148,8 +1228,23 @@ def audit_cleanup_validate(target: Path) -> None:
 
 @audit_cleanup_app.command("report")
 def audit_cleanup_report(target: Path) -> None:
+    if _is_cleanup_archive_path(target):
+        console.print("Cleanup report failed:")
+        console.print("- expected cleanup receipt directory or cleanup-receipt.json")
+        console.print(f"- got archive file: {target}")
+        console.print(
+            "- to validate cleanup archives, run:"
+            " shellforgeai audit cleanup validate <archive.tar.gz>"
+        )
+        raise typer.Exit(code=1)
     receipt_path = target / "cleanup-receipt.json" if target.is_dir() else target
-    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except Exception:
+        console.print("Cleanup report failed:")
+        console.print("- expected cleanup receipt directory or cleanup-receipt.json")
+        console.print(f"- got: {target}")
+        raise typer.Exit(code=1) from None
     console.print("Cleanup report:")
     console.print(f"- receipt: {receipt_path}")
     console.print(f"- plan_id: {payload.get('plan_id')}")
