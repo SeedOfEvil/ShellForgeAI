@@ -599,3 +599,36 @@ Step 7 verifies mission readiness, then delegates to the same guarded code path
 as `shellforgeai apply <proposal-id> --execute --confirm`. The apply receipt is
 referenced from the mission record. Without `--execute --confirm`, step 7 is
 dry-run only and prints the exact apply delegation command.
+
+
+## Post-execution mission review flow (PR54)
+
+After a mission executes through the apply gate, PR54 adds a single read-only
+review/export flow. None of these commands mutate Docker, services, packages,
+filesystem, firewall, network, or system state.
+
+1. `shellforgeai mission restart status <mission-id>` — refresh phases and
+   confirm `status=executed`.
+2. `shellforgeai mission restart report <mission-id>` — print the post-
+   execution report; writes `mission-report.json` and `mission-report.md`
+   under `<data_dir>/mission_reports/<mission-id>/`. Add `--json` for strict
+   machine-readable output.
+3. `shellforgeai mission restart export <mission-id> --redact` — bundle the
+   mission record, report, proposal, rollback preview, apply receipt,
+   before/after inspect evidence, and relevant audit events into
+   `<data_dir>/mission_exports/<mission-id>/`. The `--redact` flag applies
+   best-effort redaction to exported text copies; source artifacts remain
+   unchanged.
+4. `shellforgeai mission restart validate-export
+   <data_dir>/mission_exports/<mission-id>/` — re-verify manifest, files,
+   checksums, redaction report (when applicable), and safety invariants.
+5. `shellforgeai audit timeline --proposal <proposal-id>` — replay the full
+   audit timeline (apply gate execution + restart_mission delegated events +
+   mission_report / mission_export read-only events).
+
+Steps 2–5 are read-only. The export pack itself does not execute mutation; it
+may describe a prior gated mutation if one occurred. Natural-language asks for
+"run mission and export" remain refused — only the explicit
+`mission restart execute --execute --confirm` (PR53) or
+`apply <approved-proposal-id> --execute --confirm` (PR47) can execute the
+gated mutation.

@@ -467,3 +467,38 @@ approved CLI execution.
   the mission audit event does not duplicate the mutation safety flags.
 - Natural-language asks ("run/execute the mission", "approve and run the
   mission") remain refused. `ask` never invokes the apply gate.
+
+
+## PR54 mission report and export pack safety
+
+- `mission restart report` and `mission restart export` are read-only with
+  respect to source artifacts. They never approve, restart, roll back, or
+  apply anything. They may *describe* a prior gated mutation if one occurred
+  through the apply gate (PR47/PR48/PR49/PR53), but the report/export
+  commands themselves perform no mutation.
+- The mission report and export pack write only ShellForgeAI-owned files
+  (`<data_dir>/mission_reports/<mission-id>/mission-report.{json,md}`,
+  `<data_dir>/mission_exports/<mission-id>/...`). The mission record refresh
+  performed when building the report preserves terminal executed/refused
+  state (PR53 invariant): a report run never erases an apply receipt nor
+  downgrades `executed` back to `ready`.
+- Export manifests carry `safety.execution_allowed=false`,
+  `safety.execution_status="not_executed_by_export"`,
+  `safety.mutation_performed_by_export=false`,
+  `safety.arbitrary_command_execution=false`, and
+  `safety.rollback_execution=false`. Validation enforces these invariants
+  and refuses an export with checksum mismatches, missing required files, or
+  any of those safety flags flipped.
+- Redaction is best-effort using the existing PR34 redactor. Operators
+  should still review redacted exports before sharing. Raw source artifacts
+  are never modified — only the exported copies under the export directory
+  are redacted, and a `redaction-report.json` is included.
+- `mission restart validate-export` is read-only. It re-reads the export
+  directory and re-verifies checksums and safety invariants; it does not
+  execute anything.
+- Natural-language asks ("show mission report", "make a redacted mission
+  pack", "did the mission execute safely") return the read-only report or
+  the export pack. Asks that imply execution ("run mission and export")
+  remain refused; only the explicit `mission restart execute --execute
+  --confirm` (PR53) or `apply <approved-proposal-id> --execute --confirm`
+  (PR47) can execute the gated mutation.
