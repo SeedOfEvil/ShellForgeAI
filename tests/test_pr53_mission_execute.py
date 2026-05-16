@@ -404,3 +404,138 @@ def test_ask_is_mission_ready_is_read_only(tmp_path: Path, monkeypatch):
     assert fake.calls == []
     receipts = list((data_dir / "execution_receipts").glob("exec_*.json"))
     assert receipts == []
+
+
+# ---------------------------------------------------------------------------
+# Status refresh preserves terminal execution state (regression: see PR53
+# follow-up — `mission restart status` was rewriting executed missions back to
+# status=ready / execution=not_executed / verification=not_run).
+
+
+def _execute_and_return_mid(tmp_path: Path, monkeypatch) -> tuple[Path, str]:
+    _enable_mutation_env(monkeypatch)
+    data_dir, mid, _pid = _setup_mission(tmp_path, monkeypatch, approve=True, rollback=True)
+    _patch_fake_executor(monkeypatch, FakeCommandExecutor())
+    r = runner.invoke(app, ["mission", "restart", "execute", mid, "--execute", "--confirm"])
+    assert r.exit_code == 0, r.output
+    return data_dir, mid
+
+
+def test_mission_status_preserves_executed_state(tmp_path: Path, monkeypatch):
+    data_dir, mid = _execute_and_return_mid(tmp_path, monkeypatch)
+    mp = data_dir / "missions" / "restart" / mid / "mission.json"
+    before = json.loads(mp.read_text())
+    assert before["status"] == "executed"
+    receipt_ref = before["phases"]["execution"]["receipt"]
+    assert receipt_ref and Path(receipt_ref).exists()
+
+    r = runner.invoke(app, ["mission", "restart", "status", mid])
+    assert r.exit_code == 0, r.output
+
+    after = json.loads(mp.read_text())
+    assert after["status"] == "executed"
+    assert after["phases"]["execution"]["status"] == "executed"
+    assert after["phases"]["execution"]["receipt"] == receipt_ref
+    assert after["phases"]["verification"]["status"] == "passed"
+    assert after["phases"]["verification"]["receipt"] == receipt_ref
+    assert after["safety"]["arbitrary_command_execution"] is False
+    assert after["safety"]["execution_status"] == "executed"
+    assert after["safety"]["mutation_performed"] is True
+
+
+def test_mission_status_json_preserves_executed_state(tmp_path: Path, monkeypatch):
+    data_dir, mid = _execute_and_return_mid(tmp_path, monkeypatch)
+    r = runner.invoke(app, ["mission", "restart", "status", mid, "--json"])
+    assert r.exit_code == 0, r.output
+    payload = json.loads(r.output)
+    assert payload["status"] == "executed"
+    assert payload["phases"]["execution"]["status"] == "executed"
+    assert payload["phases"]["execution"]["receipt"]
+    assert payload["phases"]["verification"]["status"] == "passed"
+    assert payload["phases"]["verification"]["receipt"]
+    assert payload["safety"]["arbitrary_command_execution"] is False
+
+
+def test_mission_checklist_after_execution_does_not_suggest_apply(tmp_path: Path, monkeypatch):
+    data_dir, mid = _execute_and_return_mid(tmp_path, monkeypatch)
+    r = runner.invoke(app, ["mission", "restart", "checklist", mid])
+    assert r.exit_code == 0, r.output
+    out = r.output
+    assert "[OK] Execution" in out
+    assert "[OK] Verification" in out
+    # Post-execution next_commands must not suggest the apply gate.
+    assert "shellforgeai apply" not in out
+    assert "audit timeline" in out
+
+
+def test_mission_validate_executed_passes(tmp_path: Path, monkeypatch):
+    data_dir, mid = _execute_and_return_mid(tmp_path, monkeypatch)
+    r = runner.invoke(app, ["mission", "restart", "validate", mid])
+    assert r.exit_code == 0, r.output
+
+
+def test_mission_validate_executed_without_receipt_fails(tmp_path: Path, monkeypatch):
+    data_dir, mid = _execute_and_return_mid(tmp_path, monkeypatch)
+    mp = data_dir / "missions" / "restart" / mid / "mission.json"
+    payload = json.loads(mp.read_text())
+    payload["phases"]["execution"]["receipt"] = None
+    mp.write_text(json.dumps(payload), encoding="utf-8")
+    r = runner.invoke(app, ["mission", "restart", "validate", mid])
+    assert r.exit_code == 1
+    assert "receipt" in r.output.lower()
+
+
+def test_mission_validate_arbitrary_exec_after_executed_fails(tmp_path: Path, monkeypatch):
+    data_dir, mid = _execute_and_return_mid(tmp_path, monkeypatch)
+    mp = data_dir / "missions" / "restart" / mid / "mission.json"
+    payload = json.loads(mp.read_text())
+    payload["safety"]["arbitrary_command_execution"] = True
+    mp.write_text(json.dumps(payload), encoding="utf-8")
+    r = runner.invoke(app, ["mission", "restart", "validate", mid])
+    assert r.exit_code == 1
+    assert "arbitrary_command_execution" in r.output
+
+
+def test_status_refresh_still_marks_ready_pre_execution(tmp_path: Path, monkeypatch):
+    """Regression guard: pre-execution refresh must still compute readiness."""
+    data_dir, mid, _pid = _setup_mission(tmp_path, monkeypatch, approve=True, rollback=True)
+    r = runner.invoke(app, ["mission", "restart", "status", mid, "--json"])
+    assert r.exit_code == 0
+    payload = json.loads(r.output)
+    assert payload["status"] == "ready"
+    assert payload["phases"]["execution"]["status"] == "not_executed"
+    assert payload["phases"]["verification"]["status"] == "not_run"
+
+
+def test_status_refresh_preserves_refusal_record(tmp_path: Path, monkeypatch):
+    _enable_mutation_env(monkeypatch)
+    data_dir, mid, _pid = _setup_mission(tmp_path, monkeypatch)
+    _patch_fake_executor(monkeypatch, FakeCommandExecutor())
+    r = runner.invoke(app, ["mission", "restart", "execute", mid, "--execute", "--confirm"])
+    assert r.exit_code == 1
+    mp = data_dir / "missions" / "restart" / mid / "mission.json"
+    refused = json.loads(mp.read_text())
+    assert refused["phases"]["execution"]["status"] == "refused"
+    assert refused["status"] == "blocked"
+
+    r2 = runner.invoke(app, ["mission", "restart", "status", mid, "--json"])
+    assert r2.exit_code == 0
+    payload = json.loads(r2.output)
+    assert payload["phases"]["execution"]["status"] == "refused"
+    assert payload["status"] == "blocked"
+
+
+def test_failed_mission_status_does_not_reset_to_ready(tmp_path: Path, monkeypatch):
+    _enable_mutation_env(monkeypatch)
+    data_dir, mid, _pid = _setup_mission(tmp_path, monkeypatch, approve=True, rollback=True)
+    fake = FakeCommandExecutor()
+    fake.result = lab_restart_mod.ExecResult(ok=False, exit_code=1, stdout="", stderr="boom")
+    _patch_fake_executor(monkeypatch, fake)
+    r = runner.invoke(app, ["mission", "restart", "execute", mid, "--execute", "--confirm"])
+    assert r.exit_code == 1
+
+    r2 = runner.invoke(app, ["mission", "restart", "status", mid, "--json"])
+    assert r2.exit_code == 0
+    payload = json.loads(r2.output)
+    assert payload["status"] == "failed"
+    assert payload["phases"]["execution"]["status"] == "executed"

@@ -477,8 +477,76 @@ def prepare_mission(
     )
 
 
+def _preserve_terminal_state(
+    refreshed: dict[str, Any],
+    prior: dict[str, Any],
+) -> dict[str, Any]:
+    """Carry forward terminal execution/refusal state across a refresh.
+
+    ``refresh_mission`` recomputes phases from current artifacts (proposal,
+    rollback preview, restart plan readiness) — that view is read-only and must
+    not erase an executed receipt or a recorded refusal. Once a mission has an
+    execution receipt (or has reached a terminal status), the prior
+    execution/verification/safety/status fields take precedence over a freshly
+    computed "ready" view. Read-only derived fields (evidence, proposal,
+    approval, rollback, readiness) are still refreshed.
+    """
+    prior_phases = prior.get("phases") or {}
+    prior_exec = prior_phases.get("execution") or {}
+    prior_verif = prior_phases.get("verification") or {}
+    prior_status = str(prior.get("status") or "")
+    prior_exec_status = str(prior_exec.get("status") or "")
+    receipt = prior_exec.get("receipt")
+
+    terminal = (
+        prior_status in (STATUS_EXECUTED, STATUS_FAILED)
+        or prior_exec_status in ("executed", "refused")
+        or bool(receipt)
+    )
+    if not terminal:
+        return refreshed
+
+    phases = refreshed.setdefault("phases", {})
+    phases["execution"] = dict(prior_exec)
+    phases["verification"] = dict(prior_verif)
+
+    if prior_status in (
+        STATUS_EXECUTED,
+        STATUS_FAILED,
+        STATUS_BLOCKED,
+    ):
+        refreshed["status"] = prior_status
+
+    prior_safety = prior.get("safety") or {}
+    if prior_safety:
+        safety = dict(prior_safety)
+        safety["arbitrary_command_execution"] = False
+        refreshed["safety"] = safety
+
+    # Post-execution: drop apply-step suggestions and surface audit/export hints.
+    if refreshed.get("status") in (STATUS_EXECUTED, STATUS_FAILED):
+        mid = str(refreshed.get("mission_id") or "")
+        receipt_str = str((phases.get("execution") or {}).get("receipt") or "")
+        post_cmds: list[str] = []
+        if mid:
+            post_cmds.append(f"shellforgeai mission restart status {mid}")
+            post_cmds.append(f"shellforgeai mission restart validate {mid}")
+            post_cmds.append(f"shellforgeai mission restart export {mid}")
+        post_cmds.append("shellforgeai audit timeline")
+        if receipt_str:
+            post_cmds.append(f"cat {receipt_str}")
+        refreshed["next_commands"] = post_cmds
+    return refreshed
+
+
 def refresh_mission(data_dir: Path, mission_id: str) -> dict[str, Any]:
-    """Reload mission and refresh phases from artifacts. Persists the update."""
+    """Reload mission and refresh phases from artifacts. Persists the update.
+
+    Terminal execution/refusal state (existing receipt, ``status=executed`` or
+    ``status=failed``) is preserved — a read-only status/checklist refresh must
+    never erase a successful execution or downgrade ``executed`` back to
+    ``ready``.
+    """
     payload = load_mission(data_dir, mission_id)
     proposal: Proposal | None = None
     pid = str(payload.get("proposal_id") or "")
@@ -497,6 +565,7 @@ def refresh_mission(data_dir: Path, mission_id: str) -> dict[str, Any]:
         existing_mission_id=mission_id,
         created_at=str(payload.get("created_at") or ""),
     )
+    refreshed = _preserve_terminal_state(refreshed, payload)
     _write_mission_files(data_dir, refreshed)
     return refreshed
 
