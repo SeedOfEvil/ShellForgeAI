@@ -453,3 +453,63 @@ Mission execution refused:
 `shellforgeai mission restart export <mission-id>` after a delegated execute
 also copies the referenced apply receipt into the export and records it in the
 manifest under `execution_receipt`.
+
+
+### PR54 — mission post-execution report and export pack
+
+PR54 adds a read-only report and an export-pack/validate command for missions.
+None of these commands execute mutation; they collect the existing artifacts
+(mission record, proposal, rollback preview, apply receipt, before/after
+inspect evidence, audit events) into a single operator-readable report and
+optionally bundle them into a portable export directory with checksums.
+
+- `shellforgeai mission restart report <mission-id>` — print a concise
+  operator report (mission, target, proposal, status, execution path,
+  verification summary, rollback preview status, artifacts, next review
+  commands). Writes `mission-report.json` and `mission-report.md` under
+  `<data_dir>/mission_reports/<mission-id>/`. Read-only.
+- `shellforgeai mission restart report <mission-id> --json` — strict JSON
+  only (no rich header). Schema-versioned (`schema_version: "1"`); fields
+  include `execution.status`, `execution.command_argv`, `verification.*`,
+  `rollback.preview_path`, `safety.arbitrary_command_execution=false`.
+- `shellforgeai mission restart export <mission-id>` — bundle the mission
+  record, mission report, proposal, rollback preview, apply receipt,
+  before/after inspect evidence, source evidence/summary/plan, and relevant
+  audit events into `<data_dir>/mission_exports/<mission-id>/` with
+  `export-manifest.json`, `export-summary.md`, `checksums.sha256`, and a
+  legacy `manifest.json` for backward compatibility. The export command
+  itself does not execute anything; it may *describe* a prior gated
+  mutation but performs none.
+- `shellforgeai mission restart export <mission-id> --redact` — best-effort
+  redaction of secret-shaped tokens in exported text copies (uses the same
+  redactor as the PR34 export pack). Adds `redaction-report.json`. Source
+  artifacts remain unchanged; only the exported copies are redacted.
+- `shellforgeai mission restart validate-export <export-dir>` — re-read an
+  exported mission pack and verify manifest, checksums, required files,
+  redaction report (when applicable), and safety invariants (export did not
+  execute anything; `mutation_performed_by_export=false`;
+  `arbitrary_command_execution=false`). Exits 0 on success, 1 on failure
+  with a punch list (no traceback).
+
+Example report output:
+
+```
+Mission restart report
+- Mission: mission_restart_...
+- Target: sfai-pr54-target
+- Proposal: prop_...
+- Source session: sf_...
+- Status: executed
+- Execution path: apply_gate
+- Verification: passed
+- Command: docker restart sfai-pr54-target
+- Arbitrary command execution: false
+```
+
+Mission export manifest carries `source_type: "mission_restart"`,
+`mission_id`, `proposal_id`, `session_id`, `redaction_applied`,
+`included_files`, `missing_optional_files`, `checksums`, and a
+`safety.execution_status: "not_executed_by_export"` invariant. Natural-
+language asks for "run mission and export" remain refused; only the
+explicit `apply --execute --confirm` (or `mission restart execute --execute
+--confirm` handoff from PR53) can execute the gated mutation.

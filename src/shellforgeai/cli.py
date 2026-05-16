@@ -112,12 +112,6 @@ from shellforgeai.core.mission import (
     latest_mission as mission_latest,
 )
 from shellforgeai.core.mission import (
-    load_mission as mission_load,
-)
-from shellforgeai.core.mission import (
-    mission_dir as mission_dir_path,
-)
-from shellforgeai.core.mission import (
     mission_json_path,
     prepare_mission,
     refresh_mission,
@@ -128,6 +122,16 @@ from shellforgeai.core.mission import (
 )
 from shellforgeai.core.mission import (
     render_checklist as mission_render_checklist,
+)
+from shellforgeai.core.mission_export import (
+    export_mission as mission_export_pack,
+)
+from shellforgeai.core.mission_export import (
+    validate_mission_export,
+)
+from shellforgeai.core.mission_report import (
+    build_mission_report,
+    write_mission_report_files,
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
@@ -3798,66 +3802,206 @@ def mission_restart_execute(
         raise typer.Exit(code=1)
 
 
+@mission_restart_app.command("report")
+def mission_restart_report(
+    ctx: typer.Context,
+    mission_id: Annotated[str | None, typer.Argument()] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Print a concise post-execution operator report. Read-only.
+
+    Builds a structured report from the mission record (PR52/PR53), the apply
+    receipt and verification evidence (PR47/PR48), and the rollback preview
+    (PR49). Writes ``mission-report.json`` and ``mission-report.md`` under
+    ``<data_dir>/mission_reports/<mission-id>/`` so the operator can re-read
+    the report later. ShellForgeAI does not execute mutation here.
+    """
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    mid = _resolve_mission_id(runtime, mission_id)
+    report = build_mission_report(data_dir, mid)
+    json_path, md_path = write_mission_report_files(data_dir, mid, report)
+    _append_audit_event(
+        runtime,
+        kind="mission_report",
+        action="generated",
+        status="success",
+        proposal_id=report.get("proposal_id") or None,
+        session_id=report.get("session_id") or None,
+        target=report.get("target") or None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary="mission report generated",
+        artifacts=[str(json_path), str(md_path)],
+        details={
+            "mission_id": mid,
+            "mission_status": report.get("status"),
+            "execution_status_record": report["safety"].get("execution_status_record"),
+            "arbitrary_command_execution": False,
+        },
+    )
+    if json_out:
+        typer.echo(json.dumps(report, indent=2))
+        return
+    execution = report.get("execution") or {}
+    verification = report.get("verification") or {}
+    rollback = report.get("rollback") or {}
+    safety = report.get("safety") or {}
+    console.print("Mission restart report")
+    console.print(f"- Mission: {report.get('mission_id')}")
+    console.print(f"- Target: {report.get('target') or 'unknown'}")
+    console.print(f"- Proposal: {report.get('proposal_id') or 'missing'}")
+    console.print(f"- Source session: {report.get('session_id') or 'unknown'}")
+    console.print(f"- Status: {report.get('status')}")
+    console.print(f"- Execution path: {execution.get('path') or 'none'}")
+    console.print(f"- Verification: {verification.get('status', '')}")
+    cmd_argv = execution.get("command_argv") or []
+    if cmd_argv:
+        console.print(f"- Command: {' '.join(str(x) for x in cmd_argv)}")
+    else:
+        console.print(f"- Command preview: {report.get('command_preview') or '(none)'}")
+    console.print("- Arbitrary command execution: false")
+    console.print("")
+    console.print("Verification")
+    console.print(f"- running_after: {bool(verification.get('running_after', False))}")
+    console.print(f"- started_at_changed: {bool(verification.get('started_at_changed', False))}")
+    console.print(f"- health_after: {verification.get('health_after', '')}")
+    if verification.get("before_inspect"):
+        console.print(f"- before inspect: {verification['before_inspect']}")
+    if verification.get("after_inspect"):
+        console.print(f"- after inspect: {verification['after_inspect']}")
+    console.print("")
+    console.print("Safety")
+    console.print(f"- allowlisted target: {bool(safety.get('allowlisted_target', False))}")
+    console.print(f"- rollback preview: {rollback.get('preview_status', 'unknown')}")
+    console.print("- rollback execution: disabled")
+    console.print("- natural-language execution: refused")
+    console.print(f"- mutation kind: {safety.get('mutation_kind') or 'none'}")
+    console.print("")
+    console.print("Artifacts")
+    for art in report.get("artifacts") or []:
+        present = "present" if art.get("exists") == "true" else "missing"
+        console.print(f"- {art.get('role', '')}: {art.get('path', '')} ({present})")
+    console.print("")
+    console.print("Next review commands")
+    for i, cmd in enumerate(report.get("next_review_commands") or [], start=1):
+        console.print(f"{i}. {cmd}")
+    console.print("")
+    console.print(f"Report files:\n- {json_path}\n- {md_path}")
+
+
 @mission_restart_app.command("export")
 def mission_restart_export(
     ctx: typer.Context,
     mission_id: Annotated[str | None, typer.Argument()] = None,
     output: Annotated[Path | None, typer.Option("--output")] = None,
+    redact: Annotated[
+        bool,
+        typer.Option(
+            "--redact",
+            help="Best-effort secret redaction for exported text copies.",
+        ),
+    ] = False,
 ) -> None:
-    """Bundle mission files (and referenced artifacts) into a compact export."""
-    import shutil
+    """Bundle the mission, report, and referenced artifacts into a compact export.
 
+    Read-only with respect to source artifacts. Writes a new mission export
+    directory containing ``export-manifest.json``, ``export-summary.md``,
+    ``checksums.sha256``, ``mission-report.json/md``, and copies of relevant
+    proposal/rollback/receipt/inspect/audit artifacts. Never executes mutation;
+    the export pack may *describe* a prior gated mutation, but the export
+    command itself performs none.
+    """
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
     mid = _resolve_mission_id(runtime, mission_id)
-    payload = mission_load(data_dir, mid)
-    src_dir = mission_dir_path(data_dir, mid)
-    out_root = output or (data_dir / "mission_exports" / mid)
-    out_root.mkdir(parents=True, exist_ok=True)
-    included: list[str] = []
-    for name in ("mission.json", "mission.md"):
-        s = src_dir / name
-        if s.exists():
-            shutil.copy2(s, out_root / name)
-            included.append(name)
-    pid = str(payload.get("proposal_id") or "")
-    if pid:
-        path, _status = find_proposal_path(data_dir, pid)
-        if path is not None:
-            shutil.copy2(path, out_root / path.name)
-            included.append(path.name)
-    rb = str(payload.get("rollback_preview_path") or "")
-    if rb and Path(rb).exists():
-        shutil.copy2(rb, out_root / Path(rb).name)
-        included.append(Path(rb).name)
-    src_ev = str(payload.get("source_evidence") or "")
-    if src_ev and Path(src_ev).exists():
-        shutil.copy2(src_ev, out_root / "evidence.json")
-        included.append("evidence.json")
-    exec_phase = (payload.get("phases") or {}).get("execution") or {}
-    receipt_ref = str(exec_phase.get("receipt") or "")
-    if receipt_ref and Path(receipt_ref).exists():
-        shutil.copy2(receipt_ref, out_root / Path(receipt_ref).name)
-        included.append(Path(receipt_ref).name)
-    safety_payload = payload.get("safety") or {}
-    manifest = {
-        "schema_version": "1",
-        "mission_id": mid,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "included_files": included,
-        "execution_receipt": receipt_ref,
-        "safety": {
-            "execution_allowed": bool(safety_payload.get("execution_allowed", False)),
-            "execution_status": str(safety_payload.get("execution_status", "not_executed")),
-            "mutation_performed": bool(safety_payload.get("mutation_performed", False)),
+    result = mission_export_pack(data_dir, mid, output=output, redact=redact)
+    _append_audit_event(
+        runtime,
+        kind="mission_export",
+        action="created",
+        status="success",
+        proposal_id=result.proposal_id or None,
+        session_id=result.session_id or None,
+        target=None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary="mission export created",
+        artifacts=[str(result.manifest_path), str(result.summary_path)],
+        details={
+            "mission_id": mid,
+            "export_id": result.export_id,
+            "export_dir": str(result.export_dir),
+            "redaction_applied": result.redaction_applied,
+            "file_count": len(result.included_files),
+            "missing_optional_count": len(result.missing_optional),
             "arbitrary_command_execution": False,
+            "mutation_performed_by_export": False,
         },
-    }
-    (out_root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    console.print("Restart mission exported:")
+    )
+    console.print("Mission export written (ShellForgeAI did not execute anything):")
     console.print(f"- mission: {mid}")
-    console.print(f"- output: {out_root}")
-    console.print(f"- files: {len(included)}")
+    console.print(f"- export id: {result.export_id}")
+    console.print(f"- export dir: {result.export_dir}")
+    console.print(f"- files: {len(result.included_files)}")
+    if result.missing_optional:
+        console.print("- missing optional:")
+        for f in result.missing_optional:
+            console.print(f"  - {f}")
+    console.print(f"- manifest: {result.manifest_path}")
+    console.print(f"- summary: {result.summary_path}")
+    console.print(f"- checksums: {result.checksums_path}")
+    console.print(f"- redaction: {'on' if result.redaction_applied else 'off'}")
+    if result.redaction_applied:
+        console.print("- redaction warning: best-effort; review before sharing.")
+    console.print("- export execution: none")
+
+
+@mission_restart_app.command("validate-export")
+def mission_restart_validate_export(
+    ctx: typer.Context,
+    target: Annotated[Path, typer.Argument(help="Path to a mission export directory")],
+) -> None:
+    """Validate a mission export pack: manifest, files, checksums, safety."""
+    runtime = _ctx(ctx)
+    result = validate_mission_export(target)
+    _append_audit_event(
+        runtime,
+        kind="mission_export_validate",
+        action="validated" if result.ok else "validation_failed",
+        status="success" if result.ok else "failed",
+        proposal_id=None,
+        session_id=None,
+        target=None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary=(
+            "mission export validation passed" if result.ok else "mission export validation failed"
+        ),
+        artifacts=[str(target)],
+        details={
+            "export_dir": str(target),
+            "mission_id": result.info.get("mission_id"),
+            "export_id": result.info.get("export_id"),
+            "file_count": result.info.get("file_count"),
+            "redaction_applied": result.info.get("redaction_applied"),
+            "errors": result.errors,
+            "arbitrary_command_execution": False,
+            "mutation_performed_by_export": False,
+        },
+    )
+    if not result.ok:
+        console.print("Mission export validation failed:")
+        for err in result.errors or ["unknown error"]:
+            console.print(f"- {err}")
+        raise typer.Exit(code=1)
+    console.print("Mission export validation passed:")
+    console.print(f"- export: {result.info.get('export_dir', target)}")
+    console.print(f"- mission: {result.info.get('mission_id', '')}")
+    console.print(f"- files: {result.info.get('file_count', 0)}")
+    console.print("- checksums: ok")
+    console.print("- redaction: on" if result.info.get("redaction_applied") else "- redaction: off")
+    console.print("- export execution: none")
 
 
 @approvals_app.command("list")
@@ -4256,6 +4400,7 @@ def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
         "approve and run the restart mission",
         "restart it now",
         "fire the restart mission",
+        "run mission and export",
     )
     if any(h in raw for h in refuse_hints):
         latest = mission_latest(data_dir)
@@ -4271,7 +4416,135 @@ def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
             payload = refresh_mission(data_dir, mid)
             console.print("")
             typer.echo(mission_render_checklist(payload))
+            console.print("")
+            console.print(
+                "If you want a read-only post-execution report or an export pack of the "
+                "current state, use:"
+            )
+            console.print(f"- shellforgeai mission restart report {mid}")
+            console.print(f"- shellforgeai mission restart export {mid} --redact")
         return True
+
+    redact_export_hints = (
+        "make a redacted mission pack",
+        "make a redacted mission export",
+        "create a redacted mission pack",
+        "redacted mission pack",
+        "package the restart mission for review",
+        "package the restart mission for sharing",
+        "prepare change-review pack for the mission",
+        "prepare a change-review pack for the mission",
+        "prepare change review pack for the mission",
+        "make a sanitized mission pack",
+        "export mission with secrets removed",
+    )
+    plain_export_hints = (
+        "export mission report",
+        "export the mission report",
+        "export the restart mission",
+        "export this mission",
+        "export the mission",
+        "package the mission",
+    )
+    if any(h in raw for h in redact_export_hints) or any(h in raw for h in plain_export_hints):
+        latest = mission_latest(data_dir)
+        if latest is None:
+            console.print("No restart missions found to export.")
+            console.print(
+                "- to create one: shellforgeai mission restart prepare --container <target>"
+            )
+            return True
+        mid = str(latest["mission_id"])
+        want_redact = any(h in raw for h in redact_export_hints) or "redact" in raw
+        result = mission_export_pack(data_dir, mid, redact=want_redact)
+        _append_audit_event(
+            runtime,
+            kind="mission_export",
+            action="created",
+            status="success",
+            proposal_id=result.proposal_id or None,
+            session_id=result.session_id or None,
+            target=None,
+            mutation_performed=False,
+            execution_status="not_executed",
+            summary="mission export created via ask",
+            artifacts=[str(result.manifest_path), str(result.summary_path)],
+            details={
+                "mission_id": mid,
+                "export_id": result.export_id,
+                "export_dir": str(result.export_dir),
+                "redaction_applied": result.redaction_applied,
+                "arbitrary_command_execution": False,
+                "mutation_performed_by_export": False,
+            },
+        )
+        console.print("Mission export written (ShellForgeAI did not execute anything):")
+        console.print(f"- mission: {mid}")
+        console.print(f"- export id: {result.export_id}")
+        console.print(f"- export dir: {result.export_dir}")
+        console.print(f"- files: {len(result.included_files)}")
+        console.print(f"- redaction: {'on' if result.redaction_applied else 'off'}")
+        console.print("- export execution: none")
+        return True
+
+    report_hints = (
+        "show mission report",
+        "show the mission report",
+        "show me the mission report",
+        "show restart mission report",
+        "show me the restart mission report",
+        "post-execution mission report",
+        "post execution mission report",
+        "did the mission execute safely",
+        "did the restart mission execute safely",
+        "show verification report",
+        "show the verification report",
+        "show me the verification report",
+    )
+    if any(h in raw for h in report_hints):
+        latest = mission_latest(data_dir)
+        if latest is None:
+            console.print("No restart missions found.")
+            console.print(
+                "- to create one: shellforgeai mission restart prepare --container <target>"
+            )
+            return True
+        mid = str(latest["mission_id"])
+        report = build_mission_report(data_dir, mid)
+        json_path, md_path = write_mission_report_files(data_dir, mid, report)
+        _append_audit_event(
+            runtime,
+            kind="mission_report",
+            action="generated",
+            status="success",
+            proposal_id=report.get("proposal_id") or None,
+            session_id=report.get("session_id") or None,
+            target=report.get("target") or None,
+            mutation_performed=False,
+            execution_status="not_executed",
+            summary="mission report generated via ask",
+            artifacts=[str(json_path), str(md_path)],
+            details={
+                "mission_id": mid,
+                "mission_status": report.get("status"),
+                "arbitrary_command_execution": False,
+            },
+        )
+        execution = report.get("execution") or {}
+        verification = report.get("verification") or {}
+        rollback = report.get("rollback") or {}
+        console.print("Mission restart report (read-only):")
+        console.print(f"- Mission: {mid}")
+        console.print(f"- Target: {report.get('target') or 'unknown'}")
+        console.print(f"- Status: {report.get('status')}")
+        console.print(f"- Execution path: {execution.get('path') or 'none'}")
+        console.print(f"- Verification: {verification.get('status', '')}")
+        console.print(f"- Rollback preview: {rollback.get('preview_status', 'unknown')}")
+        console.print("- Arbitrary command execution: false")
+        console.print(f"- Report json: {json_path}")
+        console.print(f"- Report md: {md_path}")
+        return True
+
     return False
 
 
