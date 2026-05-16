@@ -5,6 +5,8 @@ import platform
 import re
 import sys
 from contextlib import suppress
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -101,6 +103,12 @@ from shellforgeai.core.guards import (
 )
 from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
 from shellforgeai.core.mission import (
+    apply_delegation_command as mission_apply_delegation_command,
+)
+from shellforgeai.core.mission import (
+    check_execute_readiness as mission_check_execute_readiness,
+)
+from shellforgeai.core.mission import (
     latest_mission as mission_latest,
 )
 from shellforgeai.core.mission import (
@@ -114,6 +122,9 @@ from shellforgeai.core.mission import (
     prepare_mission,
     refresh_mission,
     validate_mission_path,
+)
+from shellforgeai.core.mission import (
+    record_execution_result as mission_record_execution_result,
 )
 from shellforgeai.core.mission import (
     render_checklist as mission_render_checklist,
@@ -2015,7 +2026,34 @@ def _lab_restart_verification_sleep(seconds: float) -> None:
     _time.sleep(seconds)
 
 
-def _run_lab_restart_gate(
+@dataclass
+class LabRestartGateOutcome:
+    """Outcome of the guarded lab-container restart gate.
+
+    Returned by :func:`_perform_lab_restart_gate` so callers (apply CLI and
+    PR53 mission execute handoff) can render their own output without having
+    a second executor or bypassing the shared safety logic.
+    """
+
+    refused: bool = False
+    failed_gate: str = ""
+    failed_message: str = ""
+    success: bool = False
+    status: str = ""
+    receipt_path: Path | None = None
+    verification: dict[str, Any] = dataclass_field(default_factory=dict)
+    container: str = ""
+    action_id: str = ""
+    proposal_id: str = ""
+    rollback_preview_path: str = ""
+    rollback_readiness: str = "failed"
+    exec_result_ok: bool = False
+    exec_stderr: str = ""
+    audit_event: dict[str, Any] | None = None
+    audit_status: str = ""
+
+
+def _perform_lab_restart_gate(
     runtime: RuntimeContext,
     *,
     proposal: Proposal,
@@ -2026,10 +2064,14 @@ def _run_lab_restart_gate(
     action_id: str | None,
     executor: lab_restart_mod.CommandExecutor | None = None,
     timeout_seconds: int = 30,
-) -> None:
-    """Evaluate every PR47 gate; on success run the (mocked or real) executor.
+) -> LabRestartGateOutcome:
+    """Shared lab-container restart gate execution.
 
-    Refusals exit non-zero and write a refusal audit event + receipt.
+    Evaluates every PR47/PR48/PR49 gate, performs the restart via the injected
+    executor on success, writes the execution receipt and audit event, and
+    returns a :class:`LabRestartGateOutcome` describing what happened. Never
+    prints to the console and never raises ``typer.Exit``. Callers translate
+    the outcome to user-facing output and exit codes.
     """
     data_dir = Path(runtime.session.data_dir)
     allowlist = lab_restart_mod.load_allowlist(data_dir)
@@ -2070,13 +2112,6 @@ def _run_lab_restart_gate(
                 gate.message = f"rollback preview missing or invalid: {exc}"
 
     if not gate.allowed:
-        console.print("")
-        console.print("Execution refused:")
-        console.print(f"- failed gate: {gate.failed_gate}")
-        if gate.message:
-            console.print(f"- detail: {gate.message}")
-        console.print(f"- mutation_scope: {lab_restart_mod.MUTATION_SCOPE}")
-        console.print("- no commands executed")
         receipt = lab_restart_mod.write_execution_receipt(
             data_dir,
             proposal_id=proposal.proposal_id,
@@ -2120,8 +2155,19 @@ def _run_lab_restart_gate(
                 "receipt": str(receipt),
             },
         )
-        console.print(f"- receipt: {receipt}")
-        raise typer.Exit(code=1)
+        return LabRestartGateOutcome(
+            refused=True,
+            failed_gate=gate.failed_gate,
+            failed_message=gate.message,
+            success=False,
+            status="refused",
+            receipt_path=receipt,
+            container=gate.container,
+            action_id=gate.action_id,
+            proposal_id=proposal.proposal_id,
+            rollback_preview_path=rollback_preview_path,
+            rollback_readiness=rollback_readiness,
+        )
 
     # Gate passed. Capture pre-restart state (read-only inspect), then run
     # the executor (fake in tests, subprocess in production).
@@ -2254,9 +2300,46 @@ def _run_lab_restart_gate(
             "verification_notes": list(verification.get("notes", [])),
         },
     )
+    return LabRestartGateOutcome(
+        refused=False,
+        failed_gate="",
+        failed_message="",
+        success=(
+            bool(result.ok) and verification["status"] != lab_restart_mod.VERIFICATION_STATUS_FAILED
+        ),
+        status=status,
+        receipt_path=receipt,
+        verification=verification,
+        container=gate.container,
+        action_id=gate.action_id,
+        proposal_id=proposal.proposal_id,
+        rollback_preview_path=rollback_preview_path,
+        rollback_readiness=rollback_readiness,
+        exec_result_ok=bool(result.ok),
+        exec_stderr=result.stderr or "",
+        audit_event=event,
+        audit_status=audit_status,
+    )
+
+
+def _render_lab_restart_gate_outcome(outcome: LabRestartGateOutcome) -> None:
+    """Render the apply-CLI message block for a completed gate run."""
+    if outcome.refused:
+        console.print("")
+        console.print("Execution refused:")
+        console.print(f"- failed gate: {outcome.failed_gate}")
+        if outcome.failed_message:
+            console.print(f"- detail: {outcome.failed_message}")
+        console.print(f"- mutation_scope: {lab_restart_mod.MUTATION_SCOPE}")
+        console.print("- no commands executed")
+        if outcome.receipt_path is not None:
+            console.print(f"- receipt: {outcome.receipt_path}")
+        return
+
+    verification = outcome.verification or {}
+    vstatus = verification.get("status", "")
     console.print("")
-    vstatus = verification["status"]
-    if not result.ok:
+    if not outcome.exec_result_ok:
         console.print("Guarded lab container restart failed:")
     elif vstatus == lab_restart_mod.VERIFICATION_STATUS_PASSED:
         console.print("Guarded lab container restart executed:")
@@ -2264,10 +2347,10 @@ def _run_lab_restart_gate(
         console.print("Guarded lab container restart executed with verification warning:")
     else:
         console.print("Guarded lab container restart executed but verification failed:")
-    console.print(f"- proposal: {proposal.proposal_id}")
-    console.print(f"- action: {gate.action_id}")
-    console.print(f"- container: {gate.container}")
-    console.print(f"- command: docker restart {gate.container}")
+    console.print(f"- proposal: {outcome.proposal_id}")
+    console.print(f"- action: {outcome.action_id}")
+    console.print(f"- container: {outcome.container}")
+    console.print(f"- command: docker restart {outcome.container}")
     console.print("- executor: docker")
     console.print(f"- mutation_scope: {lab_restart_mod.MUTATION_SCOPE}")
     console.print(f"- verification: {vstatus}")
@@ -2276,16 +2359,51 @@ def _run_lab_restart_gate(
     console.print(f"- health_after: {verification.get('health_after', '')}")
     for note in verification.get("notes", []) or []:
         console.print(f"  - note: {note}")
-    if event and event.get("event_id"):
+    event = outcome.audit_event or {}
+    if event.get("event_id"):
         console.print(f"- audit event: {event['event_id']}")
-    console.print(f"- receipt: {receipt}")
+    if outcome.receipt_path is not None:
+        console.print(f"- receipt: {outcome.receipt_path}")
     console.print("- rollback: none automatic")
-    if not result.ok:
-        if result.stderr:
-            console.print(f"- stderr: {result.stderr[:200]}")
-        raise typer.Exit(code=1)
-    if vstatus == lab_restart_mod.VERIFICATION_STATUS_FAILED:
+    if not outcome.exec_result_ok and outcome.exec_stderr:
+        console.print(f"- stderr: {outcome.exec_stderr[:200]}")
+    if outcome.exec_result_ok and vstatus == lab_restart_mod.VERIFICATION_STATUS_FAILED:
         console.print("- no additional restart attempted")
+
+
+def _run_lab_restart_gate(
+    runtime: RuntimeContext,
+    *,
+    proposal: Proposal,
+    actions_payload: dict[str, Any],
+    guard_decision: str,
+    execute: bool,
+    confirm: bool,
+    action_id: str | None,
+    executor: lab_restart_mod.CommandExecutor | None = None,
+    timeout_seconds: int = 30,
+) -> None:
+    """Apply-CLI wrapper around :func:`_perform_lab_restart_gate`.
+
+    Renders output and translates failure outcomes into ``typer.Exit(1)``.
+    """
+    outcome = _perform_lab_restart_gate(
+        runtime,
+        proposal=proposal,
+        actions_payload=actions_payload,
+        guard_decision=guard_decision,
+        execute=execute,
+        confirm=confirm,
+        action_id=action_id,
+        executor=executor,
+        timeout_seconds=timeout_seconds,
+    )
+    _render_lab_restart_gate_outcome(outcome)
+    if outcome.refused:
+        raise typer.Exit(code=1)
+    if not outcome.exec_result_ok:
+        raise typer.Exit(code=1)
+    if outcome.verification.get("status") == lab_restart_mod.VERIFICATION_STATUS_FAILED:
         raise typer.Exit(code=1)
 
 
@@ -3265,6 +3383,421 @@ def mission_restart_validate(
     raise typer.Exit(code=1)
 
 
+def _execute_mission_apply_gate(
+    runtime: RuntimeContext,
+    proposal: Proposal,
+    *,
+    action_id: str | None = None,
+    allow_stale: bool = False,
+    max_age_hours: float | None = None,
+) -> LabRestartGateOutcome | tuple[str, str]:
+    """PR53 shared apply-gate execution for mission handoff.
+
+    Runs preflight, the stale/drift guard, and action compilation against the
+    given approved proposal, then delegates to :func:`_perform_lab_restart_gate`.
+    Returns the :class:`LabRestartGateOutcome` on completion or a
+    ``(failed_gate, message)`` tuple if preflight/guard refuses before the
+    lab gate runs. Never raises ``typer.Exit``; the mission CLI translates the
+    result to user output and exit codes.
+    """
+    data_dir = Path(runtime.session.data_dir)
+    preflight = run_preflight(proposal)
+    if not preflight.passed:
+        return ("preflight_failed", "; ".join(preflight.errors) or "preflight failed")
+
+    guard_max_age = max_age_from_hours(max_age_hours, source_type="proposal")
+    guard_payload = json.loads(proposal.model_dump_json())
+    guard_proposal_path, _gs = find_proposal_path(data_dir, proposal.proposal_id)
+    guard_report = check_proposal_payload(
+        guard_payload,
+        source_path=str(guard_proposal_path or ""),
+        max_age_seconds=guard_max_age,
+    )
+    write_guard_report(guard_report, data_dir=data_dir)
+    if guard_report.decision in (GUARD_DECISION_BLOCKED, GUARD_DECISION_DRIFT) or (
+        guard_report.decision == GUARD_DECISION_STALE and not allow_stale
+    ):
+        return ("guard_blocked", f"guard decision: {guard_report.decision}")
+
+    try:
+        actions_result = compile_and_write(proposal, data_dir=data_dir)
+        actions_payload = json.loads(actions_result.actions_json.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return ("actions_compile_failed", str(exc))
+
+    return _perform_lab_restart_gate(
+        runtime,
+        proposal=proposal,
+        actions_payload=actions_payload,
+        guard_decision=guard_report.decision,
+        execute=True,
+        confirm=True,
+        action_id=action_id,
+    )
+
+
+@mission_restart_app.command("execute")
+def mission_restart_execute(
+    ctx: typer.Context,
+    mission_id: Annotated[str | None, typer.Argument()] = None,
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    action_id: Annotated[str | None, typer.Option("--action-id")] = None,
+    allow_stale: Annotated[bool, typer.Option("--allow-stale")] = False,
+    max_age_hours: Annotated[float | None, typer.Option("--max-age-hours")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """PR53: hand off a ready mission to the existing apply execution gate.
+
+    Mission execute does not introduce a new executor. It verifies mission
+    readiness (approved proposal, exact ``docker restart <target>`` preview,
+    valid rollback preview, restart-plan readiness) and then delegates to the
+    same guarded code path used by ``apply --execute --confirm``. The actual
+    mutation remains the existing allowlisted Docker restart only.
+    """
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    mid = _resolve_mission_id(runtime, mission_id)
+
+    ready, blockers, mission_payload, proposal = mission_check_execute_readiness(data_dir, mid)
+    delegation_cmd = mission_apply_delegation_command(mission_payload)
+
+    if not execute or dry_run:
+        # Dry-run: no mutation, just show readiness and the exact delegation.
+        result_payload = {
+            "mission_id": mid,
+            "ready": ready,
+            "blockers": blockers,
+            "dry_run": True,
+            "delegation_command": delegation_cmd,
+            "execution": "not_executed",
+            "arbitrary_command_execution": False,
+        }
+        if json_out:
+            typer.echo(json.dumps(result_payload, indent=2))
+            if not ready:
+                raise typer.Exit(code=1)
+            return
+        console.print("Mission execute (dry-run / no execution):")
+        console.print(f"- mission: {mid}")
+        console.print(f"- readiness: {'ready' if ready else 'blocked'}")
+        for b in blockers:
+            console.print(f"  - blocker: {b}")
+        console.print(f"- delegation: {delegation_cmd}")
+        console.print("- execution: not_executed")
+        console.print("- arbitrary_command_execution: false")
+        if not ready:
+            raise typer.Exit(code=1)
+        return
+
+    if execute and not confirm:
+        _append_audit_event(
+            runtime,
+            kind="restart_mission",
+            action="execute_refused",
+            status="refused",
+            proposal_id=mission_payload.get("proposal_id") or None,
+            target=mission_payload.get("target") or None,
+            mutation_performed=False,
+            execution_status="refused",
+            summary="mission execute refused: --confirm required",
+            details={
+                "mission_id": mid,
+                "blockers": ["--confirm required alongside --execute"],
+                "delegation_command": delegation_cmd,
+                "arbitrary_command_execution": False,
+                "execution_path": "apply_gate",
+            },
+        )
+        mission_record_execution_result(
+            data_dir,
+            mid,
+            receipt_path=None,
+            verification=None,
+            execution_status="refused",
+            mission_status="blocked",
+            refusal="confirmation required",
+            blockers=["--confirm required alongside --execute"],
+        )
+        if json_out:
+            typer.echo(
+                json.dumps(
+                    {
+                        "mission_id": mid,
+                        "ready": ready,
+                        "refused": True,
+                        "reason": "confirmation required",
+                        "delegation_command": delegation_cmd,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            console.print("Mission execution refused:")
+            console.print("- reason: --confirm is required alongside --execute")
+            console.print(f"- delegation: {delegation_cmd}")
+            console.print("- no commands executed")
+        raise typer.Exit(code=1)
+
+    if not ready:
+        _append_audit_event(
+            runtime,
+            kind="restart_mission",
+            action="execute_refused",
+            status="refused",
+            proposal_id=mission_payload.get("proposal_id") or None,
+            target=mission_payload.get("target") or None,
+            mutation_performed=False,
+            execution_status="refused",
+            summary="mission execute refused: readiness blocked",
+            details={
+                "mission_id": mid,
+                "blockers": blockers,
+                "delegation_command": delegation_cmd,
+                "arbitrary_command_execution": False,
+                "execution_path": "apply_gate",
+            },
+        )
+        mission_record_execution_result(
+            data_dir,
+            mid,
+            receipt_path=None,
+            verification=None,
+            execution_status="refused",
+            mission_status="blocked",
+            refusal="readiness blocked",
+            blockers=list(blockers),
+        )
+        if json_out:
+            typer.echo(
+                json.dumps(
+                    {
+                        "mission_id": mid,
+                        "ready": False,
+                        "refused": True,
+                        "blockers": blockers,
+                        "delegation_command": delegation_cmd,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            console.print("Mission execution refused:")
+            console.print("- readiness: blocked")
+            for b in blockers:
+                console.print(f"  - blocker: {b}")
+            console.print("- no commands executed")
+            if blockers:
+                first = blockers[0]
+                pid = mission_payload.get("proposal_id") or "<proposal-id>"
+                if "rollback" in first.lower():
+                    console.print(f"- next: shellforgeai rollback preview {pid}")
+                elif "approval" in first.lower() or "approved" in first.lower():
+                    console.print(f'- next: shellforgeai approvals approve {pid} --reason "..."')
+                else:
+                    console.print(f"- next: shellforgeai mission restart checklist {mid}")
+        raise typer.Exit(code=1)
+
+    assert proposal is not None
+    outcome = _execute_mission_apply_gate(
+        runtime,
+        proposal,
+        action_id=action_id,
+        allow_stale=allow_stale,
+        max_age_hours=max_age_hours,
+    )
+
+    if isinstance(outcome, tuple):
+        gate_name, message = outcome
+        _append_audit_event(
+            runtime,
+            kind="restart_mission",
+            action="execute_refused",
+            status="refused",
+            proposal_id=proposal.proposal_id,
+            target=proposal.component or None,
+            mutation_performed=False,
+            execution_status="refused",
+            summary=f"mission execute refused before apply gate: {gate_name}",
+            details={
+                "mission_id": mid,
+                "blockers": [f"{gate_name}: {message}"],
+                "delegation_command": delegation_cmd,
+                "arbitrary_command_execution": False,
+                "execution_path": "apply_gate",
+            },
+        )
+        mission_record_execution_result(
+            data_dir,
+            mid,
+            receipt_path=None,
+            verification=None,
+            execution_status="refused",
+            mission_status="blocked",
+            refusal=f"{gate_name}: {message}",
+            blockers=[f"{gate_name}: {message}"],
+        )
+        if json_out:
+            typer.echo(
+                json.dumps(
+                    {
+                        "mission_id": mid,
+                        "refused": True,
+                        "failed_gate": gate_name,
+                        "message": message,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            console.print("Mission execution refused:")
+            console.print(f"- failed gate: {gate_name}")
+            console.print(f"- detail: {message}")
+            console.print("- no commands executed")
+        raise typer.Exit(code=1)
+
+    # Translate gate outcome into mission record + audit event.
+    if outcome.refused:
+        mission_record_execution_result(
+            data_dir,
+            mid,
+            receipt_path=outcome.receipt_path,
+            verification=None,
+            execution_status="refused",
+            mission_status="blocked",
+            refusal=outcome.failed_gate,
+            blockers=[outcome.failed_message or outcome.failed_gate],
+        )
+        _append_audit_event(
+            runtime,
+            kind="restart_mission",
+            action="execute_refused",
+            status="refused",
+            proposal_id=proposal.proposal_id,
+            target=outcome.container or proposal.component or None,
+            mutation_performed=False,
+            execution_status="refused",
+            summary=f"mission execute refused at apply gate: {outcome.failed_gate}",
+            details={
+                "mission_id": mid,
+                "blockers": [outcome.failed_message or outcome.failed_gate],
+                "receipt": str(outcome.receipt_path) if outcome.receipt_path else "",
+                "execution_path": "apply_gate",
+                "arbitrary_command_execution": False,
+            },
+        )
+        if json_out:
+            typer.echo(
+                json.dumps(
+                    {
+                        "mission_id": mid,
+                        "refused": True,
+                        "failed_gate": outcome.failed_gate,
+                        "message": outcome.failed_message,
+                        "receipt": str(outcome.receipt_path) if outcome.receipt_path else "",
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            console.print("Mission execution refused at apply gate:")
+            console.print(f"- failed gate: {outcome.failed_gate}")
+            if outcome.failed_message:
+                console.print(f"- detail: {outcome.failed_message}")
+            console.print("- no commands executed")
+            if outcome.receipt_path is not None:
+                console.print(f"- receipt: {outcome.receipt_path}")
+        raise typer.Exit(code=1)
+
+    # Apply gate ran (success/warning/failed).
+    verification = dict(outcome.verification or {})
+    if outcome.exec_result_ok and verification.get("status") in (
+        lab_restart_mod.VERIFICATION_STATUS_PASSED,
+        lab_restart_mod.VERIFICATION_STATUS_WARNING,
+    ):
+        exec_status = "executed"
+        mission_status = "executed"
+    else:
+        exec_status = "failed"
+        mission_status = "failed"
+
+    refreshed = mission_record_execution_result(
+        data_dir,
+        mid,
+        receipt_path=outcome.receipt_path,
+        verification=verification,
+        execution_status=exec_status,
+        mission_status=mission_status,
+    )
+
+    # Mission audit event is metadata-only. The real mutation event is recorded
+    # separately by the apply gate (kind=execution / action=lab_container_restart).
+    # Audit storage's validator requires non-execution events to keep all safety
+    # flags false, so we do not duplicate mutation claims here.
+    _append_audit_event(
+        runtime,
+        kind="restart_mission",
+        action="execute_delegated",
+        status="success" if exec_status == "executed" else "failed",
+        proposal_id=proposal.proposal_id,
+        target=outcome.container or proposal.component or None,
+        mutation_performed=False,
+        execution_status="not_executed",
+        summary=(f"mission execute delegated to apply gate: {exec_status}"),
+        artifacts=[str(outcome.receipt_path)] if outcome.receipt_path else [],
+        details={
+            "mission_id": mid,
+            "execution_path": "apply_gate",
+            "mutation_kind": "docker_restart",
+            "container": outcome.container,
+            "receipt": str(outcome.receipt_path) if outcome.receipt_path else "",
+            "verification_status": verification.get("status", ""),
+            "running_after": bool(verification.get("running_after", False)),
+            "started_at_changed": bool(verification.get("started_at_changed", False)),
+            "health_after": str(verification.get("health_after", "")),
+            "arbitrary_command_execution": False,
+        },
+    )
+
+    if json_out:
+        typer.echo(
+            json.dumps(
+                {
+                    "mission_id": mid,
+                    "proposal_id": proposal.proposal_id,
+                    "execution": exec_status,
+                    "mission_status": refreshed.get("status"),
+                    "receipt": str(outcome.receipt_path) if outcome.receipt_path else "",
+                    "verification": verification,
+                    "arbitrary_command_execution": False,
+                    "execution_path": "apply_gate",
+                },
+                indent=2,
+            )
+        )
+        if exec_status != "executed":
+            raise typer.Exit(code=1)
+        return
+
+    if exec_status == "executed":
+        console.print("Mission execution completed through apply gate:")
+    else:
+        console.print("Mission execution failed at apply gate:")
+    console.print(f"- mission: {mid}")
+    console.print(f"- proposal: {proposal.proposal_id}")
+    if outcome.receipt_path is not None:
+        console.print(f"- apply receipt: {outcome.receipt_path}")
+    console.print(f"- verification: {verification.get('status', '')}")
+    console.print(f"- running_after: {bool(verification.get('running_after', False))}")
+    console.print(f"- started_at_changed: {bool(verification.get('started_at_changed', False))}")
+    console.print(f"- health_after: {verification.get('health_after', '')}")
+    console.print("- arbitrary_command_execution: false")
+    console.print("- execution_path: apply_gate")
+    if exec_status != "executed":
+        raise typer.Exit(code=1)
+
+
 @mission_restart_app.command("export")
 def mission_restart_export(
     ctx: typer.Context,
@@ -3301,15 +3834,22 @@ def mission_restart_export(
     if src_ev and Path(src_ev).exists():
         shutil.copy2(src_ev, out_root / "evidence.json")
         included.append("evidence.json")
+    exec_phase = (payload.get("phases") or {}).get("execution") or {}
+    receipt_ref = str(exec_phase.get("receipt") or "")
+    if receipt_ref and Path(receipt_ref).exists():
+        shutil.copy2(receipt_ref, out_root / Path(receipt_ref).name)
+        included.append(Path(receipt_ref).name)
+    safety_payload = payload.get("safety") or {}
     manifest = {
         "schema_version": "1",
         "mission_id": mid,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "included_files": included,
+        "execution_receipt": receipt_ref,
         "safety": {
-            "execution_allowed": False,
-            "execution_status": "not_executed",
-            "mutation_performed": False,
+            "execution_allowed": bool(safety_payload.get("execution_allowed", False)),
+            "execution_status": str(safety_payload.get("execution_status", "not_executed")),
+            "mutation_performed": bool(safety_payload.get("mutation_performed", False)),
             "arbitrary_command_execution": False,
         },
     }

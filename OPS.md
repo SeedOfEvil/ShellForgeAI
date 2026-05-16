@@ -579,3 +579,23 @@ A guided wrapper that records each step in one mission file. Metadata only.
 
 Mission preparation/status/checklist never restart anything; apply is still the
 only execution gate.
+
+
+## Safe restart mission flow with mission execute handoff (PR53)
+
+PR53 adds a mission-level execute command that delegates to the existing apply
+gate without introducing a new executor or broadening mutation scope.
+
+1. `shellforgeai diagnose docker --save-plan`
+2. `shellforgeai mission restart prepare --container <target>`
+3. `shellforgeai mission restart checklist <mission-id>`
+4. `shellforgeai approvals approve <proposal-id> --reason "..."`
+5. `shellforgeai rollback preview <proposal-id>`
+6. `shellforgeai mission restart checklist <mission-id>`
+7. `shellforgeai mission restart execute <mission-id> --execute --confirm`
+8. `shellforgeai mission restart validate <mission-id>` and audit/export
+
+Step 7 verifies mission readiness, then delegates to the same guarded code path
+as `shellforgeai apply <proposal-id> --execute --confirm`. The apply receipt is
+referenced from the mission record. Without `--execute --confirm`, step 7 is
+dry-run only and prints the exact apply delegation command.

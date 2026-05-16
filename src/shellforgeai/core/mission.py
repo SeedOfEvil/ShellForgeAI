@@ -477,8 +477,76 @@ def prepare_mission(
     )
 
 
+def _preserve_terminal_state(
+    refreshed: dict[str, Any],
+    prior: dict[str, Any],
+) -> dict[str, Any]:
+    """Carry forward terminal execution/refusal state across a refresh.
+
+    ``refresh_mission`` recomputes phases from current artifacts (proposal,
+    rollback preview, restart plan readiness) — that view is read-only and must
+    not erase an executed receipt or a recorded refusal. Once a mission has an
+    execution receipt (or has reached a terminal status), the prior
+    execution/verification/safety/status fields take precedence over a freshly
+    computed "ready" view. Read-only derived fields (evidence, proposal,
+    approval, rollback, readiness) are still refreshed.
+    """
+    prior_phases = prior.get("phases") or {}
+    prior_exec = prior_phases.get("execution") or {}
+    prior_verif = prior_phases.get("verification") or {}
+    prior_status = str(prior.get("status") or "")
+    prior_exec_status = str(prior_exec.get("status") or "")
+    receipt = prior_exec.get("receipt")
+
+    terminal = (
+        prior_status in (STATUS_EXECUTED, STATUS_FAILED)
+        or prior_exec_status in ("executed", "refused")
+        or bool(receipt)
+    )
+    if not terminal:
+        return refreshed
+
+    phases = refreshed.setdefault("phases", {})
+    phases["execution"] = dict(prior_exec)
+    phases["verification"] = dict(prior_verif)
+
+    if prior_status in (
+        STATUS_EXECUTED,
+        STATUS_FAILED,
+        STATUS_BLOCKED,
+    ):
+        refreshed["status"] = prior_status
+
+    prior_safety = prior.get("safety") or {}
+    if prior_safety:
+        safety = dict(prior_safety)
+        safety["arbitrary_command_execution"] = False
+        refreshed["safety"] = safety
+
+    # Post-execution: drop apply-step suggestions and surface audit/export hints.
+    if refreshed.get("status") in (STATUS_EXECUTED, STATUS_FAILED):
+        mid = str(refreshed.get("mission_id") or "")
+        receipt_str = str((phases.get("execution") or {}).get("receipt") or "")
+        post_cmds: list[str] = []
+        if mid:
+            post_cmds.append(f"shellforgeai mission restart status {mid}")
+            post_cmds.append(f"shellforgeai mission restart validate {mid}")
+            post_cmds.append(f"shellforgeai mission restart export {mid}")
+        post_cmds.append("shellforgeai audit timeline")
+        if receipt_str:
+            post_cmds.append(f"cat {receipt_str}")
+        refreshed["next_commands"] = post_cmds
+    return refreshed
+
+
 def refresh_mission(data_dir: Path, mission_id: str) -> dict[str, Any]:
-    """Reload mission and refresh phases from artifacts. Persists the update."""
+    """Reload mission and refresh phases from artifacts. Persists the update.
+
+    Terminal execution/refusal state (existing receipt, ``status=executed`` or
+    ``status=failed``) is preserved — a read-only status/checklist refresh must
+    never erase a successful execution or downgrade ``executed`` back to
+    ``ready``.
+    """
     payload = load_mission(data_dir, mission_id)
     proposal: Proposal | None = None
     pid = str(payload.get("proposal_id") or "")
@@ -497,6 +565,7 @@ def refresh_mission(data_dir: Path, mission_id: str) -> dict[str, Any]:
         existing_mission_id=mission_id,
         created_at=str(payload.get("created_at") or ""),
     )
+    refreshed = _preserve_terminal_state(refreshed, payload)
     _write_mission_files(data_dir, refreshed)
     return refreshed
 
@@ -625,6 +694,199 @@ def validate_mission_payload(payload: dict[str, Any]) -> list[str]:
     ):
         errs.append("rollback phase present but rollback_preview_path is missing")
     return errs
+
+
+def check_execute_readiness(
+    data_dir: Path,
+    mission_id: str,
+) -> tuple[bool, list[str], dict[str, Any], Proposal | None]:
+    """Verify a mission is ready to be handed off to the apply gate (PR53).
+
+    Returns ``(ok, blockers, refreshed_payload, proposal)``. Refreshes the
+    mission first so the answer reflects current on-disk artifact state.
+    """
+    blockers: list[str] = []
+    try:
+        payload = refresh_mission(data_dir, mission_id)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return False, [f"mission not found or invalid: {exc}"], {}, None
+
+    if str(payload.get("mission_type") or "") != MISSION_TYPE:
+        blockers.append("mission_type is not docker_restart")
+    target = str(payload.get("target") or "")
+    if not target:
+        blockers.append("mission target missing")
+
+    pid = str(payload.get("proposal_id") or "")
+    proposal: Proposal | None = None
+    if not pid:
+        blockers.append("mission has no proposal_id")
+    else:
+        path, status = find_proposal_path(data_dir, pid)
+        if path is None:
+            blockers.append(f"proposal {pid} not found on disk")
+        else:
+            try:
+                proposal = load_proposal_from_path(path)
+            except (OSError, ValueError) as exc:
+                blockers.append(f"proposal {pid} could not be loaded: {exc}")
+            else:
+                if proposal.status != STATUS_APPROVED:
+                    blockers.append(f"proposal status '{proposal.status}' is not approved")
+                if proposal.component and target and proposal.component != target:
+                    blockers.append("proposal target does not match mission target")
+                expected_preview = f"docker restart {target}" if target else ""
+                preview = ""
+                for step in proposal.proposed_steps or []:
+                    text = str(step)
+                    if "docker restart" in text:
+                        idx = text.find("docker restart")
+                        preview = text[idx:].split("#", 1)[0].strip().strip(";").strip()
+                        break
+                if not preview:
+                    cmd_preview = str(payload.get("command_preview") or "")
+                    preview = cmd_preview
+                if expected_preview and preview != expected_preview:
+                    blockers.append(
+                        f"proposal command preview must be exactly '{expected_preview}'"
+                    )
+
+    phases = payload.get("phases") or {}
+    rollback = phases.get("rollback") or {}
+    rb_status = rollback.get("status")
+    if rb_status != "present":
+        blockers.append(f"rollback preview {rb_status or 'missing'}")
+    else:
+        rb_path_str = str(rollback.get("path") or "")
+        if not rb_path_str or not Path(rb_path_str).exists():
+            blockers.append("rollback preview file missing on disk")
+        else:
+            try:
+                rb_payload = load_preview(Path(rb_path_str))
+                rb_errs = validate_preview(rb_payload)
+            except Exception as exc:
+                blockers.append(f"rollback preview unreadable: {exc}")
+            else:
+                if rb_errs:
+                    blockers.append("rollback preview invalid: " + "; ".join(rb_errs))
+                if (rb_payload.get("safety") or {}).get("rollback_execution_allowed") is not False:
+                    blockers.append("rollback_execution_allowed must be false")
+                if rb_payload.get("rollback_status") != "preview_only":
+                    blockers.append("rollback_status must be preview_only")
+
+    readiness = (phases.get("readiness") or {}).get("status")
+    if readiness != "ready":
+        plan_blockers = (phases.get("readiness") or {}).get("blockers") or []
+        if plan_blockers:
+            blockers.append("restart plan readiness blocked: " + "; ".join(plan_blockers))
+        else:
+            blockers.append("restart plan readiness not ready")
+
+    approval = (phases.get("approval") or {}).get("status")
+    if approval in ("rejected", "canceled"):
+        blockers.append(f"proposal approval is {approval}")
+
+    if str(payload.get("status") or "") not in (STATUS_READY, STATUS_EXECUTED) and not blockers:
+        blockers.append(f"mission status is {payload.get('status')}")
+
+    return (not blockers), blockers, payload, proposal
+
+
+def apply_delegation_command(payload: dict[str, Any]) -> str:
+    """Return the exact `apply` invocation a mission handoff would delegate to."""
+    pid = str(payload.get("proposal_id") or "<proposal-id>")
+    return f"shellforgeai apply {pid} --execute --confirm"
+
+
+def record_execution_result(
+    data_dir: Path,
+    mission_id: str,
+    *,
+    receipt_path: Path | None,
+    verification: dict[str, Any] | None,
+    execution_status: str,
+    mission_status: str,
+    refusal: str = "",
+    blockers: list[str] | None = None,
+) -> dict[str, Any]:
+    """Update the mission record after a delegated apply attempt.
+
+    ``execution_status`` is one of ``executed | failed | refused``.
+    Receipt path is referenced (not duplicated). ``arbitrary_command_execution``
+    remains false. ``mutation_performed`` is set only when the existing safety
+    schema accepts it (i.e. when ``execution_status`` is ``executed`` and a
+    receipt is present).
+    """
+    payload = load_mission(data_dir, mission_id)
+    phases = payload.setdefault("phases", {})
+    receipt_str = str(receipt_path) if receipt_path is not None else None
+
+    if execution_status == "executed":
+        phases["execution"] = {"status": "executed", "receipt": receipt_str}
+        v = dict(verification or {})
+        v_status = str(v.get("status") or "unknown")
+        v_phase_status = (
+            "passed"
+            if v_status == "passed"
+            else "failed"
+            if v_status in ("failed", "skipped")
+            else "unknown"
+        )
+        phases["verification"] = {
+            "status": v_phase_status,
+            "receipt": receipt_str,
+            "summary": {
+                "status": v_status,
+                "running_after": bool(v.get("running_after", False)),
+                "started_at_changed": bool(v.get("started_at_changed", False)),
+                "health_after": str(v.get("health_after", "")),
+            },
+        }
+    elif execution_status == "failed":
+        phases["execution"] = {
+            "status": "executed",
+            "receipt": receipt_str,
+            "result": "failed",
+        }
+        phases["verification"] = {
+            "status": "failed",
+            "receipt": receipt_str,
+            "summary": {"status": "failed"},
+        }
+    else:  # refused
+        phases["execution"] = {
+            "status": "refused",
+            "receipt": receipt_str,
+            "refusal": refusal,
+            "blockers": list(blockers or []),
+        }
+        phases["verification"] = {"status": "not_run", "receipt": None}
+
+    payload["status"] = mission_status
+    payload["updated_at"] = _now()
+
+    safety = payload.setdefault("safety", {})
+    # Schema invariants enforced by validate_mission_payload: when execution
+    # status is `executed`, the receipt MUST be present; otherwise safety
+    # mutation/exec flags MUST remain false.
+    if execution_status == "executed" and receipt_str:
+        safety["execution_allowed"] = True
+        safety["execution_status"] = "executed"
+        safety["mutation_performed"] = True
+    else:
+        safety["execution_allowed"] = False
+        safety["execution_status"] = (
+            "refused" if execution_status in ("refused", "failed") else "not_executed"
+        )
+        safety["mutation_performed"] = False
+    safety["arbitrary_command_execution"] = False
+
+    mission_dir(data_dir, mission_id).mkdir(parents=True, exist_ok=True)
+    mission_json_path(data_dir, mission_id).write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+    mission_md_path(data_dir, mission_id).write_text(_render_markdown(payload), encoding="utf-8")
+    return payload
 
 
 def validate_mission_path(path: Path) -> tuple[bool, list[str], dict[str, Any] | None]:
