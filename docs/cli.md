@@ -642,3 +642,11 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
 - Explicit IDs always win (for example: `show compose context for prop_...`).
 - Ambiguous matches are listed (top candidates) instead of guessed.
 - Stale-only matches are flagged so long-lived `/data` artifacts are not silently treated as current.
+
+## PR61 Compose restart preview (read-only)
+
+- `shellforgeai compose restart-preview <target>` prints a read-only command preview for a Compose-managed service.
+- `shellforgeai compose restart-preview <target> --json` emits strict JSON with `schema_version`, `status`, `preview.command` (argv list), and safety flags.
+- Ask preview examples: `show compose restart preview for shellforgeai`, `preview compose service restart for shellforgeai`, `what would docker compose restart do for shellforgeai?`.
+- Mutation asks still refuse (`docker compose restart ...`, `restart compose service ...`, `run/execute/apply compose restart ...`).
+- Preview-only posture is explicit: `compose_mutation=true`, `preview_only=true`, `execution_allowed=false`, `executed=false`; no `docker compose` command is executed.

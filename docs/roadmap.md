@@ -247,3 +247,5 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
   mutation, no restart execution from status.
 
 - PR59 milestone: ask-reference disambiguation for implicit proposal/mission references (`this`/`latest`/`current`/`most recent`) with deterministic read-only resolver, stale warning guard (24h default), explicit-ID precedence, and ambiguity listing (no guessing/no execution).
+
+- PR61: added read-only `compose restart-preview` command and ask preview phrasing for Compose service restarts (preview only; no compose execution path).

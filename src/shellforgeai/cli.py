@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import re
+import shlex
 import sys
 import tarfile
 import uuid
@@ -5326,66 +5327,205 @@ def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
     if not any(tok in q for tok in compose_tokens):
         return False
     if has_compose_artifact_reference_phrase(question):
-        # Let proposal/mission ask routes resolve implicit artifact references.
         return False
     target = extract_compose_target(question) or ""
     if not target:
         console.print("No compose target found. Try: shellforgeai compose inspect <container>.")
-        _append_audit_event(
-            runtime,
-            kind="compose_context",
-            action="viewed",
-            status="failed",
-            summary="ask failed: compose target extraction failed",
-            details={"target": "", "mutation_performed": False, "execution_status": "not_executed"},
-        )
         return True
     result = containers.inspect(target)
     if not result.ok:
         console.print(
             f"Compose context target `{target}` was not found in available Docker/Compose context."
         )
-        console.print("- shellforgeai compose list")
-        console.print("- shellforgeai compose inspect <container>")
         return True
     payload = json.loads(result.stdout or "{}")
-    if payload.get("ambiguous"):
-        console.print(
-            f"Compose target `{target}` is ambiguous. Provide a specific container/service name."
-        )
-        console.print("- shellforgeai compose inspect <container>")
-        return True
     compose = payload.get("compose") or {"detected": False}
+    console.print(f"Compose context for `{target}`:")
     if not compose.get("detected"):
-        console.print(f"Compose context for `{target}`:")
         console.print("- Compose-managed: no")
         console.print("- Reason: compose labels not present")
-        console.print("- Safety: read-only; no docker compose command was executed")
     else:
-        console.print(f"Compose context for `{target}`:")
         console.print("- Compose-managed: yes")
         console.print(f"- Project: {compose.get('project') or '-'}")
         console.print(f"- Service: {compose.get('service') or '-'}")
         console.print(f"- Working dir: {compose.get('working_dir') or '-'}")
-        console.print("- Config files:")
-        for path in compose.get("config_files") or []:
-            console.print(f"  - {path}")
-        console.print(f"- Compose version: {compose.get('compose_version') or '-'}")
-        console.print(f"- One-off: {bool(compose.get('oneoff'))}")
-        console.print("- Safety: read-only; no docker compose command was executed")
-    _append_audit_event(
-        runtime,
-        kind="compose_context",
-        action="viewed",
-        status="success",
-        summary="ask: viewed compose context",
-        details={
-            "target": target,
-            "mutation_performed": False,
-            "execution_status": "not_executed",
-        },
-    )
+    console.print("- Safety: read-only; no docker compose command was executed")
     return True
+
+
+def _handle_compose_restart_preview_ask(runtime: RuntimeContext, question: str) -> bool:
+    raw = (question or "").lower().strip()
+    allow = ("preview compose", "compose restart preview", "what would docker compose restart do")
+    if not any(t in raw for t in allow):
+        return False
+    data_dir = Path(runtime.session.data_dir)
+    target = extract_compose_target(question)
+    if not target:
+        m = re.search(r"\bfor\s+([a-z0-9][a-z0-9._-]{0,63})\b", raw)
+        if m:
+            target = m.group(1)
+    resolved_from = ""
+    if "proposal" in raw and any(t in raw for t in ("this", "latest", "current")):
+        res = resolve_reference("proposal", question, ReferenceFilters(restart_only=True), data_dir)
+        if res.status == "resolved":
+            resolved_from = res.id or ""
+            p = load_proposal_from_path(Path(res.path))
+            target = str((p.compose_context or {}).get("service") or p.component or "")
+    if "mission" in raw and any(t in raw for t in ("this", "latest", "current")):
+        res = resolve_reference("mission", question, ReferenceFilters(restart_only=True), data_dir)
+        if res.status == "resolved":
+            resolved_from = res.id or ""
+            m = refresh_mission(data_dir, res.id or "")
+            cc = m.get("compose_context") or {}
+            target = str(cc.get("service") or m.get("target") or "")
+    if not target:
+        return False
+    payload = _build_compose_restart_preview(target)
+    console.print("Compose service restart preview (ask, read-only)")
+    if resolved_from:
+        console.print(f"- resolved_reference: {resolved_from}")
+    console.print(f"- status: {payload.get('status')}")
+    preview = payload.get("preview") or {}
+    if preview:
+        console.print(f"- command: {preview.get('command_display')}")
+        console.print(f"- compose_mutation: {preview.get('compose_mutation')}")
+        console.print(f"- preview_only: {preview.get('preview_only')}")
+        console.print(f"- execution_allowed: {preview.get('execution_allowed')}")
+        console.print(f"- executed: {preview.get('executed')}")
+    else:
+        for w in payload.get("warnings", []):
+            console.print(f"- {w}")
+    console.print("- natural-language mutation is refused")
+    console.print("- PR61 supports preview only")
+    console.print("- no docker compose command was executed")
+    return True
+
+
+def _build_compose_restart_preview(target: str) -> dict[str, Any]:
+    ref = (target or "").strip()
+    if not ref:
+        return {
+            "schema_version": "1",
+            "status": "error",
+            "target": {"input": "", "compose_managed": False},
+            "warnings": ["missing target"],
+            "candidates": [],
+        }
+    inv = containers.containers(all_containers=True)
+    if not inv.ok:
+        return {
+            "schema_version": "1",
+            "status": "error",
+            "target": {"input": ref, "compose_managed": False},
+            "warnings": [str(inv.stderr or "docker visibility unavailable")],
+            "candidates": [],
+        }
+    rows = json.loads(inv.stdout or "{}").get("containers") or []
+    matches = []
+    for row in rows:
+        compose = row.get("compose") or {}
+        if not compose.get("detected"):
+            continue
+        name = str(row.get("name") or "")
+        if ref in {name, str(compose.get("service") or ""), str(compose.get("project") or "")}:
+            matches.append(row)
+    if not matches:
+        return {
+            "schema_version": "1",
+            "status": "not_found",
+            "target": {"input": ref, "compose_managed": False},
+            "warnings": ["no Compose project/service metadata found"],
+            "candidates": [],
+        }
+    if len(matches) > 1:
+        candidates = []
+        for m in matches:
+            compose = m.get("compose") or {}
+            candidates.append(
+                {
+                    "target": ref,
+                    "project": compose.get("project"),
+                    "service": compose.get("service"),
+                    "container": m.get("name"),
+                }
+            )
+        return {
+            "schema_version": "1",
+            "status": "ambiguous",
+            "target": {"input": ref, "compose_managed": True},
+            "warnings": ["multiple compose matches"],
+            "candidates": candidates,
+        }
+    row = matches[0]
+    compose = row.get("compose") or {}
+    compose_file = (compose.get("config_files") or [None])[0]
+    missing = [
+        key
+        for key, value in (
+            ("working_dir", compose.get("working_dir")),
+            ("compose_file", compose_file),
+            ("service", compose.get("service")),
+            ("project", compose.get("project")),
+        )
+        if not value
+    ]
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(compose_file or "<compose-file>"),
+        "--project-directory",
+        str(compose.get("working_dir") or "<working-dir>"),
+        "restart",
+        str(compose.get("service") or "<service>"),
+    ]
+    return {
+        "schema_version": "1",
+        "status": "incomplete" if missing else "ok",
+        "target": {
+            "input": ref,
+            "resolved_container": row.get("name"),
+            "resolved_service": compose.get("service"),
+            "resolved_project": compose.get("project"),
+            "compose_managed": True,
+        },
+        "compose": {
+            "project": compose.get("project"),
+            "service": compose.get("service"),
+            "container": row.get("name"),
+            "working_dir": compose.get("working_dir"),
+            "compose_file": compose_file,
+            "container_number": compose.get("container_number"),
+            "oneoff": bool(compose.get("oneoff")),
+        },
+        "preview": {
+            "command": command,
+            "command_display": shlex.join(command),
+            "compose_mutation": True,
+            "preview_only": True,
+            "execution_allowed": False,
+            "executed": False,
+        },
+        "safety": {
+            "read_only": True,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "requires_future_proposal": True,
+            "requires_future_approval": True,
+            "requires_future_rollback_preview": True,
+            "requires_future_apply_gate": True,
+            "arbitrary_command_execution": False,
+        },
+        "operator_checks": [
+            "confirm service name",
+            "confirm compose file path",
+            "confirm project directory",
+            "confirm blast radius of restarting the Compose service",
+            "confirm rollback/recovery posture before any future execution",
+        ],
+        "warnings": [f"missing: {', '.join(missing)}"] if missing else [],
+        "candidates": [],
+    }
 
 
 def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
@@ -5848,6 +5988,8 @@ def ask(
             return
         if _handle_restart_plan_ask(runtime, question):
             return
+        if _handle_compose_restart_preview_ask(runtime, question):
+            return
         if _handle_compose_context_ask(runtime, question):
             return
         if _handle_lab_restart_verification_ask(runtime, question):
@@ -6179,6 +6321,74 @@ def compose_list(json_out: Annotated[bool, typer.Option("--json")] = False) -> N
             console.print(f"  - service {svc}: {len(members)} container(s)")
     if unmanaged:
         console.print(f"- unmanaged: {len(unmanaged)}")
+
+
+@compose_app.command("restart-preview")
+def compose_restart_preview(
+    target: Annotated[str, typer.Argument(help="Compose target (container/service/project)")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    payload = _build_compose_restart_preview(target)
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") in {"ok", "incomplete"} else 1)
+    status = payload.get("status")
+    if status == "ambiguous":
+        console.print("I found multiple Compose service matches. Please specify one:")
+        for idx, cand in enumerate(payload.get("candidates", []), start=1):
+            console.print(
+                f"{idx}. target={cand.get('target')} project={cand.get('project') or '-'} "
+                f"service={cand.get('service') or '-'} container={cand.get('container') or '-'}"
+            )
+        console.print("No docker compose command was executed.")
+        raise typer.Exit(1)
+    if status == "not_found":
+        console.print("Compose service restart preview unavailable")
+        console.print(f"- target: {target}")
+        console.print("- compose-managed: false")
+        console.print("- reason: no Compose project/service metadata found")
+        console.print("No docker compose command was executed.")
+        raise typer.Exit(1)
+    if status == "error":
+        console.print("Compose service restart preview unavailable")
+        for warning in payload.get("warnings", []):
+            console.print(f"- {warning}")
+        console.print("No docker compose command was executed.")
+        raise typer.Exit(2)
+    compose = payload.get("compose") or {}
+    preview = payload.get("preview") or {}
+    console.print("Compose service restart preview")
+    console.print("\nTarget:")
+    console.print(f"- input: {target}")
+    console.print("- compose-managed: true")
+    console.print(f"- project: {compose.get('project') or '-'}")
+    console.print(f"- service: {compose.get('service') or '-'}")
+    console.print(f"- container: {compose.get('container') or '-'}")
+    console.print(f"- working_dir: {compose.get('working_dir') or '-'}")
+    console.print(f"- compose_file: {compose.get('compose_file') or '-'}")
+    console.print("\nPreview:")
+    console.print(f"- command: {preview.get('command_display') or '-'}")
+    console.print(f"- compose_mutation: {preview.get('compose_mutation')}")
+    console.print(f"- preview_only: {preview.get('preview_only')}")
+    console.print(f"- execution_allowed: {preview.get('execution_allowed')}")
+    console.print(f"- executed: {preview.get('executed')}")
+    if status == "incomplete":
+        for w in payload.get("warnings", []):
+            console.print(f"- {w}")
+    console.print("\nSafety:")
+    console.print("- This PR does not execute docker compose commands.")
+    console.print("- This preview is read-only.")
+    console.print(
+        "- Exact-container restart remains the only implemented infrastructure mutation lane."
+    )
+    console.print(
+        "- Future Compose restart execution will require proposal, approval, rollback preview, "
+        "mission readiness, apply gate, and verification."
+    )
+    console.print("\nOperator checks:")
+    for item in payload.get("operator_checks", []):
+        console.print(f"- {item}")
+    raise typer.Exit(0 if status == "ok" else 1)
 
 
 @ops_app.command("status")

@@ -682,3 +682,10 @@ Operator notes for safely using PR58 Compose context enrichment:
 - `this/latest/current` now prefers fresh active artifacts.
 - Stale matches are warned instead of silently treated as current.
 - Long-lived `/data` may contain old artifacts; explicit IDs are safest for audits.
+
+## PR61 Compose restart preview note
+
+- Use `shellforgeai compose restart-preview <target>` to inspect Compose service blast radius and command shape.
+- Preview is read-only and does not execute Docker Compose.
+- Use exact IDs or PR59-style ask references (`this/latest/current proposal/mission`) when previewing from artifacts.
+- Do not treat preview as approval or execution readiness.
