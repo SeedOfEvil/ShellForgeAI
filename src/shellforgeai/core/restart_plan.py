@@ -78,6 +78,25 @@ def build_restart_plan(
     proposal_status = proposal.status if proposal else "missing"
     command_preview = proposal.proposed_steps[0] if proposal and proposal.proposed_steps else ""
     allow_status, allow_reasons = _allowlist_status(proposal, target)
+    compose_context: dict[str, Any] = (
+        dict(proposal.compose_context)
+        if proposal and isinstance(proposal.compose_context, dict) and proposal.compose_context
+        else ({"detected": False, "reason": "compose labels not present"} if proposal else {})
+    )
+    if proposal and not compose_context:
+        # Fallback when proposal predates PR58 enrichment.
+        legacy = dict(proposal.source.compose or {})
+        if legacy.get("project") or legacy.get("service"):
+            compose_context = {
+                "detected": True,
+                "project": str(legacy.get("project") or ""),
+                "service": str(legacy.get("service") or ""),
+                "working_dir": str(legacy.get("working_dir") or ""),
+                "config_files": list(legacy.get("config_files") or []),
+                "source": "docker_labels",
+            }
+        else:
+            compose_context = {"detected": False, "reason": "compose labels not present"}
 
     rollback_status = "unknown"
     rollback_path: str | None = None
@@ -110,6 +129,10 @@ def build_restart_plan(
         blockers.append("source evidence missing")
     if command_preview != (f"docker restart {target}" if target else ""):
         blockers.append("command preview mismatch")
+    if "docker compose" in command_preview.lower():
+        blockers.append(
+            "docker compose command preview is not allowed; container-scoped restart only"
+        )
     if rollback_status != "present":
         blockers.append(f"rollback preview {rollback_status}")
 
@@ -187,6 +210,9 @@ def build_restart_plan(
         "apply_readiness": {"status": readiness, "blockers": blockers},
         "command_preview": command_preview,
         "compose": (proposal.source.compose if proposal else {}),
+        "compose_context": compose_context,
+        "restart_scope": "container",
+        "compose_mutation": False,
         "checklist": checklist,
         "next_commands": next_commands,
         "safety": {
@@ -195,6 +221,8 @@ def build_restart_plan(
             "mutation_performed": False,
             "arbitrary_command_execution": False,
             "compose_context_advisory_only": True,
+            "compose_mutation": False,
+            "restart_scope": "container",
         },
     }
     return RestartPlan(payload=payload)
@@ -222,18 +250,34 @@ def render_restart_plan(plan: RestartPlan) -> str:
     for item in p.get("checklist", []):
         lines.append(f"{sym.get(item.get('status'), '[UNKNOWN]')} {item.get('summary')}")
     lines.append("")
-    if p.get("compose"):
-        c = p.get("compose") or {}
-        lines.extend(
-            [
-                "Compose context:",
-                f"- Project: {c.get('project') or '-'}",
-                f"- Service: {c.get('service') or '-'}",
-                f"- Working dir: {c.get('working_dir') or '-'}",
-                f"- Config files: {', '.join(c.get('config_files') or []) or '-'}",
-                "",
-            ]
-        )
+    cc = p.get("compose_context") or {}
+    if cc.get("detected"):
+        lines.append("Compose context:")
+        lines.append("- Compose-managed: yes")
+        lines.append(f"- Project: {cc.get('project') or '-'}")
+        lines.append(f"- Service: {cc.get('service') or '-'}")
+        lines.append(f"- Working dir: {cc.get('working_dir') or '-'}")
+        config_files = cc.get("config_files") or []
+        if config_files:
+            lines.append("- Config files:")
+            for path in config_files:
+                lines.append(f"  - {path}")
+        else:
+            lines.append("- Config files: -")
+        lines.append(f"- One-off: {bool(cc.get('oneoff', False))}")
+        lines.append(f"- Restart scope: {p.get('restart_scope', 'container')}")
+        lines.append(f"- Compose mutation: {bool(p.get('compose_mutation', False))}")
+        lines.append("")
+        lines.append("Scope warning:")
+        lines.append("- This restart plan targets the exact container, not the Compose service.")
+        lines.append("- No docker compose command will be executed.")
+        lines.append("")
+    elif cc:
+        lines.append("Compose context:")
+        lines.append("- Compose-managed: no")
+        if cc.get("reason"):
+            lines.append(f"- Reason: {cc.get('reason')}")
+        lines.append("")
     lines.append("Next safe commands:")
     for i, cmd in enumerate(p.get("next_commands", []), start=1):
         lines.append(f"{i}. {cmd}")

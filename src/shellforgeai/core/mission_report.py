@@ -319,7 +319,21 @@ def build_mission_report(
         "execution_allowed": bool(safety_payload.get("execution_allowed", False)),
         "execution_status_record": str(safety_payload.get("execution_status", "not_executed")),
         "mutation_performed": bool(safety_payload.get("mutation_performed", False)),
+        "compose_mutation": False,
+        "restart_scope": "container",
     }
+
+    compose_context_payload = payload.get("compose_context")
+    if not isinstance(compose_context_payload, dict) or not compose_context_payload:
+        # Derive from execution receipt if mission predates PR58 enrichment.
+        receipt_ref = str((payload.get("phases") or {}).get("execution", {}).get("receipt") or "")
+        if receipt_ref and Path(receipt_ref).exists():
+            rj = _read_json(Path(receipt_ref)) or {}
+            rj_cc = rj.get("compose_context")
+            if isinstance(rj_cc, dict) and rj_cc:
+                compose_context_payload = dict(rj_cc)
+        if not isinstance(compose_context_payload, dict) or not compose_context_payload:
+            compose_context_payload = {"detected": False, "reason": "compose labels not present"}
 
     next_review_commands = [
         f"shellforgeai mission restart status {mission_id}",
@@ -348,6 +362,9 @@ def build_mission_report(
         "artifacts": artifacts,
         "audit_events": audit_events,
         "safety": safety,
+        "compose_context": compose_context_payload,
+        "restart_scope": "container",
+        "compose_mutation": False,
         "next_review_commands": next_review_commands,
         "mission_record_path": str(_mission_dir(Path(data_dir), mission_id) / "mission.json"),
     }
@@ -408,6 +425,24 @@ def render_mission_report_md(report: dict[str, Any]) -> str:
             lines.append(f"- {art.get('role', '')}: {art.get('path', '')} ({present})")
     else:
         lines.append("- (no artifacts referenced)")
+    lines.append("")
+    compose_context = report.get("compose_context") or {}
+    lines.append("## Compose context")
+    if compose_context.get("detected"):
+        lines.append("- Compose-managed: yes")
+        lines.append(f"- project: {compose_context.get('project') or '-'}")
+        lines.append(f"- service: {compose_context.get('service') or '-'}")
+        if compose_context.get("working_dir"):
+            lines.append(f"- working_dir: {compose_context.get('working_dir')}")
+        for path in compose_context.get("config_files") or []:
+            lines.append(f"- config_file: {path}")
+    else:
+        lines.append("- Compose-managed: no")
+    lines.append(f"- restart_scope: {report.get('restart_scope', 'container')}")
+    lines.append(f"- compose_mutation: {bool(report.get('compose_mutation', False))}")
+    lines.append("- Compose context was advisory/read-only.")
+    lines.append("- No docker compose command was executed.")
+    lines.append("- Restart was exact-container scoped.")
     lines.append("")
     lines.append("## Next review commands")
     for i, cmd in enumerate(next_commands, start=1):

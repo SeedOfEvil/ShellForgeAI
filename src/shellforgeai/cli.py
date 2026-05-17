@@ -57,11 +57,14 @@ from shellforgeai.core.ask_routing import (
     extract_container_target,
     is_apply_approved_intent,
     is_compose_mutation_request,
+    is_compose_service_mutation_proposal_request,
     is_create_proposals_intent,
     is_create_restart_proposal_intent,
     is_immediate_fix_intent,
     is_lab_restart_ask_intent,
     is_lab_restart_verification_ask_intent,
+    is_mission_compose_context_query,
+    is_restart_proposal_compose_context_query,
     network_reachability_brief,
     route_ask_intent,
     target_container_status,
@@ -2498,6 +2501,11 @@ def _perform_lab_restart_gate(
                 gate.failed_gate = "rollback_preview_invalid"
                 gate.message = f"rollback preview missing or invalid: {exc}"
 
+    proposal_compose_context = (
+        dict(proposal.compose_context)
+        if isinstance(getattr(proposal, "compose_context", None), dict) and proposal.compose_context
+        else None
+    )
     if not gate.allowed:
         receipt = lab_restart_mod.write_execution_receipt(
             data_dir,
@@ -2519,6 +2527,7 @@ def _perform_lab_restart_gate(
                 "rollback_execution_allowed": False,
                 "rollback_missing": gate.failed_gate == "rollback_preview_missing",
             },
+            compose_context=proposal_compose_context,
         )
         _append_audit_event(
             runtime,
@@ -2606,6 +2615,7 @@ def _perform_lab_restart_gate(
         stdout=result.stdout,
         stderr=result.stderr,
         verification=verification,
+        compose_context=proposal_compose_context,
     )
     evidence_paths = lab_restart_mod.write_verification_evidence(
         receipt,
@@ -2634,6 +2644,7 @@ def _perform_lab_restart_gate(
                 "rollback_execution_allowed": False,
             },
             receipt_path=receipt,
+            compose_context=proposal_compose_context,
         )
 
     audit_status = (
@@ -4474,6 +4485,28 @@ def _print_proposal_show(proposal: Proposal, status: str, path: Path) -> None:
         console.print(f"- execution.reason: {proposal.execution.reason}")
     if proposal.approval.reason:
         console.print(f"- approval.reason: {proposal.approval.reason}")
+    cc = proposal.compose_context or {}
+    if cc:
+        console.print("Compose context:")
+        if cc.get("detected"):
+            console.print("- Compose-managed: yes")
+            console.print(f"- Project: {cc.get('project') or '-'}")
+            console.print(f"- Service: {cc.get('service') or '-'}")
+            if cc.get("working_dir"):
+                console.print(f"- Working dir: {cc.get('working_dir')}")
+            config_files = cc.get("config_files") or []
+            if config_files:
+                console.print("- Config files:")
+                for path_str in config_files:
+                    console.print(f"  - {path_str}")
+            console.print(f"- One-off: {bool(cc.get('oneoff', False))}")
+        else:
+            console.print("- Compose-managed: no")
+        console.print(f"- restart_scope: {proposal.restart_scope or 'container'}")
+        console.print(f"- compose_mutation: {bool(proposal.compose_mutation)}")
+        console.print("- This proposal is container-scoped.")
+        console.print(f"- Command preview remains: docker restart {proposal.component}")
+        console.print("- ShellForgeAI does not run docker compose commands in this flow.")
     console.print(f"- path: {path}")
     console.print("- Not executed by ShellForgeAI.")
 
@@ -4675,6 +4708,33 @@ def _handle_create_restart_proposal_ask(runtime: RuntimeContext, question: str) 
     if not intent.matched:
         return False
     container = intent.container
+    if is_compose_service_mutation_proposal_request(question) and not container:
+        console.print("Restart proposal refused:")
+        console.print(
+            "- reason: Compose service mutation is not supported in PR58 (context enrichment only)."
+        )
+        console.print("- read-only inspection: shellforgeai compose inspect <container>")
+        console.print(
+            "- container-scoped workflow: shellforgeai approvals propose-restart "
+            "--latest --container <container>"
+        )
+        console.print("- no proposal created")
+        console.print("- no commands executed")
+        _append_audit_event(
+            runtime,
+            kind="compose_context",
+            action="viewed",
+            status="refused",
+            summary="ask refused: compose service mutation proposal request",
+            details={
+                "target": "",
+                "mutation_performed": False,
+                "execution_status": "not_executed",
+                "compose_mutation": False,
+                "restart_scope": "container",
+            },
+        )
+        return True
     if not container:
         console.print("Restart proposal refused:")
         console.print("- reason: missing or ambiguous container target")
@@ -4712,6 +4772,46 @@ def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
         return False
     data_dir = Path(runtime.session.data_dir)
 
+    # PR58: read-only mission compose context query.
+    if is_mission_compose_context_query(question):
+        latest = mission_latest(data_dir)
+        if latest is None:
+            console.print("No restart missions found.")
+            console.print(
+                "- to create one: shellforgeai mission restart prepare --container <target>"
+            )
+            return True
+        mid = str(latest["mission_id"])
+        payload = refresh_mission(data_dir, mid)
+        cc = payload.get("compose_context") or {}
+        console.print(f"Mission compose context ({mid}):")
+        if cc.get("detected"):
+            console.print("- Compose-managed: yes")
+            console.print(f"- Project: {cc.get('project') or '-'}")
+            console.print(f"- Service: {cc.get('service') or '-'}")
+            if cc.get("working_dir"):
+                console.print(f"- Working dir: {cc.get('working_dir')}")
+        else:
+            console.print("- Compose-managed: no")
+        console.print(f"- restart_scope: {payload.get('restart_scope', 'container')}")
+        console.print(f"- compose_mutation: {bool(payload.get('compose_mutation', False))}")
+        console.print("- Compose service mutation is not enabled.")
+        _append_audit_event(
+            runtime,
+            kind="compose_context",
+            action="viewed",
+            status="success",
+            summary="ask: viewed mission compose context",
+            details={
+                "mission_id": mid,
+                "mutation_performed": False,
+                "execution_status": "not_executed",
+                "compose_mutation": False,
+                "restart_scope": "container",
+            },
+        )
+        return True
+
     prepare_hints = (
         "prepare safe restart mission for ",
         "prepare a safe restart mission for ",
@@ -4720,6 +4820,20 @@ def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
         "start safe restart mission for ",
     )
     if any(h in raw for h in prepare_hints):
+        if is_compose_service_mutation_proposal_request(question):
+            console.print("Restart mission preparation refused:")
+            console.print(
+                "- reason: Compose service mutation is not supported in PR58 "
+                "(context enrichment only)."
+            )
+            console.print("- read-only inspection: shellforgeai compose inspect <container>")
+            console.print(
+                "- container-scoped workflow: shellforgeai mission restart prepare "
+                "--container <container>"
+            )
+            console.print("- no mission created")
+            console.print("- no commands executed")
+            return True
         container = extract_container_target(question)
         if not container:
             console.print("Restart mission preparation refused:")
@@ -4933,6 +5047,55 @@ def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
 
 def _handle_restart_plan_ask(runtime: RuntimeContext, question: str) -> bool:
     raw = (question or "").lower()
+    data_dir = Path(runtime.session.data_dir)
+    # PR58: read-only proposal compose context query.
+    if is_restart_proposal_compose_context_query(question):
+        proposal = latest_approved_proposal(data_dir)
+        if proposal is None:
+            # Try any most-recent proposal regardless of approval status.
+            from shellforgeai.core.approvals import list_proposals as _list_proposals
+
+            rows = _list_proposals(data_dir)
+            if rows:
+                proposal = rows[-1][1]
+        if proposal is None:
+            console.print("No restart proposals found to inspect.")
+            console.print(
+                "- to create one: shellforgeai approvals propose-restart "
+                "--latest --container <container>"
+            )
+            return True
+        cc = proposal.compose_context or {}
+        console.print(f"Restart proposal compose context ({proposal.proposal_id}):")
+        if cc.get("detected"):
+            console.print("- Compose-managed: yes")
+            console.print(f"- Project: {cc.get('project') or '-'}")
+            console.print(f"- Service: {cc.get('service') or '-'}")
+            if cc.get("working_dir"):
+                console.print(f"- Working dir: {cc.get('working_dir')}")
+        else:
+            console.print("- Compose-managed: no")
+        console.print(f"- restart_scope: {proposal.restart_scope or 'container'}")
+        console.print(f"- compose_mutation: {bool(proposal.compose_mutation)}")
+        console.print(f"- Command preview: docker restart {proposal.component}")
+        console.print("- ShellForgeAI does not run docker compose commands in this flow.")
+        _append_audit_event(
+            runtime,
+            kind="compose_context",
+            action="viewed",
+            status="success",
+            proposal_id=proposal.proposal_id,
+            target=proposal.component or None,
+            mutation_performed=False,
+            execution_status="not_executed",
+            summary="ask: viewed restart proposal compose context",
+            details={
+                "proposal_id": proposal.proposal_id,
+                "compose_mutation": False,
+                "restart_scope": "container",
+            },
+        )
+        return True
     tokens = (
         "show restart checklist",
         "what is needed before restart",
@@ -4943,7 +5106,6 @@ def _handle_restart_plan_ask(runtime: RuntimeContext, question: str) -> bool:
     )
     if not any(t in raw for t in tokens):
         return False
-    data_dir = Path(runtime.session.data_dir)
     proposal = latest_approved_proposal(data_dir)
     plan = build_restart_plan(data_dir, proposal)
     console.print(render_restart_plan(plan))
@@ -5092,17 +5254,30 @@ def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
     q = (question or "").lower().strip()
     if is_compose_mutation_request(question):
         console.print(
-            "Refusing natural-language Compose mutation. Compose context is read-only. "
-            "To inspect ownership, run `shellforgeai compose inspect <container>`. "
-            "For a guarded restart, use the existing proposal/mission workflow."
+            "Refusing natural-language Compose mutation. PR58 only enriches Compose context. "
+            "Compose context is read-only; ShellForgeAI does not run docker compose commands."
         )
+        console.print("- Compose context is advisory/read-only.")
+        console.print("- read-only inspection: shellforgeai compose inspect <container>")
+        console.print(
+            "- container-scoped restart (only if you provide an allowlisted container target): "
+            "shellforgeai approvals propose-restart --latest --container <container>"
+        )
+        console.print("- no proposal created")
+        console.print("- no commands executed")
         _append_audit_event(
             runtime,
             kind="compose_context",
             action="viewed",
             status="refused",
             summary="ask refused: compose mutation requested",
-            details={"target": "", "mutation_performed": False, "execution_status": "not_executed"},
+            details={
+                "target": "",
+                "mutation_performed": False,
+                "execution_status": "not_executed",
+                "compose_mutation": False,
+                "restart_scope": "container",
+            },
         )
         return True
     compose_tokens = (
@@ -5633,9 +5808,9 @@ def ask(
             return
         if _handle_mission_restart_ask(runtime, question):
             return
-        if _handle_compose_context_ask(runtime, question):
-            return
         if _handle_restart_plan_ask(runtime, question):
+            return
+        if _handle_compose_context_ask(runtime, question):
             return
         if _handle_lab_restart_verification_ask(runtime, question):
             return

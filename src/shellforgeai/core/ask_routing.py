@@ -562,6 +562,7 @@ def extract_container_target(text: str) -> str:
 _COMPOSE_MUTATION_PHRASES = (
     "docker compose restart",
     "restart compose service",
+    "restart the compose service",
     "compose restart",
     "compose up",
     "docker compose up",
@@ -569,7 +570,41 @@ _COMPOSE_MUTATION_PHRASES = (
     "docker compose down",
     "recreate compose service",
     "fix compose service now",
+    "propose restart for compose service",
+    "create compose restart proposal",
+    "prepare compose restart proposal",
+    "build a compose restart proposal",
+    "build compose restart proposal",
+    "make a compose restart proposal",
+    "convert this to compose restart",
+    "run docker compose restart",
 )
+
+
+_COMPOSE_SERVICE_MUTATION_PROPOSAL_PHRASES = (
+    "propose restart for compose service",
+    "create compose restart proposal for",
+    "compose restart proposal for",
+    "restart proposal for compose service",
+    "build a compose restart proposal",
+    "make a compose restart proposal",
+    "prepare a compose restart proposal",
+    "convert this to compose restart",
+)
+
+
+def is_compose_service_mutation_proposal_request(text: str) -> bool:
+    """Detect a request to create a Compose service-level restart mutation.
+
+    PR58 only enriches Compose context. ShellForgeAI does not build proposals
+    for ``docker compose restart <service>``; this helper lets the CLI refuse
+    such requests cleanly.
+    """
+    raw = (text or "").lower()
+    if any(p in raw for p in _COMPOSE_SERVICE_MUTATION_PROPOSAL_PHRASES):
+        return True
+    return is_compose_mutation_request(text)
+
 
 _COMPOSE_TARGET_PATTERNS = (
     r"\bcompose\s+context\s+for\s+['\"]?([a-z0-9][a-z0-9._-]{0,63})['\"]?",
@@ -587,6 +622,39 @@ _COMPOSE_TARGET_PATTERNS = (
 def is_compose_mutation_request(text: str) -> bool:
     lowered = _normalize_intent_text(text or "")
     return any(p in lowered for p in _COMPOSE_MUTATION_PHRASES)
+
+
+_RESTART_PROPOSAL_COMPOSE_CONTEXT_PHRASES = (
+    "show compose context for this restart proposal",
+    "show compose context for the restart proposal",
+    "show restart proposal compose context",
+    "is this restart proposal compose managed",
+    "is this restart proposal compose-managed",
+    "what compose service owns the restart target",
+    "what compose project owns the restart target",
+    "is the restart scope container or compose service",
+    "is the restart scope container or compose",
+    "compose context for this restart proposal",
+)
+
+_MISSION_COMPOSE_CONTEXT_PHRASES = (
+    "is this mission targeting a compose service",
+    "is the mission targeting a compose service",
+    "is this mission compose managed",
+    "is this mission compose-managed",
+    "show compose context for this mission",
+    "show mission compose context",
+)
+
+
+def is_restart_proposal_compose_context_query(text: str) -> bool:
+    raw = (text or "").lower()
+    return any(p in raw for p in _RESTART_PROPOSAL_COMPOSE_CONTEXT_PHRASES)
+
+
+def is_mission_compose_context_query(text: str) -> bool:
+    raw = (text or "").lower()
+    return any(p in raw for p in _MISSION_COMPOSE_CONTEXT_PHRASES)
 
 
 def extract_compose_target(text: str) -> str:

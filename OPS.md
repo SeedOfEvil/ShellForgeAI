@@ -655,3 +655,18 @@ gated mutation.
 2. `shellforgeai compose inspect <container>`
 3. Confirm compose project/service ownership before creating restart proposals.
 4. Continue through existing proposal/mission/apply gates only for allowlisted containers.
+
+## Compose-aware restart enrichment (PR58)
+
+Operator notes for safely using PR58 Compose context enrichment:
+
+- Use `shellforgeai compose inspect <container>` first to understand project /
+  service ownership. The same context is automatically surfaced inside
+  proposals, restart plans, missions, apply receipts, and mission reports.
+- The restart proposal remains container-scoped. PR58 does not add
+  `docker compose restart/up/down/recreate` and does not change the
+  command preview, which stays exactly `docker restart <container>`.
+- If you see `docker compose` in a proposal's command preview, restart-plan
+  readiness will block. Fix the proposal — do not bypass the block.
+- Future Compose service mutations need a separate policy gate and a separate
+  PR. PR58 only enriches metadata; it never executes `docker compose`.

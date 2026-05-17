@@ -100,6 +100,9 @@ class Proposal(BaseModel):
     source_hashes: dict[str, str] = Field(default_factory=dict)
     execution: ProposalExecution = Field(default_factory=ProposalExecution)
     approval: ProposalApproval = Field(default_factory=ProposalApproval)
+    compose_context: dict[str, Any] = Field(default_factory=dict)
+    restart_scope: str = ""
+    compose_mutation: bool = False
 
     def is_mutating(self) -> bool:
         return _is_mutating_steps(self.proposed_steps)
@@ -673,6 +676,9 @@ def build_restart_proposal_from_evidence(
     labels = match.get("labels") or {}
     if not isinstance(labels, dict):
         labels = {}
+    from shellforgeai.core.compose_context import compose_context_from_row
+
+    compose_context = compose_context_from_row(match)
     allowlisted = (
         str(labels.get("shellforgeai.allow_restart", "")).lower() == "true"
         or str(labels.get("shellforgeai.disposable", "")).lower() == "true"
@@ -726,13 +732,12 @@ def build_restart_proposal_from_evidence(
             summary="docker.containers evidence",
             compose=(
                 {
-                    "project": str((match.get("compose") or {}).get("project") or ""),
-                    "service": str((match.get("compose") or {}).get("service") or ""),
-                    "working_dir": str((match.get("compose") or {}).get("working_dir") or ""),
-                    "config_files": list((match.get("compose") or {}).get("config_files") or []),
+                    "project": str(compose_context.get("project") or ""),
+                    "service": str(compose_context.get("service") or ""),
+                    "working_dir": str(compose_context.get("working_dir") or ""),
+                    "config_files": list(compose_context.get("config_files") or []),
                 }
-                if isinstance(match.get("compose"), dict)
-                and (match.get("compose") or {}).get("detected")
+                if compose_context.get("detected")
                 else {}
             ),
         ),
@@ -772,6 +777,9 @@ def build_restart_proposal_from_evidence(
             runbook_path=None,
             summary_path=None,
         ),
+        compose_context=compose_context,
+        restart_scope="container",
+        compose_mutation=False,
     )
     _ensure_dirs(data_dir)
     fp = str((proposal.fingerprint or {}).get("value") or "")

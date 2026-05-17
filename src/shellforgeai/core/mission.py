@@ -255,6 +255,22 @@ def _build_phases(
     return phases, mission_status, blockers, plan_payload
 
 
+def _derive_compose_context_for_mission(
+    proposal: Proposal | None,
+    plan_payload: dict[str, Any],
+) -> dict[str, Any]:
+    cc = plan_payload.get("compose_context")
+    if isinstance(cc, dict) and cc:
+        return dict(cc)
+    if (
+        proposal is not None
+        and isinstance(proposal.compose_context, dict)
+        and proposal.compose_context
+    ):
+        return dict(proposal.compose_context)
+    return {"detected": False, "reason": "compose labels not present"}
+
+
 def _next_commands(
     proposal: Proposal | None,
     phases: dict[str, dict[str, Any]],
@@ -289,6 +305,8 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         f"- status: {payload.get('status')}",
         f"- created_at: {payload.get('created_at')}",
         f"- execution: {payload['safety']['execution_status']}",
+        f"- restart scope: {payload.get('restart_scope', 'container')}",
+        f"- compose mutation: {bool(payload.get('compose_mutation', False))}",
         "",
         "## Phases",
     ]
@@ -303,6 +321,20 @@ def _render_markdown(payload: dict[str, Any]) -> str:
     ):
         ph = payload["phases"].get(key) or {}
         lines.append(f"- {key}: {ph.get('status')}")
+    cc = payload.get("compose_context") or {}
+    lines.append("")
+    lines.append("## Compose context")
+    if cc.get("detected"):
+        lines.append("- Compose-managed: yes")
+        lines.append(f"- project: {cc.get('project') or '-'}")
+        lines.append(f"- service: {cc.get('service') or '-'}")
+        if cc.get("working_dir"):
+            lines.append(f"- working_dir: {cc.get('working_dir')}")
+        for path in cc.get("config_files") or []:
+            lines.append(f"- config_file: {path}")
+        lines.append("- Compose service mutation is not enabled in this PR.")
+    else:
+        lines.append("- Compose-managed: no")
     lines.append("")
     lines.append("## Next commands")
     for i, cmd in enumerate(payload.get("next_commands") or [], start=1):
@@ -315,6 +347,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
             "- This mission did not approve or apply any proposal.",
             "- Natural-language restart remains refused.",
             "- Apply remains the only execution gate.",
+            "- Compose context is advisory/read-only; no docker compose command executed.",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -349,6 +382,8 @@ def _build_mission_payload(
     if rollback_preview_path is None and phases["rollback"]["path"]:
         rollback_preview_path = phases["rollback"]["path"]
 
+    compose_context = _derive_compose_context_for_mission(proposal, _plan)
+
     mid = existing_mission_id or _make_mission_id()
     now = _now()
     payload: dict[str, Any] = {
@@ -369,12 +404,17 @@ def _build_mission_payload(
         ),
         "status": mission_status,
         "phases": phases,
+        "compose_context": compose_context,
+        "restart_scope": "container",
+        "compose_mutation": False,
         "next_commands": _next_commands(proposal, phases, target),
         "safety": {
             "execution_allowed": False,
             "execution_status": "not_executed",
             "mutation_performed": False,
             "arbitrary_command_execution": False,
+            "compose_mutation": False,
+            "restart_scope": "container",
         },
     }
     return payload
@@ -598,6 +638,8 @@ def render_checklist(payload: dict[str, Any]) -> str:
         f"- Proposal: {payload.get('proposal_id') or 'missing'}",
         f"- Status: {payload.get('status')}",
         f"- Execution: {payload['safety'].get('execution_status', 'not_executed')}",
+        f"- Restart scope: {payload.get('restart_scope', 'container')}",
+        f"- Compose mutation: {bool(payload.get('compose_mutation', False))}",
         "",
         "Checklist:",
         f"{sym.get(phases.get('evidence', {}).get('status'), '[UNKNOWN]')} Evidence captured",
@@ -608,8 +650,23 @@ def render_checklist(payload: dict[str, Any]) -> str:
         f"{sym.get(phases.get('execution', {}).get('status'), '[UNKNOWN]')} Execution",
         f"{sym.get(phases.get('verification', {}).get('status'), '[UNKNOWN]')} Verification",
         "",
-        "Next commands:",
     ]
+    cc = payload.get("compose_context") or {}
+    if cc.get("detected"):
+        lines.append("Compose context:")
+        lines.append("- Compose-managed: yes")
+        lines.append(f"- Project: {cc.get('project') or '-'}")
+        lines.append(f"- Service: {cc.get('service') or '-'}")
+        if cc.get("working_dir"):
+            lines.append(f"- Working dir: {cc.get('working_dir')}")
+        lines.append(f"- Restart scope: {payload.get('restart_scope', 'container')}")
+        lines.append("- Compose service mutation is not enabled.")
+        lines.append("")
+    elif cc:
+        lines.append("Compose context:")
+        lines.append("- Compose-managed: no")
+        lines.append("")
+    lines.append("Next commands:")
     for i, cmd in enumerate(payload.get("next_commands") or [], start=1):
         lines.append(f"{i}. {cmd}")
     lines.extend(
@@ -619,6 +676,7 @@ def render_checklist(payload: dict[str, Any]) -> str:
             "- Mission status/checklist did not restart anything.",
             "- Natural-language restart remains refused.",
             "- Apply is still the only execution gate.",
+            "- Compose context is advisory/read-only; no docker compose command executed.",
         ]
     )
     return "\n".join(lines)
