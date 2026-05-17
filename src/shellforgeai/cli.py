@@ -55,6 +55,7 @@ from shellforgeai.core.ask_routing import (
     evidence_brief,
     extract_compose_target,
     extract_container_target,
+    has_compose_artifact_reference_phrase,
     is_apply_approved_intent,
     is_compose_mutation_request,
     is_compose_service_mutation_proposal_request,
@@ -5291,6 +5292,9 @@ def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
         "compose file owns",
     )
     if not any(tok in q for tok in compose_tokens):
+        return False
+    if has_compose_artifact_reference_phrase(question):
+        # Let proposal/mission ask routes resolve implicit artifact references.
         return False
     target = extract_compose_target(question) or ""
     if not target:
