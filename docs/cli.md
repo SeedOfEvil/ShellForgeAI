@@ -650,3 +650,12 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
 - Ask preview examples: `show compose restart preview for shellforgeai`, `preview compose service restart for shellforgeai`, `what would docker compose restart do for shellforgeai?`.
 - Mutation asks still refuse (`docker compose restart ...`, `restart compose service ...`, `run/execute/apply compose restart ...`).
 - Preview-only posture is explicit: `compose_mutation=true`, `preview_only=true`, `execution_allowed=false`, `executed=false`; no `docker compose` command is executed.
+
+### PR62 compose propose-restart (proposal only)
+
+- `shellforgeai compose propose-restart <target>` creates a **pending** `compose_service_restart` proposal artifact.
+- `shellforgeai compose propose-restart <target> --reason "<reason>"` stores operator rationale on the proposal.
+- `shellforgeai compose propose-restart <target> --json` emits strict JSON only.
+- Proposal posture is explicit: `compose_mutation=true`, `proposal_only=true`, `execution_allowed=false`, `executed=false`.
+- The proposal includes compose metadata + a future command preview (`preview.command` argv list and `preview.command_display`).
+- `apply` refuses this kind in PR62: “Compose service restart proposals are proposal-only in PR62; execution is not implemented.”

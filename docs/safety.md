@@ -556,4 +556,11 @@ existing proposal/mission/apply safety gates.
 - Compose service restart support is preview-only in PR61.
 - Preview output marks the future command nature with `compose_mutation=true` while still enforcing `execution_allowed=false`.
 - ShellForgeAI does not execute `docker compose` in this flow (`docker_compose_executed=false`, read-only).
+
+## PR62 compose restart proposal builder (non-executable)
+
+- ShellForgeAI can create a pending `compose_service_restart` proposal artifact from read-only compose metadata.
+- Proposal records `compose_mutation=true` and `proposal_only=true` while enforcing `execution_allowed=false`.
+- `apply` must refuse this proposal kind in PR62; compose execution is not implemented yet.
+- No docker compose command is executed (`docker_compose_executed=false`), no container is restarted, and no mission/rollback preview is auto-created.
 - Future execution requires proposal, approval, rollback preview, mission readiness, apply gate, verification, and receipts.

@@ -35,11 +35,13 @@ from shellforgeai.core.apply_bundle import (
     write_diagnostic_preflight,
 )
 from shellforgeai.core.approvals import (
+    EXECUTION_DISABLED_REASON,
     Proposal,
     approve_proposal,
     archive_proposal,
     build_restart_proposal_from_evidence,
     cancel_proposal,
+    compute_proposal_fingerprint_payload,
     create_proposals_for_session,
     find_proposal_path,
     latest_approved_proposal,
@@ -48,6 +50,7 @@ from shellforgeai.core.approvals import (
     load_proposal_from_path,
     reject_proposal,
     validate_proposal_payload,
+    write_proposal,
 )
 from shellforgeai.core.ask_routing import (
     EVIDENCE_BACKED,
@@ -2262,6 +2265,13 @@ def apply(
                 f"- proposal/plan not found: {target}\n"
                 "- no commands executed"
             )
+        raise typer.Exit(code=1)
+    if proposal.kind == "compose_service_restart":
+        console.print(
+            "Compose service restart proposals are proposal-only in PR62; "
+            "execution is not implemented."
+        )
+        console.print("- no docker compose command was executed")
         raise typer.Exit(code=1)
 
     preflight = run_preflight(proposal)
@@ -5288,11 +5298,22 @@ def _handle_lab_restart_ask(runtime: RuntimeContext, question: str) -> bool:
 
 def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
     q = (question or "").lower().strip()
-    if is_compose_mutation_request(question):
-        console.print(
-            "Refusing natural-language Compose mutation. PR58 only enriches Compose context. "
-            "Compose context is read-only; ShellForgeAI does not run docker compose commands."
+    compose_mutation_hint = ("compose" in q) and any(
+        token in q
+        for token in (
+            " restart ",
+            "restart ",
+            " docker compose ",
+            "compose up",
+            "execute ",
         )
+    )
+    if is_compose_mutation_request(question) or compose_mutation_hint:
+        console.print(
+            "Refusing natural-language Compose mutation. ShellForgeAI currently supports "
+            "Compose context, preview, and proposal creation, but not Compose execution."
+        )
+        console.print("- Compose context is read-only.")
         console.print("- Compose context is advisory/read-only.")
         console.print("- read-only inspection: shellforgeai compose inspect <container>")
         console.print(
@@ -5375,9 +5396,9 @@ def _handle_compose_restart_preview_ask(runtime: RuntimeContext, question: str) 
         res = resolve_reference("mission", question, ReferenceFilters(restart_only=True), data_dir)
         if res.status == "resolved":
             resolved_from = res.id or ""
-            m = refresh_mission(data_dir, res.id or "")
-            cc = m.get("compose_context") or {}
-            target = str(cc.get("service") or m.get("target") or "")
+            mission_payload = refresh_mission(data_dir, res.id or "")
+            cc = mission_payload.get("compose_context") or {}
+            target = str(cc.get("service") or mission_payload.get("target") or "")
     if not target:
         return False
     payload = _build_compose_restart_preview(target)
@@ -5526,6 +5547,175 @@ def _build_compose_restart_preview(target: str) -> dict[str, Any]:
         "warnings": [f"missing: {', '.join(missing)}"] if missing else [],
         "candidates": [],
     }
+
+
+def _create_compose_restart_proposal(
+    runtime: RuntimeContext, target: str, reason: str | None
+) -> dict[str, Any]:
+    preview_payload = _build_compose_restart_preview(target)
+    status = preview_payload.get("status")
+    if status != "ok":
+        out = dict(preview_payload)
+        out["proposal"] = None
+        safety = dict(out.get("safety") or {})
+        safety.update(
+            {
+                "proposal_created": False,
+                "docker_compose_executed": False,
+                "container_restarted": False,
+                "arbitrary_command_execution": False,
+            }
+        )
+        out["safety"] = safety
+        return out
+    now = datetime.now(timezone.utc).isoformat()
+    compose = dict(preview_payload.get("compose") or {})
+    proposal_id = f"prop_compose_restart_{uuid.uuid4().hex[:12]}"
+    command = list(((preview_payload.get("preview") or {}).get("command")) or [])
+    proposal = Proposal(
+        proposal_id=proposal_id,
+        created_at=now,
+        status="pending",
+        target=str((preview_payload.get("target") or {}).get("input") or target),
+        component=str(compose.get("container") or ""),
+        kind="compose_service_restart",
+        title=f"Compose service restart proposal for {compose.get('service') or target}",
+        risk="medium",
+        impact="service-impacting: compose service restart proposal only",
+        confidence="high",
+        proposed_steps=[f"docker compose restart {compose.get('service') or '<service>'}"],
+        rollback=["No rollback executed in PR62; proposal-only artifact."],
+        verification=["Confirm proposal-only status and execution_allowed=false."],
+        safety_labels=["OPERATOR-RUN", "REQUIRES APPROVAL", "COMPOSE-MUTATION", "PROPOSAL-ONLY"],
+        notes=(
+            "PR62 proposal-only compose service restart artifact. "
+            "Execution is intentionally not implemented."
+        ),
+        execution={"allowed": False, "status": "not_executed", "reason": EXECUTION_DISABLED_REASON},
+        compose_context={
+            "detected": True,
+            "project": compose.get("project"),
+            "service": compose.get("service"),
+            "working_dir": compose.get("working_dir"),
+            "config_files": [compose.get("compose_file")] if compose.get("compose_file") else [],
+            "container_number": compose.get("container_number"),
+            "oneoff": bool(compose.get("oneoff")),
+            "container": compose.get("container"),
+            "preview_command": command,
+            "preview_command_display": (preview_payload.get("preview") or {}).get(
+                "command_display"
+            ),
+            "proposal_only": True,
+            "execution_allowed": False,
+            "apply_supported": False,
+        },
+        compose_mutation=True,
+    )
+    proposal.fingerprint = compute_proposal_fingerprint_payload(
+        session_id=str(Path(runtime.session.data_dir).name or "compose-proposal"),
+        option_id=f"compose_restart_{compose.get('project') or ''}_{compose.get('service') or ''}",
+        component=str(compose.get("container") or compose.get("service") or "compose"),
+        kind="compose_service_restart",
+        title=proposal.title,
+        risk=proposal.risk,
+        steps=proposal.proposed_steps,
+        rollback=proposal.rollback,
+        verification=proposal.verification,
+    )
+    proposal.source.summary = "shellforgeai compose propose-restart"
+    proposal.source.compose = {
+        "project": compose.get("project"),
+        "service": compose.get("service"),
+        "working_dir": compose.get("working_dir"),
+        "compose_file": compose.get("compose_file"),
+    }
+    if reason:
+        proposal.notes += f"\nReason: {reason}"
+    path = write_proposal(Path(runtime.session.data_dir), proposal)
+    return {
+        "schema_version": "1",
+        "status": "created",
+        "proposal": {
+            "id": proposal.proposal_id,
+            "kind": "compose_service_restart",
+            "status": "pending",
+            "path": str(path),
+            "created_at": now,
+            "reason": reason or "",
+            "proposal_only": True,
+            "execution_allowed": False,
+            "executed": False,
+        },
+        "target": preview_payload.get("target"),
+        "compose": compose,
+        "preview": {
+            **dict(preview_payload.get("preview") or {}),
+            "proposal_only": True,
+            "execution_allowed": False,
+            "executed": False,
+            "compose_mutation": True,
+        },
+        "safety": {
+            "read_only_except_proposal_artifact": True,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "proposal_created": True,
+            "mission_created": False,
+            "approval_changed": False,
+            "apply_executed": False,
+            "requires_future_mission": True,
+            "requires_future_approval": True,
+            "requires_future_rollback_preview": True,
+            "requires_future_apply_gate": True,
+            "arbitrary_command_execution": False,
+        },
+        "warnings": [],
+        "candidates": [],
+        "next_safe_commands": [
+            f"shellforgeai approvals show {proposal.proposal_id}",
+            f"shellforgeai approvals validate {proposal.proposal_id}",
+            f"shellforgeai compose restart-preview {target}",
+        ],
+    }
+
+
+def _is_compose_restart_proposal_ask(text: str) -> bool:
+    raw = (text or "").lower()
+    if any(
+        token in raw
+        for token in ("execute compose restart proposal", "apply compose restart proposal")
+    ):
+        return False
+    return (
+        "compose" in raw
+        and "restart" in raw
+        and any(token in raw for token in ("propose", "proposal", "create"))
+    )
+
+
+def _handle_compose_restart_proposal_ask(runtime: RuntimeContext, question: str) -> bool:
+    if not _is_compose_restart_proposal_ask(question):
+        return False
+    target = extract_compose_target(question)
+    if not target:
+        match = re.search(
+            r"\brestart\s+(?:the\s+)?([a-z0-9][a-z0-9._-]{0,63})\s+compose service\b",
+            question.lower(),
+        )
+        if match:
+            target = match.group(1)
+    if target:
+        console.print("Restart proposal refused from natural language.")
+        console.print("Refusing natural-language Compose mutation.")
+        console.print(f'Run: shellforgeai compose propose-restart {target} --reason "<reason>"')
+    else:
+        console.print("Restart proposal refused from natural language.")
+        console.print("Refusing natural-language Compose mutation.")
+        console.print('Use: shellforgeai compose propose-restart <target> --reason "<reason>"')
+    console.print("- read-only inspection: shellforgeai compose inspect <container>")
+    console.print("- This creates a pending proposal only.")
+    console.print("- no docker compose command was executed")
+    return True
 
 
 def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
@@ -5990,6 +6180,8 @@ def ask(
             return
         if _handle_compose_restart_preview_ask(runtime, question):
             return
+        if _handle_compose_restart_proposal_ask(runtime, question):
+            return
         if _handle_compose_context_ask(runtime, question):
             return
         if _handle_lab_restart_verification_ask(runtime, question):
@@ -6389,6 +6581,74 @@ def compose_restart_preview(
     for item in payload.get("operator_checks", []):
         console.print(f"- {item}")
     raise typer.Exit(0 if status == "ok" else 1)
+
+
+@compose_app.command("propose-restart")
+def compose_propose_restart(
+    ctx: typer.Context,
+    target: Annotated[str, typer.Argument(help="Compose target (container/service/project)")],
+    reason: Annotated[
+        str | None, typer.Option("--reason", help="Operator reason for proposal")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only")] = False,
+) -> None:
+    runtime = _ctx(ctx)
+    payload = _create_compose_restart_proposal(runtime, target, reason)
+    status = payload.get("status")
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if status == "created" else 1)
+    if status == "created":
+        proposal = payload.get("proposal") or {}
+        compose = payload.get("compose") or {}
+        preview = payload.get("preview") or {}
+        console.print("Compose service restart proposal created")
+        console.print("\nProposal:")
+        console.print(f"- id: {proposal.get('id')}")
+        console.print(f"- kind: {proposal.get('kind')}")
+        console.print(f"- status: {proposal.get('status')}")
+        console.print("- compose_mutation: true")
+        console.print("- proposal_only: true")
+        console.print("- execution_allowed: false")
+        if reason:
+            console.print(f"- reason: {reason}")
+        console.print("\nTarget:")
+        console.print(f"- input: {target}")
+        console.print("- compose-managed: true")
+        console.print(f"- project: {compose.get('project') or '-'}")
+        console.print(f"- service: {compose.get('service') or '-'}")
+        console.print(f"- container: {compose.get('container') or '-'}")
+        console.print(f"- working_dir: {compose.get('working_dir') or '-'}")
+        console.print(f"- compose_file: {compose.get('compose_file') or '-'}")
+        console.print("\nProposed future command:")
+        console.print(f"- {preview.get('command_display') or '-'}")
+        console.print("\nSafety:")
+        console.print("- This PR creates a pending proposal only.")
+        console.print("- This PR does not execute docker compose commands.")
+        console.print("- This proposal cannot be applied yet.")
+        console.print("- Future execution will require a dedicated gated mission/apply lane.")
+        console.print("- No container was restarted.")
+        console.print("\nNext safe commands:")
+        for cmd in payload.get("next_safe_commands", []):
+            console.print(f"- {cmd}")
+        raise typer.Exit(0)
+    if status == "ambiguous":
+        console.print("I found multiple Compose service matches. Please specify one:")
+        for idx, cand in enumerate(payload.get("candidates", []), start=1):
+            console.print(
+                f"{idx}. target={cand.get('target')} project={cand.get('project') or '-'} "
+                f"service={cand.get('service') or '-'} container={cand.get('container') or '-'}"
+            )
+    else:
+        console.print("Compose service restart proposal unavailable")
+        console.print(f"- target: {target}")
+        compose_managed = bool((payload.get("target") or {}).get("compose_managed", False))
+        console.print(f"- compose-managed: {str(compose_managed).lower()}")
+        for warning in payload.get("warnings", []):
+            console.print(f"- reason: {warning}")
+    console.print("No proposal was created.")
+    console.print("No docker compose command was executed.")
+    raise typer.Exit(1)
 
 
 @ops_app.command("status")
