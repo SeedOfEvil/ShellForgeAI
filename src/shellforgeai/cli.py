@@ -217,6 +217,7 @@ mission_restart_app = typer.Typer(
 )
 mission_app.add_typer(mission_restart_app, name="restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
+ops_app = typer.Typer(help="Read-only operator status board.")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -227,9 +228,40 @@ app.add_typer(rollback_app, name="rollback")
 app.add_typer(guard_app, name="guard")
 app.add_typer(mission_app, name="mission")
 app.add_typer(compose_app, name="compose")
+app.add_typer(ops_app, name="ops")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
+
+
+def _safe_load_json(path: Path, warnings: list[str]) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        warnings.append(f"skipped malformed json: {path} ({exc})")
+        return None
+    if not isinstance(payload, dict):
+        warnings.append(f"skipped non-object json: {path}")
+        return None
+    return payload
+
+
+def _ts(payload: dict[str, Any], path: Path) -> float:
+    for key in ("updated_at", "created_at"):
+        raw = payload.get(key)
+        if isinstance(raw, str):
+            with suppress(ValueError):
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    with suppress(OSError):
+        return path.stat().st_mtime
+    return 0.0
+
+
+def _age_seconds(payload: dict[str, Any], path: Path) -> int | None:
+    t = _ts(payload, path)
+    if t <= 0:
+        return None
+    return max(0, int(datetime.now(timezone.utc).timestamp() - t))
 
 
 _HOST_AUDIT_HINTS = (
@@ -6147,3 +6179,182 @@ def compose_list(json_out: Annotated[bool, typer.Option("--json")] = False) -> N
             console.print(f"  - service {svc}: {len(members)} container(s)")
     if unmanaged:
         console.print(f"- unmanaged: {len(unmanaged)}")
+
+
+@ops_app.command("status")
+def ops_status(json_out: Annotated[bool, typer.Option("--json")] = False) -> None:
+    settings = load_settings()
+    profile = load_profile(settings.app.default_profile, Path.cwd())
+    session = build_session_context(settings, profile, mode="cli", cwd=Path.cwd())
+    data_dir = session.data_dir
+    warnings: list[str] = []
+    now = datetime.now(timezone.utc).isoformat()
+
+    evidence_path = latest_evidence_artifact(data_dir)
+    latest_evidence: dict[str, Any] | None = None
+    if evidence_path and evidence_path.exists():
+        ev = _safe_load_json(evidence_path, warnings) or {}
+        latest_evidence = {
+            "id": evidence_path.parent.name,
+            "path": str(evidence_path),
+            "created_at": ev.get("created_at"),
+            "updated_at": ev.get("updated_at"),
+            "age_seconds": _age_seconds(ev, evidence_path),
+            "target": ev.get("target"),
+            "runbook_present": (evidence_path.parent / "runbook.json").exists(),
+        }
+
+    proposals_root = data_dir / "proposals"
+    proposal_items: list[dict[str, Any]] = []
+    proposal_counts = {
+        k: 0 for k in ("pending", "approved", "rejected", "canceled", "archived", "unknown")
+    }
+    for p in sorted(proposals_root.glob("*.json")) if proposals_root.exists() else []:
+        obj = _safe_load_json(p, warnings)
+        if not obj:
+            continue
+        st = str(obj.get("status") or "unknown")
+        proposal_counts[st if st in proposal_counts else "unknown"] += 1
+        proposal_items.append({"path": p, "payload": obj})
+    latest_prop = max(proposal_items, key=lambda x: _ts(x["payload"], x["path"]), default=None)
+    prop_summary = None
+    if latest_prop:
+        pp = latest_prop["payload"]
+        compose = pp.get("compose") if isinstance(pp.get("compose"), dict) else {}
+        prop_summary = {
+            "id": pp.get("proposal_id") or latest_prop["path"].stem,
+            "path": str(latest_prop["path"]),
+            "kind": pp.get("kind"),
+            "status": pp.get("status", "unknown"),
+            "target": pp.get("target_container"),
+            "created_at": pp.get("created_at"),
+            "updated_at": pp.get("updated_at"),
+            "age_seconds": _age_seconds(pp, latest_prop["path"]),
+            "compose": {
+                "managed": bool(compose.get("managed") or compose.get("detected")),
+                "project": compose.get("project"),
+                "service": compose.get("service"),
+                "restart_scope": "container",
+                "compose_mutation": False,
+            },
+        }
+
+    mission_items: list[dict[str, Any]] = []
+    mission_counts = {k: 0 for k in ("ready", "executed", "blocked", "failed", "unknown")}
+    for p in (
+        sorted((data_dir / "missions").glob("**/mission.json"))
+        if (data_dir / "missions").exists()
+        else []
+    ):
+        obj = _safe_load_json(p, warnings)
+        if not obj:
+            continue
+        st = str(obj.get("status") or "unknown")
+        mission_counts[st if st in mission_counts else "unknown"] += 1
+        mission_items.append({"path": p, "payload": obj})
+    latest_m = max(mission_items, key=lambda x: _ts(x["payload"], x["path"]), default=None)
+    latest_exec = max(
+        [m for m in mission_items if str(m["payload"].get("status")) == "executed"],
+        key=lambda x: _ts(x["payload"], x["path"]),
+        default=None,
+    )
+
+    def _mission_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not item:
+            return None
+        mp = item["payload"]
+        compose = mp.get("compose") if isinstance(mp.get("compose"), dict) else {}
+        return {
+            "id": mp.get("mission_id") or item["path"].parent.name,
+            "path": str(item["path"]),
+            "mission_type": mp.get("mission_type", "docker_restart"),
+            "status": mp.get("status", "unknown"),
+            "target": mp.get("target_container"),
+            "proposal_id": mp.get("proposal_id"),
+            "created_at": mp.get("created_at"),
+            "updated_at": mp.get("updated_at"),
+            "age_seconds": _age_seconds(mp, item["path"]),
+            "compose": {
+                "managed": bool(compose.get("managed") or compose.get("detected")),
+                "project": compose.get("project"),
+                "service": compose.get("service"),
+                "restart_scope": "container",
+                "compose_mutation": False,
+            },
+        }
+
+    latest_mission = _mission_summary(latest_m)
+    latest_executed = _mission_summary(latest_exec)
+    audit_status = "unknown"
+    if (data_dir / "audit_events.jsonl").exists():
+        audit_status = "ok"
+    cleanup_report = scan_metadata_hygiene(data_dir)
+    total_bytes = cleanup_report.get("total_bytes", 0)
+    cleanup_status = "ok" if isinstance(total_bytes, int) and total_bytes >= 0 else "unknown"
+    payload = {
+        "schema_version": "1",
+        "status": "warn" if warnings else "ok",
+        "generated_at": now,
+        "data_dir": str(data_dir),
+        "latest_evidence": latest_evidence,
+        "proposals": {"latest": prop_summary, "counts": proposal_counts},
+        "missions": {
+            "latest": latest_mission,
+            "latest_executed": latest_executed,
+            "counts": mission_counts,
+        },
+        "compose": {
+            "recent_managed_targets_count": sum(
+                1 for i in [prop_summary, latest_mission] if i and i["compose"]["managed"]
+            ),
+            "latest_target": (latest_mission or prop_summary or {}).get("target"),
+            "latest_project": ((latest_mission or prop_summary or {}).get("compose") or {}).get(
+                "project"
+            ),
+            "latest_service": ((latest_mission or prop_summary or {}).get("compose") or {}).get(
+                "service"
+            ),
+            "compose_mutation": False,
+        },
+        "safety": {
+            "read_only": True,
+            "natural_language_mutation_refused": True,
+            "arbitrary_command_execution": False,
+            "compose_mutation": False,
+            "execution_requires_apply_gate": True,
+        },
+        "audit": {"status": audit_status, "latest_export": None, "latest_closure_report": None},
+        "cleanup": {
+            "status": cleanup_status,
+            "latest_cleanup_plan": None,
+            "latest_cleanup_archive": None,
+        },
+        "warnings": warnings,
+        "next_safe_commands": [
+            'shellforgeai ask "show compose context for this restart proposal"',
+            "shellforgeai approvals list --all",
+            "shellforgeai mission restart status <mission-id>",
+            "shellforgeai audit validate",
+        ],
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+    console.print("ShellForgeAI ops status")
+    console.print("\nLatest evidence:")
+    if not latest_evidence:
+        console.print("- none found")
+    else:
+        console.print(f"- artifact: {latest_evidence['id']}")
+        console.print(f"- age_seconds: {latest_evidence['age_seconds']}")
+    console.print("\nProposals:")
+    console.print(f"- latest: {(prop_summary or {}).get('id', 'none')}")
+    console.print(f"- counts: {proposal_counts}")
+    console.print("\nMissions:")
+    console.print(f"- latest: {(latest_mission or {}).get('id', 'none')}")
+    console.print(f"- latest executed: {(latest_executed or {}).get('id', 'none')}")
+    console.print("\nSafety:")
+    console.print("- read_only: true")
+    console.print("- compose_mutation: false")
+    console.print("- arbitrary_command_execution: false")
+    console.print("- apply gate: required")
