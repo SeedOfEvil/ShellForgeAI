@@ -686,6 +686,9 @@ Operator notes for safely using PR58 Compose context enrichment:
 ## PR61 Compose restart preview note
 
 - Use `shellforgeai compose restart-preview <target>` to inspect Compose service blast radius and command shape.
+- Use `shellforgeai compose propose-restart <target>` to create an auditable pending Compose restart proposal (proposal-only).
+- Review with `shellforgeai approvals show <id>` and `shellforgeai approvals validate <id>`.
+- Approval does not make Compose execution available yet; PR62 has no Compose execution lane.
 - Preview is read-only and does not execute Docker Compose.
 - Use exact IDs or PR59-style ask references (`this/latest/current proposal/mission`) when previewing from artifacts.
 - Do not treat preview as approval or execution readiness.
