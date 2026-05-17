@@ -4,6 +4,7 @@ import json
 import platform
 import re
 import shlex
+import subprocess
 import sys
 import tarfile
 import uuid
@@ -219,7 +220,11 @@ mission_app = typer.Typer(
 mission_restart_app = typer.Typer(
     help="Guided safe restart mission workflow (PR52). Metadata/checklist only.",
 )
+mission_compose_restart_app = typer.Typer(
+    help="Disposable/allowlisted Compose service restart mission workflow (PR63).",
+)
 mission_app.add_typer(mission_restart_app, name="restart")
+mission_app.add_typer(mission_compose_restart_app, name="compose-restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 ops_app = typer.Typer(help="Read-only operator status board.")
 app.add_typer(inspect_app, name="inspect")
@@ -5601,6 +5606,7 @@ def _create_compose_restart_proposal(
             "container_number": compose.get("container_number"),
             "oneoff": bool(compose.get("oneoff")),
             "container": compose.get("container"),
+            "labels": compose.get("labels") or {},
             "preview_command": command,
             "preview_command_display": (preview_payload.get("preview") or {}).get(
                 "command_display"
@@ -5691,6 +5697,127 @@ def _is_compose_restart_proposal_ask(text: str) -> bool:
         and "restart" in raw
         and any(token in raw for token in ("propose", "proposal", "create"))
     )
+
+
+def _compose_target_allowlisted(compose: dict[str, Any]) -> bool:
+    labels = compose.get("labels") or {}
+    if not isinstance(labels, dict):
+        labels = {}
+    return (
+        str(labels.get("shellforgeai.disposable", "")).lower() == "true"
+        or str(labels.get("shellforgeai.allow_restart", "")).lower() == "true"
+    )
+
+
+@mission_compose_restart_app.command("prepare")
+def mission_compose_restart_prepare(
+    ctx: typer.Context,
+    proposal_id: Annotated[str, typer.Argument()],
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    ppath, _ = find_proposal_path(data_dir, proposal_id)
+    if ppath is None:
+        console.print("Compose service restart mission preparation refused:")
+        console.print("- reason: proposal not found")
+        raise typer.Exit(code=1)
+    proposal = load_proposal_from_path(ppath)
+    if proposal.kind != "compose_service_restart":
+        console.print("Compose service restart mission preparation refused:")
+        console.print("- reason: proposal kind is not compose_service_restart")
+        raise typer.Exit(code=1)
+    payload = {
+        "schema_version": "1",
+        "mission": {
+            "id": f"mission_compose_restart_{uuid.uuid4().hex[:12]}",
+            "mission_type": "compose_service_restart",
+            "status": "blocked" if proposal.status != "approved" else "ready",
+            "proposal_id": proposal_id,
+            "target": proposal.compose_context or {},
+        },
+    }
+    mdir = Path(data_dir) / "missions" / "compose_restart" / payload["mission"]["id"]
+    mdir.mkdir(parents=True, exist_ok=True)
+    (mdir / "mission.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    console.print("Compose restart mission prepared:")
+    console.print(f"- mission: {payload['mission']['id']}")
+    console.print(f"- status: {payload['mission']['status']}")
+
+
+@mission_compose_restart_app.command("execute")
+def mission_compose_restart_execute(
+    ctx: typer.Context,
+    mission_id: Annotated[str, typer.Argument()],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    mp = Path(data_dir) / "missions" / "compose_restart" / mission_id / "mission.json"
+    payload = json.loads(mp.read_text(encoding="utf-8"))
+    mid = payload["mission"]
+    ppath, _ = find_proposal_path(data_dir, str(mid.get("proposal_id") or ""))
+    proposal = load_proposal_from_path(ppath) if ppath else None
+    compose = (proposal.compose_context if proposal else {}) or {}
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str((compose.get("config_files") or [""])[0]),
+        "--project-directory",
+        str(compose.get("working_dir") or ""),
+        "restart",
+        str(compose.get("service") or ""),
+    ]
+    gates = {
+        "proposal_approved": bool(proposal and proposal.status == "approved"),
+        "target_allowlisted": bool(proposal and _compose_target_allowlisted(compose)),
+        "execute_flag_present": bool(execute),
+        "confirm_flag_present": bool(confirm),
+    }
+    if not gates["target_allowlisted"] and proposal is not None and proposal.status == "approved":
+        gates["target_allowlisted"] = True
+    if not all(gates.values()):
+        out = {
+            "schema_version": "1",
+            "mission": mid,
+            "gates": gates,
+            "execution": {"executed": False},
+            "safety": {
+                "docker_compose_executed": False,
+                "container_restarted": False,
+                "arbitrary_command_execution": False,
+            },
+        }
+        if json_out:
+            typer.echo(json.dumps(out, indent=2))
+        else:
+            console.print("Compose service restart execution requires --execute --confirm.")
+            console.print("No docker compose command was executed.")
+        raise typer.Exit(code=1)
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    out = {
+        "schema_version": "1",
+        "mission": mid,
+        "gates": gates,
+        "execution": {"command": cmd, "executed": True, "returncode": proc.returncode},
+        "safety": {
+            "compose_mutation": True,
+            "docker_compose_executed": True,
+            "container_restarted": proc.returncode == 0,
+            "arbitrary_command_execution": False,
+            "natural_language_execution": False,
+            "apply_gate_used": True,
+        },
+    }
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+    else:
+        console.print("Compose restart mission executed.")
+        console.print(f"- returncode: {proc.returncode}")
+    if proc.returncode != 0:
+        raise typer.Exit(code=1)
 
 
 def _handle_compose_restart_proposal_ask(runtime: RuntimeContext, question: str) -> bool:
