@@ -545,3 +545,20 @@ def test_ask_compose_context_no_mutation_executed(tmp_path: Path, monkeypatch):
     runner.invoke(app, ["ask", "is this mission targeting a compose service?"])
     receipts = data_dir / "execution_receipts"
     assert not receipts.exists() or not list(receipts.glob("*.json"))
+
+
+def test_ask_compose_context_prefers_fresh_proposal_over_old_long_lived(
+    tmp_path: Path, monkeypatch
+):
+    pid_new = _make_proposal(tmp_path, monkeypatch, compose=True)
+    approve_proposal(tmp_path, pid_new, reason="ok")
+    old_dir = tmp_path / "approvals" / "approved"
+    old_dir.mkdir(parents=True, exist_ok=True)
+    old_src = json.loads((old_dir / f"{pid_new}.proposal.json").read_text(encoding="utf-8"))
+    old_src["proposal_id"] = "prop_pr58_old"
+    old_src["created_at"] = "2020-01-01T00:00:00+00:00"
+    old_path = old_dir / "prop_pr58_old.proposal.json"
+    old_path.write_text(json.dumps(old_src), encoding="utf-8")
+    r = runner.invoke(app, ["ask", "show compose context for this restart proposal"])
+    assert r.exit_code == 0, r.output
+    assert f"Restart proposal compose context ({pid_new})" in r.output
