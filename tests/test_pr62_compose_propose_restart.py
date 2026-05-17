@@ -60,6 +60,8 @@ def test_compose_propose_restart_human_and_artifact(monkeypatch, tmp_path: Path)
     assert payload["status"] == "pending"
     assert payload["compose_mutation"] is True
     assert payload["execution"]["allowed"] is False
+    assert payload["fingerprint"]["algorithm"] == "sha256"
+    assert len(payload["fingerprint"]["value"]) == 64
 
 
 def test_compose_propose_restart_json(monkeypatch, tmp_path: Path) -> None:
@@ -89,6 +91,10 @@ def test_compose_propose_restart_json(monkeypatch, tmp_path: Path) -> None:
     assert body["preview"]["command"][-2:] == ["restart", "s"]
     assert body["preview"]["execution_allowed"] is False
     assert body["safety"]["docker_compose_executed"] is False
+    proposal_id = body["proposal"]["id"]
+    validate = runner.invoke(app, ["approvals", "validate", proposal_id])
+    assert validate.exit_code == 0
+    assert "Proposal validation passed" in validate.stdout
 
 
 def test_compose_propose_restart_not_found(monkeypatch, tmp_path: Path) -> None:
@@ -128,3 +134,36 @@ def test_apply_refuses_compose_restart_proposal(monkeypatch, tmp_path: Path) -> 
     applied = runner.invoke(app, ["apply", pid])
     assert applied.exit_code == 1
     assert "proposal-only in PR62" in applied.stdout
+
+
+def test_ask_compose_proposal_intent_suggests_cli_not_no_target(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _runtime_env(monkeypatch, tmp_path)
+    res = runner.invoke(
+        app,
+        [
+            "ask",
+            (
+                "create a proposal to restart the shellforgeai compose service, "
+                "but do not execute anything"
+            ),
+        ],
+    )
+    assert res.exit_code == 0
+    assert "shellforgeai compose propose-restart shellforgeai --reason" in res.stdout
+    assert "No compose target found" not in res.stdout
+    assert "no docker compose command was executed" in res.stdout
+
+
+def test_ask_compose_mutation_refusal_version_neutral(monkeypatch, tmp_path: Path) -> None:
+    _runtime_env(monkeypatch, tmp_path)
+    for phrase in (
+        "restart the shellforgeai compose service",
+        "docker compose restart shellforgeai",
+        "execute compose restart proposal",
+    ):
+        res = runner.invoke(app, ["ask", phrase])
+        assert res.exit_code == 0
+        assert "Refusing natural-language Compose mutation" in res.stdout
+        assert "PR58 only enriches Compose context" not in res.stdout

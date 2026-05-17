@@ -41,6 +41,7 @@ from shellforgeai.core.approvals import (
     archive_proposal,
     build_restart_proposal_from_evidence,
     cancel_proposal,
+    compute_proposal_fingerprint_payload,
     create_proposals_for_session,
     find_proposal_path,
     latest_approved_proposal,
@@ -5297,11 +5298,22 @@ def _handle_lab_restart_ask(runtime: RuntimeContext, question: str) -> bool:
 
 def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
     q = (question or "").lower().strip()
-    if is_compose_mutation_request(question):
-        console.print(
-            "Refusing natural-language Compose mutation. PR58 only enriches Compose context. "
-            "Compose context is read-only; ShellForgeAI does not run docker compose commands."
+    compose_mutation_hint = ("compose" in q) and any(
+        token in q
+        for token in (
+            " restart ",
+            "restart ",
+            " docker compose ",
+            "compose up",
+            "execute ",
         )
+    )
+    if is_compose_mutation_request(question) or compose_mutation_hint:
+        console.print(
+            "Refusing natural-language Compose mutation. ShellForgeAI currently supports "
+            "Compose context, preview, and proposal creation, but not Compose execution."
+        )
+        console.print("- Compose context is read-only.")
         console.print("- Compose context is advisory/read-only.")
         console.print("- read-only inspection: shellforgeai compose inspect <container>")
         console.print(
@@ -5599,6 +5611,17 @@ def _create_compose_restart_proposal(
         },
         compose_mutation=True,
     )
+    proposal.fingerprint = compute_proposal_fingerprint_payload(
+        session_id=str(Path(runtime.session.data_dir).name or "compose-proposal"),
+        option_id=f"compose_restart_{compose.get('project') or ''}_{compose.get('service') or ''}",
+        component=str(compose.get("container") or compose.get("service") or "compose"),
+        kind="compose_service_restart",
+        title=proposal.title,
+        risk=proposal.risk,
+        steps=proposal.proposed_steps,
+        rollback=proposal.rollback,
+        verification=proposal.verification,
+    )
     proposal.source.summary = "shellforgeai compose propose-restart"
     proposal.source.compose = {
         "project": compose.get("project"),
@@ -5654,6 +5677,45 @@ def _create_compose_restart_proposal(
             f"shellforgeai compose restart-preview {target}",
         ],
     }
+
+
+def _is_compose_restart_proposal_ask(text: str) -> bool:
+    raw = (text or "").lower()
+    if any(
+        token in raw
+        for token in ("execute compose restart proposal", "apply compose restart proposal")
+    ):
+        return False
+    return (
+        "compose" in raw
+        and "restart" in raw
+        and any(token in raw for token in ("propose", "proposal", "create"))
+    )
+
+
+def _handle_compose_restart_proposal_ask(runtime: RuntimeContext, question: str) -> bool:
+    if not _is_compose_restart_proposal_ask(question):
+        return False
+    target = extract_compose_target(question)
+    if not target:
+        match = re.search(
+            r"\brestart\s+(?:the\s+)?([a-z0-9][a-z0-9._-]{0,63})\s+compose service\b",
+            question.lower(),
+        )
+        if match:
+            target = match.group(1)
+    if target:
+        console.print("Restart proposal refused from natural language.")
+        console.print("Refusing natural-language Compose mutation.")
+        console.print(f'Run: shellforgeai compose propose-restart {target} --reason "<reason>"')
+    else:
+        console.print("Restart proposal refused from natural language.")
+        console.print("Refusing natural-language Compose mutation.")
+        console.print('Use: shellforgeai compose propose-restart <target> --reason "<reason>"')
+    console.print("- read-only inspection: shellforgeai compose inspect <container>")
+    console.print("- This creates a pending proposal only.")
+    console.print("- no docker compose command was executed")
+    return True
 
 
 def _handle_apply_approved_ask(runtime: RuntimeContext, question: str) -> bool:
@@ -6117,6 +6179,8 @@ def ask(
         if _handle_restart_plan_ask(runtime, question):
             return
         if _handle_compose_restart_preview_ask(runtime, question):
+            return
+        if _handle_compose_restart_proposal_ask(runtime, question):
             return
         if _handle_compose_context_ask(runtime, question):
             return
