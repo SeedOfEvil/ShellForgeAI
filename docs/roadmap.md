@@ -207,3 +207,10 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Added `compose inspect` and `compose list` context commands.
 - Added advisory Compose context propagation into docker evidence and restart proposal/plan metadata.
 - No `docker compose` mutation path added.
+
+## PR57 milestone: Compose ask-route polish
+
+- Added deterministic ask target extraction for Compose-context question forms.
+- Compose context asks now route to the existing read-only inspect/list context path when a safe target is present.
+- Missing/invalid targets now produce explicit safe next-step CLI suggestions.
+- Natural-language Compose mutation requests remain refused; no new execution/mutation path added.
