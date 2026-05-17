@@ -214,3 +214,27 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Compose context asks now route to the existing read-only inspect/list context path when a safe target is present.
 - Missing/invalid targets now produce explicit safe next-step CLI suggestions.
 - Natural-language Compose mutation requests remain refused; no new execution/mutation path added.
+
+## PR58 milestone: Compose-aware restart proposal and mission enrichment
+
+- Restart proposals built from evidence now carry a normalized `compose_context`
+  block (project/service/working_dir/config_files/version/oneoff/source) when
+  the target container has Docker Compose labels. Non-Compose targets record
+  `{"detected": false, "reason": "compose labels not present"}`.
+- `approvals show`, `approvals restart-plan` (human and `--json`), mission
+  records (`mission.json`/`.md`, status/checklist), apply execution receipts,
+  and `mission restart report` now surface Compose ownership context, plus
+  explicit `restart_scope="container"` and `compose_mutation=false`.
+- Restart-plan readiness blocks when a proposal's command preview tries to use
+  `docker compose`; readiness is NOT blocked merely because the target is
+  Compose-managed.
+- Ask integration: read-only queries like "show compose context for this
+  restart proposal" / "is this mission targeting a compose service?" answer
+  from metadata. Compose service mutation phrasings (e.g. "propose restart for
+  compose service X", "docker compose restart X", "compose up X",
+  "recreate compose service X") are refused with safe suggestions
+  (`compose inspect <container>` and the container-scoped
+  `approvals propose-restart`).
+- No `docker compose` execution path added. Command preview remains the exact
+  `docker restart <container>`; the apply gate remains the only mutation path.
+  PR58 is context enrichment only.

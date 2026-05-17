@@ -516,3 +516,25 @@ PR57 extends this with deterministic ask routing for Compose context phrasing
 only. Natural-language Compose mutation requests (for example restart/up/down/
 recreate) are refused and redirected to read-only `compose inspect` plus the
 existing proposal/mission/apply safety gates.
+
+## PR58 Compose-aware restart enrichment safety
+
+- Compose context is still advisory/read-only. PR58 only enriches existing
+  proposal/restart-plan/mission/receipt/closure metadata with Compose
+  ownership info parsed from Docker labels (PR56 parser, unchanged).
+- Restart scope remains the exact container. The proposal command preview
+  remains exactly `docker restart <container>`; readiness blocks if a
+  proposal's command preview ever tries to use `docker compose`.
+- Apply receipts and mission reports record `restart_scope=container`,
+  `compose_mutation=false`, and `arbitrary_command_execution=false`. The
+  closure report explicitly states that no `docker compose` command was
+  executed and the restart was exact-container scoped.
+- `docker compose` mutation is **not enabled** in PR58. Compose service
+  mutation asks ("propose restart for compose service X",
+  "docker compose restart X", "compose up X", "recreate compose service X",
+  "create compose restart proposal for X") are refused, with read-only
+  suggestions and the existing container-scoped workflow as the only
+  alternatives.
+- Apply remains the only execution gate. PR58 adds no new mutation class,
+  no new executor, no `docker compose` argv, and no broader mutation
+  scope.

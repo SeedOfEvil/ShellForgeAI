@@ -32,6 +32,29 @@ def _parse_bool(value: Any) -> bool | None:
     return None
 
 
+def compose_context_from_row(row: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a normalized Compose context dict from a container evidence row.
+
+    Prefers a pre-parsed ``row["compose"]`` block (as emitted by
+    :func:`shellforgeai.tools.containers.containers`); falls back to parsing
+    raw ``row["labels"]`` via :func:`parse_compose_context`. Adds a
+    ``source="docker_labels"`` marker when Compose ownership is detected.
+    """
+    if not isinstance(row, dict):
+        row = {}
+    compose = row.get("compose")
+    if isinstance(compose, dict) and compose.get("detected"):
+        out = dict(compose)
+    else:
+        labels = row.get("labels") or {}
+        if not isinstance(labels, dict):
+            labels = {}
+        out = parse_compose_context(labels)
+    if out.get("detected"):
+        out.setdefault("source", "docker_labels")
+    return out
+
+
 def parse_compose_context(labels: dict[str, Any] | None) -> dict[str, Any]:
     labels = labels or {}
     if not isinstance(labels, dict):

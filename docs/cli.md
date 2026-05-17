@@ -546,3 +546,91 @@ If no safe target token is extracted, ask suggests:
 
 - `shellforgeai compose list`
 - `shellforgeai compose inspect <container>`
+
+## Compose-aware restart proposal/mission enrichment (PR58)
+
+PR58 enriches restart proposals, restart plans, missions, apply receipts, and
+mission reports with Compose ownership context when the target container is
+Compose-managed. **Context only — no `docker compose` mutation path is added.**
+
+### Proposal view
+
+`approvals show <proposal-id>` now includes a Compose context block when the
+target container has Docker Compose labels:
+
+```
+Compose context:
+- Compose-managed: yes
+- Project: shellforgeai
+- Service: shellforgeai
+- Working dir: /srv/compose/shellforgeai
+- Config files:
+  - /srv/compose/shellforgeai/compose.yml
+- One-off: False
+- restart_scope: container
+- compose_mutation: False
+- This proposal is container-scoped.
+- Command preview remains: docker restart <container>
+- ShellForgeAI does not run docker compose commands in this flow.
+```
+
+Non-Compose targets show `Compose-managed: no`.
+
+### Restart-plan view
+
+`approvals restart-plan <proposal-id>` surfaces the same context, with a scope
+warning:
+
+```
+Compose context:
+- Compose-managed: yes
+- Project: ...
+- Service: ...
+- Working dir: ...
+- Config files:
+  - ...
+
+Scope warning:
+- This restart plan targets the exact container, not the Compose service.
+- No docker compose command will be executed.
+```
+
+`--json` output adds `compose_context`, `restart_scope: "container"`, and
+`compose_mutation: false`. Apply readiness is **not** blocked merely because
+the container is Compose-managed; readiness only blocks if a proposal's
+command preview tries to use `docker compose`.
+
+### Mission view
+
+`mission restart status/checklist <mission-id>` includes Compose project,
+service, working dir, restart scope, and a "Compose service mutation is not
+enabled" line. `mission.json` adds top-level `compose_context`,
+`restart_scope: "container"`, and `compose_mutation: false`.
+
+### Apply receipt + closure report
+
+When a mission/proposal with Compose context executes through the existing
+apply gate (`apply <id> --execute --confirm` or `mission restart execute
+<id> --execute --confirm`), the receipt and mission report preserve the
+Compose context plus `restart_scope=container`, `compose_mutation=false`, and
+the exact `command_argv=["docker", "restart", "<container>"]`. The closure
+report records that Compose context was advisory/read-only, no `docker
+compose` command was executed, and the restart was exact-container scoped.
+
+### Ask routes
+
+Read-only:
+
+- `shellforgeai ask "show compose context for this restart proposal"`
+- `shellforgeai ask "is this mission targeting a compose service?"`
+
+Refused (no new mutation path):
+
+- `shellforgeai ask "propose restart for compose service shellforgeai"`
+- `shellforgeai ask "docker compose restart shellforgeai"`
+- `shellforgeai ask "compose up shellforgeai"`
+- `shellforgeai ask "recreate compose service shellforgeai"`
+
+Refusals suggest `shellforgeai compose inspect <container>` and the existing
+container-scoped `shellforgeai approvals propose-restart --latest --container
+<container>` (only when the operator names an allowlisted container).

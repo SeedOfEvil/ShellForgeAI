@@ -514,6 +514,7 @@ def write_execution_receipt(
     verification: dict[str, Any] | None = None,
     rollback: dict[str, Any] | None = None,
     receipt_path: Path | None = None,
+    compose_context: dict[str, Any] | None = None,
 ) -> Path:
     receipts = receipts_dir(Path(data_dir))
     receipts.mkdir(parents=True, exist_ok=True)
@@ -548,6 +549,8 @@ def write_execution_receipt(
             "filesystem_mutation": False,
             "firewall_mutation": False,
             "arbitrary_command_execution": False,
+            "compose_mutation": False,
+            "restart_scope": "container",
         },
     }
     if failed_gate:
@@ -556,6 +559,8 @@ def write_execution_receipt(
         payload["verification"] = dict(verification)
     if rollback is not None:
         payload["rollback"] = dict(rollback)
+    if compose_context is not None:
+        payload["compose_context"] = dict(compose_context)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     _write_receipt_markdown(out, payload)
     return out
@@ -616,6 +621,23 @@ def _write_receipt_markdown(json_path: Path, payload: dict[str, Any]) -> None:
             f"- rollback_executable_by_shellforgeai: "
             f"{rollback.get('rollback_executable_by_shellforgeai', '')}"
         )
+
+    compose_context = payload.get("compose_context")
+    if isinstance(compose_context, dict) and compose_context:
+        lines.append("")
+        lines.append("## Compose context")
+        if compose_context.get("detected"):
+            lines.append("- Compose-managed: yes")
+            lines.append(f"- project: {compose_context.get('project') or '-'}")
+            lines.append(f"- service: {compose_context.get('service') or '-'}")
+            if compose_context.get("working_dir"):
+                lines.append(f"- working_dir: {compose_context.get('working_dir')}")
+            for path in compose_context.get("config_files") or []:
+                lines.append(f"- config_file: {path}")
+        else:
+            lines.append("- Compose-managed: no")
+        lines.append("- restart_scope: container")
+        lines.append("- compose_mutation: false")
 
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
