@@ -238,3 +238,5 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - No `docker compose` execution path added. Command preview remains the exact
   `docker restart <container>`; the apply gate remains the only mutation path.
   PR58 is context enrichment only.
+
+- PR59 milestone: ask-reference disambiguation for implicit proposal/mission references (`this`/`latest`/`current`/`most recent`) with deterministic read-only resolver, stale warning guard (24h default), explicit-ID precedence, and ambiguity listing (no guessing/no execution).

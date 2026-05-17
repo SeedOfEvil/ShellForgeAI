@@ -634,3 +634,10 @@ Refused (no new mutation path):
 Refusals suggest `shellforgeai compose inspect <container>` and the existing
 container-scoped `shellforgeai approvals propose-restart --latest --container
 <container>` (only when the operator names an allowlisted container).
+
+
+### Ask reference resolution (PR59)
+- `ask` phrases that reference implicit artifacts (`this/latest/current/most recent proposal|mission`) now resolve deterministically against proposal/mission artifacts.
+- Explicit IDs always win (for example: `show compose context for prop_...`).
+- Ambiguous matches are listed (top candidates) instead of guessed.
+- Stale-only matches are flagged so long-lived `/data` artifacts are not silently treated as current.

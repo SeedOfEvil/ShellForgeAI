@@ -22,6 +22,7 @@ from shellforgeai.core.approvals import (
     load_proposal_from_path,
 )
 from shellforgeai.core.ask_routing import (
+    has_compose_artifact_reference_phrase,
     is_compose_service_mutation_proposal_request,
     is_mission_compose_context_query,
     is_restart_proposal_compose_context_query,
@@ -512,7 +513,12 @@ def test_query_detectors() -> None:
     )
     assert is_restart_proposal_compose_context_query("is this restart proposal compose-managed")
     assert is_mission_compose_context_query("is this mission targeting a compose service")
+    assert is_mission_compose_context_query("show compose context for this restart mission")
+    assert is_mission_compose_context_query("show compose context for latest restart mission")
     assert not is_mission_compose_context_query("show compose context for shellforgeai")
+    assert has_compose_artifact_reference_phrase("show compose context for this restart mission")
+    assert has_compose_artifact_reference_phrase("show compose context for this restart proposal")
+    assert not has_compose_artifact_reference_phrase("compose context for shellforgeai")
 
 
 def test_ask_show_compose_context_for_restart_proposal(tmp_path: Path, monkeypatch):
@@ -538,6 +544,26 @@ def test_ask_mission_compose_context(tmp_path: Path, monkeypatch):
     assert "Compose service mutation is not enabled" in r.output
 
 
+def test_ask_show_compose_context_for_this_restart_mission(tmp_path: Path, monkeypatch):
+    data_dir, ev = _setup(tmp_path, monkeypatch, compose=True)
+    res = prepare_mission(data_dir, container=CONTAINER, evidence_path=ev, session_id="sf_pr59")
+    assert res.ok
+    r = runner.invoke(app, ["ask", "show compose context for this restart mission"])
+    assert r.exit_code == 0, r.output
+    assert "Mission compose context" in r.output
+    assert str((res.payload or {}).get("mission_id")) in r.output
+
+
+def test_ask_show_compose_context_for_latest_restart_mission(tmp_path: Path, monkeypatch):
+    data_dir, ev = _setup(tmp_path, monkeypatch, compose=True)
+    res = prepare_mission(data_dir, container=CONTAINER, evidence_path=ev, session_id="sf_pr59")
+    assert res.ok
+    r = runner.invoke(app, ["ask", "show compose context for latest restart mission"])
+    assert r.exit_code == 0, r.output
+    assert "Mission compose context" in r.output
+    assert str((res.payload or {}).get("mission_id")) in r.output
+
+
 def test_ask_compose_context_no_mutation_executed(tmp_path: Path, monkeypatch):
     data_dir, ev = _setup(tmp_path, monkeypatch, compose=True)
     res = prepare_mission(data_dir, container=CONTAINER, evidence_path=ev, session_id="sf_pr58")
@@ -545,3 +571,20 @@ def test_ask_compose_context_no_mutation_executed(tmp_path: Path, monkeypatch):
     runner.invoke(app, ["ask", "is this mission targeting a compose service?"])
     receipts = data_dir / "execution_receipts"
     assert not receipts.exists() or not list(receipts.glob("*.json"))
+
+
+def test_ask_compose_context_prefers_fresh_proposal_over_old_long_lived(
+    tmp_path: Path, monkeypatch
+):
+    pid_new = _make_proposal(tmp_path, monkeypatch, compose=True)
+    approve_proposal(tmp_path, pid_new, reason="ok")
+    old_dir = tmp_path / "approvals" / "approved"
+    old_dir.mkdir(parents=True, exist_ok=True)
+    old_src = json.loads((old_dir / f"{pid_new}.proposal.json").read_text(encoding="utf-8"))
+    old_src["proposal_id"] = "prop_pr58_old"
+    old_src["created_at"] = "2020-01-01T00:00:00+00:00"
+    old_path = old_dir / "prop_pr58_old.proposal.json"
+    old_path.write_text(json.dumps(old_src), encoding="utf-8")
+    r = runner.invoke(app, ["ask", "show compose context for this restart proposal"])
+    assert r.exit_code == 0, r.output
+    assert f"Restart proposal compose context ({pid_new})" in r.output

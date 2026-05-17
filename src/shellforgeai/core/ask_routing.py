@@ -643,6 +643,11 @@ _MISSION_COMPOSE_CONTEXT_PHRASES = (
     "is this mission compose managed",
     "is this mission compose-managed",
     "show compose context for this mission",
+    "show compose context for this restart mission",
+    "show compose context for latest restart mission",
+    "show compose context for the latest restart mission",
+    "show compose context for current restart mission",
+    "show compose context for most recent restart mission",
     "show mission compose context",
 )
 
@@ -655,6 +660,20 @@ def is_restart_proposal_compose_context_query(text: str) -> bool:
 def is_mission_compose_context_query(text: str) -> bool:
     raw = (text or "").lower()
     return any(p in raw for p in _MISSION_COMPOSE_CONTEXT_PHRASES)
+
+
+def has_compose_artifact_reference_phrase(text: str) -> bool:
+    """Return True when compose ask references implicit proposal/mission artifacts.
+
+    These phrases should be handled by proposal/mission reference routes before
+    generic compose target extraction.
+    """
+    raw = (text or "").lower()
+    if "compose" not in raw or "context" not in raw:
+        return False
+    if ("proposal" not in raw) and ("mission" not in raw):
+        return False
+    return any(tok in raw for tok in ("this", "latest", "current", "most recent"))
 
 
 def extract_compose_target(text: str) -> str:

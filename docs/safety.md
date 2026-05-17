@@ -538,3 +538,11 @@ existing proposal/mission/apply safety gates.
 - Apply remains the only execution gate. PR58 adds no new mutation class,
   no new executor, no `docker compose` argv, and no broader mutation
   scope.
+
+
+## Ask reference disambiguation (PR59)
+- Reference resolution for implicit proposal/mission phrases is read-only.
+- Ambiguous references are never guessed; ShellForgeAI asks for explicit IDs.
+- Stale long-lived `/data` artifacts are warned for `this/latest/current` references.
+- Natural-language execution remains refused.
+- No docker compose mutation path is introduced.

@@ -55,6 +55,7 @@ from shellforgeai.core.ask_routing import (
     evidence_brief,
     extract_compose_target,
     extract_container_target,
+    has_compose_artifact_reference_phrase,
     is_apply_approved_intent,
     is_compose_mutation_request,
     is_compose_service_mutation_proposal_request,
@@ -143,6 +144,7 @@ from shellforgeai.core.mission_report import (
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
+from shellforgeai.core.reference_resolver import ReferenceFilters, resolve_reference
 from shellforgeai.core.restart_plan import (
     _resolve_proposal as resolve_restart_plan_proposal,
 )
@@ -4774,14 +4776,17 @@ def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
 
     # PR58: read-only mission compose context query.
     if is_mission_compose_context_query(question):
-        latest = mission_latest(data_dir)
-        if latest is None:
-            console.print("No restart missions found.")
-            console.print(
-                "- to create one: shellforgeai mission restart prepare --container <target>"
-            )
+        res = resolve_reference("mission", question, ReferenceFilters(restart_only=True), data_dir)
+        if res.status == "ambiguous":
+            console.print("I found multiple matching restart missions. Please specify one:")
+            for idx, c in enumerate(res.candidates[:3], start=1):
+                console.print(f"{idx}. {c.id} status={c.status_label} target={c.target or '-'}")
             return True
-        mid = str(latest["mission_id"])
+        if res.status != "resolved":
+            console.print("No restart missions found.")
+            console.print("- try: shellforgeai mission restart list")
+            return True
+        mid = res.id
         payload = refresh_mission(data_dir, mid)
         cc = payload.get("compose_context") or {}
         console.print(f"Mission compose context ({mid}):")
@@ -5050,21 +5055,19 @@ def _handle_restart_plan_ask(runtime: RuntimeContext, question: str) -> bool:
     data_dir = Path(runtime.session.data_dir)
     # PR58: read-only proposal compose context query.
     if is_restart_proposal_compose_context_query(question):
-        proposal = latest_approved_proposal(data_dir)
-        if proposal is None:
-            # Try any most-recent proposal regardless of approval status.
-            from shellforgeai.core.approvals import list_proposals as _list_proposals
-
-            rows = _list_proposals(data_dir)
-            if rows:
-                proposal = rows[-1][1]
-        if proposal is None:
-            console.print("No restart proposals found to inspect.")
-            console.print(
-                "- to create one: shellforgeai approvals propose-restart "
-                "--latest --container <container>"
-            )
+        res = resolve_reference("proposal", question, ReferenceFilters(restart_only=True), data_dir)
+        if res.status == "ambiguous":
+            console.print("I found multiple matching restart proposals. Please specify one:")
+            for idx, c in enumerate(res.candidates[:3], start=1):
+                console.print(
+                    f"{idx}. {c.id} status={c.status_label} target={c.target or c.component or '-'}"
+                )
             return True
+        if res.status != "resolved":
+            console.print("No restart proposals found to inspect.")
+            console.print("- try: shellforgeai approvals list --all")
+            return True
+        proposal = load_proposal_from_path(Path(res.path))
         cc = proposal.compose_context or {}
         console.print(f"Restart proposal compose context ({proposal.proposal_id}):")
         if cc.get("detected"):
@@ -5289,6 +5292,9 @@ def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
         "compose file owns",
     )
     if not any(tok in q for tok in compose_tokens):
+        return False
+    if has_compose_artifact_reference_phrase(question):
+        # Let proposal/mission ask routes resolve implicit artifact references.
         return False
     target = extract_compose_target(question) or ""
     if not target:

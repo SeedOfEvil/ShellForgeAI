@@ -670,3 +670,10 @@ Operator notes for safely using PR58 Compose context enrichment:
   readiness will block. Fix the proposal — do not bypass the block.
 - Future Compose service mutations need a separate policy gate and a separate
   PR. PR58 only enriches metadata; it never executes `docker compose`.
+
+
+## PR59 operator note: ask-reference disambiguation
+- Prefer explicit proposal/mission IDs when multiple candidates exist.
+- `this/latest/current` now prefers fresh active artifacts.
+- Stale matches are warned instead of silently treated as current.
+- Long-lived `/data` may contain old artifacts; explicit IDs are safest for audits.
