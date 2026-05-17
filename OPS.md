@@ -67,7 +67,12 @@ shellforgeai tools list
 shellforgeai diagnose disk --save-plan
 shellforgeai audit list
 shellforgeai audit timeline
+shellforgeai ops status
 ```
+
+Use `shellforgeai ops status` as the quick posture board (evidence/proposal/mission/audit/cleanup),
+then follow up with explicit proposal/mission IDs; PR59 "this/latest/current"
+ask-reference disambiguation remains available for read-only follow-ups.
 
 ## Restricted containers
 

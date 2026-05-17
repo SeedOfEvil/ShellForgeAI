@@ -4,6 +4,10 @@ ShellForgeAI is built to be safe by construction. The runtime does not run
 arbitrary shell, does not mutate the host without policy approval, and
 treats model output as advisory.
 
+`shellforgeai ops status` is read-only reporting only: it summarizes existing
+artifacts/metadata and does not approve, apply, execute, restart, or generate
+rollback previews, closure reports, exports, or cleanup plans.
+
 ## Boundaries
 
 - **No arbitrary shell.** Tools are typed wrappers around specific binaries

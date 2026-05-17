@@ -239,4 +239,11 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
   `docker restart <container>`; the apply gate remains the only mutation path.
   PR58 is context enrichment only.
 
+## PR60 milestone: read-only ops status board
+
+- Added `shellforgeai ops status` and `shellforgeai ops status --json` for compact
+  artifact-backed operator posture reporting.
+- Read-only only: no new executor, no apply path changes, no `docker compose`
+  mutation, no restart execution from status.
+
 - PR59 milestone: ask-reference disambiguation for implicit proposal/mission references (`this`/`latest`/`current`/`most recent`) with deterministic read-only resolver, stale warning guard (24h default), explicit-ID precedence, and ambiguity listing (no guessing/no execution).
