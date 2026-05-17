@@ -578,6 +578,8 @@ _COMPOSE_MUTATION_PHRASES = (
     "make a compose restart proposal",
     "convert this to compose restart",
     "run docker compose restart",
+    "execute compose restart preview",
+    "apply compose restart",
 )
 
 

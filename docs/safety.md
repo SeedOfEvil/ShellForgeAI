@@ -550,3 +550,10 @@ existing proposal/mission/apply safety gates.
 - Stale long-lived `/data` artifacts are warned for `this/latest/current` references.
 - Natural-language execution remains refused.
 - No docker compose mutation path is introduced.
+
+## PR61 compose restart preview-only
+
+- Compose service restart support is preview-only in PR61.
+- Preview output marks the future command nature with `compose_mutation=true` while still enforcing `execution_allowed=false`.
+- ShellForgeAI does not execute `docker compose` in this flow (`docker_compose_executed=false`, read-only).
+- Future execution requires proposal, approval, rollback preview, mission readiness, apply gate, verification, and receipts.
