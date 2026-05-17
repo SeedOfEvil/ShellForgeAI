@@ -5108,6 +5108,7 @@ def _handle_compose_context_ask(runtime: RuntimeContext, question: str) -> bool:
     compose_tokens = (
         "compose project",
         "compose service",
+        "compose managed",
         "compose-managed",
         "compose context",
         "compose file owns",

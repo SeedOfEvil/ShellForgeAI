@@ -16,6 +16,7 @@ def test_extract_compose_target_supported_forms() -> None:
     assert extract_compose_target("what compose project owns shellforgeai?") == "shellforgeai"
     assert extract_compose_target("what compose service is shellforgeai?") == "shellforgeai"
     assert extract_compose_target("is shellforgeai compose managed?") == "shellforgeai"
+    assert extract_compose_target("is shellforgeai compose-managed?") == "shellforgeai"
     assert extract_compose_target("compose context for 'shellforgeai'") == "shellforgeai"
     assert extract_compose_target('compose context for "shellforgeai"') == "shellforgeai"
 
@@ -59,8 +60,45 @@ def test_ask_compose_context_missing_target_suggests_safe_cli() -> None:
     assert "shellforgeai compose inspect <container>" in res.stdout
 
 
-def test_ask_compose_context_mutation_refused() -> None:
-    res = runner.invoke(app, ["ask", "docker compose restart shellforgeai"])
+def test_ask_compose_context_non_hyphenated_managed_phrase_routes(monkeypatch) -> None:
+    payload = {
+        "container": "shellforgeai",
+        "compose": {"detected": True, "project": "shellforgeai"},
+    }
+
+    class _Res:
+        ok = True
+        stdout = json.dumps(payload)
+
+    monkeypatch.setattr("shellforgeai.cli.containers.inspect", lambda target: _Res())
+    res = runner.invoke(app, ["ask", "is shellforgeai compose managed?"])
     assert res.exit_code == 0
-    assert "Refusing natural-language Compose mutation" in res.stdout
-    assert "Compose context is read-only" in res.stdout
+    assert "Compose context for `shellforgeai`:" in res.stdout
+
+
+def test_ask_compose_context_hyphenated_managed_phrase_routes(monkeypatch) -> None:
+    payload = {
+        "container": "shellforgeai",
+        "compose": {"detected": True, "project": "shellforgeai"},
+    }
+
+    class _Res:
+        ok = True
+        stdout = json.dumps(payload)
+
+    monkeypatch.setattr("shellforgeai.cli.containers.inspect", lambda target: _Res())
+    res = runner.invoke(app, ["ask", "is shellforgeai compose-managed?"])
+    assert res.exit_code == 0
+    assert "Compose context for `shellforgeai`:" in res.stdout
+
+
+def test_ask_compose_context_mutation_refused() -> None:
+    for phrase in (
+        "restart compose service shellforgeai",
+        "docker compose restart shellforgeai",
+        "compose up shellforgeai",
+    ):
+        res = runner.invoke(app, ["ask", phrase])
+        assert res.exit_code == 0
+        assert "Refusing natural-language Compose mutation" in res.stdout
+        assert "Compose context is read-only" in res.stdout
