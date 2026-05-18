@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -71,18 +72,33 @@ def _category_severity(count: int, size: int, t: HygieneThresholds) -> str:
     return "ok"
 
 
-def _scan_safe_items(cat: RetentionCategory, data_dir: Path) -> list[Path]:
+def _scan_safe_items(cat: RetentionCategory, data_dir: Path) -> tuple[list[Path], list[str]]:
     safe: list[Path] = []
+    warnings: list[str] = []
+    data_root = data_dir.resolve()
     for item in collect_category(cat):
         try:
             resolved = item.resolve(strict=True)
         except FileNotFoundError:
             continue
-        if item.is_symlink() and data_dir.resolve() not in resolved.parents:
+        except OSError as exc:
+            warnings.append(f"unreadable item skipped: {item} ({exc})")
             continue
-        if data_dir.resolve() in resolved.parents:
+        if item.is_symlink() and data_root not in resolved.parents:
+            warnings.append(f"outside-data-dir symlink skipped: {item}")
+            continue
+        if data_root in resolved.parents:
             safe.append(item)
-    return safe
+        else:
+            warnings.append(f"outside-data-dir path skipped: {item}")
+    return safe, warnings
+
+
+def _iso_from_mtime(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat()
+    except OSError:
+        return None
 
 
 def scan_metadata_hygiene(
@@ -101,23 +117,43 @@ def scan_metadata_hygiene(
         "indexes",
     ]
     categories: dict[str, dict[str, Any]] = {}
+    reasons: list[dict[str, Any]] = []
+    warnings: list[str] = []
     total = 0
     total_items = 0
     for name in names:
-        items = _scan_safe_items(cats[name], data_dir)
+        items, item_warnings = _scan_safe_items(cats[name], data_dir)
+        warnings.extend(item_warnings)
         sz = sum(file_size(p) for p in items)
         total += sz
         total_items += len(items)
         sev = _category_severity(len(items), sz, t)
         key = name.replace("-", "_")
+        item_ts = sorted(filter(None, (_iso_from_mtime(p) for p in items)))
         categories[key] = {
             "count": len(items),
             "bytes": sz,
             "human": human_bytes(sz),
             "severity": sev,
+            "oldest_created_at": item_ts[0] if item_ts else None,
+            "newest_created_at": item_ts[-1] if item_ts else None,
         }
+        if sev != "ok":
+            reasons.append(
+                {
+                    "category": name,
+                    "count": len(items),
+                    "threshold": t.category_critical_count
+                    if sev == "critical"
+                    else t.category_warn_count,
+                    "estimated_bytes": sz,
+                    "oldest_created_at": item_ts[0] if item_ts else None,
+                    "newest_created_at": item_ts[-1] if item_ts else None,
+                    "severity": sev,
+                    "recommended_action": "cleanup_plan",
+                }
+            )
 
-    warnings: list[str] = []
     if total >= t.total_critical_bytes:
         severity = "critical"
         warnings.append("ShellForgeAI metadata total is above critical threshold")
@@ -127,46 +163,33 @@ def scan_metadata_hygiene(
     else:
         severity = "ok"
 
-    for name, entry in categories.items():
-        if entry["severity"] != "ok":
-            warnings.append(f"{name} category is above {entry['severity']} threshold")
-            if entry["severity"] == "critical" and severity != "critical":
-                severity = "critical"
-            elif entry["severity"] == "warning" and severity == "ok":
-                severity = "warning"
+    for entry in reasons:
+        if entry["severity"] == "critical":
+            severity = "critical"
+            break
+        if severity == "ok":
+            severity = "warning"
 
-    recs = ["shellforgeai audit retention"]
-    recs.append("shellforgeai audit prune --dry-run --category exports --max-age-days 30")
-    if categories["exports"]["severity"] != "ok":
-        recs.extend(
-            [
-                "shellforgeai audit prune --dry-run --category exports --max-age-days 30",
-                "shellforgeai audit prune --archive --dry-run --category exports --max-age-days 30",
-            ]
-        )
-    if categories["audit_exports"]["severity"] != "ok":
-        recs.append("shellforgeai audit prune --dry-run --category audit-exports --max-age-days 30")
-    if categories["apply_bundles"]["severity"] != "ok":
-        recs.append("shellforgeai audit prune --dry-run --category apply-bundles --max-age-days 30")
-    if categories["artifacts"]["severity"] != "ok":
-        recs.append("artifacts may contain evidence; archive before deletion")
-        recs.append(
-            "shellforgeai audit prune --archive --dry-run --category artifacts --max-age-days 60"
-        )
-    if categories["approvals"]["severity"] != "ok":
-        recs.append("review approvals via: shellforgeai approvals list --status pending")
-        recs.append("review audit history via: shellforgeai audit search approvals")
-
-    recs.append("After reviewing the dry-run and archive, an operator may rerun with --execute.")
+    recs = [
+        "shellforgeai audit retention",
+        "shellforgeai audit prune --dry-run --category exports --max-age-days 30",
+        "shellforgeai audit cleanup plan --category exports --max-age-days 7 --keep-latest 5",
+        "shellforgeai audit cleanup archive <cleanup-plan>",
+        "shellforgeai audit cleanup validate <cleanup-archive>",
+        "shellforgeai audit cleanup execute <cleanup-plan> --confirm",
+    ]
 
     return {
         "severity": severity,
+        "status": severity,
         "data_dir": str(data_dir),
         "audit_dir": str(data_dir / "audit"),
         "total_bytes": total,
         "total_human": human_bytes(total),
         "total_items": total_items,
         "categories": categories,
+        "reasons": reasons,
         "warnings": warnings,
         "recommendations": recs,
+        "suggested_commands": recs,
     }

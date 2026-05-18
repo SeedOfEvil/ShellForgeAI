@@ -116,7 +116,7 @@ from shellforgeai.core.guards import (
     max_age_from_hours,
     write_guard_report,
 )
-from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
+from shellforgeai.core.metadata_hygiene import human_bytes, scan_metadata_hygiene
 from shellforgeai.core.mission import (
     apply_delegation_command as mission_apply_delegation_command,
 )
@@ -704,16 +704,30 @@ def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
         f"{hygiene['severity']} | ShellForgeAI metadata: "
         f"{hygiene['total_human']} across {hygiene['total_items']} items"
     )
-    cats = sorted(hygiene["categories"].items(), key=lambda kv: int(kv[1]["bytes"]), reverse=True)
-    console.print("- Largest categories:")
-    for name, row in cats[:3]:
-        console.print(f"  - {name}: {row['human']} / {row['count']} items")
+    reasons = hygiene.get("reasons") or []
+    if reasons:
+        console.print("- Reasons:")
+        for reason in reasons[:5]:
+            console.print(
+                "  - "
+                f"{reason['category']}: {reason['count']} items, "
+                f"estimated_size={human_bytes(int(reason['estimated_bytes']))}, "
+                f"threshold={reason['threshold']}, "
+                f"oldest={reason['oldest_created_at'] or 'unknown'}"
+            )
+    else:
+        cats = sorted(
+            hygiene["categories"].items(), key=lambda kv: int(kv[1]["bytes"]), reverse=True
+        )
+        console.print("- Largest categories:")
+        for name, row in cats[:3]:
+            console.print(f"  - {name}: {row['human']} / {row['count']} items")
     if hygiene["warnings"]:
         console.print(f"- Warning: {hygiene['warnings'][0]}")
     if hygiene["recommendations"]:
-        console.print(f"- Suggested next step: {hygiene['recommendations'][0]}")
-        if len(hygiene["recommendations"]) > 1:
-            console.print(f"- Dry-run cleanup: {hygiene['recommendations'][1]}")
+        console.print("- Suggested safe next steps:")
+        for cmd in hygiene["recommendations"][:5]:
+            console.print(f"  - {cmd}")
 
 
 @model_app.command("doctor")
@@ -1021,10 +1035,12 @@ def audit_cleanup_plan(
     cats = build_categories(data_dir)
     candidates: list[dict[str, Any]] = []
     warnings: list[str] = []
+    matched_count = 0
+    outside_data_dir = 0
     for c in selected_categories:
-        selected = prune_select(
-            collect_category(cats[c]), max_age_days=max_age_days, keep_latest=keep_latest
-        )
+        all_items = collect_category(cats[c])
+        matched_count += len(all_items)
+        selected = prune_select(all_items, max_age_days=max_age_days, keep_latest=keep_latest)
         for p in selected:
             try:
                 rp = p.resolve(strict=True)
@@ -1032,6 +1048,7 @@ def audit_cleanup_plan(
                 continue
             if not any(root.resolve() in rp.parents for root in _cleanup_allowed_roots(data_dir)):
                 warnings.append(f"skipped outside allowed roots: {p}")
+                outside_data_dir += 1
                 continue
             age_days = int((datetime.now(timezone.utc).timestamp() - p.stat().st_mtime) // 86400)
             candidates.append(
@@ -1075,10 +1092,13 @@ def audit_cleanup_plan(
         },
         "candidates": candidates,
         "summary": {
+            "matched_count": matched_count,
+            "kept_count": max(matched_count - len(candidates), 0),
             "candidate_count": len(candidates),
             "candidate_bytes": candidate_bytes,
             "would_archive": sum(1 for c in candidates if c["requires_archive_first"]),
             "would_delete": len(candidates),
+            "outside_data_dir": outside_data_dir,
         },
         "safety": {
             "dry_run": True,
@@ -1086,6 +1106,8 @@ def audit_cleanup_plan(
             "mutation_performed": False,
             "shellforgeai_metadata_only": True,
             "arbitrary_path_deletion": False,
+            "requires_archive": True,
+            "requires_confirm": True,
         },
         "next_commands": [
             f"shellforgeai audit cleanup archive {plan_id}",
@@ -1119,7 +1141,16 @@ def audit_cleanup_plan(
     if json_output:
         console.print_json(data=payload)
         return
+    summary: dict[str, Any] = payload["summary"]
     console.print(f"Cleanup plan created: {plan_id}")
+    console.print(f"- category: {', '.join(selected_categories)}")
+    console.print(f"- data_dir: {data_dir}")
+    console.print(f"- matched: {summary['matched_count']}")
+    console.print(f"- kept: {summary['kept_count']}")
+    console.print(f"- candidates for archive/delete: {summary['candidate_count']}")
+    console.print(f"- outside data_dir: {summary['outside_data_dir']}")
+    console.print("- shellforgeai-owned metadata only: true")
+    console.print("- safety: dry_run=true requires_archive=true requires_confirm=true")
     console.print(f"- plan: {out_dir / 'cleanup-plan.json'}")
 
 

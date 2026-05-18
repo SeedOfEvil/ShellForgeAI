@@ -285,3 +285,10 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
   natural-language execution.
 
 - PR69: added read-only `compose env-contract` execution-environment contract/readiness diagnostics so operators can verify exact disposable-lane prerequisites without executing restart or loosening safety gates.
+
+
+## PR70 milestone: metadata hygiene status and cleanup polish
+
+- Doctor metadata hygiene now reports explicit category-level reasons and safe, gated cleanup command sequence.
+- Doctor JSON now includes structured `metadata_hygiene.reasons[]` and `suggested_commands[]`.
+- Cleanup plan output now includes matched/kept/candidate and outside-data-dir counters with explicit safety flags.

@@ -243,7 +243,10 @@ The status safety block is invariant: `apply_mode=validation-only`, `execution_a
 
 ## Metadata hygiene safety
 - Doctor/status metadata hygiene is report-and-guidance only.
+- Doctor/ops metadata hygiene output is read-only and may suggest commands, but never performs cleanup.
 - No automatic cleanup is performed.
+- Cleanup is limited to ShellForgeAI-owned metadata under `data_dir`; paths resolving outside `data_dir` are refused/skipped.
+- No Docker/Compose/system cleanup is performed by hygiene, retention, or cleanup review commands.
 - `shellforgeai audit prune` remains dry-run by default.
 - Deletion still requires explicit `--execute --confirm` (PR46).
 
