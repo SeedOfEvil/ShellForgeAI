@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import re
@@ -5854,6 +5855,66 @@ def _compose_cli_preflight(compose: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _compose_config_snapshot(compose: dict[str, Any]) -> dict[str, Any]:
+    compose_file = str((compose.get("config_files") or [""])[0] or "")
+    payload: dict[str, Any] = {
+        "compose_file_known": bool(compose_file),
+        "compose_file_readable": False,
+        "compose_file_sha256": None,
+        "compose_file_error": "",
+        "compose_file_snapshot_available": False,
+        "blockers": [],
+        "warnings": [],
+    }
+    if not compose_file:
+        payload["compose_file_error"] = "compose file path missing"
+        payload["blockers"].append("compose_file_missing")
+        return payload
+    path = Path(compose_file)
+    if not path.exists():
+        payload["compose_file_error"] = "compose file missing"
+        payload["blockers"].append("compose_file_snapshot_unavailable")
+        return payload
+    try:
+        raw = path.read_bytes()
+        payload["compose_file_readable"] = True
+        payload["compose_file_sha256"] = hashlib.sha256(raw).hexdigest()
+        payload["compose_file_snapshot_available"] = True
+    except Exception as exc:
+        payload["compose_file_error"] = str(exc)
+        payload["blockers"].append("compose_file_snapshot_unavailable")
+    return payload
+
+
+def _compose_environment_readiness(preflight: dict[str, Any]) -> tuple[str, list[str]]:
+    blockers = list(preflight.get("blockers") or [])
+    blocker_map = {
+        "compose_cli_unavailable": "docker_compose_cli_unavailable",
+        "compose_invocation_unsupported": "required_invocation_unsupported",
+        "docker_socket_unavailable": "docker_socket_unavailable",
+        "docker_cli_missing": "docker_cli_missing",
+    }
+    normalized = [blocker_map.get(b, b) for b in blockers]
+    if preflight.get("docker_cli_available") is False and "docker_cli_missing" not in normalized:
+        normalized.append("docker_cli_missing")
+    if (
+        preflight.get("compose_cli_available") is False
+        and "docker_compose_cli_unavailable" not in normalized
+    ):
+        normalized.append("docker_compose_cli_unavailable")
+    if (
+        preflight.get("required_invocation_supported") is False
+        and "required_invocation_unsupported" not in normalized
+    ):
+        normalized.append("required_invocation_unsupported")
+    if (
+        preflight.get("docker_socket_available") is False
+        and "docker_socket_unavailable" not in normalized
+    ):
+        normalized.append("docker_socket_unavailable")
+    return ("ok" if not normalized else "blocked", normalized)
+
+
 def _compose_mission_gates(
     data_dir: Path, mission_payload: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
@@ -7170,6 +7231,186 @@ def compose_propose_restart(
     console.print("No proposal was created.")
     console.print("No docker compose command was executed.")
     raise typer.Exit(1)
+
+
+@compose_app.command("env-check")
+def compose_env_check(
+    target: Annotated[
+        str | None, typer.Option("--target", help="Compose target (container/service/project)")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only")] = False,
+) -> None:
+    payload: dict[str, Any] = {
+        "schema_version": "1",
+        "status": "unknown",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "target_input": target or "",
+        "environment": {},
+        "readiness": {"compose_restart_execution_ready": False, "blockers": [], "warnings": []},
+        "safety": {
+            "read_only": True,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "arbitrary_command_execution": False,
+        },
+        "candidates": [],
+        "next_safe_steps": [],
+    }
+    compose: dict[str, Any] = {}
+    status = "ok"
+    candidates: list[dict[str, Any]] = []
+    if target:
+        preview_payload = _build_compose_restart_preview(target)
+        pstatus = str(preview_payload.get("status") or "unknown")
+        if pstatus == "ambiguous":
+            status = "ambiguous"
+            candidates = list(preview_payload.get("candidates") or [])
+        elif pstatus == "not_found":
+            status = "not_found"
+        else:
+            compose = dict(preview_payload.get("compose") or {})
+    preflight = _compose_cli_preflight(compose)
+    env_status, env_blockers = _compose_environment_readiness(preflight)
+    payload["environment"] = {**preflight, "status": env_status, "blockers": env_blockers}
+    blockers: list[str] = list(env_blockers)
+    warnings: list[str] = []
+    if target and status not in {"ambiguous", "not_found"}:
+        config = _compose_config_snapshot(compose)
+        allowlisted = _compose_target_allowlisted(compose)
+        target_blockers: list[str] = []
+        if not bool(compose.get("detected")):
+            target_blockers.append("target_not_compose_managed")
+        if not compose.get("project") or not compose.get("service"):
+            target_blockers.append("compose_metadata_incomplete")
+        if not compose.get("working_dir"):
+            target_blockers.append("working_dir_missing")
+        if not config.get("compose_file_known"):
+            target_blockers.append("compose_file_missing")
+        if not config.get("compose_file_snapshot_available"):
+            target_blockers.append("compose_file_snapshot_unavailable")
+        if not allowlisted:
+            target_blockers.append("target_not_allowlisted")
+        blockers.extend(list(config.get("blockers") or []))
+        blockers.extend(target_blockers)
+        payload["target"] = {
+            "resolved": True,
+            "compose_managed": bool(compose.get("detected")),
+            "container": compose.get("container"),
+            "project": compose.get("project"),
+            "service": compose.get("service"),
+            "working_dir": compose.get("working_dir"),
+            "compose_file": str((compose.get("config_files") or [""])[0] or ""),
+            "container_number": compose.get("container_number"),
+            "oneoff": bool(compose.get("oneoff")),
+        }
+        payload["config_snapshot"] = config
+        payload["allowlist"] = {
+            "target_allowlisted": allowlisted,
+            "disposable": str(
+                (compose.get("labels") or {}).get("shellforgeai.disposable", "")
+            ).lower()
+            == "true",
+            "allow_restart": str(
+                (compose.get("labels") or {}).get("shellforgeai.allow_restart", "")
+            ).lower()
+            == "true",
+            "blockers": ["target_not_allowlisted"] if not allowlisted else [],
+            "warnings": [],
+        }
+    elif target:
+        payload["target"] = {"resolved": False, "compose_managed": False}
+        if status == "ambiguous":
+            payload["candidates"] = candidates
+        elif status == "not_found":
+            blockers.append("target_not_found")
+    else:
+        payload["target"] = {"resolved": False, "none_selected": True}
+        blockers.append("target_required_for_target_readiness")
+    blockers = sorted({b for b in blockers if b})
+    payload["readiness"] = {
+        "compose_restart_execution_ready": not blockers,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+    payload["status"] = (
+        status if status in {"ambiguous", "not_found"} else ("blocked" if blockers else "ok")
+    )
+    payload["next_safe_steps"] = [
+        (
+            "Provide Docker Compose CLI/plugin support in this execution "
+            "environment when docker_compose_cli_unavailable is present."
+        ),
+        (
+            "Expose a readable compose file path to ShellForgeAI when "
+            "compose_file_snapshot_unavailable is present."
+        ),
+        (
+            "Mark only disposable/test Compose targets allowlisted when "
+            "target_not_allowlisted is present."
+        ),
+    ]
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload["status"] in {"ok", "blocked"} else 1)
+    console.print("Compose execution environment check")
+    console.print("\nExecution environment:")
+    console.print(
+        f"- docker cli: {'available' if preflight.get('docker_cli_available') else 'unavailable'}"
+    )
+    socket_state = (
+        "available" if preflight.get("docker_socket_available") is not False else "unavailable"
+    )
+    console.print(f"- docker socket: {socket_state}")
+    compose_state = "available" if preflight.get("compose_cli_available") else "unavailable"
+    console.print(f"- docker compose cli/plugin: {compose_state}")
+    inv_state = "supported" if preflight.get("required_invocation_supported") else "unsupported"
+    console.print(f"- required invocation: {inv_state}")
+    console.print(f"- status: {'ok' if not env_blockers else 'blocked'}")
+    console.print("\nTarget:")
+    if target:
+        if payload["status"] == "ambiguous":
+            console.print(f"- input: {target}")
+            console.print("- status: ambiguous")
+            console.print("- candidates:")
+            for cand in candidates:
+                console.print(
+                    f"  - target={cand.get('target')} project={cand.get('project') or '-'} "
+                    f"service={cand.get('service') or '-'} container={cand.get('container') or '-'}"
+                )
+        elif payload["status"] == "not_found":
+            console.print(f"- input: {target}")
+            console.print("- status: not_found")
+        else:
+            tgt = payload["target"]
+            console.print(f"- input: {target}")
+            console.print(f"- compose-managed: {str(tgt.get('compose_managed')).lower()}")
+            console.print(f"- project: {tgt.get('project') or '-'}")
+            console.print(f"- service: {tgt.get('service') or '-'}")
+            console.print(f"- container: {tgt.get('container') or '-'}")
+            console.print(f"- working_dir: {tgt.get('working_dir') or '-'}")
+            console.print(f"- compose_file: {tgt.get('compose_file') or '-'}")
+            cfg = payload.get("config_snapshot") or {}
+            console.print("\nConfig snapshot:")
+            console.print(f"- compose_file_readable: {cfg.get('compose_file_readable')}")
+            console.print(
+                f"- compose_file_sha256: {cfg.get('compose_file_sha256') or 'unavailable'}"
+            )
+    else:
+        console.print("- none selected")
+    console.print("\nReadiness:")
+    ready = payload["readiness"]["compose_restart_execution_ready"]
+    console.print(f"- compose restart execution ready: {ready}")
+    if payload["readiness"]["blockers"]:
+        console.print("- blockers:")
+        for b in payload["readiness"]["blockers"]:
+            console.print(f"  - {b}")
+    console.print("\nSafety:")
+    console.print("- read-only: true")
+    console.print("- no docker compose command was executed except read-only preflight checks")
+    console.print("- no container was restarted")
 
 
 @ops_app.command("status")
