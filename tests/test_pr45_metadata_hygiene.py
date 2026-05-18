@@ -42,6 +42,7 @@ def test_doctor_includes_metadata_hygiene_and_json(tmp_path: Path, monkeypatch) 
     out = runner.invoke(app, ["doctor"])
     assert out.exit_code == 0
     assert "Metadata hygiene" in out.stdout
+    assert "Suggested safe next steps" in out.stdout
     jout = runner.invoke(app, ["doctor", "--json"])
     assert jout.exit_code == 0
     assert '"metadata_hygiene"' in jout.stdout
@@ -80,6 +81,7 @@ def test_doctor_json_severity_and_no_contamination(tmp_path: Path, monkeypatch) 
     assert text.startswith("{")
     parsed = json.loads(text)
     assert parsed["metadata_hygiene"]["severity"] in {"warning", "critical"}
+    assert isinstance(parsed["metadata_hygiene"]["reasons"], list)
     assert parsed["metadata_hygiene"]["recommendations"]
     assert "Metadata hygiene" not in out.stdout
 
@@ -91,3 +93,27 @@ def test_retention_json_is_strict_json(tmp_path: Path, monkeypatch) -> None:
     assert out.exit_code == 0
     payload = json.loads(out.stdout)
     assert payload["execution"] == "none"
+
+
+def test_cleanup_plan_reports_counts_and_safety(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    exports = tmp_path / "exports"
+    exports.mkdir(parents=True)
+    (exports / "a.json").write_text("a")
+    (exports / "b.json").write_text("b")
+    out = runner.invoke(
+        app,
+        ["audit", "cleanup", "plan", "--category", "exports", "--keep-latest", "1"],
+    )
+    assert out.exit_code == 0
+    assert "matched:" in out.stdout
+    assert "candidates for archive/delete:" in out.stdout
+    json_out = runner.invoke(
+        app,
+        ["audit", "cleanup", "plan", "--category", "exports", "--keep-latest", "1", "--json"],
+    )
+    assert json_out.exit_code == 0
+    payload = json.loads(json_out.stdout)
+    assert payload["summary"]["matched_count"] == 2
+    assert payload["summary"]["kept_count"] == 1
+    assert payload["safety"]["requires_confirm"] is True

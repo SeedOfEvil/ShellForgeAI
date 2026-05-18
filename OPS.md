@@ -921,3 +921,16 @@ it.
 6. Only then consider PR68 optional disposable proof workflow.
 
 **Warning:** Do not label production services as disposable just to satisfy the contract.
+
+
+## Operator workflow for reducing metadata hygiene critical state
+
+1. `shellforgeai doctor`
+2. `shellforgeai audit retention`
+3. `shellforgeai audit cleanup plan --category exports --max-age-days 7 --keep-latest 5`
+4. `shellforgeai audit cleanup archive <plan-id>`
+5. `shellforgeai audit cleanup validate <cleanup-archive.tar.gz>`
+6. `shellforgeai audit cleanup execute <plan-id> --confirm`
+7. `shellforgeai doctor`
+
+Do not manually delete random `/data` paths unless recovering from known corruption.
