@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from shellforgeai.cli import app
+from shellforgeai.core.approvals import find_proposal_path
 
 runner = CliRunner()
 
@@ -67,6 +68,8 @@ def test_compose_rollback_preview_schema_and_safety(monkeypatch, tmp_path: Path)
     assert payload["safety"]["container_restarted"] is False
     assert payload["safety"]["arbitrary_command_execution"] is False
     assert payload["config_state"]["compose_file_sha256"]
+    assert payload["config_state"]["compose_file_readable"] is True
+    assert payload["config_state"]["compose_file_snapshot_available"] is True
 
 
 def test_compose_rollback_validate_rejects_up_command(monkeypatch, tmp_path: Path) -> None:
@@ -126,3 +129,62 @@ def test_compose_mission_checklist_uses_compose_preview(monkeypatch, tmp_path: P
     runner.invoke(app, ["rollback", "preview", pid])
     c2 = runner.invoke(app, ["mission", "compose-restart", "checklist", mid])
     assert "rollback preview missing" not in c2.stdout
+    assert "compose_file_snapshot_unavailable" not in c2.stdout
+
+
+def test_compose_preview_missing_compose_file_is_degraded_but_valid(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _runtime(monkeypatch, tmp_path)
+    pid = _make_proposal(monkeypatch, tmp_path)
+    proposal_path, _ = find_proposal_path(tmp_path / "data", pid)
+    assert proposal_path is not None
+    body = json.loads(proposal_path.read_text(encoding="utf-8"))
+    body["compose_context"]["config_files"] = ["/srv/compose/shellforgeai/compose.yml"]
+    proposal_path.write_text(json.dumps(body, indent=2), encoding="utf-8")
+
+    assert runner.invoke(app, ["rollback", "preview", pid]).exit_code == 0
+    preview_path = tmp_path / "data" / "rollback_previews" / pid / "rollback-preview.json"
+    payload = json.loads(preview_path.read_text(encoding="utf-8"))
+    assert payload["config_state"]["compose_file_readable"] is False
+    assert payload["config_state"]["compose_file_sha256"] == ""
+    assert payload["config_state"]["compose_file_snapshot_available"] is False
+    assert any(
+        w.get("code") in {"compose_file_unreadable", "compose_file_snapshot_unavailable"}
+        for w in payload["warnings"]
+    )
+    val = runner.invoke(app, ["rollback", "validate", pid])
+    assert val.exit_code == 0
+
+
+def test_compose_mission_execute_blocked_when_snapshot_unavailable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _runtime(monkeypatch, tmp_path)
+    pid = _make_proposal(monkeypatch, tmp_path)
+    runner.invoke(app, ["approvals", "approve", pid, "--reason", "ok"])
+    proposal_path, _ = find_proposal_path(tmp_path / "data", pid)
+    assert proposal_path is not None
+    body = json.loads(proposal_path.read_text(encoding="utf-8"))
+    body["compose_context"]["config_files"] = ["/srv/compose/shellforgeai/compose.yml"]
+    proposal_path.write_text(json.dumps(body, indent=2), encoding="utf-8")
+    runner.invoke(app, ["rollback", "preview", pid])
+    pre = runner.invoke(app, ["mission", "compose-restart", "prepare", pid])
+    mid = [
+        ln.split(":", 1)[1].strip()
+        for ln in pre.stdout.splitlines()
+        if ln.strip().startswith("- mission:")
+    ][0]
+    status = runner.invoke(app, ["mission", "compose-restart", "status", mid, "--json"])
+    sbody = json.loads(status.stdout)
+    assert sbody["gates"]["compose_file_snapshot_available"] is False
+    assert "compose_file_snapshot_unavailable" in sbody["blockers"]
+    ex = runner.invoke(
+        app, ["mission", "compose-restart", "execute", mid, "--execute", "--confirm", "--json"]
+    )
+    assert ex.exit_code == 1
+    ebody = json.loads(ex.stdout)
+    assert ebody["safety"]["docker_compose_executed"] is False
+    assert ebody["safety"]["container_restarted"] is False
+    assert ebody["execution"]["returncode"] is None
+    assert "compose_file_snapshot_unavailable" in ebody["warnings"]

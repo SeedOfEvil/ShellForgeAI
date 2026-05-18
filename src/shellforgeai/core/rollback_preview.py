@@ -88,7 +88,7 @@ def _build_compose_service_restart_preview(proposal: Proposal) -> dict[str, Any]
     command = list(compose.get("preview_command") or [])
     command_display = str(compose.get("preview_command_display") or "")
     target_service = str(compose.get("service") or "")
-    warnings: list[str] = []
+    warnings: list[dict[str, str]] = []
 
     compose_file_sha256 = ""
     compose_file_readable = False
@@ -101,12 +101,29 @@ def _build_compose_service_restart_preview(proposal: Proposal) -> dict[str, Any]
                 compose_file_readable = True
             except OSError as exc:
                 compose_file_error = str(exc)
-                warnings.append(f"compose_file unreadable: {exc}")
+                warnings.append(
+                    {
+                        "code": "compose_file_unreadable",
+                        "message": (
+                            "compose file path is not readable from this execution environment"
+                        ),
+                    }
+                )
         else:
             compose_file_error = "compose_file missing"
-            warnings.append("compose_file missing")
+            warnings.append(
+                {
+                    "code": "compose_file_snapshot_unavailable",
+                    "message": "compose file snapshot unavailable in this execution environment",
+                }
+            )
     else:
-        warnings.append("compose_file missing from proposal")
+        warnings.append(
+            {
+                "code": "compose_file_snapshot_unavailable",
+                "message": "compose file path missing from proposal metadata",
+            }
+        )
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -148,6 +165,7 @@ def _build_compose_service_restart_preview(proposal: Proposal) -> dict[str, Any]
             "compose_file_sha256": compose_file_sha256,
             "compose_file_readable": compose_file_readable,
             "compose_file_error": compose_file_error,
+            "compose_file_snapshot_available": bool(compose_file_readable and compose_file_sha256),
             "env_files": [],
             "config_hash_warnings": [],
         },
@@ -268,6 +286,11 @@ def _validate_compose_restart_preview(payload: dict[str, Any]) -> list[str]:
         errs.append("recovery.rollback_command_generated must be false")
     if not rec.get("notes"):
         errs.append("recovery.notes must be present")
+    cfg = payload.get("config_state") or {}
+    if cfg.get("compose_file_readable") is False and cfg.get("compose_file_sha256"):
+        errs.append(
+            "config_state.compose_file_sha256 must be empty when compose_file_readable=false"
+        )
     safety = payload.get("safety") or {}
     for k in ("docker_compose_executed", "container_restarted", "arbitrary_command_execution"):
         if safety.get(k) is not False:
