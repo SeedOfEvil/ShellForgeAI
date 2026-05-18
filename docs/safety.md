@@ -564,3 +564,11 @@ existing proposal/mission/apply safety gates.
 - `apply` must refuse this proposal kind in PR62; compose execution is not implemented yet.
 - No docker compose command is executed (`docker_compose_executed=false`), no container is restarted, and no mission/rollback preview is auto-created.
 - Future execution requires proposal, approval, rollback preview, mission readiness, apply gate, verification, and receipts.
+
+## PR64 compose restart preflight and verification hardening
+
+- Compose service restart mission execution is gated by explicit Compose CLI/plugin preflight before mutation.
+- Preflight failures block execution before `docker compose restart` and surface structured blockers in mission status/checklist/validate/execute/report outputs.
+- On preflight block, safety fields remain `docker_compose_executed=false` and `container_restarted=false`, with restart returncode unset/null because restart was never invoked.
+- ShellForgeAI does not use host-side bypass wrappers; no SSH/nsenter/sudo workaround path is introduced.
+- ShellForgeAI still does not support `docker compose up/down/recreate` and still refuses natural-language mutation execution.

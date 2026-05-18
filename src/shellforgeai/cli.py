@@ -5714,55 +5714,127 @@ def _compose_mission_path(data_dir: Path, mission_id: str) -> Path:
     return Path(data_dir) / "missions" / "compose_restart" / mission_id / "mission.json"
 
 
+def _compose_preflight_blockers(stderr: str) -> tuple[list[str], dict[str, Any], str]:
+    low = (stderr or "").lower()
+    blockers: list[str] = []
+    fields = {
+        "docker_cli_available": True,
+        "docker_socket_available": None,
+        "compose_cli_available": None,
+        "required_invocation_supported": None,
+    }
+    reason = "Docker Compose preflight failed."
+    if "unknown command: docker compose" in low or "'compose' is not a docker command" in low:
+        fields["compose_cli_available"] = False
+        fields["required_invocation_supported"] = False
+        blockers.append("compose_cli_unavailable")
+        reason = "Docker Compose CLI/plugin is unavailable in this execution environment."
+    elif "unknown shorthand flag" in low:
+        fields["required_invocation_supported"] = False
+        blockers.append("compose_invocation_unsupported")
+        reason = "Docker Compose invocation is unsupported in this environment."
+    elif "cannot connect to the docker daemon" in low or "permission denied" in low:
+        fields["docker_socket_available"] = False
+        blockers.append("docker_socket_unavailable")
+        reason = "Docker daemon/socket is unavailable for docker compose."
+    return blockers, fields, reason
+
+
 def _compose_cli_preflight(compose: dict[str, Any]) -> dict[str, Any]:
     version_cmd = ["docker", "compose", "version"]
-    probe_cmd = [
-        "docker",
-        "compose",
-        "-f",
-        str((compose.get("config_files") or [""])[0]),
-        "--project-directory",
-        str(compose.get("working_dir") or ""),
-        "config",
-        "--services",
-    ]
     out: dict[str, Any] = {
-        "available": False,
-        "version_ok": False,
-        "supports_required_invocation": False,
-        "blocked_reason": "",
-        "commands": {"version": version_cmd, "probe": probe_cmd},
+        "status": "unknown",
+        "docker_cli_available": None,
+        "docker_socket_available": None,
+        "compose_cli_available": None,
+        "compose_invocation_ok": None,
+        "required_invocation_supported": None,
+        "command_checked": version_cmd,
+        "returncode": None,
+        "stdout_snippet": "",
+        "stderr_snippet": "",
+        "reason": "",
+        "blockers": [],
+        "warnings": [],
     }
     try:
         version_proc = subprocess.run(version_cmd, capture_output=True, text=True, check=False)
     except FileNotFoundError:
-        out["blocked_reason"] = "docker CLI not found"
-        return out
-    if version_proc.returncode != 0:
-        out["blocked_reason"] = (
-            version_proc.stderr or version_proc.stdout or "docker compose version failed"
-        ).strip()
-        return out
-    version_text = f"{version_proc.stdout}\n{version_proc.stderr}".lower()
-    out["available"] = True
-    out["version_ok"] = "compose" in version_text
-    try:
-        probe_proc = subprocess.run(probe_cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError:
-        out["blocked_reason"] = "docker CLI not found"
-        return out
-    probe_stderr = (probe_proc.stderr or "").strip()
-    if "unknown shorthand flag" in probe_stderr.lower():
-        out["blocked_reason"] = probe_stderr
-        return out
-    if probe_proc.returncode != 0:
-        out["blocked_reason"] = (
-            probe_stderr
-            or (probe_proc.stdout or "").strip()
-            or "docker compose preflight probe failed"
+        out.update(
+            {
+                "status": "blocked",
+                "docker_cli_available": False,
+                "reason": "docker CLI not found",
+                "blockers": ["docker_cli_missing"],
+            }
         )
         return out
-    out["supports_required_invocation"] = True
+    out["returncode"] = version_proc.returncode
+    out["stdout_snippet"] = (version_proc.stdout or "").strip()[:300]
+    out["stderr_snippet"] = (version_proc.stderr or "").strip()[:300]
+    out["docker_cli_available"] = True
+    if version_proc.returncode != 0:
+        blockers, fields, reason = _compose_preflight_blockers(out["stderr_snippet"])
+        out.update(fields)
+        out["compose_invocation_ok"] = False
+        out["status"] = "blocked"
+        out["reason"] = reason
+        out["blockers"] = blockers or ["compose_preflight_failed"]
+        if out["compose_cli_available"] is None:
+            out["compose_cli_available"] = False
+        return out
+    out.update(
+        {
+            "status": "ok",
+            "compose_cli_available": True,
+            "compose_invocation_ok": True,
+            "required_invocation_supported": True,
+            "reason": "Compose CLI preflight passed.",
+        }
+    )
+    cfg = (compose.get("config_files") or [""])[0]
+    wd = compose.get("working_dir") or ""
+    svc = str(compose.get("service") or "")
+    probe_cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(cfg),
+        "--project-directory",
+        str(wd),
+        "config",
+        "--services",
+    ]
+    try:
+        probe_proc = subprocess.run(probe_cmd, capture_output=True, text=True, check=False)
+        if probe_proc.returncode != 0:
+            out["command_checked"] = probe_cmd
+            out["returncode"] = probe_proc.returncode
+            out["stdout_snippet"] = (probe_proc.stdout or "").strip()[:300]
+            out["stderr_snippet"] = (probe_proc.stderr or "").strip()[:300]
+            blockers, fields, reason = _compose_preflight_blockers(out["stderr_snippet"])
+            out.update(fields)
+            out["compose_invocation_ok"] = False
+            if "unknown shorthand flag" in out["stderr_snippet"].lower():
+                out["required_invocation_supported"] = False
+            out["status"] = "blocked"
+            out["reason"] = reason
+            out["blockers"] = blockers or ["compose_preflight_probe_failed"]
+            return out
+        services = [ln.strip() for ln in (probe_proc.stdout or "").splitlines() if ln.strip()]
+        if svc and services and svc not in services:
+            out.update(
+                {
+                    "status": "blocked",
+                    "command_checked": probe_cmd,
+                    "reason": "Compose service not found in compose config preflight.",
+                    "blockers": ["compose_service_not_found"],
+                    "compose_invocation_ok": True,
+                }
+            )
+            return out
+    except FileNotFoundError:
+        pass
     return out
 
 
@@ -5797,10 +5869,10 @@ def _compose_mission_gates(
         ),
         "rollback_preview_present": rollback_ok,
         "rollback_preview_valid": rollback_ok,
-        "docker_compose_available": bool(preflight["available"]),
-        "docker_compose_version_ok": bool(preflight["version_ok"]),
+        "docker_compose_available": bool(preflight.get("compose_cli_available")),
+        "docker_compose_version_ok": bool(preflight.get("compose_invocation_ok")),
         "docker_compose_supports_required_invocation": bool(
-            preflight["supports_required_invocation"]
+            preflight.get("required_invocation_supported")
         ),
     }
     blockers: list[str] = []
@@ -5820,7 +5892,7 @@ def _compose_mission_gates(
         blockers.append("docker compose version check failed")
     if not gates["docker_compose_supports_required_invocation"]:
         blockers.append(
-            f"docker compose preflight failed: {preflight.get('blocked_reason') or 'incompatible'}"
+            f"docker compose preflight failed: {preflight.get('reason') or 'incompatible'}"
         )
     return gates, preflight, compose, blockers
 
@@ -5876,7 +5948,7 @@ def mission_compose_restart_status(
         "schema_version": "1",
         "mission": {**payload.get("mission", {}), "status": status},
         "gates": gates,
-        "preflight": preflight,
+        "compose_preflight": preflight,
         "target": compose,
         "blockers": blockers,
     }
@@ -5914,7 +5986,7 @@ def mission_compose_restart_validate(
         "ok": ok,
         "mission_id": mission_id,
         "gates": gates,
-        "preflight": preflight,
+        "compose_preflight": preflight,
         "errors": blockers,
     }
     if json_out:
@@ -5964,13 +6036,20 @@ def mission_compose_restart_execute(
             "schema_version": "1",
             "mission": {**mid, "status": "blocked"},
             "gates": gates,
-            "preflight": preflight,
-            "execution": {"executed": False, "command": cmd, "returncode": None},
+            "compose_preflight": preflight,
+            "execution": {
+                "executed": False,
+                "blocked": True,
+                "command": cmd,
+                "returncode": None,
+                "restart_returncode": None,
+            },
             "safety": {
                 "docker_compose_executed": False,
                 "container_restarted": False,
                 "arbitrary_command_execution": False,
             },
+            "reason": preflight.get("reason") or (blockers[0] if blockers else "blocked"),
             "warnings": blockers,
         }
         if json_out:
@@ -5979,16 +6058,85 @@ def mission_compose_restart_execute(
             console.print("Compose service restart execution requires --execute --confirm.")
             console.print("No docker compose command was executed.")
         raise typer.Exit(code=1)
+    before_rows: list[dict[str, Any]] = []
+    after_rows: list[dict[str, Any]] = []
+    try:
+        inv_before = containers.containers(all_containers=True)
+        if inv_before.ok:
+            before_rows = json.loads(inv_before.stdout or "{}").get("containers") or []
+    except Exception:
+        pass
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        inv_after = containers.containers(all_containers=True)
+        if inv_after.ok:
+            after_rows = json.loads(inv_after.stdout or "{}").get("containers") or []
+    except Exception:
+        pass
+    target = str(compose.get("service") or "")
+    project = str(compose.get("project") or "")
+
+    def _pick(rows):
+        for r in rows:
+            cc = r.get("compose") or {}
+            if str(cc.get("service") or "") == target and str(cc.get("project") or "") == project:
+                return r
+        return None
+
+    b = _pick(before_rows)
+    a = _pick(after_rows)
+    sibling_before = {
+        str((r.get("compose") or {}).get("service") or ""): str(r.get("started_at") or "")
+        for r in before_rows
+        if str((r.get("compose") or {}).get("project") or "") == project
+        and str((r.get("compose") or {}).get("service") or "") != target
+    }
+    sibling_after = {
+        str((r.get("compose") or {}).get("service") or ""): str(r.get("started_at") or "")
+        for r in after_rows
+        if str((r.get("compose") or {}).get("project") or "") == project
+        and str((r.get("compose") or {}).get("service") or "") != target
+    }
+    touched = sorted(
+        [k for k, v in sibling_before.items() if sibling_after.get(k) and sibling_after.get(k) != v]
+    )
+    verification = {
+        "target_exists_after": a is not None,
+        "running_after": bool((a or {}).get("state") == "running"),
+        "started_at_changed": bool(
+            a and b and str(a.get("started_at") or "") != str(b.get("started_at") or "")
+        ),
+        "health_after": str((a or {}).get("health") or "unknown"),
+        "compose_project_unchanged": bool(a and (a.get("compose") or {}).get("project") == project),
+        "compose_service_unchanged": bool(a and (a.get("compose") or {}).get("service") == target),
+        "unrelated_services_checked_count": len(sibling_before),
+        "unrelated_services_touched": touched,
+        "warnings": [] if not touched else ["unrelated compose services appear touched"],
+        "before_snapshot": {"target": b, "siblings": sibling_before},
+        "after_snapshot": {"target": a, "siblings": sibling_after},
+    }
+    restarted = bool(
+        proc.returncode == 0
+        and verification["target_exists_after"]
+        and verification["started_at_changed"]
+        and verification["running_after"]
+    )
     out = {
         "schema_version": "1",
         "mission": mid,
         "gates": gates,
-        "execution": {"command": cmd, "executed": True, "returncode": proc.returncode},
+        "execution": {
+            "command": cmd,
+            "executed": True,
+            "returncode": proc.returncode,
+            "restart_returncode": proc.returncode,
+        },
+        "compose_preflight": preflight,
+        "verification": verification,
         "safety": {
             "compose_mutation": True,
             "docker_compose_executed": True,
-            "container_restarted": proc.returncode == 0,
+            "container_restarted": restarted,
             "arbitrary_command_execution": False,
             "natural_language_execution": False,
             "apply_gate_used": True,
