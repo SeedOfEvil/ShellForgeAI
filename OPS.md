@@ -718,3 +718,86 @@ Operator notes for safely using PR58 Compose context enrichment:
 - If `compose_file_snapshot_unavailable` appears, either deliberately expose a readable compose-file snapshot to the ShellForgeAI runtime or accept that execution remains blocked.
 - If `docker_compose_cli_unavailable` appears, deliberately provide Compose CLI/plugin support in the runtime or accept blocked readiness.
 - Never bypass ShellForgeAI gates with host-side workarounds and then claim ShellForgeAI executed the restart flow.
+
+## PR67 disposable Compose harness lab workflow
+
+The disposable Compose harness lets an operator exercise the Compose
+service restart lane end-to-end against a throwaway target. The real
+ShellForgeAI service is intentionally still blocked from this lane.
+
+> Do not label production services disposable just to make tests pass.
+> The disposable labels are for throwaway test stacks only.
+
+Steps:
+
+1. Bring the disposable stack up (outside ShellForgeAI):
+
+   ```
+   ./scripts/pr67_disposable_compose_harness.sh up
+   ./scripts/pr67_disposable_compose_harness.sh status
+   ```
+
+2. Verify readiness with read-only ShellForgeAI diagnostics:
+
+   ```
+   shellforgeai compose env-check --target sfai-pr67-compose-web --json
+   ```
+
+   Expect `readiness.compose_restart_execution_ready=true`,
+   `allowlist.target_allowlisted=true`, `allowlist.disposable=true`, and
+   a populated `config_snapshot.compose_file_sha256`.
+
+3. Read-only preview:
+
+   ```
+   shellforgeai compose restart-preview sfai-pr67-compose-web
+   ```
+
+4. Build the proposal:
+
+   ```
+   shellforgeai compose propose-restart sfai-pr67-compose-web \
+       --reason "PR67 disposable harness test"
+   ```
+
+5. Approve and create the rollback recovery preview:
+
+   ```
+   shellforgeai approvals validate <proposal-id>
+   shellforgeai approvals approve <proposal-id> \
+       --reason "PR67 disposable harness test"
+   shellforgeai rollback preview <proposal-id>
+   shellforgeai rollback validate <rollback-preview>
+   ```
+
+6. Prepare and inspect the mission:
+
+   ```
+   shellforgeai mission compose-restart prepare <proposal-id>
+   shellforgeai mission compose-restart checklist <mission-id>
+   shellforgeai mission compose-restart validate <mission-id>
+   ```
+
+7. Execute only with explicit `--execute --confirm`, and only against
+   the disposable target, and only with Hector's go-ahead:
+
+   ```
+   shellforgeai mission compose-restart execute <mission-id> \
+       --execute --confirm
+   ```
+
+8. Tear the disposable stack down (outside ShellForgeAI):
+
+   ```
+   ./scripts/pr67_disposable_compose_harness.sh down
+   ```
+
+Reminders:
+
+- PR67 never runs `--execute --confirm` automatically. The gated mission
+  still requires both flags.
+- PR67 does not introduce a generic Compose executor. The only argv
+  shape on this lane remains `docker compose -f <compose_file>
+  --project-directory <working_dir> restart <service>`.
+- PR67 does not add `docker compose up/down/recreate` from ShellForgeAI.
+- PR67 does not enable natural-language Compose mutation.

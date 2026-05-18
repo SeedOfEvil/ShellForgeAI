@@ -587,3 +587,31 @@ existing proposal/mission/apply safety gates.
 - It does not create proposals, missions, or rollback previews.
 - It does not execute `docker compose restart` (or any Compose mutation command).
 - Host-side bypasses (manual mounts/nsenter/ssh/sudo wrappers) remain intentionally out of scope.
+
+## PR67 disposable Compose execution harness policy
+
+- The disposable Compose harness (`examples/compose/disposable-restart/`,
+  `tests/fixtures/compose/disposable-restart/`, and
+  `scripts/pr67_disposable_compose_harness.sh`) is a lab-only target range.
+- Real ShellForgeAI services remain blocked from Compose restart execution.
+  Production services must not be labeled `shellforgeai.disposable=true` or
+  `shellforgeai.allow_restart=true` to make tests pass. The disposable label
+  is reserved for throwaway test stacks.
+- A target only becomes execution-eligible when it carries the
+  `shellforgeai.disposable=true` (or `shellforgeai.allow_restart=true`)
+  label *and* every PR61–PR66 gate still passes: approved proposal with valid
+  fingerprint, complete Compose metadata, readable compose file with
+  `compose_file_sha256`, valid rollback recovery preview, Compose CLI
+  preflight ok, and `--execute --confirm` on the mission.
+- The disposable harness does not bypass any of these gates. It is the
+  *only* shape of target that can pass them.
+- ShellForgeAI app commands still never run `docker compose up`, `docker
+  compose down`, or `docker compose recreate`. The optional
+  `scripts/pr67_disposable_compose_harness.sh` is an external operator
+  helper, not a ShellForgeAI execution path; it refuses to act on anything
+  but the disposable `sfai_pr67_disposable` project.
+- Natural-language Compose mutation (`docker compose restart …`, `execute
+  latest compose restart mission`, etc.) is still refused and routed to the
+  gated CLI lane.
+- No host-side bypass (SSH/nsenter/sudo wrappers) was introduced.
+- No generic Compose executor was introduced.
