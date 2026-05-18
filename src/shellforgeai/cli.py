@@ -4,6 +4,7 @@ import json
 import platform
 import re
 import shlex
+import subprocess
 import sys
 import tarfile
 import uuid
@@ -219,7 +220,11 @@ mission_app = typer.Typer(
 mission_restart_app = typer.Typer(
     help="Guided safe restart mission workflow (PR52). Metadata/checklist only.",
 )
+mission_compose_restart_app = typer.Typer(
+    help="Disposable/allowlisted Compose service restart mission workflow (PR63).",
+)
 mission_app.add_typer(mission_restart_app, name="restart")
+mission_app.add_typer(mission_compose_restart_app, name="compose-restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 ops_app = typer.Typer(help="Read-only operator status board.")
 app.add_typer(inspect_app, name="inspect")
@@ -891,7 +896,7 @@ def audit_retention(
                 )
         top_items.sort(key=lambda r: int(r["bytes"]), reverse=True)
         top_items = top_items[:top]
-    payload = {
+    payload: dict[str, Any] = {
         "categories": rows,
         "total_bytes": hygiene["total_bytes"],
         "total_human": hygiene["total_human"],
@@ -5518,6 +5523,7 @@ def _build_compose_restart_preview(target: str) -> dict[str, Any]:
             "compose_file": compose_file,
             "container_number": compose.get("container_number"),
             "oneoff": bool(compose.get("oneoff")),
+            "labels": compose.get("labels") or {},
         },
         "preview": {
             "command": command,
@@ -5601,6 +5607,7 @@ def _create_compose_restart_proposal(
             "container_number": compose.get("container_number"),
             "oneoff": bool(compose.get("oneoff")),
             "container": compose.get("container"),
+            "labels": compose.get("labels") or {},
             "preview_command": command,
             "preview_command_display": (preview_payload.get("preview") or {}).get(
                 "command_display"
@@ -5691,6 +5698,309 @@ def _is_compose_restart_proposal_ask(text: str) -> bool:
         and "restart" in raw
         and any(token in raw for token in ("propose", "proposal", "create"))
     )
+
+
+def _compose_target_allowlisted(compose: dict[str, Any]) -> bool:
+    labels = compose.get("labels") or {}
+    if not isinstance(labels, dict):
+        labels = {}
+    return (
+        str(labels.get("shellforgeai.disposable", "")).lower() == "true"
+        or str(labels.get("shellforgeai.allow_restart", "")).lower() == "true"
+    )
+
+
+def _compose_mission_path(data_dir: Path, mission_id: str) -> Path:
+    return Path(data_dir) / "missions" / "compose_restart" / mission_id / "mission.json"
+
+
+def _compose_cli_preflight(compose: dict[str, Any]) -> dict[str, Any]:
+    version_cmd = ["docker", "compose", "version"]
+    probe_cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str((compose.get("config_files") or [""])[0]),
+        "--project-directory",
+        str(compose.get("working_dir") or ""),
+        "config",
+        "--services",
+    ]
+    out: dict[str, Any] = {
+        "available": False,
+        "version_ok": False,
+        "supports_required_invocation": False,
+        "blocked_reason": "",
+        "commands": {"version": version_cmd, "probe": probe_cmd},
+    }
+    try:
+        version_proc = subprocess.run(version_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        out["blocked_reason"] = "docker CLI not found"
+        return out
+    if version_proc.returncode != 0:
+        out["blocked_reason"] = (
+            version_proc.stderr or version_proc.stdout or "docker compose version failed"
+        ).strip()
+        return out
+    version_text = f"{version_proc.stdout}\n{version_proc.stderr}".lower()
+    out["available"] = True
+    out["version_ok"] = "compose" in version_text
+    try:
+        probe_proc = subprocess.run(probe_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        out["blocked_reason"] = "docker CLI not found"
+        return out
+    probe_stderr = (probe_proc.stderr or "").strip()
+    if "unknown shorthand flag" in probe_stderr.lower():
+        out["blocked_reason"] = probe_stderr
+        return out
+    if probe_proc.returncode != 0:
+        out["blocked_reason"] = (
+            probe_stderr
+            or (probe_proc.stdout or "").strip()
+            or "docker compose preflight probe failed"
+        )
+        return out
+    out["supports_required_invocation"] = True
+    return out
+
+
+def _compose_mission_gates(
+    data_dir: Path, mission_payload: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
+    mid = mission_payload.get("mission") or {}
+    ppath, _ = find_proposal_path(data_dir, str(mid.get("proposal_id") or ""))
+    proposal = load_proposal_from_path(ppath) if ppath else None
+    compose = (proposal.compose_context if proposal else {}) or {}
+    compose_file = str((compose.get("config_files") or [""])[0])
+    rollback_path = (
+        rollback_preview_mod.rollback_preview_dir(data_dir, str(mid.get("proposal_id") or ""))
+        / "rollback-preview.json"
+    )
+    rollback_ok = rollback_path.exists()
+    preflight = _compose_cli_preflight(compose)
+    gates = {
+        "proposal_approved": bool(proposal and proposal.status == "approved"),
+        "fingerprint_valid": bool(
+            proposal
+            and isinstance(proposal.fingerprint, dict)
+            and str(proposal.fingerprint.get("value") or "")
+            and str(proposal.fingerprint.get("algorithm") or "") == "sha256"
+        ),
+        "target_allowlisted": bool(_compose_target_allowlisted(compose)),
+        "compose_metadata_complete": bool(
+            compose.get("project")
+            and compose.get("service")
+            and compose.get("working_dir")
+            and compose_file
+        ),
+        "rollback_preview_present": rollback_ok,
+        "rollback_preview_valid": rollback_ok,
+        "docker_compose_available": bool(preflight["available"]),
+        "docker_compose_version_ok": bool(preflight["version_ok"]),
+        "docker_compose_supports_required_invocation": bool(
+            preflight["supports_required_invocation"]
+        ),
+    }
+    blockers: list[str] = []
+    if not gates["proposal_approved"]:
+        blockers.append("proposal is not approved")
+    if not gates["fingerprint_valid"]:
+        blockers.append("proposal fingerprint validation failed")
+    if not gates["target_allowlisted"]:
+        blockers.append("target is not marked disposable/allowlisted")
+    if not gates["compose_metadata_complete"]:
+        blockers.append("compose metadata incomplete")
+    if not gates["rollback_preview_present"]:
+        blockers.append("rollback preview missing")
+    if not gates["docker_compose_available"]:
+        blockers.append("docker compose CLI unavailable")
+    if not gates["docker_compose_version_ok"]:
+        blockers.append("docker compose version check failed")
+    if not gates["docker_compose_supports_required_invocation"]:
+        blockers.append(
+            f"docker compose preflight failed: {preflight.get('blocked_reason') or 'incompatible'}"
+        )
+    return gates, preflight, compose, blockers
+
+
+@mission_compose_restart_app.command("prepare")
+def mission_compose_restart_prepare(
+    ctx: typer.Context,
+    proposal_id: Annotated[str, typer.Argument()],
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    ppath, _ = find_proposal_path(data_dir, proposal_id)
+    if ppath is None:
+        console.print("Compose service restart mission preparation refused:")
+        console.print("- reason: proposal not found")
+        raise typer.Exit(code=1)
+    proposal = load_proposal_from_path(ppath)
+    if proposal.kind != "compose_service_restart":
+        console.print("Compose service restart mission preparation refused:")
+        console.print("- reason: proposal kind is not compose_service_restart")
+        raise typer.Exit(code=1)
+    mission_record: dict[str, Any] = {
+        "id": f"mission_compose_restart_{uuid.uuid4().hex[:12]}",
+        "mission_type": "compose_service_restart",
+        "status": "prepared",
+        "proposal_id": proposal_id,
+        "target": proposal.compose_context or {},
+    }
+    payload: dict[str, Any] = {
+        "schema_version": "1",
+        "mission": mission_record,
+    }
+    mdir = Path(data_dir) / "missions" / "compose_restart" / str(mission_record["id"])
+    mdir.mkdir(parents=True, exist_ok=True)
+    (mdir / "mission.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    console.print("Compose restart mission prepared:")
+    console.print(f"- mission: {mission_record['id']}")
+    console.print(f"- status: {mission_record['status']}")
+
+
+@mission_compose_restart_app.command("status")
+def mission_compose_restart_status(
+    ctx: typer.Context,
+    mission_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    payload = json.loads(_compose_mission_path(data_dir, mission_id).read_text(encoding="utf-8"))
+    gates, preflight, compose, blockers = _compose_mission_gates(data_dir, payload)
+    status = "ready" if not blockers else "blocked"
+    out = {
+        "schema_version": "1",
+        "mission": {**payload.get("mission", {}), "status": status},
+        "gates": gates,
+        "preflight": preflight,
+        "target": compose,
+        "blockers": blockers,
+    }
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    console.print(f"Compose mission: {mission_id}")
+    console.print(f"- status: {status}")
+    for b in blockers:
+        console.print(f"- blocker: {b}")
+
+
+@mission_compose_restart_app.command("checklist")
+def mission_compose_restart_checklist(
+    ctx: typer.Context,
+    mission_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    mission_compose_restart_status(ctx, mission_id, json_out=json_out)
+
+
+@mission_compose_restart_app.command("validate")
+def mission_compose_restart_validate(
+    ctx: typer.Context,
+    mission_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    payload = json.loads(_compose_mission_path(data_dir, mission_id).read_text(encoding="utf-8"))
+    gates, preflight, _compose, blockers = _compose_mission_gates(data_dir, payload)
+    ok = not blockers
+    out = {
+        "schema_version": "1",
+        "ok": ok,
+        "mission_id": mission_id,
+        "gates": gates,
+        "preflight": preflight,
+        "errors": blockers,
+    }
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+    else:
+        console.print(
+            "Compose restart mission validation passed."
+            if ok
+            else "Compose restart mission validation failed."
+        )
+        for err in blockers:
+            console.print(f"- {err}")
+    if not ok:
+        raise typer.Exit(code=1)
+
+
+@mission_compose_restart_app.command("execute")
+def mission_compose_restart_execute(
+    ctx: typer.Context,
+    mission_id: Annotated[str, typer.Argument()],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    payload = json.loads(_compose_mission_path(data_dir, mission_id).read_text(encoding="utf-8"))
+    mid = payload["mission"]
+    gates, preflight, compose, blockers = _compose_mission_gates(data_dir, payload)
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str((compose.get("config_files") or [""])[0]),
+        "--project-directory",
+        str(compose.get("working_dir") or ""),
+        "restart",
+        str(compose.get("service") or ""),
+    ]
+    gates = {
+        **gates,
+        "execute_flag_present": bool(execute),
+        "confirm_flag_present": bool(confirm),
+    }
+    if not all(gates.values()):
+        out = {
+            "schema_version": "1",
+            "mission": {**mid, "status": "blocked"},
+            "gates": gates,
+            "preflight": preflight,
+            "execution": {"executed": False, "command": cmd, "returncode": None},
+            "safety": {
+                "docker_compose_executed": False,
+                "container_restarted": False,
+                "arbitrary_command_execution": False,
+            },
+            "warnings": blockers,
+        }
+        if json_out:
+            typer.echo(json.dumps(out, indent=2))
+        else:
+            console.print("Compose service restart execution requires --execute --confirm.")
+            console.print("No docker compose command was executed.")
+        raise typer.Exit(code=1)
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    out = {
+        "schema_version": "1",
+        "mission": mid,
+        "gates": gates,
+        "execution": {"command": cmd, "executed": True, "returncode": proc.returncode},
+        "safety": {
+            "compose_mutation": True,
+            "docker_compose_executed": True,
+            "container_restarted": proc.returncode == 0,
+            "arbitrary_command_execution": False,
+            "natural_language_execution": False,
+            "apply_gate_used": True,
+        },
+    }
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+    else:
+        console.print("Compose restart mission executed.")
+        console.print(f"- returncode: {proc.returncode}")
+    if proc.returncode != 0:
+        raise typer.Exit(code=1)
 
 
 def _handle_compose_restart_proposal_ask(runtime: RuntimeContext, question: str) -> bool:
