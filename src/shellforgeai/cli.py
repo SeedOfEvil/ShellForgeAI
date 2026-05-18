@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import platform
 import re
@@ -1013,6 +1014,31 @@ def _validate_cleanup_archive_file(path: Path) -> tuple[bool, list[str], int]:
     return (not extra_errors), extra_errors, files
 
 
+def _cleanup_plan_fingerprint(payload: dict[str, Any]) -> str:
+    canon = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canon).hexdigest()
+
+
+def _find_cleanup_archive_for_plan(
+    data_dir: Path, plan_id: str
+) -> tuple[Path | None, dict[str, Any] | None]:
+    archive_dir = data_dir / "cleanup_archives"
+    if not archive_dir.exists():
+        return None, None
+    for archive in sorted(archive_dir.glob("*.tar.gz"), reverse=True):
+        try:
+            with tarfile.open(archive, "r:gz") as tf:
+                mf = tf.extractfile("archive-manifest.json")
+                if mf is None:
+                    continue
+                manifest = json.loads(mf.read().decode("utf-8"))
+                if manifest.get("plan_id") == plan_id:
+                    return archive, manifest
+        except Exception:
+            continue
+    return None, None
+
+
 @audit_cleanup_app.command("plan")
 def audit_cleanup_plan(
     ctx: typer.Context,
@@ -1073,6 +1099,7 @@ def audit_cleanup_plan(
     candidate_bytes = sum(int(c["bytes"]) for c in candidates)
     payload = {
         "schema_version": "1",
+        "kind": "cleanup_plan",
         "plan_id": plan_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "mode": "dry_run",
@@ -1109,6 +1136,12 @@ def audit_cleanup_plan(
             "requires_archive": True,
             "requires_confirm": True,
         },
+        "execution_allowed": False,
+        "mutation_performed": False,
+        "requires_archive": True,
+        "requires_confirm": True,
+        "arbitrary_path_deletion": False,
+        "shellforgeai_owned_only": True,
         "next_commands": [
             f"shellforgeai audit cleanup archive {plan_id}",
             f"shellforgeai audit cleanup execute {plan_id} --confirm",
@@ -1159,7 +1192,9 @@ def audit_cleanup_archive(ctx: typer.Context, plan_id: str) -> None:
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
     pdir = _cleanup_plan_dir(data_dir, plan_id)
-    payload = json.loads((pdir / "cleanup-plan.json").read_text(encoding="utf-8"))
+    plan_path = pdir / "cleanup-plan.json"
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan_fingerprint = _cleanup_plan_fingerprint(payload)
     candidates = [Path(c["path"]) for c in payload.get("candidates", [])]
     candidates.extend([pdir / "cleanup-plan.json", pdir / "cleanup-plan.md"])
     archive_path = create_archive(
@@ -1173,6 +1208,34 @@ def audit_cleanup_archive(ctx: typer.Context, plan_id: str) -> None:
             f"{uuid.uuid4().hex[:6]}.tar.gz"
         ),
     )
+    with tarfile.open(archive_path, "r:gz") as tf:
+        mf = tf.extractfile("archive-manifest.json")
+        manifest = json.loads(mf.read().decode("utf-8")) if mf is not None else {}
+    manifest.update(
+        {
+            "schema_version": "1",
+            "plan_id": plan_id,
+            "plan_path": str(plan_path),
+            "plan_fingerprint": plan_fingerprint,
+            "candidate_count": len(payload.get("candidates", [])),
+        }
+    )
+    # rewrite tarball with enriched manifest
+    tmp_archive = archive_path.with_suffix(".tmp")
+    with tarfile.open(archive_path, "r:gz") as src, tarfile.open(tmp_archive, "w:gz") as dst:
+        for member in src.getmembers():
+            if member.name == "archive-manifest.json":
+                data = json.dumps(manifest, indent=2).encode("utf-8")
+                m = tarfile.TarInfo(member.name)
+                m.size = len(data)
+                dst.addfile(m, io.BytesIO(data))
+                continue
+            f = src.extractfile(member)
+            if f is None:
+                dst.addfile(member)
+            else:
+                dst.addfile(member, io.BytesIO(f.read()))
+    tmp_archive.replace(archive_path)
     _append_audit_event(
         runtime,
         kind="audit",
@@ -1200,9 +1263,22 @@ def audit_cleanup_execute(
     if not confirm:
         console.print("Refused: --confirm required.")
         raise typer.Exit(code=1)
-    payload = json.loads(
-        (_cleanup_plan_dir(data_dir, plan_id) / "cleanup-plan.json").read_text(encoding="utf-8")
-    )
+    plan_path = _cleanup_plan_dir(data_dir, plan_id) / "cleanup-plan.json"
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    archive_path, archive_manifest = _find_cleanup_archive_for_plan(data_dir, plan_id)
+    if archive_path is None or archive_manifest is None:
+        console.print("Refused: matching cleanup archive not found.")
+        raise typer.Exit(code=1)
+    expected_fingerprint = _cleanup_plan_fingerprint(payload)
+    if archive_manifest.get("plan_fingerprint") != expected_fingerprint:
+        console.print("Refused: cleanup archive fingerprint mismatch.")
+        raise typer.Exit(code=1)
+    valid_archive, archive_errors, _archive_files = _validate_cleanup_archive_file(archive_path)
+    if not valid_archive:
+        console.print("Refused: cleanup archive validation failed.")
+        for err in archive_errors:
+            console.print(f"- {err}")
+        raise typer.Exit(code=1)
     candidates = [Path(c["path"]) for c in payload.get("candidates", [])]
     deleted, failed, bytes_removed = delete_paths(candidates, _cleanup_allowed_roots(data_dir))
     rid = (
@@ -1213,11 +1289,22 @@ def audit_cleanup_execute(
     rdir.mkdir(parents=True, exist_ok=True)
     receipt = {
         "schema_version": "1",
+        "kind": "cleanup_execute_result",
         "receipt_id": rid,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "plan_id": plan_id,
-        "archive_id": None,
+        "archive_id": archive_manifest.get("archive_id"),
+        "archive_path": str(archive_path),
+        "plan_path": str(plan_path),
+        "category": ",".join(payload.get("selection", {}).get("categories", [])),
+        "confirmed": True,
+        "archive_validated": True,
         "mode": "execute",
+        "candidate_count": len(candidates),
+        "deleted_count": len(deleted),
+        "skipped_count": max(len(candidates) - len(deleted) - len(failed), 0),
+        "failed_count": len(failed),
+        "mutation_performed": len(candidates) > 0,
         "deleted": [str(p) for p in deleted],
         "failed": failed,
         "bytes_removed": bytes_removed,
@@ -1232,6 +1319,10 @@ def audit_cleanup_execute(
             "package_mutation": False,
             "firewall_mutation": False,
         },
+        "docker_mutation": False,
+        "compose_mutation": False,
+        "system_mutation": False,
+        "errors": failed,
     }
     (rdir / "cleanup-receipt.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
     (rdir / "cleanup-receipt.md").write_text(f"# Cleanup Receipt {rid}\n", encoding="utf-8")

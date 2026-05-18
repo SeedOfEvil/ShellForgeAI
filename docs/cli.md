@@ -520,10 +520,17 @@ explicit `apply --execute --confirm` (or `mission restart execute --execute
 ```bash
 shellforgeai audit cleanup plan --category exports --max-age-days 7
 shellforgeai audit cleanup archive <cleanup-plan-id>
+shellforgeai audit cleanup validate <cleanup-archive.tar.gz>
 shellforgeai audit cleanup execute <cleanup-plan-id> --confirm
 shellforgeai audit cleanup validate <cleanup-receipt-or-dir>
 shellforgeai audit cleanup report <cleanup-receipt-or-dir>
 ```
+
+Guardrails:
+- `audit cleanup plan` is always dry-run (`execution_allowed=false`, `mutation_performed=false`).
+- `audit cleanup execute` refuses without `--confirm`.
+- `audit cleanup execute` also refuses unless a matching, valid cleanup archive exists for the same plan fingerprint.
+- Ask remains report-only for metadata hygiene; natural-language cleanup execution requests are refused.
 
 ## Compose ownership context (PR56)
 
