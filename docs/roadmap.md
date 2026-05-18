@@ -265,3 +265,21 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
   natural-language Compose mutation, and the real `shellforgeai` service
   remains blocked from the restart lane because it is not (and must not
   be) labeled disposable/allow_restart.
+
+- PR68: added an optional live disposable Compose restart proof path
+  (`scripts/pr68_disposable_compose_restart_proof.sh` orchestrator and
+  docs) so NewTwo/operators can drive the existing PR63-PR67 gated
+  Compose service restart lane end-to-end against the disposable PR67
+  harness target. The orchestrator is lab-only; ShellForgeAI never
+  invokes it. Default behavior is dry-run / readiness only. Even with
+  the explicit `--execute-approved-disposable-restart` flag the
+  orchestrator only verifies readiness and prints the manual gated
+  command sequence; the operator runs `shellforgeai mission
+  compose-restart execute <mid> --execute --confirm` directly. The
+  orchestrator refuses production-looking target names, pins the exact
+  disposable target invariants, and never installs packages, never
+  mounts host paths, never prunes, never deletes arbitrary paths, and
+  never edits production compose files. PR68 adds no new ShellForgeAI
+  mutation capability, no generic Compose executor, no `docker compose
+  up/down/recreate` from the app, no host-side bypass, and no
+  natural-language execution.
