@@ -5501,6 +5501,9 @@ def _build_compose_restart_preview(target: str) -> dict[str, Any]:
         }
     row = matches[0]
     compose = row.get("compose") or {}
+    # Docker labels live on the row; Compose-context parse drops them. Merge
+    # them back in so allowlist/disposable evaluation downstream can see them.
+    merged_labels = _normalize_label_dict(row, compose)
     compose_file = (compose.get("config_files") or [None])[0]
     missing = [
         key
@@ -5540,7 +5543,7 @@ def _build_compose_restart_preview(target: str) -> dict[str, Any]:
             "compose_file": compose_file,
             "container_number": compose.get("container_number"),
             "oneoff": bool(compose.get("oneoff")),
-            "labels": compose.get("labels") or {},
+            "labels": merged_labels,
         },
         "preview": {
             "command": command,
@@ -5717,18 +5720,95 @@ def _is_compose_restart_proposal_ask(text: str) -> bool:
     )
 
 
+def _normalize_label_dict(*sources: Any) -> dict[str, str]:
+    """Merge labels from heterogeneous shapes into a single str->str dict.
+
+    Accepts label dicts found at row/container/compose levels under common
+    keys: ``labels``, ``Labels``, ``docker_labels``, ``container_labels``,
+    and Docker inspect-shaped ``Config.Labels``.
+    """
+    out: dict[str, str] = {}
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        for k in ("labels", "Labels", "docker_labels", "container_labels"):
+            v = src.get(k)
+            if isinstance(v, dict):
+                for lk, lv in v.items():
+                    if lk is None:
+                        continue
+                    out[str(lk)] = "" if lv is None else str(lv)
+        config = src.get("Config")
+        if isinstance(config, dict):
+            cl = config.get("Labels")
+            if isinstance(cl, dict):
+                for lk, lv in cl.items():
+                    if lk is None:
+                        continue
+                    out[str(lk)] = "" if lv is None else str(lv)
+        inspect = src.get("inspect")
+        if isinstance(inspect, dict):
+            cfg = inspect.get("Config")
+            if isinstance(cfg, dict):
+                cl = cfg.get("Labels")
+                if isinstance(cl, dict):
+                    for lk, lv in cl.items():
+                        if lk is None:
+                            continue
+                        out[str(lk)] = "" if lv is None else str(lv)
+    return out
+
+
+def _label_is_true(value: Any) -> bool:
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
 def _compose_target_allowlisted(compose: dict[str, Any]) -> bool:
-    labels = compose.get("labels") or {}
-    if not isinstance(labels, dict):
-        labels = {}
-    return (
-        str(labels.get("shellforgeai.disposable", "")).lower() == "true"
-        or str(labels.get("shellforgeai.allow_restart", "")).lower() == "true"
+    labels = _normalize_label_dict(compose)
+    return _label_is_true(labels.get("shellforgeai.disposable")) or _label_is_true(
+        labels.get("shellforgeai.allow_restart")
     )
 
 
 def _compose_mission_path(data_dir: Path, mission_id: str) -> Path:
     return Path(data_dir) / "missions" / "compose_restart" / mission_id / "mission.json"
+
+
+def _emit_compose_mission_not_found(mission_id: str, json_out: bool) -> None:
+    body = {
+        "schema_version": "1",
+        "status": "not_found",
+        "mission_id": mission_id,
+        "error": "mission_not_found",
+        "executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "warnings": [],
+    }
+    if json_out:
+        typer.echo(json.dumps(body))
+    else:
+        console.print(f"Compose restart mission not found: {mission_id}")
+        console.print("- no docker compose command was executed")
+        console.print("- no container was restarted")
+    raise typer.Exit(code=1)
+
+
+def _load_compose_mission_payload(
+    data_dir: Path, mission_id: str, json_out: bool
+) -> dict[str, Any]:
+    path = _compose_mission_path(data_dir, mission_id)
+    if not path.exists():
+        _emit_compose_mission_not_found(mission_id, json_out)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        _emit_compose_mission_not_found(mission_id, json_out)
+        return {}  # unreachable; Exit raised above
 
 
 def _compose_preflight_blockers(stderr: str) -> tuple[list[str], dict[str, Any], str]:
@@ -6093,7 +6173,7 @@ def mission_compose_restart_status(
 ) -> None:
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
-    payload = json.loads(_compose_mission_path(data_dir, mission_id).read_text(encoding="utf-8"))
+    payload = _load_compose_mission_payload(data_dir, mission_id, json_out)
     gates, preflight, compose, blockers = _compose_mission_gates(data_dir, payload)
     status = "ready" if not blockers else "blocked"
     out = {
@@ -6132,7 +6212,7 @@ def mission_compose_restart_validate(
 ) -> None:
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
-    payload = json.loads(_compose_mission_path(data_dir, mission_id).read_text(encoding="utf-8"))
+    payload = _load_compose_mission_payload(data_dir, mission_id, json_out)
     gates, preflight, _compose, blockers = _compose_mission_gates(data_dir, payload)
     ok = not blockers
     out = {
@@ -6167,7 +6247,7 @@ def mission_compose_restart_execute(
 ) -> None:
     runtime = _ctx(ctx)
     data_dir = Path(runtime.session.data_dir)
-    payload = json.loads(_compose_mission_path(data_dir, mission_id).read_text(encoding="utf-8"))
+    payload = _load_compose_mission_payload(data_dir, mission_id, json_out)
     mid = payload["mission"]
     gates, preflight, compose, blockers = _compose_mission_gates(data_dir, payload)
     cmd = [
@@ -7355,16 +7435,13 @@ def compose_env_check(
             "oneoff": bool(compose.get("oneoff")),
         }
         payload["config_snapshot"] = config
+        normalized_labels = _normalize_label_dict(compose)
         payload["allowlist"] = {
             "target_allowlisted": allowlisted,
-            "disposable": str(
-                (compose.get("labels") or {}).get("shellforgeai.disposable", "")
-            ).lower()
-            == "true",
-            "allow_restart": str(
-                (compose.get("labels") or {}).get("shellforgeai.allow_restart", "")
-            ).lower()
-            == "true",
+            "disposable": _label_is_true(normalized_labels.get("shellforgeai.disposable")),
+            "allow_restart": _label_is_true(normalized_labels.get("shellforgeai.allow_restart")),
+            "test_harness": normalized_labels.get("shellforgeai.test_harness", ""),
+            "scope": normalized_labels.get("shellforgeai.scope", ""),
             "blockers": ["target_not_allowlisted"] if not allowlisted else [],
             "warnings": [],
         }
@@ -7445,6 +7522,13 @@ def compose_env_check(
             console.print(f"- compose_file_readable: {cfg.get('compose_file_readable')}")
             console.print(
                 f"- compose_file_sha256: {cfg.get('compose_file_sha256') or 'unavailable'}"
+            )
+            allow = payload.get("allowlist") or {}
+            console.print("\nAllowlist:")
+            console.print(f"- disposable: {str(allow.get('disposable', False)).lower()}")
+            console.print(f"- allow_restart: {str(allow.get('allow_restart', False)).lower()}")
+            console.print(
+                f"- target_allowlisted: {str(allow.get('target_allowlisted', False)).lower()}"
             )
     else:
         console.print("- none selected")
