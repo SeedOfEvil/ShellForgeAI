@@ -692,3 +692,10 @@ Operator notes for safely using PR58 Compose context enrichment:
 - Preview is read-only and does not execute Docker Compose.
 - Use exact IDs or PR59-style ask references (`this/latest/current proposal/mission`) when previewing from artifacts.
 - Do not treat preview as approval or execution readiness.
+
+## Compose restart mission preflight guidance
+
+- If Compose restart mission preflight is blocked, fix the runtime/harness environment (Docker CLI/plugin/socket/project wiring) instead of bypassing ShellForgeAI gates.
+- Use `shellforgeai mission compose-restart checklist <mission-id>` or `status` to read the exact preflight blocker.
+- Do not treat host-side manual compose commands as an in-product workaround; those are outside ShellForgeAI policy scope.
+- In Docker01-style containerized runs, preflight can block when the container does not expose a working `docker compose` plugin path.

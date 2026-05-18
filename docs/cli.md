@@ -649,6 +649,9 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
 - `shellforgeai compose restart-preview <target> --json` emits strict JSON with `schema_version`, `status`, `preview.command` (argv list), and safety flags.
 - Ask preview examples: `show compose restart preview for shellforgeai`, `preview compose service restart for shellforgeai`, `what would docker compose restart do for shellforgeai?`.
 - Mutation asks still refuse (`docker compose restart ...`, `restart compose service ...`, `run/execute/apply compose restart ...`).
+- `shellforgeai mission compose-restart status|checklist|validate|execute|report --json` includes `compose_preflight` with structured gate diagnostics (`status`, docker/compose availability flags, command checked, return code, snippets, blockers).
+- If Compose preflight blocks, execute refusal remains non-mutating and reports `execution.executed=false`, `execution.blocked=true`, `execution.restart_returncode=null`, `safety.docker_compose_executed=false`, and `safety.container_restarted=false`.
+- In a capable environment, successful execute output includes verification evidence (`target_exists_after`, `started_at_changed`, compose label stability, sibling-service touch checks) so operators can confirm only the intended service/container changed.
 - Preview-only posture is explicit: `compose_mutation=true`, `preview_only=true`, `execution_allowed=false`, `executed=false`; no `docker compose` command is executed.
 
 ### PR62 compose propose-restart (proposal only)
