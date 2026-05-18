@@ -649,3 +649,11 @@ existing proposal/mission/apply safety gates.
   readable compose file path, populated `compose_file_sha256`,
   allowlist labels) remains a deliberate operator-prepared property.
   PR68 documents how to prepare it; it does not auto-configure it.
+
+## PR69 compose execution environment contract
+
+- `shellforgeai compose env-contract` is diagnostics/readiness reporting only; it does not execute restart or any Compose mutation command.
+- PR69 does not loosen existing safety gates. Production targets remain blocked unless explicitly disposable+allow_restart in a disposable test scope.
+- Contract gates are explicit across environment, target safety, and compose-file snapshot/rollback prerequisites.
+- Host-side bypasses are out of scope: no host path remount automation, no ssh/nsenter/sudo host pivoting, and no generic Compose executor path is introduced.
+- Natural-language execution requests for Compose mutation remain refused.

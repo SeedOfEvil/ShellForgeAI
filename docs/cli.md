@@ -715,3 +715,9 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
   `--execute --confirm` on the mission.
 - See OPS.md ("PR68 optional live disposable Compose restart proof") for
   environment prerequisites and the operator workflow.
+
+### PR69 compose env-contract (read-only contract/readiness diagnostics)
+- `shellforgeai compose env-contract --target <target>` reports the Compose execution environment contract gates in one view: target metadata, environment prerequisites, compose file snapshot visibility/hash, execution readiness blockers, and explicit safety flags.
+- `shellforgeai compose env-contract --target <target> --json` emits strict JSON only with required sections: `schema_version`, `status`, `target`, `environment`, `snapshot`, `readiness`, and `safety`.
+- Current Docker01-style blocked example remains expected when environment is not prepared: blockers can include `docker_compose_cli_unavailable`, `compose_file_snapshot_unavailable`, and `target_not_allowlisted`.
+- Ready disposable example (conceptual/fixture-backed): disposable+allow_restart target, compose CLI available, required invocation supported, and readable compose file hash => `status=ready`, `readiness.ready=true`, `readiness.ready_for_optional_disposable_proof=true`.

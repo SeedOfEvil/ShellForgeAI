@@ -283,3 +283,5 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
   mutation capability, no generic Compose executor, no `docker compose
   up/down/recreate` from the app, no host-side bypass, and no
   natural-language execution.
+
+- PR69: added read-only `compose env-contract` execution-environment contract/readiness diagnostics so operators can verify exact disposable-lane prerequisites without executing restart or loosening safety gates.

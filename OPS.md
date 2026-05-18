@@ -910,3 +910,14 @@ it.
   `shellforgeai mission compose-restart execute <mission-id>
   --execute --confirm`. The orchestrator is an external lab helper;
   ShellForgeAI's gates are unchanged.
+
+## PR69 operator contract checklist (compose disposable proof readiness)
+
+1. Bring up disposable harness externally (do not relabel production).
+2. Run `shellforgeai compose env-contract --target sfai-pr67-compose-web` (or `--json`).
+3. Confirm `target.target_allowlisted=true` (disposable + allow_restart only).
+4. Confirm `snapshot.compose_file_snapshot_available=true`.
+5. Confirm `environment.docker_compose_cli_available=true` and `environment.required_invocation_supported=true`.
+6. Only then consider PR68 optional disposable proof workflow.
+
+**Warning:** Do not label production services as disposable just to satisfy the contract.
