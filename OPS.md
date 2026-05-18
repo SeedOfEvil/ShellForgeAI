@@ -710,3 +710,11 @@ Operator notes for safely using PR58 Compose context enrichment:
 6. Continue only when all gates pass; recovery remains manual/operator-led.
 
 > Compose recovery is not magic rollback: it depends on known-good image/config state, source control, and backups.
+
+## Compose execution environment readiness workflow (PR66)
+
+- Run `shellforgeai compose env-check` to confirm runtime-level prerequisites before expecting Compose restart mission readiness.
+- Run `shellforgeai compose env-check --target <target>` to see target-specific blockers in one place.
+- If `compose_file_snapshot_unavailable` appears, either deliberately expose a readable compose-file snapshot to the ShellForgeAI runtime or accept that execution remains blocked.
+- If `docker_compose_cli_unavailable` appears, deliberately provide Compose CLI/plugin support in the runtime or accept blocked readiness.
+- Never bypass ShellForgeAI gates with host-side workarounds and then claim ShellForgeAI executed the restart flow.

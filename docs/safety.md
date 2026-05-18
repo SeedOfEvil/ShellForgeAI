@@ -579,3 +579,11 @@ existing proposal/mission/apply safety gates.
 - ShellForgeAI does not run `docker compose` in rollback preview/validation, does not run `up/down/recreate`, and does not generate executable compose rollback scripts.
 - Config evidence in this lane is hash-only where available (e.g., compose file checksum); env/config contents are not stored.
 - A valid compose recovery preview is required for compose restart mission readiness gates.
+
+## PR66 compose execution environment diagnostics
+
+- `shellforgeai compose env-check` is read-only diagnostics only.
+- It may run bounded read-only preflight checks (Docker CLI/socket/Compose capability probes) and inspect existing Compose metadata/snapshots.
+- It does not create proposals, missions, or rollback previews.
+- It does not execute `docker compose restart` (or any Compose mutation command).
+- Host-side bypasses (manual mounts/nsenter/ssh/sudo wrappers) remain intentionally out of scope.

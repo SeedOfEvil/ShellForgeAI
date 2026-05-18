@@ -668,3 +668,10 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
 - `shellforgeai rollback preview <proposal-id>` now supports `compose_service_restart` proposals and writes a recovery preview artifact with compose target metadata, restart command argv preview, safety flags, before-state placeholders, and operator recovery notes.
 - This preview is guidance only: `automatic_rollback=false`, `rollback_command_generated=false`, and ShellForgeAI does not execute `docker compose` from rollback flows.
 - `shellforgeai rollback validate <preview-id-or-path>` validates compose recovery previews, including requiring `docker compose ... restart <service>` argv shape and rejecting `up/down/recreate` patterns.
+
+### PR66 compose env-check (read-only diagnostics)
+- `shellforgeai compose env-check` reports current runtime readiness for future Compose service restart execution gates.
+- `shellforgeai compose env-check --target <target>` adds target diagnostics: compose ownership metadata, compose-file path/readability/hash snapshot state, and disposable/allowlist gate posture.
+- `shellforgeai compose env-check --json` and `--target <target> --json` emit strict JSON only with `schema_version`, `environment`, `readiness`, `safety`, blockers, and warnings.
+- Typical blocked-state blockers in Docker01-style environments are surfaced together (for example: `docker_compose_cli_unavailable`, `compose_file_snapshot_unavailable`, `target_not_allowlisted`).
+- This command does not create proposals, missions, or rollback previews, and it never executes a Compose restart.
