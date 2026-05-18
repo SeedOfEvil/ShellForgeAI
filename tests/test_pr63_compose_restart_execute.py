@@ -50,6 +50,16 @@ def _make_proposal(monkeypatch, tmp_path: Path, approved: bool = True) -> str:
 def test_compose_mission_execute_requires_confirm(monkeypatch, tmp_path: Path) -> None:
     _runtime_env(monkeypatch, tmp_path)
     pid = _make_proposal(monkeypatch, tmp_path)
+    (tmp_path / "data" / "rollback_previews" / pid).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "rollback_previews" / pid / "rollback-preview.json").write_text(
+        json.dumps(
+            {
+                "rollback_status": "preview_only",
+                "safety": {"rollback_execution_allowed": False},
+                "schema_version": "1",
+            }
+        )
+    )
     prep = runner.invoke(app, ["mission", "compose-restart", "prepare", pid])
     mid = [
         ln.split(":", 1)[1].strip()
@@ -64,6 +74,16 @@ def test_compose_mission_execute_requires_confirm(monkeypatch, tmp_path: Path) -
 def test_compose_mission_execute_runs_expected_argv(monkeypatch, tmp_path: Path) -> None:
     _runtime_env(monkeypatch, tmp_path)
     pid = _make_proposal(monkeypatch, tmp_path)
+    (tmp_path / "data" / "rollback_previews" / pid).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "rollback_previews" / pid / "rollback-preview.json").write_text(
+        json.dumps(
+            {
+                "rollback_status": "preview_only",
+                "safety": {"rollback_execution_allowed": False},
+                "schema_version": "1",
+            }
+        )
+    )
     prep = runner.invoke(app, ["mission", "compose-restart", "prepare", pid])
     mid = [
         ln.split(":", 1)[1].strip()
@@ -73,13 +93,18 @@ def test_compose_mission_execute_runs_expected_argv(monkeypatch, tmp_path: Path)
     seen = {}
 
     class P:
-        returncode = 0
-        stdout = ""
-        stderr = ""
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
 
     def _run(cmd, capture_output, text, check):
         seen["cmd"] = cmd
         seen["check"] = check
+        if cmd[:3] == ["docker", "compose", "version"]:
+            return P(stdout="Docker Compose version v2.0.0")
+        if cmd[-2:] == ["config", "--services"]:
+            return P(stdout="s")
         return P()
 
     monkeypatch.setattr("shellforgeai.cli.subprocess.run", _run)
