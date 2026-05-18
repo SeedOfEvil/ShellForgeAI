@@ -256,3 +256,12 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - PR65: hardened `rollback preview`/`rollback validate` for `compose_service_restart` proposals with recovery-preview schema, command-shape validation, config hashing (hash-only), and explicit non-automatic rollback posture.
 
 - PR66: added read-only `compose env-check` diagnostics to explain Compose restart execution readiness blockers (runtime preflight, compose-file snapshot visibility, and allowlist posture) without creating proposals/missions or executing Compose mutation.
+
+- PR67: added a disposable Compose execution harness (fixture/template,
+  external lab helper script, README) plus readiness tests so the
+  Compose service restart lane (PR61–PR66 gates) can be proven against a
+  throwaway target. ShellForgeAI continues to refuse `docker compose
+  up/down/recreate`, never runs the lab helper itself, never executes
+  natural-language Compose mutation, and the real `shellforgeai` service
+  remains blocked from the restart lane because it is not (and must not
+  be) labeled disposable/allow_restart.

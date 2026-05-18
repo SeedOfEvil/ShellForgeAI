@@ -1,0 +1,27 @@
+name: sfai_pr67_disposable
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: sfai-pr67-compose-web
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      shellforgeai.disposable: "true"
+      shellforgeai.allow_restart: "true"
+      shellforgeai.test_harness: "compose-restart"
+      shellforgeai.scope: "pr67"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
