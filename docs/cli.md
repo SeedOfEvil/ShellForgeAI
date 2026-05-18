@@ -682,3 +682,36 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
 - Against the disposable target, `shellforgeai compose env-check --target sfai-pr67-compose-web --json` reports `readiness.compose_restart_execution_ready=true`, `allowlist.target_allowlisted=true`, `allowlist.disposable=true`, `allowlist.allow_restart=true`, and a real `config_snapshot.compose_file_sha256` when the compose file is readable and the Docker Compose CLI preflight passes.
 - Against the real `shellforgeai` service env-check continues to report blockers such as `target_not_allowlisted`, `compose_file_snapshot_unavailable`, and `docker_compose_cli_unavailable`. PR67 does not weaken any of those blockers.
 - The full disposable workflow (preview → propose-restart → approvals → rollback preview → mission prepare → checklist → validate → execute --execute --confirm) still goes through every PR61–PR66 gate. Only `--execute --confirm` mutates, and only against the disposable target.
+
+### PR68 optional live disposable Compose restart proof (lab orchestrator)
+
+- Optional external operator helper: `scripts/pr68_disposable_compose_restart_proof.sh`.
+  Lab-only. Not invoked by the ShellForgeAI app.
+- Subcommands:
+  - `print-commands` / `dry-run` - print the exact gated ShellForgeAI
+    command sequence. No execution.
+  - `check-env` - read-only local readiness (compose file readable, docker
+    CLI + compose plugin available). No mutation.
+  - `run-readiness` - run `shellforgeai compose env-check --json` and
+    `shellforgeai compose restart-preview --json` against the disposable
+    target. Read-only.
+  - `run-proof [--execute-approved-disposable-restart]` - default mode
+    refuses to drive execution and prints the manual command sequence.
+    Even with the explicit dangerous flag, the orchestrator only verifies
+    `compose env-check` readiness and prints the gated steps; the operator
+    runs `shellforgeai mission compose-restart execute <mid> --execute
+    --confirm` themselves.
+- Hard target pins (refused otherwise):
+  - project=`sfai_pr67_disposable`
+  - service=`web`
+  - container=`sfai-pr67-compose-web`
+- Production-looking target names (`shellforgeai`, `*production*`,
+  `*prod*`) are explicitly refused by the orchestrator.
+- ShellForgeAI's existing gates are unchanged. Execution still requires
+  an approved `compose_service_restart` proposal with valid fingerprint,
+  disposable/allow_restart labels, populated `compose_file_sha256`,
+  valid rollback recovery preview, Compose CLI preflight ok, the target
+  service present in `docker compose config --services`, and explicit
+  `--execute --confirm` on the mission.
+- See OPS.md ("PR68 optional live disposable Compose restart proof") for
+  environment prerequisites and the operator workflow.

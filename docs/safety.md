@@ -615,3 +615,37 @@ existing proposal/mission/apply safety gates.
   gated CLI lane.
 - No host-side bypass (SSH/nsenter/sudo wrappers) was introduced.
 - No generic Compose executor was introduced.
+
+## PR68 optional live disposable Compose restart proof policy
+
+- PR68 adds no new ShellForgeAI mutation capability. It adds a lab-only
+  orchestrator script (`scripts/pr68_disposable_compose_restart_proof.sh`)
+  plus docs so NewTwo/operators can prove the existing PR63-PR67 gated
+  Compose service restart lane end-to-end against the PR67 disposable
+  harness target.
+- The orchestrator is external to the ShellForgeAI app. The app never
+  invokes it. The orchestrator never bypasses ShellForgeAI gates.
+- Default mode is dry-run / print-only / read-only readiness. The
+  orchestrator does not pass `--execute --confirm` for the operator. It
+  refuses to drive any execution unless the explicit dangerous flag
+  `--execute-approved-disposable-restart` is provided AND
+  `compose env-check` reports `compose_restart_execution_ready=true`
+  AND the target name is exactly `sfai-pr67-compose-web`.
+- Even with the dangerous flag, the orchestrator only verifies readiness
+  and prints the manual gated command sequence. The operator runs
+  `shellforgeai mission compose-restart execute <mid> --execute --confirm`
+  themselves. The app's gates remain the source of truth.
+- The orchestrator refuses production-looking target names
+  (`shellforgeai`, anything containing `production`/`prod`).
+- PR68 does not add `docker compose up/down/recreate` from ShellForgeAI.
+- PR68 does not add a generic Compose executor.
+- PR68 does not install packages at runtime, does not mount host paths
+  from inside ShellForgeAI, does not SSH/nsenter/sudo to the host, does
+  not run `docker system prune`, and does not delete arbitrary paths.
+- PR68 does not enable natural-language Compose mutation. Asks like
+  "docker compose restart sfai-pr67-compose-web" remain refused and
+  routed to the gated CLI lane.
+- Environment readiness (Compose CLI inside the ShellForgeAI runtime,
+  readable compose file path, populated `compose_file_sha256`,
+  allowlist labels) remains a deliberate operator-prepared property.
+  PR68 documents how to prepare it; it does not auto-configure it.

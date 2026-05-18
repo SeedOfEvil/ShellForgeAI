@@ -801,3 +801,112 @@ Reminders:
   --project-directory <working_dir> restart <service>`.
 - PR67 does not add `docker compose up/down/recreate` from ShellForgeAI.
 - PR67 does not enable natural-language Compose mutation.
+
+## PR68 optional live disposable Compose restart proof
+
+PR68 adds an **optional** lab-only orchestrator script that makes it easy
+to prove the existing PR63-PR67 gated Compose restart lane end-to-end
+against the disposable PR67 harness target. It adds no new mutation
+capability to the ShellForgeAI app.
+
+The orchestrator lives at:
+
+```
+scripts/pr68_disposable_compose_restart_proof.sh
+```
+
+It is operator/NewTwo tooling only. It is not invoked by the
+ShellForgeAI app. It does not bypass any ShellForgeAI gate. It never
+auto-passes `--execute --confirm`.
+
+### Environment prerequisites for a successful live proof
+
+Before the gated mission `execute` step can succeed against the
+disposable harness, all of the following must be true:
+
+1. The disposable Compose stack is up (via the PR67 harness helper),
+   labels `shellforgeai.disposable=true` and
+   `shellforgeai.allow_restart=true` are present on the service.
+2. ShellForgeAI resolves the target as Compose-managed
+   (`shellforgeai compose inspect sfai-pr67-compose-web`).
+3. The host compose file path recorded in Compose labels is **readable
+   from inside the ShellForgeAI execution environment**. If you run
+   ShellForgeAI in a container, this typically means deliberately bind
+   mounting the compose file (read-only is fine) into the ShellForgeAI
+   container at the same path the Compose labels record. Do not have
+   ShellForgeAI mount host paths itself.
+4. The Docker CLI + Compose plugin is available inside the ShellForgeAI
+   execution environment. `docker compose version` must succeed and
+   `docker compose -f <compose-file> --project-directory <working-dir>
+   config --services` must list the disposable service. If you run
+   ShellForgeAI in a container, this is a build-time concern for that
+   container; this PR does not install packages at runtime.
+5. `shellforgeai compose env-check --target sfai-pr67-compose-web --json`
+   returns `readiness.compose_restart_execution_ready=true` with no
+   blockers.
+6. `shellforgeai rollback preview <proposal-id>` returns a recovery
+   preview with `compose_file_sha256` populated and
+   `shellforgeai rollback validate` accepts it.
+7. `shellforgeai mission compose-restart validate <mission-id>` reports
+   all gates true.
+8. The operator (Hector) explicitly approves the live execute step.
+
+If any of these is false, the gated mission `execute` step will refuse
+and `docker_compose_executed=false`, `container_restarted=false` will
+remain in the receipt. That is the intended behavior - do not work around
+it.
+
+### Operator workflow
+
+1. Print the exact gated command sequence (no execution):
+
+   ```
+   ./scripts/pr68_disposable_compose_restart_proof.sh print-commands
+   ```
+
+2. Confirm local environment readiness (read-only, no mutation):
+
+   ```
+   ./scripts/pr68_disposable_compose_restart_proof.sh check-env
+   ```
+
+3. Bring up the disposable harness (external, not ShellForgeAI):
+
+   ```
+   ./scripts/pr67_disposable_compose_harness.sh up
+   ./scripts/pr67_disposable_compose_harness.sh status
+   ```
+
+4. Run the read-only ShellForgeAI readiness checks:
+
+   ```
+   ./scripts/pr68_disposable_compose_restart_proof.sh run-readiness
+   ```
+
+5. Drive the gated lane manually through the ShellForgeAI CLI exactly as
+   printed by `print-commands`. The orchestrator never passes
+   `--execute --confirm` for you. Even with
+   `--execute-approved-disposable-restart`, the orchestrator only
+   verifies env-check readiness and then prints the manual steps; the
+   operator runs `shellforgeai mission compose-restart execute
+   <mission-id> --execute --confirm` directly.
+
+6. Tear the disposable stack down:
+
+   ```
+   ./scripts/pr67_disposable_compose_harness.sh down
+   ```
+
+### Safety reminders
+
+- Do **not** label production services disposable to make tests pass.
+  The real `shellforgeai` service must remain blocked from this lane.
+- The orchestrator refuses targets whose names look production-like.
+- The orchestrator never runs `docker system prune`, never deletes
+  arbitrary paths, never installs packages, never edits production
+  compose files, and never invokes `docker compose up/down/recreate`
+  against the production project.
+- All actual gated execution still happens through
+  `shellforgeai mission compose-restart execute <mission-id>
+  --execute --confirm`. The orchestrator is an external lab helper;
+  ShellForgeAI's gates are unchanged.
