@@ -5886,6 +5886,51 @@ def _compose_config_snapshot(compose: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _normalize_compose_metadata(
+    compose: dict[str, Any] | None,
+    *,
+    target_input: str = "",
+) -> dict[str, Any]:
+    raw = compose if isinstance(compose, dict) else {}
+    compose_file = str(
+        raw.get("compose_file")
+        or raw.get("config_file")
+        or ((raw.get("config_files") or raw.get("compose_files") or [None])[0] or "")
+        or ""
+    ).strip()
+    config_files_raw = raw.get("config_files") or raw.get("compose_files") or []
+    config_files = [str(x).strip() for x in config_files_raw if str(x or "").strip()]
+    if compose_file and not config_files:
+        config_files = [compose_file]
+    if not compose_file and config_files:
+        compose_file = config_files[0]
+    project = str(raw.get("project") or raw.get("compose_project") or "").strip()
+    service = str(raw.get("service") or raw.get("compose_service") or "").strip()
+    container = str(
+        raw.get("container") or raw.get("container_name") or raw.get("target") or target_input or ""
+    ).strip()
+    working_dir = str(
+        raw.get("working_dir") or raw.get("project_dir") or raw.get("project_directory") or ""
+    ).strip()
+    compose_managed = bool(raw.get("compose_managed"))
+    if (raw.get("detected") is True and (project or service)) or (project and service):
+        compose_managed = True
+    labels = raw.get("labels") if isinstance(raw.get("labels"), dict) else {}
+    return {
+        "compose_managed": compose_managed,
+        "detected": bool(raw.get("detected")) or compose_managed,
+        "project": project,
+        "service": service,
+        "container": container,
+        "working_dir": working_dir,
+        "compose_file": compose_file,
+        "config_files": config_files,
+        "container_number": raw.get("container_number"),
+        "oneoff": bool(raw.get("oneoff")),
+        "labels": labels,
+    }
+
+
 def _compose_environment_readiness(preflight: dict[str, Any]) -> tuple[str, list[str]]:
     blockers = list(preflight.get("blockers") or [])
     blocker_map = {
@@ -7271,7 +7316,9 @@ def compose_env_check(
         elif pstatus == "not_found":
             status = "not_found"
         else:
-            compose = dict(preview_payload.get("compose") or {})
+            compose = _normalize_compose_metadata(
+                dict(preview_payload.get("compose") or {}), target_input=target or ""
+            )
     preflight = _compose_cli_preflight(compose)
     env_status, env_blockers = _compose_environment_readiness(preflight)
     payload["environment"] = {**preflight, "status": env_status, "blockers": env_blockers}
@@ -7281,7 +7328,7 @@ def compose_env_check(
         config = _compose_config_snapshot(compose)
         allowlisted = _compose_target_allowlisted(compose)
         target_blockers: list[str] = []
-        if not bool(compose.get("detected")):
+        if not bool(compose.get("compose_managed")):
             target_blockers.append("target_not_compose_managed")
         if not compose.get("project") or not compose.get("service"):
             target_blockers.append("compose_metadata_incomplete")
@@ -7297,12 +7344,13 @@ def compose_env_check(
         blockers.extend(target_blockers)
         payload["target"] = {
             "resolved": True,
-            "compose_managed": bool(compose.get("detected")),
+            "compose_managed": bool(compose.get("compose_managed")),
             "container": compose.get("container"),
             "project": compose.get("project"),
             "service": compose.get("service"),
             "working_dir": compose.get("working_dir"),
-            "compose_file": str((compose.get("config_files") or [""])[0] or ""),
+            "compose_file": str(compose.get("compose_file") or ""),
+            "config_files": list(compose.get("config_files") or []),
             "container_number": compose.get("container_number"),
             "oneoff": bool(compose.get("oneoff")),
         }
