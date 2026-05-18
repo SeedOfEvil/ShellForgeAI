@@ -3012,15 +3012,23 @@ def rollback_preview_cmd(
     console.print(f"- proposal: {proposal.proposal_id}")
     console.print(f"- rollback: {paths.json_path}")
     console.print(f"- summary: {paths.md_path}")
-    console.print("- status: preview_only")
+    payload = rollback_preview_mod.load_preview(paths.json_path)
+    status = payload.get("rollback_status") or "preview_only"
+    console.print(f"- status: {status}")
     console.print("- ShellForgeAI will not execute rollback.")
 
 
 @rollback_app.command("validate")
-def rollback_validate_cmd(ctx: typer.Context, target: Annotated[Path, typer.Argument()]) -> None:
-    _ = _ctx(ctx)
+def rollback_validate_cmd(ctx: typer.Context, target: Annotated[str, typer.Argument()]) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    target_path = Path(target)
+    if not (target_path.exists() and target_path.is_file()):
+        cand = rollback_preview_mod.rollback_preview_dir(data_dir, target) / "rollback-preview.json"
+        if cand.exists():
+            target_path = cand
     try:
-        payload = rollback_preview_mod.load_preview(target)
+        payload = rollback_preview_mod.load_preview(target_path)
     except Exception as exc:
         console.print(f"Rollback preview validation failed:\n- malformed or missing file: {exc}")
         raise typer.Exit(code=1) from None
@@ -3032,11 +3040,19 @@ def rollback_validate_cmd(ctx: typer.Context, target: Annotated[Path, typer.Argu
         raise typer.Exit(code=1)
     console.print("Rollback preview validation passed:")
     console.print(f"- proposal: {payload.get('proposal_id', '')}")
-    console.print(f"- rollback_available: {payload.get('rollback_available')}")
-    console.print(
-        f"- executable_by_shellforgeai: {payload.get('rollback_executable_by_shellforgeai')}"
-    )
-    console.print(f"- status: {payload.get('rollback_status')}")
+    console.print(f"- kind: {payload.get('proposal_kind') or payload.get('mutation_kind', '')}")
+    if payload.get("kind") == "compose_service_restart_recovery_preview":
+        console.print("- compose metadata: present")
+        console.print(
+            f"- automatic_rollback: {(payload.get('recovery') or {}).get('automatic_rollback')}"
+        )
+        console.print("- execution supported: gated only")
+    else:
+        console.print(f"- rollback_available: {payload.get('rollback_available')}")
+        console.print(
+            f"- executable_by_shellforgeai: {payload.get('rollback_executable_by_shellforgeai')}"
+        )
+        console.print(f"- status: {payload.get('rollback_status')}")
     console.print("- safety: ok")
 
 
@@ -5851,6 +5867,22 @@ def _compose_mission_gates(
         / "rollback-preview.json"
     )
     rollback_ok = rollback_path.exists()
+    rollback_payload: dict[str, Any] = {}
+    compose_file_readable = False
+    compose_file_hash_present = False
+    compose_file_snapshot_gate_required = False
+    if rollback_ok:
+        try:
+            rollback_payload = rollback_preview_mod.load_preview(rollback_path)
+            if rollback_payload.get("kind") == "compose_service_restart_recovery_preview":
+                rollback_errors = rollback_preview_mod.validate_preview(rollback_payload)
+                rollback_ok = not rollback_errors
+                compose_file_snapshot_gate_required = True
+                cfg = rollback_payload.get("config_state") or {}
+                compose_file_readable = bool(cfg.get("compose_file_readable"))
+                compose_file_hash_present = bool(cfg.get("compose_file_sha256"))
+        except Exception:
+            rollback_ok = False
     preflight = _compose_cli_preflight(compose)
     gates = {
         "proposal_approved": bool(proposal and proposal.status == "approved"),
@@ -5869,6 +5901,12 @@ def _compose_mission_gates(
         ),
         "rollback_preview_present": rollback_ok,
         "rollback_preview_valid": rollback_ok,
+        "compose_file_readable": compose_file_readable,
+        "compose_file_hash_present": compose_file_hash_present,
+        "compose_file_snapshot_gate_required": compose_file_snapshot_gate_required,
+        "compose_file_snapshot_available": bool(
+            compose_file_readable and compose_file_hash_present
+        ),
         "docker_compose_available": bool(preflight.get("compose_cli_available")),
         "docker_compose_version_ok": bool(preflight.get("compose_invocation_ok")),
         "docker_compose_supports_required_invocation": bool(
@@ -5886,6 +5924,14 @@ def _compose_mission_gates(
         blockers.append("compose metadata incomplete")
     if not gates["rollback_preview_present"]:
         blockers.append("rollback preview missing")
+    if (
+        gates["compose_file_snapshot_gate_required"]
+        and not gates["compose_file_snapshot_available"]
+    ):
+        blockers.append("compose_file_snapshot_unavailable")
+        blockers.append("rollback preview is present, but compose file snapshot is unavailable")
+        blockers.append(f"compose_file_readable={str(gates['compose_file_readable']).lower()}")
+        blockers.append("compose_file_sha256 is missing")
     if not gates["docker_compose_available"]:
         blockers.append("docker compose CLI unavailable")
     if not gates["docker_compose_version_ok"]:
@@ -5957,6 +6003,8 @@ def mission_compose_restart_status(
         return
     console.print(f"Compose mission: {mission_id}")
     console.print(f"- status: {status}")
+    console.print(f"- compose_file_readable: {gates.get('compose_file_readable')}")
+    console.print(f"- compose_file_hash_present: {gates.get('compose_file_hash_present')}")
     for b in blockers:
         console.print(f"- blocker: {b}")
 
@@ -6031,7 +6079,22 @@ def mission_compose_restart_execute(
         "execute_flag_present": bool(execute),
         "confirm_flag_present": bool(confirm),
     }
-    if not all(gates.values()):
+    required_gate_keys = [
+        "proposal_approved",
+        "fingerprint_valid",
+        "target_allowlisted",
+        "compose_metadata_complete",
+        "rollback_preview_present",
+        "rollback_preview_valid",
+        "docker_compose_available",
+        "docker_compose_version_ok",
+        "docker_compose_supports_required_invocation",
+        "execute_flag_present",
+        "confirm_flag_present",
+    ]
+    if gates.get("compose_file_snapshot_gate_required"):
+        required_gate_keys.append("compose_file_snapshot_available")
+    if not all(bool(gates.get(k)) for k in required_gate_keys):
         out = {
             "schema_version": "1",
             "mission": {**mid, "status": "blocked"},

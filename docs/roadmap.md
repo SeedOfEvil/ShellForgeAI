@@ -252,3 +252,5 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - PR62: added `compose propose-restart` to create pending `compose_service_restart` proposal artifacts from Compose metadata (proposal-only, non-executable, apply refusal retained).
 
 - PR64: hardened compose-service restart mission preflight diagnostics and post-execution verification evidence so blocked-vs-executed outcomes are explicit without broadening mutation scope.
+
+- PR65: hardened `rollback preview`/`rollback validate` for `compose_service_restart` proposals with recovery-preview schema, command-shape validation, config hashing (hash-only), and explicit non-automatic rollback posture.

@@ -572,3 +572,10 @@ existing proposal/mission/apply safety gates.
 - On preflight block, safety fields remain `docker_compose_executed=false` and `container_restarted=false`, with restart returncode unset/null because restart was never invoked.
 - ShellForgeAI does not use host-side bypass wrappers; no SSH/nsenter/sudo workaround path is introduced.
 - ShellForgeAI still does not support `docker compose up/down/recreate` and still refuses natural-language mutation execution.
+
+
+## PR65 compose rollback/recovery preview hardening
+- Compose rollback preview is explicitly a **recovery preview** (metadata + operator guidance), not automatic rollback execution.
+- ShellForgeAI does not run `docker compose` in rollback preview/validation, does not run `up/down/recreate`, and does not generate executable compose rollback scripts.
+- Config evidence in this lane is hash-only where available (e.g., compose file checksum); env/config contents are not stored.
+- A valid compose recovery preview is required for compose restart mission readiness gates.
