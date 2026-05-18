@@ -3012,15 +3012,23 @@ def rollback_preview_cmd(
     console.print(f"- proposal: {proposal.proposal_id}")
     console.print(f"- rollback: {paths.json_path}")
     console.print(f"- summary: {paths.md_path}")
-    console.print("- status: preview_only")
+    payload = rollback_preview_mod.load_preview(paths.json_path)
+    status = payload.get("rollback_status") or "preview_only"
+    console.print(f"- status: {status}")
     console.print("- ShellForgeAI will not execute rollback.")
 
 
 @rollback_app.command("validate")
-def rollback_validate_cmd(ctx: typer.Context, target: Annotated[Path, typer.Argument()]) -> None:
-    _ = _ctx(ctx)
+def rollback_validate_cmd(ctx: typer.Context, target: Annotated[str, typer.Argument()]) -> None:
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    target_path = Path(target)
+    if not (target_path.exists() and target_path.is_file()):
+        cand = rollback_preview_mod.rollback_preview_dir(data_dir, target) / "rollback-preview.json"
+        if cand.exists():
+            target_path = cand
     try:
-        payload = rollback_preview_mod.load_preview(target)
+        payload = rollback_preview_mod.load_preview(target_path)
     except Exception as exc:
         console.print(f"Rollback preview validation failed:\n- malformed or missing file: {exc}")
         raise typer.Exit(code=1) from None
@@ -3032,11 +3040,19 @@ def rollback_validate_cmd(ctx: typer.Context, target: Annotated[Path, typer.Argu
         raise typer.Exit(code=1)
     console.print("Rollback preview validation passed:")
     console.print(f"- proposal: {payload.get('proposal_id', '')}")
-    console.print(f"- rollback_available: {payload.get('rollback_available')}")
-    console.print(
-        f"- executable_by_shellforgeai: {payload.get('rollback_executable_by_shellforgeai')}"
-    )
-    console.print(f"- status: {payload.get('rollback_status')}")
+    console.print(f"- kind: {payload.get('proposal_kind') or payload.get('mutation_kind', '')}")
+    if payload.get("kind") == "compose_service_restart_recovery_preview":
+        console.print("- compose metadata: present")
+        console.print(
+            f"- automatic_rollback: {(payload.get('recovery') or {}).get('automatic_rollback')}"
+        )
+        console.print("- execution supported: gated only")
+    else:
+        console.print(f"- rollback_available: {payload.get('rollback_available')}")
+        console.print(
+            f"- executable_by_shellforgeai: {payload.get('rollback_executable_by_shellforgeai')}"
+        )
+        console.print(f"- status: {payload.get('rollback_status')}")
     console.print("- safety: ok")
 
 

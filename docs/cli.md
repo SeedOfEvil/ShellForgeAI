@@ -662,3 +662,9 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
 - Proposal posture is explicit: `compose_mutation=true`, `proposal_only=true`, `execution_allowed=false`, `executed=false`.
 - The proposal includes compose metadata + a future command preview (`preview.command` argv list and `preview.command_display`).
 - `apply` refuses this kind in PR62: “Compose service restart proposals are proposal-only in PR62; execution is not implemented.”
+
+
+### Compose rollback/recovery preview (PR65)
+- `shellforgeai rollback preview <proposal-id>` now supports `compose_service_restart` proposals and writes a recovery preview artifact with compose target metadata, restart command argv preview, safety flags, before-state placeholders, and operator recovery notes.
+- This preview is guidance only: `automatic_rollback=false`, `rollback_command_generated=false`, and ShellForgeAI does not execute `docker compose` from rollback flows.
+- `shellforgeai rollback validate <preview-id-or-path>` validates compose recovery previews, including requiring `docker compose ... restart <service>` argv shape and rejecting `up/down/recreate` patterns.

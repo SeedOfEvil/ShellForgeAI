@@ -699,3 +699,14 @@ Operator notes for safely using PR58 Compose context enrichment:
 - Use `shellforgeai mission compose-restart checklist <mission-id>` or `status` to read the exact preflight blocker.
 - Do not treat host-side manual compose commands as an in-product workaround; those are outside ShellForgeAI policy scope.
 - In Docker01-style containerized runs, preflight can block when the container does not expose a working `docker compose` plugin path.
+
+
+### Compose restart with recovery-preview gate (PR65)
+1. `shellforgeai compose propose-restart <target>`
+2. `shellforgeai approvals approve <proposal-id> --reason "..."`
+3. `shellforgeai rollback preview <proposal-id>`
+4. `shellforgeai rollback validate <proposal-id-or-preview-path>`
+5. `shellforgeai mission compose-restart checklist <mission-id>` / `validate`
+6. Continue only when all gates pass; recovery remains manual/operator-led.
+
+> Compose recovery is not magic rollback: it depends on known-good image/config state, source control, and backups.
