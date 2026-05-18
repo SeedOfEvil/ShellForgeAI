@@ -510,7 +510,7 @@ approved CLI execution.
   --confirm` (PR53) or `apply <approved-proposal-id> --execute --confirm`
   (PR47) can execute the gated mutation.
 
-- PR55 cleanup review is metadata-only. `audit cleanup plan` and `audit cleanup archive` never delete; `audit cleanup execute` requires `--confirm` and path safety guards.
+- PR55/PR71 cleanup review is metadata-only. `audit cleanup plan` and `audit cleanup archive` never delete; `audit cleanup execute` requires `--confirm`, a matching validated archive, and path safety guards. Cleanup remains restricted to ShellForgeAI-owned metadata paths only (no Docker/Compose/system cleanup).
 
 ## PR56 Compose ownership context safety
 

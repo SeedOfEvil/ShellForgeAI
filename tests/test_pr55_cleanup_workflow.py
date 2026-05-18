@@ -29,5 +29,10 @@ def test_cleanup_execute_requires_confirm(tmp_path: Path, monkeypatch) -> None:
     plan_id = json.loads(p.stdout)["plan_id"]
     no = runner.invoke(app, ["audit", "cleanup", "execute", plan_id])
     assert no.exit_code != 0
+    missing_archive = runner.invoke(app, ["audit", "cleanup", "execute", plan_id, "--confirm"])
+    assert missing_archive.exit_code != 0
+    assert "matching cleanup archive not found" in missing_archive.stdout
+    arc = runner.invoke(app, ["audit", "cleanup", "archive", plan_id])
+    assert arc.exit_code == 0
     ok = runner.invoke(app, ["audit", "cleanup", "execute", plan_id, "--confirm"])
     assert ok.exit_code == 0

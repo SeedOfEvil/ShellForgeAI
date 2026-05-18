@@ -934,3 +934,4 @@ it.
 7. `shellforgeai doctor`
 
 Do not manually delete random `/data` paths unless recovering from known corruption.
+Do not run step 6 unless operator-approved; start with narrow categories (for example `exports`) and verify archive validation before execution.

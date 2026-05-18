@@ -292,3 +292,10 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Doctor metadata hygiene now reports explicit category-level reasons and safe, gated cleanup command sequence.
 - Doctor JSON now includes structured `metadata_hygiene.reasons[]` and `suggested_commands[]`.
 - Cleanup plan output now includes matched/kept/candidate and outside-data-dir counters with explicit safety flags.
+
+## PR71 milestone: metadata cleanup archive/execute live-safe command pass
+
+- Hardened cleanup lane sequencing: retention/report -> plan (dry-run) -> archive -> validate -> execute `--confirm`.
+- Execute now requires matching validated archive + plan fingerprint match before any deletion.
+- Execute results/receipts include plan/archive linkage, candidate/deleted/skipped/failed counters, and explicit safety flags.
+- Scope remains ShellForgeAI-owned metadata only; no Docker/Compose/system mutation and no natural-language cleanup execution.
