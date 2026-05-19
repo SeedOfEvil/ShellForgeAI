@@ -728,3 +728,130 @@ container-scoped `shellforgeai approvals propose-restart --latest --container
 - `shellforgeai compose env-contract --target <target> --json` emits strict JSON only with required sections: `schema_version`, `status`, `target`, `environment`, `snapshot`, `readiness`, and `safety`.
 - Current Docker01-style blocked example remains expected when environment is not prepared: blockers can include `docker_compose_cli_unavailable`, `compose_file_snapshot_unavailable`, and `target_not_allowlisted`.
 - Ready disposable example (conceptual/fixture-backed): disposable+allow_restart target, compose CLI available, required invocation supported, and readable compose file hash => `status=ready`, `readiness.ready=true`, `readiness.ready_for_optional_disposable_proof=true`.
+
+### PR73 compose env-plan (read-only environment readiness plan)
+
+- `shellforgeai compose env-plan --target <target>` consumes the existing
+  env-contract / env-check readiness output and maps every current
+  readiness blocker to an explicit operator-controlled remediation step.
+  It is **read-only** and never performs any of the remediation it
+  suggests.
+- `shellforgeai compose env-plan --target <target> --json` emits strict
+  JSON only with required sections: `schema_version`, `status`, `target`,
+  `readiness`, `plan`, `post_conditions`, `safety`, and `warnings`.
+- Each `plan` entry includes `blocker`, `meaning`, `operator_remediation`,
+  `shellforgeai_action="none"`, `automated=false`,
+  `mutation_required_outside_shellforgeai`, `allowed_for_disposable_lab`,
+  and `allowed_for_production` (always `false`).
+- For production-like targets (`shellforgeai`, anything containing
+  `production` / `prod`) that are not already allowlisted, the plan adds
+  a warning and recommends using the PR67 disposable harness target
+  instead. It does not suggest labeling production services
+  `shellforgeai.disposable=true`.
+- Safety flags in every plan output: `read_only=true`,
+  `docker_compose_executed=false`, `container_restarted=false`,
+  `host_side_bypass=false`, `arbitrary_command_execution=false`,
+  `natural_language_execution=false`.
+- This command does not create proposals, missions, or rollback previews,
+  does not run `docker compose`, does not mount host paths, does not
+  install packages, and does not weaken any PR63–PR71 gate.
+
+Example (Docker01-style disposable target, environment not yet prepared):
+
+```
+$ shellforgeai compose env-plan --target sfai-pr67-compose-web
+Compose execution environment plan
+
+Target:
+- input: sfai-pr67-compose-web
+- compose-managed: true
+- ...
+- target_allowlisted: true
+- production_like: false
+
+Current readiness:
+- ready: false
+- ready_for_optional_disposable_proof: false
+
+Blockers:
+  1. compose_file_snapshot_unavailable
+     Meaning: Compose file path is known from Docker labels, but
+       ShellForgeAI cannot read or hash it from inside its execution
+       environment.
+     Operator remediation: Expose the disposable Compose file read-only
+       into the ShellForgeAI container/harness at the same path Compose
+       recorded, then rerun env-check/env-contract.
+     ShellForgeAI action: none; no automated remediation performed.
+  2. docker_compose_cli_unavailable
+     Meaning: docker compose CLI/plugin is not available inside the
+       ShellForgeAI execution environment ...
+     Operator remediation: Provide a compatible Docker CLI with Compose
+       plugin inside the ShellForgeAI container/harness ...
+     ShellForgeAI action: none; no automated remediation performed.
+
+Required after remediation:
+- env-check reports compose_restart_execution_ready=true for the
+  disposable target
+- env-contract reports ready=true and
+  ready_for_optional_disposable_proof=true
+- production shellforgeai remains not allowlisted
+- PR68 run-proof may only be executed with explicit operator approval
+
+Safety:
+- read_only: true
+- docker_compose_executed: false
+- container_restarted: false
+- host_side_bypass: false
+- arbitrary_command_execution: false
+- natural_language_execution: false
+```
+
+JSON shape (truncated):
+
+```json
+{
+  "schema_version": "1",
+  "status": "blocked",
+  "target": {
+    "input": "sfai-pr67-compose-web",
+    "compose_managed": true,
+    "project": "sfai_pr67_disposable",
+    "service": "web",
+    "container": "sfai-pr67-compose-web",
+    "disposable": true,
+    "allow_restart": true,
+    "target_allowlisted": true,
+    "production_like": false
+  },
+  "readiness": {
+    "ready": false,
+    "ready_for_optional_disposable_proof": false,
+    "blockers": [
+      "compose_file_snapshot_unavailable",
+      "docker_compose_cli_unavailable"
+    ]
+  },
+  "plan": [
+    {
+      "blocker": "compose_file_snapshot_unavailable",
+      "meaning": "...",
+      "operator_remediation": "...",
+      "shellforgeai_action": "none",
+      "automated": false,
+      "mutation_required_outside_shellforgeai": true,
+      "allowed_for_disposable_lab": true,
+      "allowed_for_production": false
+    }
+  ],
+  "post_conditions": ["..."],
+  "safety": {
+    "read_only": true,
+    "docker_compose_executed": false,
+    "container_restarted": false,
+    "host_side_bypass": false,
+    "arbitrary_command_execution": false,
+    "natural_language_execution": false
+  },
+  "warnings": []
+}
+```

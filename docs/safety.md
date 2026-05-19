@@ -661,6 +661,38 @@ existing proposal/mission/apply safety gates.
 - Host-side bypasses are out of scope: no host path remount automation, no ssh/nsenter/sudo host pivoting, and no generic Compose executor path is introduced.
 - Natural-language execution requests for Compose mutation remain refused.
 
+## PR73 compose execution environment readiness plan
+
+- `shellforgeai compose env-plan` is read-only enablement guidance only.
+  It consumes env-check / env-contract output and maps each readiness
+  blocker to an explicit operator-controlled remediation step.
+- ShellForgeAI does **not** install Docker Compose, does **not** mount
+  host paths from inside the container, does **not** edit compose files,
+  does **not** label production services disposable, does **not** run
+  `docker compose` (restart / up / down / recreate / config), and does
+  **not** create proposals, missions, rollback previews, apply, or
+  cleanup artifacts from env-plan.
+- Environment changes are operator-controlled external setup only.
+  Every plan entry carries `shellforgeai_action="none"` and
+  `automated=false`. The `allowed_for_production` flag is always `false`.
+- Production-like targets (`shellforgeai`, anything containing
+  `production` / `prod`) that are not already allowlisted are flagged
+  with a warning and routed to the PR67 disposable harness recommendation.
+  env-plan will never suggest labeling production services
+  `shellforgeai.disposable=true` or `shellforgeai.allow_restart=true`.
+- No host-side bypass (SSH / nsenter / sudo wrappers) was introduced.
+  No generic Compose executor was introduced. No `shell=True` invocation
+  was introduced.
+- Natural-language Compose mutation (`docker compose restart …`,
+  `fix compose execution environment`, `install docker compose`,
+  `mount the compose file`, `label shellforgeai disposable`,
+  `restart compose service now`, `execute the proof`) remains refused
+  and routed to the explicit gated CLI lane.
+- env-plan does not weaken any PR63–PR71 gate. The PR68 optional
+  disposable Compose restart proof remains blocked until every
+  env-contract / env-plan blocker is resolved by deliberate operator
+  action outside ShellForgeAI, with explicit operator approval.
+
 ## PR70 metadata hygiene reporting safety
 
 - Doctor / status / retention hygiene output is read-only.

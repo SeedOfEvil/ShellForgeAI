@@ -6286,6 +6286,349 @@ def _compose_env_contract_payload(target: str | None) -> dict[str, Any]:
     return payload
 
 
+_COMPOSE_ENV_PLAN_BLOCKER_MAP: dict[str, dict[str, Any]] = {
+    "target_not_compose_managed": {
+        "meaning": (
+            "Target has no Compose metadata; ShellForgeAI cannot prove the disposable Compose "
+            "restart lane against a non-Compose target."
+        ),
+        "operator_remediation": (
+            "Use a Compose-managed target (inspect Docker labels for "
+            "com.docker.compose.project / .service) or pick the PR67 disposable harness."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "target_not_allowlisted": {
+        "meaning": (
+            "Target is not explicitly marked disposable + allow_restart and is therefore not "
+            "eligible for the Compose service restart execution lane."
+        ),
+        "operator_remediation": (
+            "For lab proof, use the PR67 disposable harness "
+            "(sfai_pr67_disposable / sfai-pr67-compose-web). Do not label production services "
+            "shellforgeai.disposable=true or shellforgeai.allow_restart=true to bypass this gate."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "compose_file_snapshot_unavailable": {
+        "meaning": (
+            "Compose file path is known from Docker labels, but ShellForgeAI cannot read or hash "
+            "it from inside its execution environment."
+        ),
+        "operator_remediation": (
+            "Expose the disposable Compose file read-only into the ShellForgeAI container/harness "
+            "at the same path Compose recorded, then rerun env-check/env-contract."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": True,
+    },
+    "compose_file_missing": {
+        "meaning": "Compose file path is not recorded on the target's Docker labels.",
+        "operator_remediation": (
+            "Ensure the disposable target was started with Compose so labels record "
+            "com.docker.compose.project.config_files."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": True,
+    },
+    "docker_compose_cli_unavailable": {
+        "meaning": (
+            "docker compose CLI/plugin is not available inside the ShellForgeAI execution "
+            "environment, so the required preflight invocation cannot run."
+        ),
+        "operator_remediation": (
+            "Provide a compatible Docker CLI with Compose plugin inside the ShellForgeAI "
+            "container/harness. ShellForgeAI will not install packages automatically."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": True,
+    },
+    "docker_cli_missing": {
+        "meaning": "docker CLI itself is missing inside the ShellForgeAI execution environment.",
+        "operator_remediation": (
+            "Provide a Docker CLI inside the ShellForgeAI container/harness. "
+            "ShellForgeAI will not install packages automatically."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": True,
+    },
+    "docker_socket_unavailable": {
+        "meaning": "Docker socket is not reachable from inside the ShellForgeAI runtime.",
+        "operator_remediation": (
+            "Expose the Docker socket read-only into the ShellForgeAI runtime in the lab harness. "
+            "Do not enable this in production."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": True,
+    },
+    "required_invocation_unsupported": {
+        "meaning": (
+            "The required argv form is not supported by the available Compose plugin: "
+            "docker compose -f <compose_file> --project-directory <working_dir> "
+            "restart <service>."
+        ),
+        "operator_remediation": (
+            "Provide a compatible Docker CLI + Compose plugin version inside the ShellForgeAI "
+            "runtime and rerun env-check."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": True,
+    },
+    "compose_preflight_failed": {
+        "meaning": (
+            "Docker Compose preflight version check did not return success; the available "
+            "Compose plugin could not confirm a supported invocation."
+        ),
+        "operator_remediation": (
+            "Provide a compatible Docker CLI + Compose plugin inside the ShellForgeAI runtime "
+            "and rerun env-check. ShellForgeAI will not install or upgrade packages."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": True,
+    },
+    "compose_metadata_incomplete": {
+        "meaning": "Compose project/service/container metadata is incomplete for the target.",
+        "operator_remediation": (
+            "Re-inspect the target via 'shellforgeai compose inspect <container>' and confirm "
+            "the disposable harness is healthy."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "rollback_preview_missing": {
+        "meaning": "No rollback/recovery preview exists for the proposal that wires this target.",
+        "operator_remediation": (
+            "Run 'shellforgeai rollback preview <proposal-id>' and "
+            "'shellforgeai rollback validate <rollback-preview>'."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "rollback_preview_invalid": {
+        "meaning": "An existing rollback preview failed validation.",
+        "operator_remediation": (
+            "Regenerate and re-validate the rollback preview, or inspect the proposal/target "
+            "metadata for drift."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "proposal_not_approved": {
+        "meaning": "The compose_service_restart proposal is not in approved status.",
+        "operator_remediation": (
+            "Review the proposal and approve it explicitly via 'shellforgeai approvals approve "
+            "<proposal-id>' only when every other gate is satisfied."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "fingerprint_invalid": {
+        "meaning": "Proposal fingerprint changed or failed validation since it was created.",
+        "operator_remediation": (
+            "Recreate the proposal from fresh evidence and re-approve. Do not edit the proposal "
+            "artifact by hand."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "missing_confirm": {
+        "meaning": "Execution requires the explicit '--execute --confirm' flags.",
+        "operator_remediation": (
+            "Provide '--execute --confirm' on the mission execute command only after every "
+            "other gate is green."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "target_ambiguous": {
+        "meaning": "The target string resolved to multiple containers; cannot plan readiness.",
+        "operator_remediation": (
+            "Disambiguate the target by exact container name or project/service pair and rerun "
+            "env-plan."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "target_not_found": {
+        "meaning": "No container/service resolved for the supplied target.",
+        "operator_remediation": (
+            "Confirm the target name with 'shellforgeai compose list' or "
+            "'shellforgeai inspect containers'."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+    "target_required": {
+        "meaning": "env-plan needs a --target to compute a target-specific readiness plan.",
+        "operator_remediation": (
+            "Run 'shellforgeai compose env-plan --target <container-or-service>'."
+        ),
+        "shellforgeai_action": "none",
+        "allowed_for_disposable_lab": True,
+        "allowed_for_production": False,
+        "mutation_required_outside_shellforgeai": False,
+    },
+}
+
+
+def _compose_target_looks_production_like(target_input: str, target_meta: dict[str, Any]) -> bool:
+    haystacks = [
+        str(target_input or "").lower(),
+        str(target_meta.get("project") or "").lower(),
+        str(target_meta.get("service") or "").lower(),
+        str(target_meta.get("container") or "").lower(),
+    ]
+    for hay in haystacks:
+        if not hay:
+            continue
+        if hay == "shellforgeai":
+            return True
+        if "production" in hay or "prod" in hay:
+            return True
+    return False
+
+
+def _compose_env_plan_payload(target: str | None) -> dict[str, Any]:
+    contract = _compose_env_contract_payload(target)
+    target_meta = dict(contract.get("target") or {})
+    readiness = dict(contract.get("readiness") or {})
+    blockers: list[str] = list(readiness.get("blockers") or [])
+    production_like = _compose_target_looks_production_like(target or "", target_meta)
+    target_meta["production_like"] = production_like
+
+    plan_entries: list[dict[str, Any]] = []
+    for blocker in blockers:
+        info = _COMPOSE_ENV_PLAN_BLOCKER_MAP.get(blocker)
+        if info is None:
+            plan_entries.append(
+                {
+                    "blocker": blocker,
+                    "meaning": (
+                        "Unrecognized blocker name; ShellForgeAI does not have a built-in "
+                        "remediation mapping for this readiness blocker."
+                    ),
+                    "operator_remediation": (
+                        "Check 'shellforgeai compose env-check' and "
+                        "'shellforgeai compose env-contract' output for the blocker name, then "
+                        "consult docs/compose-ops.md."
+                    ),
+                    "shellforgeai_action": "none",
+                    "automated": False,
+                    "mutation_required_outside_shellforgeai": False,
+                    "allowed_for_disposable_lab": True,
+                    "allowed_for_production": False,
+                }
+            )
+            continue
+        plan_entries.append(
+            {
+                "blocker": blocker,
+                "meaning": info["meaning"],
+                "operator_remediation": info["operator_remediation"],
+                "shellforgeai_action": "none",
+                "automated": False,
+                "mutation_required_outside_shellforgeai": bool(
+                    info.get("mutation_required_outside_shellforgeai", False)
+                ),
+                "allowed_for_disposable_lab": bool(info.get("allowed_for_disposable_lab", True)),
+                "allowed_for_production": bool(info.get("allowed_for_production", False)),
+            }
+        )
+
+    warnings: list[str] = []
+    if production_like and not target_meta.get("target_allowlisted"):
+        warnings.append(
+            "production-like target detected; do not label production services "
+            "shellforgeai.disposable=true or shellforgeai.allow_restart=true to satisfy gates"
+        )
+
+    post_conditions = [
+        "env-check reports compose_restart_execution_ready=true for the disposable target",
+        "env-contract reports ready=true and ready_for_optional_disposable_proof=true",
+        "production shellforgeai remains not allowlisted",
+        "PR68 run-proof may only be executed with explicit operator approval",
+    ]
+
+    status = str(contract.get("status") or "unknown")
+    if status not in {"ok", "ready", "blocked", "not_found", "error"}:
+        status = "blocked"
+    if status == "ready":
+        status = "ok"
+    if blockers and status == "ok":
+        status = "blocked"
+
+    payload: dict[str, Any] = {
+        "schema_version": "1",
+        "status": status,
+        "target": {
+            "input": target_meta.get("input") or (target or ""),
+            "compose_managed": bool(target_meta.get("compose_managed")),
+            "project": target_meta.get("project") or "",
+            "service": target_meta.get("service") or "",
+            "container": target_meta.get("container") or "",
+            "disposable": bool(target_meta.get("disposable")),
+            "allow_restart": bool(target_meta.get("allow_restart")),
+            "target_allowlisted": bool(target_meta.get("target_allowlisted")),
+            "production_like": production_like,
+        },
+        "readiness": {
+            "ready": bool(readiness.get("ready")),
+            "ready_for_optional_disposable_proof": bool(
+                readiness.get("ready_for_optional_disposable_proof")
+            ),
+            "blockers": blockers,
+        },
+        "plan": plan_entries,
+        "post_conditions": post_conditions,
+        "safety": {
+            "read_only": True,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "host_side_bypass": False,
+            "arbitrary_command_execution": False,
+            "natural_language_execution": False,
+        },
+        "warnings": warnings,
+    }
+    return payload
+
+
 def _compose_mission_gates(
     data_dir: Path, mission_payload: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
@@ -7852,6 +8195,69 @@ def compose_env_contract(
     console.print("- no container was restarted")
     console.print("- natural-language execution remains refused")
     console.print("- production targets are not allowlisted by default")
+
+
+@compose_app.command("env-plan")
+def compose_env_plan(
+    target: Annotated[
+        str | None, typer.Option("--target", help="Compose target (container/service/project)")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only")] = False,
+) -> None:
+    payload = _compose_env_plan_payload(target)
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload["status"] in {"ok", "blocked", "not_found"} else 1)
+    tgt = payload["target"]
+    readiness = payload["readiness"]
+    console.print("Compose execution environment plan")
+    console.print("\nTarget:")
+    console.print(f"- input: {tgt.get('input') or '-'}")
+    console.print(f"- compose-managed: {str(tgt.get('compose_managed', False)).lower()}")
+    console.print(f"- project: {tgt.get('project') or '-'}")
+    console.print(f"- service: {tgt.get('service') or '-'}")
+    console.print(f"- container: {tgt.get('container') or '-'}")
+    console.print(f"- disposable: {str(tgt.get('disposable', False)).lower()}")
+    console.print(f"- allow_restart: {str(tgt.get('allow_restart', False)).lower()}")
+    console.print(f"- target_allowlisted: {str(tgt.get('target_allowlisted', False)).lower()}")
+    console.print(f"- production_like: {str(tgt.get('production_like', False)).lower()}")
+    if tgt.get("production_like") and not tgt.get("target_allowlisted"):
+        console.print("\nTarget is not eligible for Compose execution proof.")
+        console.print("Reason:")
+        console.print("- target_not_allowlisted")
+        console.print("- production target should not be labeled disposable for testing")
+        console.print("Recommended safe action:")
+        console.print("- use the PR67 disposable harness target instead")
+    console.print("\nCurrent readiness:")
+    console.print(f"- ready: {str(readiness.get('ready', False)).lower()}")
+    console.print(
+        "- ready_for_optional_disposable_proof: "
+        f"{str(readiness.get('ready_for_optional_disposable_proof', False)).lower()}"
+    )
+    if not readiness.get("blockers"):
+        console.print("\nBlockers:")
+        console.print("- none")
+    else:
+        console.print("\nBlockers:")
+        for idx, entry in enumerate(payload.get("plan") or [], start=1):
+            console.print(f"  {idx}. {entry.get('blocker')}")
+            console.print(f"     Meaning: {entry.get('meaning')}")
+            console.print(f"     Operator remediation: {entry.get('operator_remediation')}")
+            console.print("     ShellForgeAI action: none; no automated remediation performed.")
+    console.print("\nRequired after remediation:")
+    for line in payload.get("post_conditions") or []:
+        console.print(f"- {line}")
+    if payload.get("warnings"):
+        console.print("\nWarnings:")
+        for warning in payload["warnings"]:
+            console.print(f"- {warning}")
+    console.print("\nSafety:")
+    console.print("- read_only: true")
+    console.print("- docker_compose_executed: false")
+    console.print("- container_restarted: false")
+    console.print("- host_side_bypass: false")
+    console.print("- arbitrary_command_execution: false")
+    console.print("- natural_language_execution: false")
 
 
 @ops_app.command("status")
