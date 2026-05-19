@@ -55,6 +55,13 @@ These blockers are the contract being enforced, not bugs. The
 disposable PR67 target (`sfai-pr67-compose-web`) is the lane for proving
 the gated Compose service restart end-to-end.
 
+PR73 adds `shellforgeai compose env-plan --target <target>` (read-only)
+that maps each current blocker to an explicit operator-controlled
+remediation step. It does not change Docker, Compose, files, packages,
+firewall, services, or labels on its own. The blockers above remain
+until an operator deliberately changes the ShellForgeAI runtime
+environment outside the app, then re-runs env-check / env-contract.
+
 ### Exact-container restart
 
 The PR47 lab container restart lane is disabled by default on Docker01.

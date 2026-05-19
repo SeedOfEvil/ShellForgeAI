@@ -922,6 +922,49 @@ it.
 
 **Warning:** Do not label production services as disposable just to satisfy the contract.
 
+## PR73 environment readiness plan workflow (operator-enablement)
+
+`shellforgeai compose env-plan --target <target>` is the read-only
+enablement plan. It answers: *what must change outside ShellForgeAI for
+the disposable Compose restart proof to become ready?* It never performs
+the changes itself.
+
+Operator workflow:
+
+1. Bring up the PR67 disposable harness externally
+   (`scripts/pr67_disposable_compose_harness.sh up`). Never relabel
+   production services to satisfy gates.
+2. Run `shellforgeai compose env-contract --target sfai-pr67-compose-web`
+   to see the current contract state.
+3. Run `shellforgeai compose env-plan --target sfai-pr67-compose-web`
+   (or `--json`) to see each blocker mapped to an explicit
+   operator-controlled remediation step. Every entry carries
+   `shellforgeai_action="none"` and `automated=false`.
+4. Apply the listed remediation **externally** (out of ShellForgeAI):
+   for example, provide a compatible Docker CLI + Compose plugin inside
+   the ShellForgeAI runtime; expose the disposable Compose file
+   read-only at the path Compose recorded.
+5. Re-run env-check / env-contract. Confirm
+   `ready_for_optional_disposable_proof=true`.
+6. Only then consider the PR68 optional disposable proof workflow,
+   with explicit operator approval. The PR47 production allowlist
+   remains unchanged: production `shellforgeai` must stay not
+   allowlisted.
+
+**Refused operations.** ShellForgeAI itself will not, in any path:
+
+- install Docker Compose,
+- mount host paths,
+- edit compose files,
+- label production services disposable,
+- run `docker compose` (restart / up / down / recreate / config),
+- create proposals, missions, rollback previews, apply, or cleanup
+  artifacts from env-plan,
+- execute natural-language mutation asks
+  (`fix compose execution environment`, `install docker compose`,
+  `mount the compose file`, `label shellforgeai disposable`,
+  `restart compose service now`, `execute the proof`).
+
 
 ## Operator workflow for reducing metadata hygiene critical state
 

@@ -16,6 +16,7 @@ lane that is **disposable-only** by design.
 | `rollback preview <proposal-id>` (compose proposals) | preview-only    | Recovery preview, hash-only config evidence, no auto-rollback.        |
 | `compose env-check [--target T]`                     | read-only        | Diagnostics: Compose CLI/plugin, snapshot, allowlist posture.         |
 | `compose env-contract [--target T]`                  | read-only        | Full execution-environment contract / readiness in one view.          |
+| `compose env-plan [--target T]`                      | read-only        | Maps current readiness blockers to operator-controlled remediation.   |
 | `mission compose-restart …`                          | metadata, gated  | Prepare/status/checklist/validate/execute/report/export.              |
 | `scripts/pr67_disposable_compose_harness.sh`         | external helper  | Bring up/down the disposable test stack. Not invoked by the app.      |
 | `scripts/pr68_disposable_compose_restart_proof.sh`   | external helper  | Optional readiness/proof orchestrator. Not invoked by the app.        |
@@ -89,6 +90,57 @@ When any blocker is present, `execute` refuses with:
 - `execution.restart_returncode=null`
 - `safety.docker_compose_executed=false`
 - `safety.container_restarted=false`
+
+## Environment enablement plan (PR73)
+
+`shellforgeai compose env-plan --target <target>` is a read-only enablement
+plan. It does **not** perform any of the remediation it suggests. It only
+maps the readiness blockers reported by `env-check` / `env-contract` to
+explicit operator-controlled remediation steps.
+
+- ShellForgeAI does not install Compose, mount host paths, edit compose
+  files, label production services disposable, restart services, or run
+  `docker compose` of any kind from this command.
+- For each blocker, the plan entry includes `meaning`,
+  `operator_remediation`, `shellforgeai_action="none"`, `automated=false`,
+  and explicit `allowed_for_disposable_lab` / `allowed_for_production`
+  flags.
+- If the target looks production-like (e.g. `shellforgeai`,
+  anything containing `production` / `prod`) and is **not** already
+  allowlisted, the plan output adds a warning and recommends using the
+  PR67 disposable harness instead. It will never suggest labeling a
+  production service `shellforgeai.disposable=true`.
+- The PR68 optional disposable Compose restart proof remains blocked until
+  every env-contract / env-plan blocker is resolved by deliberate operator
+  action **outside** ShellForgeAI, and an explicit operator approval is
+  granted.
+
+Blocker-to-remediation mapping (abbreviated):
+
+- `compose_file_snapshot_unavailable` → expose the disposable Compose file
+  read-only into the ShellForgeAI runtime at the same path Compose
+  recorded. ShellForgeAI action: none.
+- `docker_compose_cli_unavailable` → provide a compatible Docker CLI +
+  Compose plugin inside the ShellForgeAI container/harness. ShellForgeAI
+  action: none.
+- `required_invocation_unsupported` → fix Compose plugin/CLI compatibility
+  so the `docker compose -f <file> --project-directory <dir> restart
+  <service>` argv form is supported. ShellForgeAI action: none.
+- `target_not_allowlisted` → use the PR67 disposable harness for lab
+  proof. Do not label production services disposable. ShellForgeAI
+  action: none.
+- `rollback_preview_missing` / `rollback_preview_invalid` → run
+  `shellforgeai rollback preview <proposal-id>` and
+  `shellforgeai rollback validate <rollback-preview>`. ShellForgeAI
+  action: none from env-plan (which never mutates).
+- `proposal_not_approved` / `fingerprint_invalid` / `missing_confirm` →
+  operator approval / explicit `--execute --confirm` on the mission only
+  after every other gate is green. ShellForgeAI action: none from
+  env-plan.
+
+Unknown blocker names are preserved verbatim with a generic explanation;
+no automatic remediation is offered. See `docs/cli.md` for the JSON
+schema.
 
 ## Docker01 current caveat
 

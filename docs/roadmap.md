@@ -300,6 +300,21 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Execute results/receipts include plan/archive linkage, candidate/deleted/skipped/failed counters, and explicit safety flags.
 - Scope remains ShellForgeAI-owned metadata only; no Docker/Compose/system mutation and no natural-language cleanup execution.
 
+## PR73 milestone: compose execution environment readiness plan
+
+- Added read-only `shellforgeai compose env-plan --target <target>`
+  (and `--json`) that maps current env-check / env-contract readiness
+  blockers to explicit operator-controlled remediation steps for the
+  disposable Compose restart proof.
+- Every plan entry carries `shellforgeai_action="none"` and
+  `automated=false`. Production-like targets are flagged with a warning
+  and routed to the PR67 disposable harness recommendation — never to a
+  "label production disposable" suggestion.
+- env-plan is read-only: no `docker compose` execution, no host-side
+  bypass, no host path mount, no package install, no proposal / mission
+  / rollback preview / apply / cleanup artifact creation, no
+  natural-language mutation execution, and no PR63–PR71 gate weakening.
+
 ## Current state (PR71 baseline)
 
 - The safe evidence → runbook → proposal → approval → rollback preview
@@ -308,11 +323,12 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - The exact-container restart lane (PR47/PR48/PR49) is the only
   always-available real mutation lane, and remains allowlist-only,
   env-gated, and `--execute --confirm`-gated.
-- The Compose service restart lane (PR61–PR69) has preview, proposal,
-  mission, rollback recovery preview, env-check, env-contract, and a
-  disposable harness/proof orchestrator. Live execution remains gated
-  by the env-contract and is intentionally blocked in default
-  production deployments.
+- The Compose service restart lane (PR61–PR69, PR73) has preview,
+  proposal, mission, rollback recovery preview, env-check, env-contract,
+  env-plan, and a disposable harness/proof orchestrator. Live execution
+  remains gated by the env-contract and is intentionally blocked in
+  default production deployments. env-plan is enablement guidance only
+  and performs no environment changes.
 - Metadata cleanup execution is hardened (PR71): archive + fingerprint
   + `--confirm` before any deletion of ShellForgeAI-owned metadata.
 
