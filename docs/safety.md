@@ -660,3 +660,46 @@ existing proposal/mission/apply safety gates.
 - Contract gates are explicit across environment, target safety, and compose-file snapshot/rollback prerequisites.
 - Host-side bypasses are out of scope: no host path remount automation, no ssh/nsenter/sudo host pivoting, and no generic Compose executor path is introduced.
 - Natural-language execution requests for Compose mutation remain refused.
+
+## PR70 metadata hygiene reporting safety
+
+- Doctor / status / retention hygiene output is read-only.
+- Doctor JSON includes structured `metadata_hygiene.reasons[]` and
+  `suggested_commands[]` so operators can script the safe sequence
+  without ambiguity. Suggestions are commands, not actions; nothing is
+  performed by reporting.
+- Cleanup plan output adds matched/kept/candidate and
+  outside-`<data_dir>` counters with explicit safety flags. No deletion
+  occurs at planning time.
+
+## PR71 cleanup execute archive/fingerprint gate
+
+- `audit cleanup execute <plan-id> --confirm` is the only command that
+  may delete under the PR55 cleanup lane.
+- Execute refuses unless **all** of the following are true:
+  - `--confirm` is present on the command line.
+  - A matching, validated cleanup archive exists for the same plan.
+  - The plan fingerprint recorded in the archive matches the plan
+    fingerprint on disk.
+  - Every candidate path resolves inside the allowed `<data_dir>`
+    roots (no symlink escapes, no protected roots).
+  - The category is not protected (`approvals`, `audit-events`).
+- A JSON+markdown receipt under `<data_dir>/cleanup_receipts/` records
+  plan/archive linkage, candidate/deleted/skipped/failed counters, and
+  explicit safety flags. Receipts validate after execute.
+- Scope remains ShellForgeAI-owned metadata only. No Docker/Compose/
+  system mutation. Natural-language cleanup execution remains refused
+  and is routed to the explicit `--confirm` CLI guidance.
+
+## Quick mutation boundary summary (current)
+
+| Lane                                 | Allowed real mutation                                          | Required gates                                                                                                                                                  |
+| ------------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Metadata cleanup (PR46)              | delete ShellForgeAI metadata under `<data_dir>`                | `audit prune … --execute --confirm`, allowed root, non-protected category                                                                                       |
+| Metadata cleanup (PR55 + PR71)       | delete ShellForgeAI metadata under `<data_dir>`                | plan → archive → validate → `cleanup execute <plan-id> --confirm` with matching fingerprint and validated archive                                              |
+| Exact-container restart (PR47/48/49) | exactly one `docker restart <allowlisted-container>`           | allowlist enabled with the target, `SHELLFORGEAI_MUTATION_MODE=lab`, `SHELLFORGEAI_ALLOW_LAB_CONTAINER_RESTART=1`, approved proposal, fresh guard, `--execute --confirm` |
+| Compose service restart (PR63+)      | exactly one `docker compose … restart <disposable-service>`    | approved `compose_service_restart` proposal, valid recovery preview, env-contract green (compose CLI in runtime, readable compose file, hash), disposable + allow_restart labels, `--execute --confirm` |
+
+Everything outside this table is read-only / preview-only / proposal-only
+/ refused. `apply` for any non-PR47 proposal kind remains
+validation/preflight-only.

@@ -299,3 +299,40 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Execute now requires matching validated archive + plan fingerprint match before any deletion.
 - Execute results/receipts include plan/archive linkage, candidate/deleted/skipped/failed counters, and explicit safety flags.
 - Scope remains ShellForgeAI-owned metadata only; no Docker/Compose/system mutation and no natural-language cleanup execution.
+
+## Current state (PR71 baseline)
+
+- The safe evidence → runbook → proposal → approval → rollback preview
+  → mission → apply → verification → receipt → audit/export spine
+  exists end-to-end.
+- The exact-container restart lane (PR47/PR48/PR49) is the only
+  always-available real mutation lane, and remains allowlist-only,
+  env-gated, and `--execute --confirm`-gated.
+- The Compose service restart lane (PR61–PR69) has preview, proposal,
+  mission, rollback recovery preview, env-check, env-contract, and a
+  disposable harness/proof orchestrator. Live execution remains gated
+  by the env-contract and is intentionally blocked in default
+  production deployments.
+- Metadata cleanup execution is hardened (PR71): archive + fingerprint
+  + `--confirm` before any deletion of ShellForgeAI-owned metadata.
+
+## Next tracks (intent, not commitment)
+
+1. Documentation consolidation and the PR72 handoff baseline.
+2. Optional env-contract satisfaction for a deliberate disposable live
+   Compose restart proof on Docker01 (Compose CLI inside the runtime,
+   readable compose file, disposable target labels).
+3. Compose verification / closure-report polish *after* a successful
+   disposable proof.
+4. Compose recreate **preview only** at a later milestone — never
+   recreate execution.
+5. Never jump to broad production mutation. The product stays a Tier-3
+   triage tool with narrow, audited mutation lanes.
+
+## Non-goals (current, unchanged)
+
+- Becoming a shell or generic remote-execution agent.
+- Autopilot or self-healing infrastructure.
+- Production Compose orchestration.
+- Hidden mutation under workspace trust.
+- Auto-apply of model-generated plans.

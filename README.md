@@ -1,27 +1,102 @@
 # ShellForgeAI
 
-A lean, CLI-first AI ops harness for Linux systems. ShellForgeAI collects
-evidence with typed, read-only tools, proposes conservative plans, writes
-auditable artifacts, and uses an LLM (default: OpenAI Codex CLI) only for
-advisory synthesis.
+ShellForgeAI is a lightweight, portable Tier-3 triage and guarded remediation
+tool — a combat knife with a safety catch, receipts, and a flight recorder. It
+collects evidence with typed read-only collectors, builds operator runbooks,
+stages mutation proposals behind explicit approval/mission/apply gates,
+verifies outcomes, and writes auditable receipts. The default LLM (OpenAI
+Codex CLI) is used only for advisory synthesis; it never executes commands.
 
-> Status: alpha. `apply` is intentionally validation-only — ShellForgeAI
-> never executes mutating commands automatically. Model output is advisory.
+> Status: alpha. Mutation is gated to two narrow lanes: ShellForgeAI-owned
+> metadata cleanup, and exact-container Docker restart (with a separate,
+> disposable-only Compose service restart lane that remains environment-gated
+> in most deployments). Everything else is read-only or proposal-only.
 
-## Highlights
+## What it is
 
-- **Read-only by default.** No arbitrary shell, no package install, no service
-  restart, no destructive actions.
-- **Evidence-first.** Recognized intents (disk, performance, health, firewall,
-  service) auto-run typed read-only collectors before any model call.
-- **Auditable.** Every session writes JSONL audit records and artifacts under
-  the data dir.
-- **Profiles.** `inspect`, `assisted`, `lab-direct`, `prod-readonly` gate which
-  risk classes are allowed, asked, or denied.
-- **Pluggable models.** Codex CLI (default), Ollama, vLLM, and any
-  OpenAI-compatible endpoint (e.g. OpenRouter).
-- **Interactive operator loop.** Run `shellforgeai` with no subcommand for a
-  REPL with slash commands, workspace trust, and streaming synthesis.
+- An evidence collector for Linux/Docker/Compose hosts (read-only).
+- A runbook / proposal generator from collected evidence.
+- An approval / mission / apply workflow helper with deterministic gates.
+- An audit, export, receipt, and redaction tool.
+- A guarded exact-container restart tool (allowlisted / disposable targets).
+- A Compose-aware diagnostic, preview, and proposal tool.
+- A metadata cleanup tool with archive + fingerprint + confirm gates.
+
+## What it is not
+
+- Not an autopilot.
+- Not a platform.
+- Not a generic shell or remote-execution agent.
+- Not a production Compose orchestrator.
+- Not a natural-language mutation agent.
+- Not a package / config / firewall / DNS / route mutator.
+- Not self-healing infrastructure.
+
+## Workflow spine
+
+```
+Evidence
+  → Runbook
+  → Proposal
+  → Approval
+  → Rollback / recovery preview
+  → Mission checklist + readiness
+  → Explicit execute / apply gate (--execute --confirm)
+  → Verification
+  → Receipt / closure report
+  → Export / audit / cleanup
+```
+
+Every mutation passes every gate. Asks never execute. Previews never execute.
+Proposals never execute. Approvals never execute. Rollback previews never
+execute. Status, checklist, report, and export never execute.
+
+## Capabilities (current)
+
+- `diagnose` for docker / logs / errors / network / nginx / performance /
+  disk / packages / package / config / changes (read-only).
+- Runbooks (`runbook`, `validate-runbook`).
+- Approvals queue (`approvals create|list|show|approve|reject|cancel|
+  archive|validate|propose-restart|restart-plan`).
+- Exact-container restart lane via `apply <approved-proposal> --execute
+  --confirm` (allowlisted lab / disposable targets only).
+- Mission workflow for restart and Compose-restart (`mission restart …`,
+  `mission compose-restart …`).
+- Closure reports and mission exports (`mission … report|export|
+  validate-export`).
+- Audit timeline, validate, index, search (`audit …`).
+- Audit-aware incident index and ops status board (`ops status`).
+- Export packs and redaction (`export`, `validate-export`).
+- Metadata retention and cleanup (`audit retention`, `audit cleanup
+  plan|archive|validate|execute|report`) — PR71-hardened archive +
+  fingerprint + `--confirm` gate.
+- Compose context (`compose inspect|list`).
+- Compose service restart preview / proposal / mission lanes
+  (`compose restart-preview|propose-restart`, `mission compose-restart …`).
+- Compose env-check and env-contract diagnostics (`compose env-check`,
+  `compose env-contract`).
+- Disposable Compose harness and optional proof orchestrator
+  (`scripts/pr67_disposable_compose_harness.sh`,
+  `scripts/pr68_disposable_compose_restart_proof.sh`) — external operator
+  helpers, not ShellForgeAI execution paths.
+
+## Safety summary
+
+- Asks do not execute. Previews do not execute. Proposals do not execute.
+  Approvals do not execute. Rollback previews do not execute. Status,
+  checklist, report, export do not execute.
+- Mutation requires the explicit CLI workflow with `--execute --confirm`,
+  the matching env vars (for Docker restart), and every prior gate green.
+- Cleanup execution additionally requires a valid archive whose fingerprint
+  matches the plan, plus `--confirm`.
+- Compose service restart execution remains disposable / allowlisted only and
+  is blocked unless the environment satisfies the env-contract (Compose CLI
+  inside the runtime, readable compose file, populated snapshot hash,
+  disposable+allow_restart labels).
+- Strict JSON for `--json` modes. Failures are clean operator errors, never
+  tracebacks for expected failures. Every mutation path writes a receipt.
+
+See [`docs/safety.md`](docs/safety.md) for the full mutation boundary.
 
 ## Install
 
@@ -40,32 +115,50 @@ The CLI is exposed as both `shellforgeai` and `sfai`.
 ## Quick start
 
 ```bash
-shellforgeai doctor                       # runtime health
-shellforgeai inspect host                 # host snapshot
-shellforgeai diagnose nginx               # evidence + conservative plan
-shellforgeai diagnose disk --save-plan
-shellforgeai research "nginx permission denied"
-shellforgeai plan "investigate high disk usage"
-shellforgeai audit list
-shellforgeai ask "what is this machine doing?"
-shellforgeai ask "find failed containers and explain likely cause"   # evidence-backed
-shellforgeai ask "why can the service not write to disk?"            # evidence-backed
-shellforgeai ask --no-evidence "explain DNS like I am new"           # plain model Q&A
-shellforgeai diagnose docker --save-plan --with-runbook              # safe operator runbook
-shellforgeai runbook --latest                                        # build runbook from latest evidence
-shellforgeai ask "give me a safe fix plan for the failed containers" # evidence + runbook
+shellforgeai doctor
+shellforgeai model doctor
+shellforgeai ops status
+shellforgeai diagnose docker --save-plan --with-runbook
+shellforgeai runbook --latest
+shellforgeai approvals list --all
+shellforgeai compose inspect shellforgeai
+shellforgeai compose env-check --target shellforgeai
+shellforgeai compose env-contract --target shellforgeai
+shellforgeai audit retention
+shellforgeai audit cleanup plan --category exports --max-age-days 7 --keep-latest 5
 ```
 
-For ops-shaped questions `ask` reuses the same read-only evidence
-collection as `diagnose`. Generic explainers and conceptual questions
-stay as plain model Q&A. `ask` never mutates — mutation-style requests
-("can you restart nginx?") collect read-only evidence and print a
-safety boundary; `apply` remains validation-only. Fix-plan / runbook
-intents (e.g. "what should I do next?", "fix bad-network safely")
-synthesize an operator-run remediation plan (`runbook.md`,
-`runbook.json`) from existing evidence; ShellForgeAI does not execute
-any of the steps and labels mutating commands `OPERATOR-RUN` /
-`REQUIRES APPROVAL` / `SERVICE-IMPACTING`.
+Read-only `ask` examples:
+
+```bash
+shellforgeai ask "what is this machine doing?"
+shellforgeai ask "find failed containers and explain likely cause"
+shellforgeai ask "show compose context for this restart proposal"
+shellforgeai ask "did the restart work?"
+shellforgeai ask "audit retention status"
+```
+
+`ask` collects evidence for ops-shaped questions and refuses mutation
+phrasing with a safety boundary. It never executes; mutation requires the
+explicit CLI lane.
+
+## Deeper documentation
+
+- [`docs/cli.md`](docs/cli.md) — CLI reference, organized by operator workflow.
+- [`docs/safety.md`](docs/safety.md) — mutation boundaries and refusal rules.
+- [`docs/architecture.md`](docs/architecture.md) — runtime, workflow spine,
+  trust and mutation boundaries.
+- [`docs/data-layout.md`](docs/data-layout.md) — `/data` layout, artifact
+  lifecycle, and retention.
+- [`docs/mission-workflow.md`](docs/mission-workflow.md) — exact-container
+  restart and Compose service restart missions.
+- [`docs/compose-ops.md`](docs/compose-ops.md) — Compose context, preview,
+  proposal, env-check / env-contract, and disposable harness.
+- [`docs/audit-and-cleanup.md`](docs/audit-and-cleanup.md) — audit timeline,
+  exports, retention reporting, and the hardened cleanup gate.
+- [`OPS.md`](OPS.md) — operator field guide.
+- [`HOMELAB.md`](HOMELAB.md) — Docker01 / homelab state and caveats.
+- [`docs/roadmap.md`](docs/roadmap.md) — milestone history and next tracks.
 
 ## Using OpenAI Codex / ChatGPT sign-in
 
@@ -99,34 +192,30 @@ sfai> /pending
 sfai> /exit
 ```
 
-Slash commands include `/help`, `/status`, `/doctor`, `/health`, `/model`,
-`/tools`, `/audit`, `/workspace`, `/mode`, `/profile`, `/evidence`, `/pending`,
-`/examples`, `/clear`, `/raw on|off`, `/context minimal|standard|full`,
-`/exit`. See `docs/interactive-mode.md`.
-
-Natural-language diagnostic questions auto-collect evidence and stream a
-synthesized operator answer (facts, clues, missing evidence, safe next
-steps). When a deeper read-only follow-up makes sense, ShellForgeAI queues it
-and runs it when you confirm with `yes` / `proceed` / `dig deeper`.
-
 Interactive mode is *not* a shell: pasted shell-looking input is blocked
-unless explicitly prefixed with `ask explain ...` or `ask review ...`.
+unless explicitly prefixed with `ask explain ...` or `ask review ...`. See
+[`docs/interactive-mode.md`](docs/interactive-mode.md).
 
 ## Project layout
 
 ```
 src/shellforgeai/
   cli.py              Typer entry points
-  core/               session, config, profiles, diagnose, evidence, plans
-  tools/              typed read-only tools (host, journal, systemd, network, ...)
-  llm/                provider abstraction (codex, ollama, vllm, openai-compatible, openrouter)
-  interactive/        REPL, slash commands, workspace trust, streaming synthesis
+  core/               session, config, profiles, diagnose, evidence, plans,
+                      approvals, mission, compose_context, rollback_preview,
+                      retention, metadata_hygiene, reference_resolver
+  tools/              typed read-only tools
+  llm/                provider abstraction (codex, ollama, vllm, …)
+  interactive/        REPL, slash commands, workspace trust, streaming
   policy/             risk classes, rules, approvals
   knowledge/          local docs and audit search
   audit/              JSONL audit logger and artifact storage
   render/             rich console rendering
 config/               default.yaml, profiles/, tools/
-docs/                 architecture, cli, interactive-mode, model-providers, safety, tools, ...
+docs/                 architecture, cli, safety, data-layout, mission-workflow,
+                      compose-ops, audit-and-cleanup, interactive-mode, …
+scripts/              dev / lint / test helpers, disposable Compose harness,
+                      disposable Compose restart proof orchestrator
 tests/                pytest suite
 ```
 
@@ -140,20 +229,6 @@ Profiles in `config/profiles/` decide which risk classes are allowed, asked,
 or denied. The active profile is selected with `--profile` or via
 `app.default_profile` in config.
 
-## Safety
-
-- `apply` is validation-only in this alpha (it parses and validates plans,
-  never executes them).
-- Workspace trust grants doc reads and artifact writes — it never lifts
-  policy or enables mutation.
-- Service-impacting commands are described as approval-required and
-  operator-run; ShellForgeAI does not run them.
-- In restricted containers, the Codex CLI may emit `bwrap`/namespace errors;
-  treat as a provider sandbox limitation, not a host failure. ShellForgeAI's
-  typed read-only collectors keep working.
-
-See `docs/safety.md`.
-
 ## Development
 
 ```bash
@@ -166,5 +241,3 @@ make check    # format + lint + type + tests
 ## License
 
 MIT. See `LICENSE`.
-
-- Approval queue is idempotent by proposal fingerprint; apply bundle generation refreshes static files only (no execution).

@@ -74,11 +74,84 @@ synthesis** (LLM providers).
    summary) is appended; artifacts are written to the session artifact dir
    only when produced.
 
-## Safety boundary
+## Workflow spine
 
-- The runtime never calls `subprocess` for arbitrary shell. Tools wrap
-  specific binaries with bounded args via `util.subprocess`.
-- Mutating actions are policy-gated. `apply` validates plan JSON and
-  returns; it never executes steps.
-- Workspace trust is scoped to read workspace docs and write artifacts /
-  audit under the data dir. It does not change policy.
+```
+Evidence
+  → Runbook
+  → Proposal
+  → Approval
+  → Rollback / recovery preview
+  → Mission checklist + readiness
+  → Explicit execute / apply gate
+  → Verification
+  → Receipt / closure report
+  → Export / audit / cleanup
+```
+
+Each step writes its artifact under `<data_dir>` (see
+[`data-layout.md`](data-layout.md)). Each step refuses to advance unless
+the prior step's artifact exists and validates. No step skips ahead, no
+step retries automatically, and no step executes the next step on the
+operator's behalf.
+
+## Trust boundary
+
+- ShellForgeAI inspects within its configured runtime access only.
+- It must not assume host/systemd facts when running inside a container.
+  Container limits surface as visibility limitations, never as
+  fabricated host health claims.
+- It distinguishes container runtime boundaries, Docker state, Compose
+  metadata (advisory only), package DB visibility, labels, mounts,
+  logs, and its own artifacts.
+- Workspace trust grants doc reads and artifact writes under the data
+  dir. It never lifts policy, enables mutation, or bypasses gates.
+
+## Mutation boundary
+
+The runtime never calls `subprocess` for arbitrary shell. Tools wrap
+specific binaries with bounded args via `util.subprocess`. Only three
+narrow mutation lanes exist; everything else is read-only.
+
+1. **ShellForgeAI-owned metadata cleanup.** `audit prune` (PR46) and
+   `audit cleanup execute` (PR55 + PR71-hardened). Deletes
+   ShellForgeAI-owned metadata under `<data_dir>` only. PR71 requires a
+   matching validated archive whose fingerprint matches the plan, plus
+   `--confirm`.
+2. **Exact-container Docker restart.** `apply <approved-proposal>
+   --execute --confirm` (PR47/PR48/PR49). Exactly one `docker restart
+   <allowlisted-container>`. Allowlist disabled by default; env-gated.
+3. **Compose service restart (disposable-only).** `mission compose-restart
+   execute <id> --execute --confirm` (PR63+). Exactly one
+   `docker compose ... restart <service>` against a disposable +
+   allow_restart labelled target, only when the env-contract is fully
+   satisfied. Blocked by default in production deployments — this is the
+   intended posture.
+
+What ShellForgeAI does not mutate, ever:
+
+- `docker compose up/down/recreate`, `docker stop|start|kill|rm|exec|run`,
+  Docker volume/network/image commands.
+- `systemctl` / service control.
+- `apt`/`yum`/`dnf`/`apk`/`pip` package operations.
+- chmod / chown / rm / mv / cp on arbitrary paths.
+- firewall / route / DNS / interface changes.
+- Generated operator scripts or arbitrary shell strings.
+
+## Data and artifact flow
+
+See [`data-layout.md`](data-layout.md) for the full table. Each
+artifact class has a single command that creates it, a defined set of
+commands that read or refresh it, and an explicit mutation/non-mutation
+posture.
+
+## Design principles
+
+- Read-only first; preview before proposal; proposal before approval.
+- Approval before mission; rollback/recovery preview before any execute
+  step; explicit `--confirm` before any mutation.
+- Verify after mutation; write a receipt; preserve a tamper-evident
+  audit trail.
+- Refuse natural-language mutation. The only execution paths are the
+  explicit CLI lanes above.
+- Boring on purpose. Small sharp tool, not a broad control plane.
