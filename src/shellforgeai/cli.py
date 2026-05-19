@@ -1039,6 +1039,230 @@ def _find_cleanup_archive_for_plan(
     return None, None
 
 
+_CLEANUP_REVIEW_SUPPORTED = {"exports", "audit-exports", "apply-bundles", "actions", "artifacts"}
+_CLEANUP_REVIEW_GATES = (
+    "cleanup_plan",
+    "matching_archive",
+    "archive_validation",
+    "matching_plan_fingerprint",
+    "explicit_confirm",
+    "receipt_validation",
+)
+
+
+def _cleanup_review_payload(
+    data_dir: Path, category: str | None, top: int
+) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
+    hygiene: dict[str, Any] = scan_metadata_hygiene(data_dir)
+    raw_categories: list[dict[str, Any]] = []
+    for key, info in hygiene["categories"].items():
+        display_name = key.replace("_", "-")
+        supported = display_name in _CLEANUP_REVIEW_SUPPORTED
+        raw_categories.append(
+            {
+                "name": display_name,
+                "bytes": int(info["bytes"]),
+                "human": info["human"],
+                "items": int(info["count"]),
+                "severity": info["severity"],
+                "cleanup_supported": supported,
+            }
+        )
+    raw_categories.sort(key=lambda c: c["bytes"], reverse=True)
+
+    safest_first_lane: str | None = None
+    for c in raw_categories:
+        if not c["cleanup_supported"]:
+            c["recommended"] = False
+            c["reason"] = "report-only; no cleanup plan support"
+        elif c["items"] == 0:
+            c["recommended"] = False
+            c["reason"] = "no items"
+        elif c["name"] == "exports":
+            c["recommended"] = True
+            c["reason"] = "safe narrow first lane"
+            safest_first_lane = "exports"
+        elif c["name"] == "artifacts":
+            c["recommended"] = False
+            c["reason"] = "large category; review carefully before cleanup"
+        else:
+            c["recommended"] = False
+            c["reason"] = "supported; review before cleanup"
+
+    recommendations: list[dict[str, Any]] = []
+    if safest_first_lane == "exports":
+        recommendations.append(
+            {
+                "kind": "cleanup_plan",
+                "category": "exports",
+                "command": [
+                    "shellforgeai",
+                    "audit",
+                    "cleanup",
+                    "plan",
+                    "--category",
+                    "exports",
+                    "--max-age-days",
+                    "7",
+                    "--keep-latest",
+                    "5",
+                    "--json",
+                ],
+                "command_display": (
+                    "shellforgeai audit cleanup plan --category exports"
+                    " --max-age-days 7 --keep-latest 5 --json"
+                ),
+                "mutation": False,
+            }
+        )
+
+    display = list(raw_categories)
+    filter_warning: str | None = None
+    if category:
+        norm = category.strip().lower()
+        norm_dash = norm.replace("_", "-")
+        match = [c for c in raw_categories if c["name"] == norm_dash]
+        if not match:
+            filter_warning = f"unknown category '{category}'"
+            display = []
+        else:
+            display = match
+    if top and top > 0:
+        display = display[:top]
+
+    warnings = list(hygiene["warnings"])
+    if filter_warning:
+        warnings.append(filter_warning)
+
+    payload: dict[str, Any] = {
+        "schema_version": "1",
+        "status": hygiene["severity"],
+        "data_root": str(data_dir),
+        "review_only": True,
+        "summary": {
+            "total_bytes": int(hygiene["total_bytes"]),
+            "total_human": hygiene["total_human"],
+            "total_items": int(hygiene["total_items"]),
+            "largest_category": raw_categories[0]["name"] if raw_categories else None,
+        },
+        "categories": [
+            {
+                "name": c["name"],
+                "bytes": c["bytes"],
+                "human": c["human"],
+                "items": c["items"],
+                "severity": c["severity"],
+                "cleanup_supported": c["cleanup_supported"],
+                "recommended": c["recommended"],
+                "reason": c["reason"],
+            }
+            for c in display
+        ],
+        "recommendations": recommendations,
+        "required_gates_before_deletion": list(_CLEANUP_REVIEW_GATES),
+        "safest_first_lane": safest_first_lane,
+        "next_safe_commands": [
+            "shellforgeai audit cleanup plan --category exports"
+            " --max-age-days 7 --keep-latest 5 --json",
+            "shellforgeai audit cleanup archive <cleanup-plan-id>",
+            "shellforgeai audit cleanup validate <cleanup-archive.tar.gz>",
+        ],
+        "safety": {
+            "review_only": True,
+            "cleanup_executed": False,
+            "archive_created": False,
+            "mutation_performed": False,
+            "arbitrary_paths_allowed": False,
+            "docker_mutation": False,
+            "system_mutation": False,
+            "natural_language_execution": False,
+            "shellforgeai_metadata_only": True,
+        },
+        "warnings": warnings,
+        "execution": "none",
+    }
+    return payload, display, filter_warning
+
+
+@audit_cleanup_app.command("review")
+def audit_cleanup_review(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json"),
+    category: str | None = typer.Option(None, "--category"),
+    top: int = typer.Option(0, "--top"),
+) -> None:
+    """Read-only operator review of /data cleanup posture (PR74).
+
+    Does not create plans, does not create archives, does not delete.
+    """
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    payload, display, filter_warning = _cleanup_review_payload(data_dir, category, top)
+
+    if json_output:
+        console.print_json(data=payload)
+        return
+
+    console.print("ShellForgeAI cleanup review")
+    console.print("")
+    console.print("Data root:")
+    console.print(f"- path: {payload['data_root']}")
+    console.print(f"- status: {payload['status']}")
+    console.print(f"- total metadata: {payload['summary']['total_human']}")
+    console.print(f"- total items: {payload['summary']['total_items']}")
+    console.print("- execution: none")
+
+    if filter_warning:
+        console.print("")
+        console.print(f"- warning: {filter_warning}")
+        console.print("No cleanup candidates found for the selected filters.")
+        console.print("No deletion was performed.")
+        return
+
+    if display:
+        console.print("")
+        console.print("Largest categories:")
+        for idx, c in enumerate(display, start=1):
+            tag = "cleanup_supported" if c["cleanup_supported"] else "report-only"
+            console.print(f"{idx}. {c['name']}  {c['human']}  {c['items']} items  [{tag}]")
+    else:
+        console.print("")
+        console.print("No cleanup candidates found for the selected filters.")
+        console.print("No deletion was performed.")
+
+    if payload["recommendations"]:
+        console.print("")
+        console.print("Recommended review lanes:")
+        console.print(f"- safest first lane: {payload['safest_first_lane']}")
+        console.print(
+            "- reason: exported bundles are reviewable artifacts"
+            " and already supported by cleanup planning"
+        )
+        console.print("- suggested dry-run:")
+        for rec in payload["recommendations"]:
+            console.print(f"  {rec['command_display']}")
+
+    console.print("")
+    console.print("Required gates before deletion:")
+    for i, gate in enumerate(payload["required_gates_before_deletion"], start=1):
+        console.print(f"{i}. {gate.replace('_', ' ')}")
+
+    console.print("")
+    console.print("Safety:")
+    console.print("- review_only: true")
+    console.print("- cleanup_executed: false")
+    console.print("- archive_created: false")
+    console.print("- mutation_performed: false")
+    console.print("- arbitrary_paths_allowed: false")
+    console.print("- docker_mutation: false")
+    console.print("- system_mutation: false")
+
+    console.print("")
+    console.print("Next safe commands:")
+    for cmd in payload["next_safe_commands"]:
+        console.print(f"- {cmd}")
+
+
 @audit_cleanup_app.command("plan")
 def audit_cleanup_plan(
     ctx: typer.Context,

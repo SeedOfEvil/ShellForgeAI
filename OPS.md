@@ -978,3 +978,39 @@ Operator workflow:
 
 Do not manually delete random `/data` paths unless recovering from known corruption.
 Do not run step 6 unless operator-approved; start with narrow categories (for example `exports`) and verify archive validation before execution.
+
+## PR74 Docker01 housekeeping runbook (read-only review first)
+
+When `doctor` reports metadata hygiene `critical`, do not jump to
+broad deletion. The cleanup review pack lets Hector/NewTwo decide what
+is worth cleaning before any plan is written.
+
+1. `shellforgeai doctor` — confirm severity and read the suggested
+   commands. No cleanup runs from doctor.
+2. `shellforgeai audit retention` (optionally `--top 20` or `--json`) —
+   see the size/severity by category.
+3. `shellforgeai audit cleanup review` (or `--json` for tooling) —
+   read-only decision aid. Reports the largest categories, marks each
+   category as `cleanup_supported` or report-only, recommends `exports`
+   as the safest narrow first lane when it has items, restates the
+   PR71 deletion gates, and prints the next safe dry-run command.
+   No plans/archives/receipts are created and no files are deleted.
+4. Choose a narrow category (default: `exports`). Avoid broad
+   `--include-artifacts` cleanup unless the artifacts category has been
+   reviewed item-by-item.
+5. `shellforgeai audit cleanup plan --category exports --max-age-days 7
+   --keep-latest 5 --json` — still dry-run, still no deletion.
+6. `shellforgeai audit cleanup archive <plan-id>` — writes the
+   fingerprinted cleanup archive.
+7. `shellforgeai audit cleanup validate <cleanup-archive.tar.gz>` —
+   reject the run on any validation error.
+8. `shellforgeai audit cleanup execute <plan-id> --confirm` — only run
+   this if Hector approves and the previous gates have passed.
+9. `shellforgeai audit cleanup validate <cleanup-receipt-or-dir>` —
+   verify the receipt is well-formed and safety-clean.
+
+Do not run broad cleanup blindly. Do not use natural-language asks to
+delete (ask routing refuses and prints the explicit guarded CLI). Do
+not touch `/data` paths outside ShellForgeAI's owned roots; the cleanup
+lane enforces this and any path resolving outside is refused. PR74 adds
+review-only reporting; it does not loosen the PR71 deletion gates.

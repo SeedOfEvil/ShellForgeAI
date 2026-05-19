@@ -300,6 +300,27 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Execute results/receipts include plan/archive linkage, candidate/deleted/skipped/failed counters, and explicit safety flags.
 - Scope remains ShellForgeAI-owned metadata only; no Docker/Compose/system mutation and no natural-language cleanup execution.
 
+## PR74 milestone: /data cleanup review pack
+
+- Added read-only `shellforgeai audit cleanup review` (and `--json`,
+  `--category <name>`, `--top N`) that summarizes the ShellForgeAI
+  metadata footprint, groups categories by size, marks each as
+  `cleanup_supported` or report-only, recommends the safest narrow
+  first lane (default: `exports`), restates the PR71 deletion gates,
+  and prints the next safe dry-run command.
+- Review is strictly read-only: it never creates plans, archives, or
+  receipts, never deletes, never calls `docker compose`, never mutates
+  services / packages / firewall / files / network, and never accepts
+  natural-language execution. The JSON `safety` block pins
+  `review_only=true`, `cleanup_executed=false`, `archive_created=false`,
+  `mutation_performed=false`, `arbitrary_paths_allowed=false`,
+  `docker_mutation=false`, `system_mutation=false`,
+  `natural_language_execution=false`.
+- PR55/PR71 cleanup gates are unchanged. Review enables operator
+  decision-making before the existing
+  `plan → archive → validate → execute --confirm → receipt validation`
+  sequence; it does not loosen any gate.
+
 ## PR73 milestone: compose execution environment readiness plan
 
 - Added read-only `shellforgeai compose env-plan --target <target>`
