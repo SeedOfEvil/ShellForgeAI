@@ -268,6 +268,16 @@ The status safety block is invariant: `apply_mode=validation-only`, `execution_a
   category values are refused before any plan/archive is created.
   Cleanup execute remains separate and still requires `--confirm` plus
   the full PR71 archive/fingerprint/validation gate.
+- `shellforgeai audit cleanup execute-readiness` (PR76) is a read-only
+  readiness check that re-asserts the PR71 gates (plan kind/safety,
+  matching cleanup archive, archive validation, plan fingerprint,
+  allowed-root candidate paths) before the operator runs
+  `cleanup execute --confirm`. It creates no plans, no archives, no
+  receipts, deletes nothing, never touches Docker/Compose/services/
+  packages/firewall/network/system, and never accepts natural-language
+  cleanup execution. The matching `audit cleanup report` command is also
+  read-only. Cleanup execute remains gated by `--confirm`, matching
+  archive, archive validation, and matching plan fingerprint.
 
 ## PR46 — first guarded mutation gate
 

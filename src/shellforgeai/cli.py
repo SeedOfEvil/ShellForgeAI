@@ -1987,32 +1987,501 @@ def audit_cleanup_validate(target: Path) -> None:
     console.print("- safety: ok")
 
 
-@audit_cleanup_app.command("report")
-def audit_cleanup_report(target: Path) -> None:
-    if _is_cleanup_archive_path(target):
-        console.print("Cleanup report failed:")
-        console.print("- expected cleanup receipt directory or cleanup-receipt.json")
-        console.print(f"- got archive file: {target}")
-        console.print(
-            "- to validate cleanup archives, run:"
-            " shellforgeai audit cleanup validate <archive.tar.gz>"
+def _resolve_cleanup_plan_input(data_dir: Path, raw: str) -> tuple[Path | None, str | None]:
+    """Resolve plan id, plan dir, or cleanup-plan.json to (plan_path, plan_id).
+
+    Returns (None, None) if no plan can be located.
+    """
+    candidate = Path(raw)
+    if candidate.is_file() and candidate.name == "cleanup-plan.json":
+        return candidate, candidate.parent.name
+    if candidate.is_dir() and (candidate / "cleanup-plan.json").is_file():
+        return candidate / "cleanup-plan.json", candidate.name
+    plan_dir = _cleanup_plan_dir(data_dir, raw)
+    plan_json = plan_dir / "cleanup-plan.json"
+    if plan_json.is_file():
+        return plan_json, raw
+    return None, None
+
+
+def _find_cleanup_receipt_for_plan(data_dir: Path, plan_id: str) -> Path | None:
+    rdir = data_dir / "cleanup_receipts"
+    if not rdir.exists():
+        return None
+    for d in sorted(rdir.iterdir(), reverse=True):
+        rp = d / "cleanup-receipt.json"
+        if not rp.is_file():
+            continue
+        try:
+            payload = json.loads(rp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if payload.get("plan_id") == plan_id:
+            return rp
+    return None
+
+
+def _cleanup_execute_readiness_payload(data_dir: Path, raw: str) -> tuple[int, dict[str, Any]]:
+    """Read-only: check whether a cleanup plan is ready for `execute --confirm`.
+
+    Creates no plans, no archives, no receipts; deletes nothing.
+    """
+    base_safety: dict[str, Any] = {
+        "read_only": True,
+        "cleanup_executed": False,
+        "deletion_performed": False,
+        "mutation_performed": False,
+        "arbitrary_paths_allowed": False,
+        "docker_mutation": False,
+        "system_mutation": False,
+        "natural_language_execution": False,
+        "explicit_confirm_required": True,
+        "shellforgeai_metadata_only": True,
+    }
+    empty_plan: dict[str, Any] = {
+        "id": None,
+        "path": None,
+        "category": None,
+        "candidate_count": 0,
+        "bytes_planned": 0,
+        "execution_allowed": False,
+        "mutation_performed": False,
+        "requires_archive": True,
+        "requires_confirm": True,
+        "shellforgeai_metadata_only": True,
+    }
+    empty_archive: dict[str, Any] = {
+        "found": False,
+        "path": None,
+        "archive_validated": False,
+        "checksums_ok": False,
+        "plan_id_matches": False,
+        "plan_fingerprint_matches": False,
+        "execution_allowed": False,
+    }
+
+    plan_path, plan_id = _resolve_cleanup_plan_input(data_dir, raw)
+    if plan_path is None:
+        return 1, {
+            "schema_version": "1",
+            "status": "not_found",
+            "plan": dict(empty_plan, id=raw),
+            "archive": empty_archive,
+            "readiness": {
+                "ready_for_execute_confirm": False,
+                "execute_performed": False,
+                "blockers": ["cleanup plan not found"],
+                "warnings": [],
+            },
+            "safety": base_safety,
+            "next_commands": {},
+            "warnings": [],
+        }
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    try:
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return 1, {
+            "schema_version": "1",
+            "status": "error",
+            "plan": dict(empty_plan, id=plan_id, path=str(plan_path)),
+            "archive": empty_archive,
+            "readiness": {
+                "ready_for_execute_confirm": False,
+                "execute_performed": False,
+                "blockers": [f"plan JSON unreadable: {exc}"],
+                "warnings": [],
+            },
+            "safety": base_safety,
+            "next_commands": {},
+            "warnings": [],
+        }
+
+    if payload.get("kind") != "cleanup_plan":
+        blockers.append("plan kind is not cleanup_plan")
+    plan_errs = _validate_cleanup_plan_payload(payload)
+    blockers.extend(plan_errs)
+
+    selection_cats = payload.get("selection", {}).get("categories", []) or []
+    for c in selection_cats:
+        if not _is_safe_cleanup_category(c):
+            blockers.append(f"unsafe category: {c}")
+
+    allowed_roots = [r.resolve() for r in _cleanup_allowed_roots(data_dir)]
+    for c in payload.get("candidates", []):
+        raw_p = c.get("path") if isinstance(c, dict) else None
+        if not isinstance(raw_p, str) or not raw_p:
+            blockers.append("candidate missing path")
+            continue
+        try:
+            rp = Path(raw_p).resolve()
+        except Exception:
+            blockers.append(f"candidate path unresolvable: {raw_p}")
+            continue
+        if not any(root in rp.parents or root == rp for root in allowed_roots):
+            blockers.append(f"candidate path outside ShellForgeAI metadata: {raw_p}")
+
+    plan_block: dict[str, Any] = {
+        "id": plan_id,
+        "path": str(plan_path),
+        "category": ",".join(selection_cats) if selection_cats else None,
+        "candidate_count": int(payload.get("summary", {}).get("candidate_count", 0)),
+        "bytes_planned": int(payload.get("summary", {}).get("candidate_bytes", 0)),
+        "execution_allowed": bool(payload.get("execution_allowed", False)),
+        "mutation_performed": bool(payload.get("mutation_performed", False)),
+        "requires_archive": bool(payload.get("requires_archive", True)),
+        "requires_confirm": bool(payload.get("requires_confirm", True)),
+        "shellforgeai_metadata_only": bool(
+            payload.get("safety", {}).get("shellforgeai_metadata_only", True)
+        ),
+    }
+
+    expected_fingerprint = _cleanup_plan_fingerprint(payload)
+    archive_path, archive_manifest = (
+        _find_cleanup_archive_for_plan(data_dir, plan_id) if plan_id else (None, None)
+    )
+    archive_block: dict[str, Any] = dict(empty_archive)
+    if archive_path is None or archive_manifest is None:
+        blockers.append("matching cleanup archive not found")
+    else:
+        archive_block["found"] = True
+        archive_block["path"] = str(archive_path)
+        archive_block["plan_id_matches"] = archive_manifest.get("plan_id") == plan_id
+        if not archive_block["plan_id_matches"]:
+            blockers.append("archive plan_id mismatch")
+        archive_block["plan_fingerprint_matches"] = (
+            archive_manifest.get("plan_fingerprint") == expected_fingerprint
         )
-        raise typer.Exit(code=1)
+        if not archive_block["plan_fingerprint_matches"]:
+            blockers.append("archive plan_fingerprint mismatch")
+        archive_block["execution_allowed"] = bool(archive_manifest.get("execution_allowed", False))
+        valid_archive, archive_errors, _files = _validate_cleanup_archive_file(archive_path)
+        archive_block["archive_validated"] = valid_archive
+        archive_block["checksums_ok"] = valid_archive
+        if not valid_archive:
+            blockers.append("archive validation failed")
+            warnings.extend(archive_errors)
+
+    existing_receipt = _find_cleanup_receipt_for_plan(data_dir, plan_id) if plan_id else None
+    execute_performed = existing_receipt is not None
+    if execute_performed:
+        warnings.append(f"cleanup already executed for this plan: {existing_receipt}")
+
+    ready = (not blockers) and not execute_performed
+    status = "ready" if ready else "blocked"
+    next_commands: dict[str, str] = {
+        "review_plan": f"shellforgeai audit cleanup validate {plan_path}",
+    }
+    if archive_path is not None:
+        next_commands["validate_archive"] = f"shellforgeai audit cleanup validate {archive_path}"
+    if ready and plan_id:
+        next_commands["execute"] = f"shellforgeai audit cleanup execute {plan_id} --confirm"
+
+    result = {
+        "schema_version": "1",
+        "status": status,
+        "plan": plan_block,
+        "archive": archive_block,
+        "readiness": {
+            "ready_for_execute_confirm": ready,
+            "execute_performed": execute_performed,
+            "blockers": blockers,
+            "warnings": warnings,
+        },
+        "safety": base_safety,
+        "next_commands": next_commands,
+        "warnings": warnings,
+    }
+    return (0 if ready else 1), result
+
+
+@audit_cleanup_app.command("execute-readiness")
+def audit_cleanup_execute_readiness(
+    ctx: typer.Context,
+    plan: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Read-only readiness check before `audit cleanup execute --confirm` (PR76).
+
+    Inspects the plan, the matching cleanup archive, archive validation, and
+    plan fingerprint. Creates no plans, no archives, no receipts. Deletes
+    nothing. The execute command still requires explicit `--confirm`.
+    """
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    exit_code, payload = _cleanup_execute_readiness_payload(data_dir, plan)
+
+    if json_output:
+        console.print_json(data=payload)
+        if exit_code != 0:
+            raise typer.Exit(code=exit_code)
+        return
+
+    plan_block = payload["plan"]
+    archive_block = payload["archive"]
+    readiness = payload["readiness"]
+    console.print("Cleanup execute readiness")
+    console.print("")
+    console.print("Plan:")
+    console.print(f"- id: {plan_block['id']}")
+    console.print(f"- path: {plan_block['path']}")
+    console.print(f"- category: {plan_block['category']}")
+    console.print(f"- candidates: {plan_block['candidate_count']}")
+    console.print(f"- bytes planned: {plan_block['bytes_planned']}")
+    console.print(f"- execution_allowed: {str(plan_block['execution_allowed']).lower()}")
+    console.print(f"- mutation_performed: {str(plan_block['mutation_performed']).lower()}")
+    console.print(f"- requires_archive: {str(plan_block['requires_archive']).lower()}")
+    console.print(f"- requires_confirm: {str(plan_block['requires_confirm']).lower()}")
+    console.print(
+        f"- shellforgeai_metadata_only: {str(plan_block['shellforgeai_metadata_only']).lower()}"
+    )
+    console.print("")
+    console.print("Archive:")
+    console.print(f"- found: {str(archive_block['found']).lower()}")
+    console.print(f"- path: {archive_block['path']}")
+    console.print(f"- archive_validated: {str(archive_block['archive_validated']).lower()}")
+    console.print(f"- checksums_ok: {str(archive_block['checksums_ok']).lower()}")
+    console.print(f"- plan_id matches: {str(archive_block['plan_id_matches']).lower()}")
+    console.print(
+        f"- plan_fingerprint matches: {str(archive_block['plan_fingerprint_matches']).lower()}"
+    )
+    console.print("")
+    console.print("Safety gates:")
+    console.print("- arbitrary paths: blocked")
+    console.print("- docker mutation: false")
+    console.print("- system mutation: false")
+    console.print("- natural-language execution: false")
+    console.print("- explicit confirm required: true")
+    console.print("")
+    console.print("Readiness:")
+    console.print(
+        f"- ready_for_execute_confirm: {str(readiness['ready_for_execute_confirm']).lower()}"
+    )
+    console.print(f"- execute_performed: {str(readiness['execute_performed']).lower()}")
+    if readiness["blockers"]:
+        console.print("")
+        console.print("Blockers:")
+        for b in readiness["blockers"]:
+            console.print(f"- {b}")
+        console.print("")
+        console.print("No deletion was performed.")
+    elif readiness["ready_for_execute_confirm"]:
+        console.print("")
+        console.print("Operator-only next command:")
+        console.print(payload["next_commands"]["execute"])
+        console.print("")
+        console.print("Warning:")
+        console.print(
+            "This command will delete the planned ShellForgeAI-owned metadata candidates."
+        )
+        console.print("Review the plan and archive before running execute.")
+
+    if exit_code != 0:
+        raise typer.Exit(code=exit_code)
+
+
+def _cleanup_report_payload(data_dir: Path, target: Path) -> tuple[int, dict[str, Any]]:
+    base_safety = {
+        "docker_mutation": False,
+        "system_mutation": False,
+        "arbitrary_paths_allowed": False,
+        "shellforgeai_metadata_only": True,
+    }
+    empty_receipt: dict[str, Any] = {
+        "id": None,
+        "path": None,
+        "kind": None,
+        "plan_id": None,
+        "archive_path": None,
+        "archive_validated": False,
+        "category": None,
+    }
+    empty_result = {"deleted": 0, "failed": 0, "bytes_removed": 0, "skipped": 0}
+    empty_validation = {
+        "receipt_valid": False,
+        "checksums_ok": False,
+        "plan_fingerprint_matched": False,
+    }
+
+    if _is_cleanup_archive_path(target):
+        return 1, {
+            "schema_version": "1",
+            "status": "error",
+            "receipt": empty_receipt,
+            "result": empty_result,
+            "safety": base_safety,
+            "validation": empty_validation,
+            "next_commands": [],
+            "warnings": [
+                f"expected cleanup receipt directory or cleanup-receipt.json,"
+                f" got archive file: {target}",
+                "to validate cleanup archives, run:"
+                " shellforgeai audit cleanup validate <archive.tar.gz>",
+            ],
+        }
+
     receipt_path = target / "cleanup-receipt.json" if target.is_dir() else target
+    if not receipt_path.is_file():
+        return 1, {
+            "schema_version": "1",
+            "status": "not_found",
+            "receipt": dict(empty_receipt, path=str(receipt_path)),
+            "result": empty_result,
+            "safety": base_safety,
+            "validation": empty_validation,
+            "next_commands": [],
+            "warnings": ["cleanup receipt not found"],
+        }
+
     try:
         payload = json.loads(receipt_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        return 1, {
+            "schema_version": "1",
+            "status": "error",
+            "receipt": dict(empty_receipt, path=str(receipt_path)),
+            "result": empty_result,
+            "safety": base_safety,
+            "validation": empty_validation,
+            "next_commands": [],
+            "warnings": [f"receipt JSON unreadable: {exc}"],
+        }
+
+    safety_in = payload.get("safety", {}) or {}
+    receipt_safety_ok = (
+        safety_in.get("shellforgeai_metadata_only") is True
+        and safety_in.get("arbitrary_path_deletion") is False
+        and safety_in.get("remediation_execution") is False
+    )
+
+    archive_validated = bool(payload.get("archive_validated", False))
+    plan_id = payload.get("plan_id")
+    plan_fingerprint_matched = False
+    if plan_id:
+        plan_path_str = payload.get("plan_path")
+        try:
+            plan_path = (
+                Path(plan_path_str)
+                if plan_path_str
+                else (_cleanup_plan_dir(data_dir, plan_id) / "cleanup-plan.json")
+            )
+            if plan_path.is_file():
+                plan_payload = json.loads(plan_path.read_text(encoding="utf-8"))
+                expected_fp = _cleanup_plan_fingerprint(plan_payload)
+                _ap, manifest = _find_cleanup_archive_for_plan(data_dir, plan_id)
+                if manifest is not None:
+                    plan_fingerprint_matched = manifest.get("plan_fingerprint") == expected_fp
+        except Exception:
+            plan_fingerprint_matched = False
+
+    deleted_count = (
+        int(payload.get("deleted_count"))
+        if isinstance(payload.get("deleted_count"), int)
+        else len(payload.get("deleted", []) or [])
+    )
+    failed_count = (
+        int(payload.get("failed_count"))
+        if isinstance(payload.get("failed_count"), int)
+        else len(payload.get("failed", []) or [])
+    )
+    skipped_count = int(payload.get("skipped_count", 0) or 0)
+    bytes_removed = int(payload.get("bytes_removed", 0) or 0)
+
+    return 0, {
+        "schema_version": "1",
+        "status": "ok",
+        "receipt": {
+            "id": payload.get("receipt_id"),
+            "path": str(receipt_path),
+            "kind": payload.get("kind"),
+            "plan_id": plan_id,
+            "archive_path": payload.get("archive_path"),
+            "archive_validated": archive_validated,
+            "category": payload.get("category"),
+        },
+        "result": {
+            "deleted": deleted_count,
+            "failed": failed_count,
+            "bytes_removed": bytes_removed,
+            "skipped": skipped_count,
+        },
+        "safety": base_safety,
+        "validation": {
+            "receipt_valid": receipt_safety_ok,
+            "checksums_ok": archive_validated,
+            "plan_fingerprint_matched": plan_fingerprint_matched,
+        },
+        "next_commands": [
+            "shellforgeai audit retention",
+            "shellforgeai audit cleanup review",
+            "shellforgeai doctor",
+        ],
+        "warnings": [],
+    }
+
+
+@audit_cleanup_app.command("report")
+def audit_cleanup_report(
+    ctx: typer.Context,
+    target: Path,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Summarize a cleanup execute receipt (PR76). Read-only."""
+    runtime = _ctx(ctx)
+    data_dir = Path(runtime.session.data_dir)
+    exit_code, payload = _cleanup_report_payload(data_dir, target)
+
+    if json_output:
+        console.print_json(data=payload)
+        if exit_code != 0:
+            raise typer.Exit(code=exit_code)
+        return
+
+    if payload["status"] != "ok":
         console.print("Cleanup report failed:")
-        console.print("- expected cleanup receipt directory or cleanup-receipt.json")
+        for w in payload["warnings"]:
+            console.print(f"- {w}")
         console.print(f"- got: {target}")
-        raise typer.Exit(code=1) from None
-    console.print("Cleanup report:")
-    console.print(f"- receipt: {receipt_path}")
-    console.print(f"- plan_id: {payload.get('plan_id')}")
-    console.print(f"- deleted: {len(payload.get('deleted', []))}")
-    console.print(f"- failed: {len(payload.get('failed', []))}")
-    console.print(f"- bytes_removed: {payload.get('bytes_removed', 0)}")
-    console.print("- safety: shellforgeai_metadata_only=true")
+        if exit_code != 0:
+            raise typer.Exit(code=exit_code)
+        return
+
+    receipt = payload["receipt"]
+    result = payload["result"]
+    validation = payload["validation"]
+    console.print("Cleanup report (execution)")
+    console.print("")
+    console.print("Receipt:")
+    console.print(f"- id: {receipt['id']}")
+    console.print(f"- kind: {receipt['kind']}")
+    console.print(f"- plan_id: {receipt['plan_id']}")
+    console.print(f"- archive_validated: {str(receipt['archive_validated']).lower()}")
+    console.print(f"- category: {receipt['category']}")
+    console.print("")
+    console.print("Result:")
+    console.print(f"- deleted: {result['deleted']}")
+    console.print(f"- failed: {result['failed']}")
+    console.print(f"- bytes removed: {result['bytes_removed']}")
+    console.print(f"- skipped: {result['skipped']}")
+    console.print("")
+    console.print("Safety:")
+    console.print("- docker_mutation: false")
+    console.print("- system_mutation: false")
+    console.print("- arbitrary_paths_allowed: false")
+    console.print("- shellforgeai_metadata_only: true")
+    console.print("")
+    console.print("Validation:")
+    console.print(f"- receipt validation: {'passed' if validation['receipt_valid'] else 'failed'}")
+    console.print(
+        f"- archive fingerprint matched: {str(validation['plan_fingerprint_matched']).lower()}"
+    )
+    console.print("- cleanup scope: ShellForgeAI metadata only")
+    console.print("")
+    console.print("Follow-up:")
+    for cmd in payload["next_commands"]:
+        console.print(f"- {cmd}")
 
 
 @audit_app.command("prune")

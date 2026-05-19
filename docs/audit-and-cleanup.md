@@ -185,6 +185,47 @@ strict (`schema_version="1"`, `kind="cleanup_prepare_result"`) and pins
 archive validation fails, `decision.ready_for_operator_decision` is
 `false` and the execute command is not surfaced as approved.
 
+## Cleanup execute readiness and report (PR76)
+
+PR76 adds two read-only commands that bracket the final
+`audit cleanup execute --confirm` step:
+
+```
+shellforgeai audit cleanup execute-readiness <plan-id-or-path>
+shellforgeai audit cleanup execute-readiness <plan-id-or-path> --json
+shellforgeai audit cleanup report <receipt-path-or-dir>
+shellforgeai audit cleanup report <receipt-path-or-dir> --json
+```
+
+`execute-readiness` re-checks the PR71 gates **before** the operator
+runs `execute --confirm`:
+
+- plan exists, `kind=cleanup_plan`, and validates as a cleanup plan,
+- `execution_allowed=false`, `mutation_performed=false`,
+  `requires_archive=true`, `requires_confirm=true`,
+  `safety.shellforgeai_metadata_only=true`,
+- a matching cleanup archive exists, validates, and carries the
+  plan fingerprint and `plan_id`,
+- every candidate path resolves under an allowed ShellForgeAI metadata
+  root,
+- no existing receipt already records execution of this plan.
+
+`execute-readiness` is strictly read-only: it creates no plans,
+archives, or receipts, and deletes nothing. When ready, the JSON
+`next_commands.execute` field is the only place the explicit
+`execute <plan-id> --confirm` invocation is surfaced — and that command
+still goes through the full PR71 enforcement at execute time.
+
+`audit cleanup report` summarizes an execute receipt: plan/archive
+linkage, deleted/failed/bytes/skipped counters, the receipt safety
+block, and a fingerprint cross-check against the matching archive. The
+final operator decision workflow is:
+
+```
+review -> prepare -> execute-readiness -> operator approval ->
+execute --confirm -> report
+```
+
 ## Cleanup (PR55 + PR71 hardened gate)
 
 The cleanup lane is the only one that may delete ShellForgeAI-owned

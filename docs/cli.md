@@ -532,6 +532,33 @@ Guardrails:
 - `audit cleanup execute` also refuses unless a matching, valid cleanup archive exists for the same plan fingerprint.
 - Ask remains report-only for metadata hygiene; natural-language cleanup execution requests are refused.
 
+### Cleanup execute readiness and report (PR76)
+
+`audit cleanup execute-readiness <plan-id-or-path>` is a read-only
+readiness check that answers whether the operator may run
+`audit cleanup execute <plan> --confirm` safely. It re-checks the PR71
+gates (plan kind/safety, matching cleanup archive, archive validation,
+plan fingerprint, allowed-root candidate paths) and emits an
+operator-only `--confirm` command in `next_commands.execute` when ready.
+
+```bash
+shellforgeai audit cleanup execute-readiness <plan-id-or-path>
+shellforgeai audit cleanup execute-readiness <plan-id-or-path> --json
+```
+
+`execute-readiness` creates no plans, no archives, no receipts, and
+deletes nothing. `--json` emits strict JSON with `schema_version="1"`
+and a `safety` block pinning `read_only=true`, `cleanup_executed=false`,
+`deletion_performed=false`, `arbitrary_paths_allowed=false`,
+`docker_mutation=false`, `system_mutation=false`,
+`natural_language_execution=false`, `explicit_confirm_required=true`.
+
+`audit cleanup report <receipt-path-or-dir>` summarizes an execute
+receipt (plan/archive linkage, deleted/failed/bytes/skipped, receipt
+safety, fingerprint cross-check) and supports `--json`. It is
+read-only. Cleanup execute still requires plan + matching archive +
+archive validation + matching plan fingerprint + `--confirm`.
+
 ### Cleanup prepare workflow (PR75)
 
 `audit cleanup prepare` is a guided pre-execution decision packet. It runs

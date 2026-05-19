@@ -300,6 +300,31 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Execute results/receipts include plan/archive linkage, candidate/deleted/skipped/failed counters, and explicit safety flags.
 - Scope remains ShellForgeAI-owned metadata only; no Docker/Compose/system mutation and no natural-language cleanup execution.
 
+## PR76 milestone: cleanup execute readiness and post-execute report
+
+- Added read-only `shellforgeai audit cleanup execute-readiness
+  <plan-id-or-path>` (and `--json`) that re-checks the PR71 gates
+  before the operator runs `cleanup execute --confirm`: plan kind and
+  safety fields, matching cleanup archive, archive validation, matching
+  plan fingerprint, allowed-root candidate paths. When ready it emits
+  an operator-only `next_commands.execute` invocation that still
+  includes `--confirm`; when blocked it lists the blockers cleanly.
+- Hardened `shellforgeai audit cleanup report
+  <cleanup-receipt-or-dir>` with a richer human summary
+  (deleted/failed/bytes/skipped, plan/archive linkage, receipt safety,
+  fingerprint cross-check) and a strict `--json` output.
+- Both commands are strictly read-only: they create no plans, no
+  archives, no receipts; delete nothing; never touch Docker/Compose/
+  services/packages/firewall/network/system; and never accept
+  natural-language cleanup execution. JSON safety blocks pin
+  `read_only=true`, `cleanup_executed=false`, `deletion_performed=false`,
+  `arbitrary_paths_allowed=false`, `docker_mutation=false`,
+  `system_mutation=false`, `natural_language_execution=false`,
+  `explicit_confirm_required=true`.
+- PR55/PR71 cleanup execute gates are unchanged. `cleanup execute
+  <plan> --confirm` with matching validated archive and matching plan
+  fingerprint remains the sole deletion path.
+
 ## PR75 milestone: /data cleanup prepare workflow
 
 - Added `shellforgeai audit cleanup prepare --category <cat>
