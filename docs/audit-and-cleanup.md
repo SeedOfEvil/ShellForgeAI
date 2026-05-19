@@ -164,6 +164,17 @@ The workflow distinguishes three stages:
   PR71 gates (matching archive, matching plan fingerprint, archive
   validation, `--confirm`, receipt validation) still apply unchanged.
 
+`audit cleanup validate` accepts three inputs:
+- a `cleanup-plan.json` file — checks cleanup-plan semantics
+  (`kind=cleanup_plan`, `execution_allowed=false`,
+  `mutation_performed=false`, `requires_archive=true`,
+  `requires_confirm=true`, `safety.shellforgeai_metadata_only=true`,
+  candidate paths free of `..` traversal),
+- a `cleanup_archive_*.tar.gz` archive — checks archive members,
+  manifest, and the dry-run safety invariants,
+- a cleanup receipt directory or `cleanup-receipt.json` — checks the
+  post-execute receipt safety block.
+
 `prepare` defaults to `--category exports` (the safest first lane).
 Unsupported or path-traversal category strings are refused with a non-
 zero exit before any plan or archive is created. The `--json` output is

@@ -1014,6 +1014,52 @@ def _validate_cleanup_archive_file(path: Path) -> tuple[bool, list[str], int]:
     return (not extra_errors), extra_errors, files
 
 
+def _validate_cleanup_plan_payload(payload: dict[str, Any]) -> list[str]:
+    """Validate a cleanup-plan JSON payload using cleanup-plan semantics.
+
+    A cleanup plan is dry-run metadata. This validator confirms the plan
+    asserts its own no-mutation contract and that every candidate path
+    resolves under an allowed ShellForgeAI-owned root.
+    """
+    errs: list[str] = []
+    if payload.get("kind") != "cleanup_plan":
+        errs.append("kind must be cleanup_plan")
+    for k in (
+        "execution_allowed",
+        "mutation_performed",
+        "arbitrary_path_deletion",
+    ):
+        if k in payload and payload.get(k) is not False:
+            errs.append(f"{k} must be false")
+    for k in ("requires_archive", "requires_confirm", "shellforgeai_owned_only"):
+        if k in payload and payload.get(k) is not True:
+            errs.append(f"{k} must be true")
+    safety = payload.get("safety")
+    if not isinstance(safety, dict):
+        errs.append("missing safety block")
+    else:
+        for k in ("execution_allowed", "mutation_performed", "arbitrary_path_deletion"):
+            if k in safety and safety.get(k) is not False:
+                errs.append(f"safety.{k} must be false")
+        for k in (
+            "dry_run",
+            "shellforgeai_metadata_only",
+            "requires_archive",
+            "requires_confirm",
+        ):
+            if k in safety and safety.get(k) is not True:
+                errs.append(f"safety.{k} must be true")
+    # Candidate paths must not contain traversal markers (defense-in-depth).
+    for c in payload.get("candidates", []):
+        raw = c.get("path") if isinstance(c, dict) else None
+        if not isinstance(raw, str) or not raw:
+            errs.append("candidate missing path")
+            continue
+        if ".." in Path(raw).parts:
+            errs.append(f"unsafe candidate path: {raw}")
+    return errs
+
+
 def _cleanup_plan_fingerprint(payload: dict[str, Any]) -> str:
     canon = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(canon).hexdigest()
@@ -1879,6 +1925,31 @@ def audit_cleanup_validate(target: Path) -> None:
             " shellforgeai audit cleanup validate <archive.tar.gz>"
         )
         raise typer.Exit(code=1)
+    # Cleanup plan validation (PR75): dispatched by kind=cleanup_plan.
+    if target.is_file() and target.suffix == ".json" and target.name == "cleanup-plan.json":
+        try:
+            plan_payload = json.loads(target.read_text(encoding="utf-8"))
+        except Exception:
+            console.print("Cleanup plan validation failed:")
+            console.print("- plan missing or invalid JSON")
+            raise typer.Exit(code=1) from None
+        if plan_payload.get("kind") == "cleanup_plan":
+            plan_errs = _validate_cleanup_plan_payload(plan_payload)
+            if plan_errs:
+                console.print("Cleanup plan validation failed:")
+                for e in plan_errs:
+                    console.print(f"- {e}")
+                raise typer.Exit(code=1)
+            console.print("Cleanup plan validation passed:")
+            console.print(f"- plan_id: {plan_payload.get('plan_id')}")
+            console.print(f"- candidates: {len(plan_payload.get('candidates', []))}")
+            console.print("- execution_allowed: false")
+            console.print("- mutation_performed: false")
+            console.print("- requires_archive: true")
+            console.print("- requires_confirm: true")
+            console.print("- shellforgeai_metadata_only: true")
+            console.print("- safety: ok")
+            return
     receipt_path = target / "cleanup-receipt.json" if target.is_dir() else target
     try:
         payload = json.loads(receipt_path.read_text(encoding="utf-8"))

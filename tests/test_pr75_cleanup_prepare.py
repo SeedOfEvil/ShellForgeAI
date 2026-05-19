@@ -289,3 +289,158 @@ def test_prepare_keep_latest_filters_candidates(tmp_path: Path, monkeypatch) -> 
     assert payload["plan"]["candidate_count"] == 4
     # files still on disk (not deleted)
     assert len(list((tmp_path / "exports").iterdir())) == 6
+
+
+# --- next_commands wiring (PR75 blocker fix) ------------------------------
+
+
+def test_prepare_next_commands_review_plan_present(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _seed_exports(tmp_path)
+    out = runner.invoke(app, ["audit", "cleanup", "prepare", "--category", "exports", "--json"])
+    payload = json.loads(out.stdout)
+    nc = payload["next_commands"]
+    assert "review_plan" in nc
+    assert "validate_archive" in nc
+    assert "execute_if_approved" in nc
+
+
+def test_prepare_review_plan_command_actually_works(tmp_path: Path, monkeypatch) -> None:
+    """The review_plan next command must succeed against the generated plan."""
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _seed_exports(tmp_path)
+    out = runner.invoke(app, ["audit", "cleanup", "prepare", "--category", "exports", "--json"])
+    payload = json.loads(out.stdout)
+    cmd = payload["next_commands"]["review_plan"]
+    assert cmd[0] == "shellforgeai"
+    # Invoke the actual CLI (drop the "shellforgeai" head).
+    res = runner.invoke(app, cmd[1:])
+    assert res.exit_code == 0, res.stdout
+
+
+def test_prepare_validate_archive_command_actually_works(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _seed_exports(tmp_path)
+    out = runner.invoke(app, ["audit", "cleanup", "prepare", "--category", "exports", "--json"])
+    payload = json.loads(out.stdout)
+    cmd = payload["next_commands"]["validate_archive"]
+    res = runner.invoke(app, cmd[1:])
+    assert res.exit_code == 0, res.stdout
+
+
+def test_prepare_execute_command_requires_confirm(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _seed_exports(tmp_path)
+    out = runner.invoke(app, ["audit", "cleanup", "prepare", "--category", "exports", "--json"])
+    payload = json.loads(out.stdout)
+    cmd = payload["next_commands"]["execute_if_approved"]
+    assert "--confirm" in cmd
+    # Without --confirm the execute command still refuses (PR71 regression).
+    plan_id = payload["plan"]["id"]
+    res = runner.invoke(app, ["audit", "cleanup", "execute", plan_id])
+    assert res.exit_code == 1
+    assert "confirm" in res.stdout.lower()
+
+
+# --- cleanup plan validation (Option A) -----------------------------------
+
+
+def _generate_plan(tmp_path: Path, monkeypatch) -> Path:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _seed_exports(tmp_path)
+    out = runner.invoke(app, ["audit", "cleanup", "prepare", "--category", "exports", "--json"])
+    payload = json.loads(out.stdout)
+    return Path(payload["plan"]["path"])
+
+
+def test_cleanup_validate_passes_for_generated_plan(tmp_path: Path, monkeypatch) -> None:
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 0, out.stdout
+    assert "Cleanup plan validation passed" in out.stdout
+    assert "execution_allowed: false" in out.stdout
+    assert "mutation_performed: false" in out.stdout
+
+
+def test_cleanup_validate_plan_rejects_execution_allowed_true(tmp_path: Path, monkeypatch) -> None:
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload["execution_allowed"] = True
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 1
+    assert "execution_allowed must be false" in out.stdout
+
+
+def test_cleanup_validate_plan_rejects_mutation_performed_true(tmp_path: Path, monkeypatch) -> None:
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload["mutation_performed"] = True
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 1
+    assert "mutation_performed must be false" in out.stdout
+
+
+def test_cleanup_validate_plan_rejects_requires_archive_false(tmp_path: Path, monkeypatch) -> None:
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload["requires_archive"] = False
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 1
+    assert "requires_archive must be true" in out.stdout
+
+
+def test_cleanup_validate_plan_rejects_requires_confirm_false(tmp_path: Path, monkeypatch) -> None:
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload["requires_confirm"] = False
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 1
+    assert "requires_confirm must be true" in out.stdout
+
+
+def test_cleanup_validate_plan_rejects_safety_metadata_only_false(
+    tmp_path: Path, monkeypatch
+) -> None:
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload["safety"]["shellforgeai_metadata_only"] = False
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 1
+    assert "shellforgeai_metadata_only must be true" in out.stdout
+
+
+def test_cleanup_validate_plan_rejects_unsafe_candidate_path(tmp_path: Path, monkeypatch) -> None:
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload["candidates"].append(
+        {
+            "path": "../../etc/passwd",
+            "category": "exports",
+            "bytes": 1,
+            "age_days": 0,
+            "reason": "x",
+            "safe_to_delete": True,
+            "requires_archive_first": False,
+        }
+    )
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 1
+    assert "unsafe candidate path" in out.stdout
+
+
+def test_cleanup_validate_plan_does_not_require_remediation_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Plan validator must not require post-execute receipt fields."""
+    plan_path = _generate_plan(tmp_path, monkeypatch)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    # The plan has no remediation_execution / docker_mutation keys at top level.
+    assert "remediation_execution" not in payload
+    out = runner.invoke(app, ["audit", "cleanup", "validate", str(plan_path)])
+    assert out.exit_code == 0, out.stdout
