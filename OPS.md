@@ -1014,3 +1014,31 @@ delete (ask routing refuses and prints the explicit guarded CLI). Do
 not touch `/data` paths outside ShellForgeAI's owned roots; the cleanup
 lane enforces this and any path resolving outside is refused. PR74 adds
 review-only reporting; it does not loosen the PR71 deletion gates.
+
+## PR75 Docker01 cleanup prepare workflow
+
+When PR74 review says `exports` is the safest first lane and the
+operator wants a decision packet without writing five commands by hand,
+use `audit cleanup prepare`:
+
+1. `shellforgeai audit cleanup review` — confirm severity, safest first
+   lane, and that gates are understood.
+2. `shellforgeai audit cleanup prepare --category exports --max-age-days
+   7 --keep-latest 5` — creates the plan, creates the matching archive,
+   validates the archive, and prints the decision packet. No deletion.
+3. Inspect the plan path and candidates list printed by `prepare`.
+4. `shellforgeai audit cleanup validate <cleanup-archive.tar.gz>` —
+   re-check the archive on its own if desired.
+5. Stop here for Hector/operator approval. `prepare` will not execute,
+   and the printed execute command is marked operator-approved only.
+6. Only if explicitly approved:
+   `shellforgeai audit cleanup execute <plan-id> --confirm`. PR71 gates
+   (matching archive, matching plan fingerprint, validation, `--confirm`)
+   still all apply.
+7. `shellforgeai audit cleanup validate <cleanup-receipt-or-dir>` —
+   verify the post-execute receipt is well-formed and safety-clean.
+
+`prepare` never broadens cleanup beyond ShellForgeAI-owned metadata,
+never accepts arbitrary paths, refuses unknown/path-traversal categories
+before creating anything, and never invokes Docker/Compose/services or
+the apply/mission paths.

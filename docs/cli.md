@@ -532,6 +532,37 @@ Guardrails:
 - `audit cleanup execute` also refuses unless a matching, valid cleanup archive exists for the same plan fingerprint.
 - Ask remains report-only for metadata hygiene; natural-language cleanup execution requests are refused.
 
+### Cleanup prepare workflow (PR75)
+
+`audit cleanup prepare` is a guided pre-execution decision packet. It runs
+the existing read-only review, creates a dry-run cleanup plan via the
+existing PR55 plan path, creates the matching archive via the existing
+PR71 archive path, validates the archive, and **stops before execute**.
+It never deletes candidate files and never invokes `cleanup execute`.
+
+```bash
+shellforgeai audit cleanup prepare --category exports --max-age-days 7 --keep-latest 5
+shellforgeai audit cleanup prepare --category exports --max-age-days 7 --keep-latest 5 --json
+```
+
+The text output prints the review summary, the plan id/path/fingerprint,
+the archive path with `archive_validated`/`checksums`, a `Decision`
+block (`prepared_for_review`, `ready_for_operator_decision`,
+`execute_performed: false`, `deletion_performed: false`) and the exact
+execute command marked **operator-approved only**. `--json` emits strict
+JSON with `schema_version="1"`, `kind="cleanup_prepare_result"`, and a
+`safety` block that pins `cleanup_executed=false`,
+`mutation_performed=false`, `deletion_performed=false`,
+`arbitrary_paths_allowed=false`, `docker_mutation=false`,
+`system_mutation=false`. Category defaults to `exports` and is validated
+against the cleanup-supported allowlist (`exports`, `audit-exports`,
+`apply-bundles`, `actions`, `artifacts`); unknown or path-traversal
+categories are refused with non-zero exit and no plan/archive is created.
+
+Prepare creates plan and archive metadata only — the only path that
+deletes is still `audit cleanup execute <plan> --confirm`, which keeps
+the full PR71 gate set.
+
 ### Cleanup review pack (PR74)
 
 `audit cleanup review` is a read-only operator decision aid. It answers

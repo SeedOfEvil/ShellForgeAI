@@ -137,6 +137,54 @@ before authoring a plan: `cleanup_plan`, `matching_archive`,
 `receipt_validation`. Deletion still requires the explicit
 `plan → archive → validate → execute --confirm` sequence below.
 
+## Cleanup prepare workflow (PR75)
+
+`audit cleanup prepare` guides an operator through a complete safe
+pre-execution sequence in one command:
+
+1. read current cleanup review/retention posture,
+2. create a dry-run cleanup plan using the existing plan path,
+3. create the matching archive using the existing archive path,
+4. validate the archive (members + manifest + fingerprint),
+5. emit a decision packet,
+6. **stop before execute**,
+7. print the exact execute command as operator-approved only.
+
+```
+shellforgeai audit cleanup prepare --category exports --max-age-days 7 --keep-latest 5
+shellforgeai audit cleanup prepare --category exports --max-age-days 7 --keep-latest 5 --json
+```
+
+The workflow distinguishes three stages:
+
+- `audit cleanup review` — read-only; no plan, no archive, no deletion.
+- `audit cleanup prepare` — creates plan + archive metadata, validates
+  archive, no deletion, no execute.
+- `audit cleanup execute <plan> --confirm` — the only deletion path; the
+  PR71 gates (matching archive, matching plan fingerprint, archive
+  validation, `--confirm`, receipt validation) still apply unchanged.
+
+`audit cleanup validate` accepts three inputs:
+- a `cleanup-plan.json` file — checks cleanup-plan semantics
+  (`kind=cleanup_plan`, `execution_allowed=false`,
+  `mutation_performed=false`, `requires_archive=true`,
+  `requires_confirm=true`, `safety.shellforgeai_metadata_only=true`,
+  candidate paths free of `..` traversal),
+- a `cleanup_archive_*.tar.gz` archive — checks archive members,
+  manifest, and the dry-run safety invariants,
+- a cleanup receipt directory or `cleanup-receipt.json` — checks the
+  post-execute receipt safety block.
+
+`prepare` defaults to `--category exports` (the safest first lane).
+Unsupported or path-traversal category strings are refused with a non-
+zero exit before any plan or archive is created. The `--json` output is
+strict (`schema_version="1"`, `kind="cleanup_prepare_result"`) and pins
+`safety.cleanup_executed=false`, `safety.mutation_performed=false`,
+`safety.deletion_performed=false`, `safety.arbitrary_paths_allowed=false`,
+`safety.docker_mutation=false`, `safety.system_mutation=false`. If
+archive validation fails, `decision.ready_for_operator_decision` is
+`false` and the execute command is not surfaced as approved.
+
 ## Cleanup (PR55 + PR71 hardened gate)
 
 The cleanup lane is the only one that may delete ShellForgeAI-owned

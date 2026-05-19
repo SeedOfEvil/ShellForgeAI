@@ -259,6 +259,15 @@ The status safety block is invariant: `apply_mode=validation-only`, `execution_a
   matching validated archive, matching plan fingerprint, candidate paths
   inside allowed `<data_dir>` roots, and receipt validation are all
   still required before any deletion.
+- `shellforgeai audit cleanup prepare` (PR75) is a guided pre-execution
+  workflow. It creates ShellForgeAI-owned plan and archive metadata, runs
+  the existing archive validation, and emits a decision packet — then
+  stops. It never deletes candidate files, never calls cleanup execute,
+  never touches Docker/Compose/services/packages/firewall/network/system,
+  and never accepts natural-language execution. Unknown or path-traversal
+  category values are refused before any plan/archive is created.
+  Cleanup execute remains separate and still requires `--confirm` plus
+  the full PR71 archive/fingerprint/validation gate.
 
 ## PR46 — first guarded mutation gate
 
