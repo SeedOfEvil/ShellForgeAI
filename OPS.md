@@ -1042,3 +1042,34 @@ use `audit cleanup prepare`:
 never accepts arbitrary paths, refuses unknown/path-traversal categories
 before creating anything, and never invokes Docker/Compose/services or
 the apply/mission paths.
+
+## PR76 Docker01 cleanup final-decision sequence
+
+PR76 adds an explicit readiness gate and a post-execute report between
+`prepare` and the eventual `execute --confirm`. The full Docker01
+sequence is:
+
+1. `shellforgeai audit cleanup review` — confirm severity and the
+   safest first lane.
+2. `shellforgeai audit cleanup prepare --category exports
+   --max-age-days 7 --keep-latest 5` — produce plan + archive.
+3. `shellforgeai audit cleanup execute-readiness <plan-id>` — re-check
+   the PR71 gates (plan kind/safety, matching archive, archive
+   validation, plan fingerprint, allowed-root candidate paths). This is
+   read-only and creates nothing.
+4. Manual review of the plan candidate list and the archive
+   manifest/fingerprint as printed by `execute-readiness`.
+5. Only if Hector approves and `ready_for_execute_confirm=true`:
+   `shellforgeai audit cleanup execute <plan-id> --confirm`. PR71
+   archive/fingerprint/validation/confirm gates still all apply at
+   execute time.
+6. `shellforgeai audit cleanup report <cleanup-receipt-or-dir>` —
+   summarize the execute receipt (deleted/failed/bytes/skipped, safety
+   block, fingerprint cross-check). Also read-only.
+7. `shellforgeai doctor` and `shellforgeai audit retention` to confirm
+   post-execute posture.
+
+`execute-readiness` and `report` never delete anything, never create
+plans/archives/receipts, never touch Docker/Compose/services/packages/
+firewall/network/system, and never accept natural-language cleanup
+execution.
