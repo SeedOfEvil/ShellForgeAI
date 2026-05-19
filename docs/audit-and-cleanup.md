@@ -95,6 +95,48 @@ classifies state and suggests commands.
 can exist for days or weeks; PR59 reference resolution warns when
 implicit references resolve to stale candidates. Prefer explicit IDs.
 
+## Cleanup review (PR74)
+
+`audit cleanup review` is a read-only operator decision aid that runs
+before any `audit cleanup plan`. It answers:
+
+- What is taking space in `<data_dir>`?
+- Which categories are safe cleanup candidates?
+- Which cleanup plan command should I run next?
+- What is the safest narrow lane to start with (default: `exports`)?
+- What PR71 gates still prevent deletion?
+
+```
+shellforgeai audit cleanup review
+shellforgeai audit cleanup review --json
+shellforgeai audit cleanup review --category exports
+shellforgeai audit cleanup review --top 10
+```
+
+`audit cleanup review` differs from `audit cleanup plan`/`archive`/
+`execute`:
+
+- It never creates `cleanup_plans/` entries, never writes archives,
+  never writes receipts, never deletes files.
+- It does not call `docker compose`, does not touch services, packages,
+  firewall, or system state.
+- `--json` emits strict, parseable JSON only — no text before/after.
+- The `safety` block pins `review_only=true`, `cleanup_executed=false`,
+  `archive_created=false`, `mutation_performed=false`,
+  `arbitrary_paths_allowed=false`, `docker_mutation=false`,
+  `system_mutation=false`, `natural_language_execution=false`.
+- Recommended first lane defaults to `exports` because exports are
+  reviewable artifact bundles already supported by `audit cleanup plan`.
+  Categories not supported by cleanup planning (`approvals`,
+  `audit-events`, `indexes`) are marked `cleanup_supported=false` and
+  never recommended as executable lanes.
+
+The review then restates the PR71 deletion gates so operators see them
+before authoring a plan: `cleanup_plan`, `matching_archive`,
+`archive_validation`, `matching_plan_fingerprint`, `explicit_confirm`,
+`receipt_validation`. Deletion still requires the explicit
+`plan → archive → validate → execute --confirm` sequence below.
+
 ## Cleanup (PR55 + PR71 hardened gate)
 
 The cleanup lane is the only one that may delete ShellForgeAI-owned

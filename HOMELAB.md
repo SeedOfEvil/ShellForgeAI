@@ -115,6 +115,27 @@ Before any change-touching exercise on Docker01:
 5. Tear down disposable stacks afterwards
    (`scripts/pr67_disposable_compose_harness.sh down`).
 
+## Current Docker01 housekeeping note (PR74 baseline)
+
+Doctor on Docker01 has been reporting `metadata hygiene = critical`
+from accumulated historical artifacts (recent QA: ~12.8 MiB metadata,
+~1534 items, root disk ~11G / 16G used). This is not an emergency.
+The PR74 review pack is the right entry point:
+
+```
+shellforgeai audit cleanup review
+shellforgeai audit cleanup review --json
+```
+
+The review is read-only — no plans, archives, receipts, or deletions
+are created. Use it to choose a narrow first lane (default
+recommendation: `exports`) before authoring any
+`audit cleanup plan`. The full Docker01 housekeeping runbook
+(review → plan → archive → validate → execute --confirm → validate
+receipt) lives in `OPS.md` under "PR74 Docker01 housekeeping runbook
+(read-only review first)". No real cleanup runs unless Hector
+explicitly steps through the gated CLI sequence.
+
 ## What this file does not contain
 
 - No secrets, tokens, API keys, or credentials.

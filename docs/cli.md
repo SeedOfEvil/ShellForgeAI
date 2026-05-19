@@ -532,6 +532,34 @@ Guardrails:
 - `audit cleanup execute` also refuses unless a matching, valid cleanup archive exists for the same plan fingerprint.
 - Ask remains report-only for metadata hygiene; natural-language cleanup execution requests are refused.
 
+### Cleanup review pack (PR74)
+
+`audit cleanup review` is a read-only operator decision aid. It answers
+"what is taking space?", "what is the safest narrow lane to start with?",
+"which cleanup plan command should I run next?", and "what gates still
+prevent deletion?" without creating plans, archives, or receipts and
+without deleting anything.
+
+```bash
+shellforgeai audit cleanup review
+shellforgeai audit cleanup review --json
+shellforgeai audit cleanup review --category exports
+shellforgeai audit cleanup review --top 10
+```
+
+Output summarizes the total metadata footprint, groups categories by
+size, marks each category as `cleanup_supported` (exports, audit-exports,
+apply-bundles, actions, artifacts) or report-only (approvals,
+audit-events, indexes), recommends `exports` as the safest first lane
+when it has items, lists the PR71 deletion gates that still apply, and
+prints the next safe dry-run command. `--json` emits strict JSON with
+`schema_version="1"` and a `safety` block that pins `review_only=true`,
+`cleanup_executed=false`, `archive_created=false`,
+`mutation_performed=false`, `arbitrary_paths_allowed=false`,
+`docker_mutation=false`, `system_mutation=false`, and
+`natural_language_execution=false`. Review never broadens cleanup scope;
+the gated PR55/PR71 sequence remains the only deletion path.
+
 ## Compose ownership context (PR56)
 
 Read-only Compose awareness from Docker container labels.

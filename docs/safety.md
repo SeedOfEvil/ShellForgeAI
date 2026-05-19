@@ -249,6 +249,16 @@ The status safety block is invariant: `apply_mode=validation-only`, `execution_a
 - No Docker/Compose/system cleanup is performed by hygiene, retention, or cleanup review commands.
 - `shellforgeai audit prune` remains dry-run by default.
 - Deletion still requires explicit `--execute --confirm` (PR46).
+- `shellforgeai audit cleanup review` (PR74) is strictly read-only: it
+  summarizes the footprint, marks supported vs report-only categories,
+  recommends a conservative `--max-age-days 7 --keep-latest 5` dry-run
+  plan for `exports`, and restates the PR71 deletion gates. It never
+  creates plans/archives/receipts, never deletes, never touches Docker
+  or the system, and never accepts natural-language execution.
+- The PR55/PR71 cleanup execute gates are unchanged: `--confirm`,
+  matching validated archive, matching plan fingerprint, candidate paths
+  inside allowed `<data_dir>` roots, and receipt validation are all
+  still required before any deletion.
 
 ## PR46 — first guarded mutation gate
 
