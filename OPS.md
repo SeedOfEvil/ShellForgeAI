@@ -1125,42 +1125,75 @@ not change that scope, does not add arbitrary path deletion, does not
 mutate Docker/Compose/services/packages/firewall/network/system, and
 does not let natural-language `ask` flows execute cleanup.
 
-## PR79 safe operator command pass
+## PR79 / PR80 safe operator command pass
 
 After a deploy / image sync / restart, run the safe command coverage
-harness to confirm the read-only command surface still works:
+harness to confirm the read-only command surface still works.
+
+### Post-deploy smoke workflow
+
+Recommended sequence (every step is read-only):
+
+1. `shellforgeai self-test commands --profile quick` — fast, env-independent
+   smoke. Reliably reports `ok` on a fresh container.
+2. `shellforgeai self-test commands --profile standard --json` — broad
+   coverage with a parseable payload. May report `warn` when optional
+   artifacts (latest runbook, compose target) are not yet present —
+   that is expected and is not a command failure.
+3. `shellforgeai doctor` — final sanity check on the runtime.
+4. `shellforgeai ops status` — operations status board.
+
+For CI / strict pipelines that should not tolerate optional-artifact
+warnings:
 
 ```
-shellforgeai self-test commands
-shellforgeai self-test commands --json
+shellforgeai self-test commands --profile standard --fail-on-warn --json
 ```
 
-The harness exercises `version`, `doctor`, `model doctor`, `ops status`,
-`audit retention`, `audit cleanup review`, the
-`audit cleanup execute-readiness <missing-plan>` and
-`audit cleanup report <missing-receipt>` negative refusal paths,
-`compose inspect / env-check / env-contract / env-plan` against the
-local target, `validate-runbook --latest`, two locally-routed
-`ask` smokes, and a deterministic ask-mutation refusal-routing check.
+`--fail-on-warn` exits non-zero on `warn` and adds `ci_status: "failed_on_warn"`
+to the JSON payload. Warnings remain warnings — the flag does not convert
+them into runtime failures.
 
-Operator expectations:
+### Profiles
+
+- `quick` — cheap, env-independent. Best first gate after a deploy.
+  Runs `version`, `doctor`, `model doctor`, `tools list`, `ops status`,
+  and the ask-mutation refusal smoke. Avoids artifact-dependent checks.
+- `standard` (default) — PR79 coverage: cleanup review / readiness /
+  report negative paths, compose env-check / env-contract / env-plan,
+  validate-runbook --latest, locally-routed ask smokes, and the
+  ask-mutation refusal smoke.
+- `full` — `standard` plus `audit list`, `audit timeline --latest --json`,
+  and `compose list --json`. May warn more often when those artifacts
+  are absent; still strictly read-only.
+
+### Operator expectations
 
 - `status: ok` — every check passed.
-- `status: warn` — every check passed but at least one was skipped
-  (e.g. no runbook artifact on the host, compose target absent from
-  the local Docker inventory). Read the `(reason)` next to each
-  `SKIP` line; do not treat skips as failures.
+- `status: warn` — every check passed but at least one was warned or
+  skipped because an optional artifact is missing (e.g. no runbook
+  artifact on the host, compose target absent from the local Docker
+  inventory, audit storage empty). Read the `(reason)` next to each
+  `WARN` / `SKIP` line. Do not treat warnings as failures.
 - `status: failed` — at least one check failed. Investigate the
   `(reason)` next to the `FAIL` line before continuing other work.
 
-The harness is read-only. It does not execute cleanup, apply, mission,
-docker compose restart, proposal/mission/archive/plan creation, or
-natural-language mutation, and it never uses `shell=True`. It is safe
-to run on Docker01 against production data.
+The harness is read-only across every profile. It does not execute
+cleanup, apply, mission, docker compose restart, proposal/mission/archive/plan
+creation, or natural-language mutation, and it never uses `shell=True`.
+It is safe to run on Docker01 against production data.
 
-Use it:
+### NewTwo Docker01 QA note
+
+The runtime container image may lack developer tools (ruff, pytest,
+mypy). Use a disposable dev-validation container alongside Docker01 for
+`ruff format` / `ruff check` / `pytest -q` / `mypy src/shellforgeai tests`.
+The self-test harness itself runs in the runtime image because it only
+exercises ShellForgeAI's own CLI surface.
+
+### When to use it
 
 1. After image sync / container recreate on Docker01.
 2. After approving and merging a new PR locally, before live QA.
-3. As a quick smoke any time the operator wants a quick "everything
-   still safe?" signal.
+3. As a quick smoke any time the operator wants an "everything still
+   safe?" signal.

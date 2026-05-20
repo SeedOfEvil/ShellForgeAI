@@ -782,11 +782,14 @@ Everything outside this table is read-only / preview-only / proposal-only
 / refused. `apply` for any non-PR47 proposal kind remains
 validation/preflight-only.
 
-## PR79 safe command coverage harness safety
+## PR79 / PR80 safe command coverage harness safety
 
-`shellforgeai self-test commands` (and `--json`) is a strictly read-only
-operator coverage harness. It exercises core CLI command surfaces in
-sequence and reports pass/fail/skip. It does not:
+`shellforgeai self-test commands` (and `--json`,
+`--profile quick|standard|full`, `--fail-on-warn`, `--include-skipped`)
+is a strictly read-only operator coverage harness. It exercises core CLI
+command surfaces in sequence and reports pass/fail/warn/skip. Every
+profile (`quick`, `standard`, `full`) is read-only and safe to run after
+every deployment. None of the profiles:
 
 - run `audit cleanup execute`, `audit cleanup prepare`, or
   `audit cleanup archive`,
@@ -803,11 +806,19 @@ sequence and reports pass/fail/skip. It does not:
   systemd/journal access for its automated tests.
 
 If a check cannot run (no runbook artifact, compose target absent from
-Docker inventory, Docker unavailable), the harness records it as
-`skip` with an explicit reason. Real failures are surfaced as `fail`
-with their exit code or exception type, not hidden.
+Docker inventory, Docker unavailable, audit storage empty), the harness
+records it as `skip` with an explicit reason and — when the cause is an
+incomplete environment rather than a profile exclusion — sets the row's
+`warn:true` flag and counts it in `summary.warned`. Real failures are
+surfaced as `fail` with their exit code or exception type, not hidden.
 
-The optional disposable mutation lane is intentionally **not** implemented
-in PR79: the JSON payload reports it as `implemented=false`,
-`executed=false`, `status=manual_only`. A future PR (with its own gate,
-allowlist, receipt, and audit event) would be required to enable it.
+`--fail-on-warn` exits non-zero when the overall status is `warn`. It is
+a CI strictness knob: warnings remain warnings (the JSON `status` stays
+`warn` and a `ci_status: "failed_on_warn"` field is emitted). It does
+not convert warnings into runtime failures and does not change which
+checks are run.
+
+The optional disposable mutation lane is intentionally **not** implemented:
+the JSON payload reports it as `implemented=false`, `executed=false`,
+`status=manual_only`. A future PR (with its own gate, allowlist,
+receipt, and audit event) would be required to enable it.

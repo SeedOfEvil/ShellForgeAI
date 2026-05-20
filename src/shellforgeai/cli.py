@@ -9600,22 +9600,87 @@ def ops_status(json_out: Annotated[bool, typer.Option("--json")] = False) -> Non
 @self_test_app.command("commands")
 def self_test_commands(
     json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only")] = False,
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            help="Validation profile: quick | standard (default) | full",
+        ),
+    ] = "standard",
+    fail_on_warn: Annotated[
+        bool,
+        typer.Option(
+            "--fail-on-warn",
+            help="Exit nonzero when status is warn (for CI strictness).",
+        ),
+    ] = False,
+    include_skipped: Annotated[
+        bool,
+        typer.Option(
+            "--include-skipped",
+            help="Render skipped checks in the human output even when they are warn-only.",
+        ),
+    ] = False,
 ) -> None:
-    """PR79 safe command coverage harness (read-only).
+    """PR79/PR80 safe command coverage harness (read-only).
 
     Exercises core ShellForgeAI CLI command surfaces in-process and reports
-    pass/fail/skipped without mutating infrastructure. Never executes
+    pass/fail/warn/skipped without mutating infrastructure. Never executes
     cleanup, apply, mission, docker compose restart, or natural-language
     mutation.
+
+    Profiles
+    --------
+    - ``quick``: cheap, environment-independent smoke (version, doctor,
+      model doctor, tools list, ops status, ask refusal routing). No
+      artifact-dependent checks. Ideal for the first post-deploy gate.
+    - ``standard`` (default): PR79 coverage — broad read-only surface, may
+      warn when optional artifacts (latest runbook, compose target) are
+      missing.
+    - ``full``: standard plus broader read-only checks (audit list, audit
+      timeline, compose list). May warn more often; never mutates.
+
+    With ``--fail-on-warn`` the command exits non-zero when the overall
+    status is ``warn``. Warnings are not converted into runtime failures —
+    they remain warnings; the flag is for CI strictness only.
     """
     from shellforgeai.core.self_test import run_self_test_commands
 
-    payload = run_self_test_commands()
-    if json_out:
-        typer.echo(json.dumps(payload))
-        raise typer.Exit(0 if payload["status"] != "failed" else 1)
+    try:
+        payload = run_self_test_commands(profile=profile, include_skipped=include_skipped)
+    except ValueError as exc:
+        # Unknown profile — keep stderr clean: emit a clear, single-line error.
+        if json_out:
+            err_payload = {
+                "schema_version": "1",
+                "status": "failed",
+                "error": str(exc),
+                "available_profiles": ["quick", "standard", "full"],
+            }
+            typer.echo(json.dumps(err_payload))
+        else:
+            console.print(f"Error: {exc}")
+            console.print("Valid profiles: quick, standard, full")
+        raise typer.Exit(2) from exc
 
-    console.print("ShellForgeAI safe command coverage")
+    status = payload["status"]
+    ci_failed_on_warn = fail_on_warn and status == "warn"
+
+    if json_out:
+        if ci_failed_on_warn:
+            payload = dict(payload)
+            payload["ci_status"] = "failed_on_warn"
+        typer.echo(json.dumps(payload))
+        if status == "failed" or ci_failed_on_warn:
+            raise typer.Exit(1)
+        raise typer.Exit(0)
+
+    console.print("ShellForgeAI self-test commands")
+    console.print("")
+    console.print("Profile:")
+    console.print(f"- name: {payload['profile']}")
+    console.print("- read-only: true")
+    console.print("- mutation: false")
     console.print("")
     console.print("Mode:")
     for key, value in payload["mode"].items():
@@ -9624,18 +9689,31 @@ def self_test_commands(
     console.print("Checks:")
     for check in payload["checks"]:
         label = check["status"].upper()
+        if check.get("warn") and check["status"] == "skip":
+            label = "WARN"
+        if not include_skipped and check["status"] == "skip" and not check.get("warn"):
+            continue
         line = f"{label} {check['name']}"
-        if check["status"] in {"skip", "fail"} and check.get("reason"):
+        has_reason = bool(check.get("reason"))
+        if has_reason and (check["status"] in {"skip", "fail"} or check.get("warn")):
             line += f"  ({check['reason']})"
         console.print(line)
     console.print("")
     console.print("Summary:")
     console.print(f"- passed: {payload['summary']['passed']}")
     console.print(f"- failed: {payload['summary']['failed']}")
+    console.print(f"- warned: {payload['summary']['warned']}")
     console.print(f"- skipped: {payload['summary']['skipped']}")
-    console.print(f"- status: {payload['status']}")
+    console.print(f"- status: {status}")
     console.print("")
-    console.print("Safety:")
+    console.print("Safety invariants:")
+    console.print("- cleanup execute: not run")
+    console.print("- mission/apply execute: not run")
+    console.print("- docker compose mutation: not run")
+    console.print("- natural-language execution: not run")
+    console.print("- arbitrary command execution: false")
+    console.print("")
+    console.print("Safety (detailed):")
     console.print("- no cleanup execute")
     console.print("- no cleanup archive")
     console.print("- no cleanup prepare")
@@ -9647,5 +9725,28 @@ def self_test_commands(
     console.print("- no production mutation")
     console.print("- no natural-language execution")
     console.print("- no shell=true")
-    if payload["status"] == "failed":
+    if payload.get("warnings"):
+        console.print("")
+        console.print("Warnings:")
+        for w in payload["warnings"]:
+            console.print(f"- {w['name']}: {w['reason']}")
+    if payload.get("next_safe_commands"):
+        console.print("")
+        console.print("Next safe commands:")
+        for cmd in payload["next_safe_commands"]:
+            console.print(f"- {cmd}")
+    if status == "warn":
+        console.print("")
+        console.print(
+            "This is not a command failure. Optional artifact-dependent checks "
+            "were skipped or warned."
+        )
+    if ci_failed_on_warn:
+        console.print("")
+        console.print(
+            "--fail-on-warn: exiting nonzero because at least one warning exists. "
+            "Warnings remain warnings; this flag is for CI strictness only."
+        )
+        raise typer.Exit(1)
+    if status == "failed":
         raise typer.Exit(1)
