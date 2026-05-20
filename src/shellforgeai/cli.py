@@ -232,6 +232,9 @@ ops_app = typer.Typer(help="Read-only operator status board.")
 self_test_app = typer.Typer(
     help="Safe read-only command coverage harness (PR79). No mutation, no execute.",
 )
+triage_app = typer.Typer(
+    help="PR81 read-only triage ranking. Scans the scene and ranks suspects. No mutation.",
+)
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -244,6 +247,7 @@ app.add_typer(mission_app, name="mission")
 app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
 app.add_typer(self_test_app, name="self-test")
+app.add_typer(triage_app, name="triage")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -9750,3 +9754,31 @@ def self_test_commands(
         raise typer.Exit(1)
     if status == "failed":
         raise typer.Exit(1)
+
+
+@triage_app.command("docker")
+def triage_docker(
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """PR81 read-only Docker triage ranking ("scene awareness").
+
+    Inventories the current Docker scene using existing read-only collectors,
+    ranks suspicious containers across multiple failure classes (crashloop,
+    noisy errors, bad HTTP, disk pressure, permission denied, high-CPU watch),
+    and prints evidence/why/safe-next-command per suspect. Never restarts,
+    stops, removes, prunes, or otherwise mutates anything.
+    """
+    from shellforgeai.core.triage_ranking import (
+        collect_scene,
+        rank_scene,
+        render_human,
+    )
+
+    scene = collect_scene()
+    payload = rank_scene(scene)
+
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+
+    console.print(render_human(payload), end="")

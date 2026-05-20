@@ -822,3 +822,35 @@ The optional disposable mutation lane is intentionally **not** implemented:
 the JSON payload reports it as `implemented=false`, `executed=false`,
 `status=manual_only`. A future PR (with its own gate, allowlist,
 receipt, and audit event) would be required to enable it.
+
+## PR81 triage ranking safety
+
+`shellforgeai triage docker` (PR81) is **read-only**. It inventories the
+current Docker scene through the existing read-only `docker.containers`
+and `docker.problem_summary` collectors and deterministically ranks
+suspects across multiple failure classes (crashloop, noisy errors, bad
+HTTP / upstream / refused, disk pressure, permission denied, plus a
+high-CPU watch lane for loud-but-healthy containers).
+
+The command never:
+
+- starts, stops, restarts, removes, or prunes containers,
+- runs `docker compose` mutation,
+- runs `cleanup prepare/archive/execute`,
+- creates proposals or missions,
+- runs `apply`,
+- writes outside its in-memory JSON/human payload,
+- uses `shell=True` or any natural-language execution path.
+
+Every `triage docker --json` payload sets `safety.read_only=true`,
+`safety.mutation_performed=false`, and explicitly `false` for
+`cleanup_executed`, `proposal_created`, `mission_created`,
+`apply_executed`, `docker_compose_executed`, `container_restarted`,
+`natural_language_execution`, and `shell_true`. Per-suspect
+`safe_next_commands` are constrained to `shellforgeai diagnose …`
+invocations — never a restart, never a remediation execution.
+
+Natural-language mutation refusal is unchanged. PR81 does not broaden the
+ask router; mutation phrases ("restart the top suspect", "fix the
+crashloop", "clean up disk now") continue to refuse with the existing
+PR74–PR80 wording.

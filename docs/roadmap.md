@@ -451,6 +451,40 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 5. Never jump to broad production mutation. The product stays a Tier-3
    triage tool with narrow, audited mutation lanes.
 
+## PR81 milestone: battle-lab triage ranking and scene awareness
+
+- Added a read-only Docker triage ranking command: `shellforgeai triage
+  docker [--json]`. It inventories the current Docker scene using the
+  existing read-only `docker.containers` + `docker.problem_summary`
+  collectors and deterministically ranks multiple suspects across
+  failure classes — `crashloop` / `restart_storm`, `noisy_errors`,
+  `bad_http`, `disk_pressure`, `permission_denied`, plus a
+  `high_cpu_watch` lane for loud-but-healthy containers.
+- Each suspect carries severity, confidence, evidence bullets, why
+  ranked here, and a single read-only safe next command (always a
+  `shellforgeai diagnose …` invocation). Watch entries are listed
+  below suspects so they are visible without outranking real failures.
+- Strict JSON shape (`schema_version`, `mode=docker_triage_ranking`,
+  `summary`, `suspects`, `watch`, `safety`, `warnings`,
+  `next_safe_commands`) with `safety.read_only=true` and every
+  mutation flag explicitly `false`.
+- No mutation behavior added. The command never restarts, stops,
+  removes, or prunes containers, never runs docker compose mutation or
+  cleanup execute, never creates proposals or missions, never runs
+  `apply`, and never uses `shell=True`. The natural-language router is
+  not broadened; mutation phrases continue to refuse with the PR74–PR80
+  wording.
+- Scoring is fixture-driven for testability: the scoring engine
+  consumes a plain scene dict, so battle-lab regression coverage runs
+  without a live Docker daemon. Tests cover crashloop ranking,
+  bad-http / noisy-errors / disk-pressure / permission-denied class
+  presence, the high-CPU watch case, evidence/why/safe-next bullets
+  per suspect, JSON shape, safety flags, and safety regressions
+  (no mutation imports, no `shell=True`).
+- PR79/PR80 self-test profiles are unchanged. PR74–PR77 cleanup
+  gates, PR56–PR69 compose gates, and the natural-language mutation
+  refusal tests continue to pass.
+
 ## PR80 milestone: self-test command profiles and QA handoff polish
 
 - Extended `shellforgeai self-test commands` with validation profiles
