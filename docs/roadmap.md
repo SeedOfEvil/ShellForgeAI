@@ -300,6 +300,43 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - Execute results/receipts include plan/archive linkage, candidate/deleted/skipped/failed counters, and explicit safety flags.
 - Scope remains ShellForgeAI-owned metadata only; no Docker/Compose/system mutation and no natural-language cleanup execution.
 
+## PR77 milestone: cleanup execution UX/report polish
+
+- Polished `audit cleanup execute-readiness` so the boundary between
+  "gates satisfied" and "operator-approved" is explicit. JSON now
+  exposes top-level `ready_for_execute_confirm`,
+  `operator_action_required`, `read_only`, `cleanup_executed`,
+  `deletion_performed`, and a `gates` block alongside the existing
+  `readiness`, `plan`, `archive`, `safety`, and `next_commands`
+  payload. Human output begins with `Status:` and `Validated gates:`
+  blocks and an `Operator warning:` that explicitly states the command
+  did not delete anything; the blocked branch refuses to surface the
+  execute command and adds `Do not execute until blockers are
+  resolved.`
+- Polished `audit cleanup execute` refusal without `--confirm` to list
+  the required gates (`matching archive`, `archive validation`,
+  `matching plan fingerprint`, `explicit --confirm`), say
+  `Nothing was deleted.`, and point back at
+  `audit cleanup execute-readiness`.
+- Polished `audit cleanup report` to add a `Post-execute checks:`
+  block in human output and a `post_execute_checks` array in JSON
+  (`audit cleanup validate <receipt>`, `audit retention`,
+  `audit cleanup review`, `doctor`). Added top-level `receipt_kind`,
+  `receipt_valid`, `receipt_plan_id`, `deleted`, `failed`, and
+  `bytes_removed` mirror fields for downstream consumers.
+- All PR55/PR71/PR74/PR75/PR76 cleanup gates and read-only properties
+  are unchanged. Readiness and report do not call `cleanup execute`,
+  do not mutate Docker/Compose/services/packages/firewall/network/
+  system, and natural-language `ask` paths still cannot reach
+  `cleanup execute`. Only `audit cleanup execute <plan> --confirm`
+  deletes.
+- Added `tests/test_pr77_cleanup_execute_polish.py` covering
+  readiness JSON top-level fields and `gates`, human Status/Validated
+  gates/Operator warning blocks, blocked branch hiding the execute
+  command, execute-refusal gate listing, refusal non-deletion,
+  report `post_execute_checks` and top-level mirror fields, and
+  read-only safety regressions.
+
 ## PR76 milestone: cleanup execute readiness and post-execute report
 
 - Added read-only `shellforgeai audit cleanup execute-readiness
