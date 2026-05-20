@@ -1081,3 +1081,6 @@ The PR79 `mode` block and the PR79 `no_*` safety keys
 Exit code is `0` for `ok` or `warn` (warnings present), `1` when at
 least one check failed, `1` when `--fail-on-warn` is used and there is
 at least one warning, and `2` for an unknown profile.
+
+- `shellforgeai triage docker detail <suspect> [--json]` (PR83) drills into one ranked suspect from deterministic Docker triage. Read-only: emits rank context, severity/confidence/score/classes, why-ranked-here, per-suspect evidence bullets, safe read-only next commands, and explicit no-mutation safety flags.
+- `shellforgeai triage docker detail --rank <n> [--json]` selects by rank using the same deterministic ranking snapshot; supports clean `not_found`/`error` JSON statuses without traceback.

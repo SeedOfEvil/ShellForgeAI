@@ -1265,3 +1265,5 @@ execution path, and never uses `shell=True`. Mutation-style asks
 ("restart the top suspect", "fix the crashloop", "clean up disk now")
 continue to refuse with the existing PR74–PR80 wording, plus the PR82
 no-mutation wording on broad-triage prompts.
+
+- PR83 drilldown step added after broad ranking: `shellforgeai triage docker detail <suspect>` (or `--rank <n>`) to inspect why/evidence before any gated remediation workflow.
