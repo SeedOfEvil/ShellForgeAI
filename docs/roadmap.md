@@ -451,6 +451,45 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 5. Never jump to broad production mutation. The product stays a Tier-3
    triage tool with narrow, audited mutation lanes.
 
+## PR80 milestone: self-test command profiles and QA handoff polish
+
+- Extended `shellforgeai self-test commands` with validation profiles
+  (`--profile quick|standard|full`), `--fail-on-warn`, and
+  `--include-skipped`. The default profile remains `standard` so the
+  PR79 default behavior is preserved.
+- `quick` is a cheap, env-independent smoke (`version`, `doctor`,
+  `model doctor`, `tools list`, `ops status`, ask refusal) and is the
+  recommended first post-deploy gate. `standard` keeps the PR79
+  coverage. `full` adds broader read-only checks (`audit list`,
+  `audit timeline --latest --json`, `compose list --json`).
+- Introduced an explicit warn vs skip distinction: rows backed by
+  missing optional artifacts (latest runbook, compose target absent
+  from inventory, empty audit storage) are surfaced as `WARN` with a
+  reason and contribute to `summary.warned`; the overall `status`
+  becomes `warn` (not `failed`). `--fail-on-warn` exits non-zero on
+  `warn` and adds `ci_status: "failed_on_warn"` to the JSON payload
+  without converting warnings into runtime failures.
+- Expanded the JSON schema with `profile`, `summary.warned`, a
+  canonical `safety` block (`read_only`, `mutation_performed`,
+  `cleanup_execute_run`, `mission_execute_run`, `apply_execute_run`,
+  `docker_compose_executed`, `docker_compose_mutation`,
+  `natural_language_execution`, `arbitrary_command_execution`),
+  `warnings`/`skipped` arrays, and `next_safe_commands`. The PR79
+  `mode` block and `no_*` safety keys remain for backward compatibility.
+- Improved the human output: explicit `Profile`, `Safety invariants`,
+  `Warnings`, and `Next safe commands` sections, plus a one-line "this
+  is not a command failure" reminder when warnings are present.
+- The harness remains strictly read-only across every profile. PR80
+  did not change any mutation gates, did not add any runtime mutation
+  capability, did not change cleanup / mission / apply / Compose
+  execution behavior, and did not broaden natural-language behavior.
+- Tests: added `tests/test_pr80_self_test_profiles.py`; PR79 tests
+  adjusted to align with the schema (no behavior regressions). Full
+  suite continues to pass with repo-local fixtures only.
+- Docs updated: [`docs/cli.md`](cli.md), [`docs/safety.md`](safety.md),
+  [`OPS.md`](../OPS.md) (post-deploy smoke workflow + NewTwo Docker01
+  QA note).
+
 ## PR79 milestone: safe command coverage harness
 
 - Added `shellforgeai self-test commands` (and `--json`), a read-only

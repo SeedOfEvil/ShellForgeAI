@@ -31,7 +31,7 @@ Running with no `<command>` enters interactive mode (see
 | `validate-runbook [<runbook.json-or-session-dir>] [--latest]` | Validate `runbook.json` schema + safety/risk rules (read-only). Supports direct `runbook.json`, session directory, or `--latest`. Exit code `0` valid, `1` invalid/missing. |
 | `status [--json] [--verbose] [--since TS] [--include-retention] [--include-index] [--include-audit] [--include-approvals]` | Operator status dashboard (PR43). Read-only summary of ShellForgeAI operational health: build/profile/runtime, model config/auth hints, safety invariants (`apply` validation-only; execution remains not executed), latest artifacts, approvals queue counts, guard/refusal signals, audit/index presence, optional retention footprint, and short next-step commands. No model generation, no remediation execution, no metadata mutation. `--json` emits machine-readable schema v1. |
 | `ops status [--json]` | Compact read-only operations status board (PR60): summarizes latest evidence/runbook, proposal/mission latest+counts, compose context already captured in metadata, safety boundary flags, and audit/cleanup posture. No approval/apply/execute/restart/export/cleanup generation. `--json` emits strict JSON. |
-| `self-test commands [--json]` | Safe operator command coverage harness (PR79). Runs core read-only CLI command surfaces in-process — `version`, `doctor`, `model doctor`, `ops status` (+`--json`), `audit retention` (+`--json`), `audit cleanup review` (+`--json`), `audit cleanup execute-readiness <missing>` and `report <missing>` negative paths, `compose inspect` / `env-check` / `env-contract` / `env-plan` against the local target, `validate-runbook --latest`, locally-routed `ask` smokes, and a deterministic ask-mutation refusal-routing check — and reports `PASS`/`FAIL`/`SKIP` per check with a summary. Never executes cleanup, apply, mission, docker/compose restart, proposal/mission/archive/plan creation, or natural-language mutation; never uses `shell=True`. Skipped checks include an explicit reason (e.g. no runbook artifact, compose target unavailable). `--json` emits strict schema-versioned output with per-check rows, mode invariants, and a safety block. |
+| `self-test commands [--json] [--profile quick\|standard\|full] [--fail-on-warn] [--include-skipped]` | Safe operator command coverage harness (PR79 + PR80 profiles). Runs core read-only CLI command surfaces in-process and reports `PASS`/`FAIL`/`WARN`/`SKIP` per check with a summary. Profiles: `quick` (version, doctor, model doctor, tools list, ops status, ask refusal — cheap and env-independent; intended as the first post-deploy gate), `standard` (default, PR79 coverage including `audit retention`, `audit cleanup review`, the `audit cleanup execute-readiness <missing>` and `report <missing>` negative paths, `compose inspect` / `env-check` / `env-contract` / `env-plan`, `validate-runbook --latest`, locally-routed `ask` smokes, and the ask-mutation refusal smoke), `full` (standard plus `audit list`, `audit timeline --latest --json`, `compose list --json`). `--fail-on-warn` exits non-zero when status is `warn` (for CI strictness; warnings remain warnings — the flag does not convert them into runtime failures). `--include-skipped` renders profile-excluded rows in the human output. Never executes cleanup, apply, mission, docker/compose restart, proposal/mission/archive/plan creation, or natural-language mutation; never uses `shell=True`. Warned/skipped checks include an explicit reason (e.g. no runbook artifact, compose target unavailable). `--json` emits strict schema-versioned output with `profile`, per-check rows (including per-row `warn` boolean), `summary` (passed/failed/warned/skipped), `safety`, `warnings`, `skipped`, and `next_safe_commands`. |
 | `ask <question>` | Free-form ask. Options: `--context standard\|minimal\|full`, `--full-context`, `--raw`, `--no-evidence`, `--since 30m`. For recognized ops-shaped questions (e.g. "find failed containers", "network reachability is broken", "why can the service not write to disk?") `ask` reuses the same read-only routing and evidence collection as `diagnose`, writes `evidence.json` + `ask-summary.md`, and answers from the evidence. For network/reachability questions ("upstream unreachable", "DNS errors in logs", "connection refused errors", "why is bad-network failing?", with typo tolerance) `ask` collects combined Docker/log + runtime network evidence and ranks app/container log themes (DNS, upstream, connection refused, timeout, TLS) above runtime network basics — a healthy DNS resolver/default route does NOT cancel an app/container log showing reachability failure. Fix-plan / runbook intents ("give me a safe fix plan for the failed containers", "what should I do next?", "fix bad-network safely", "create a runbook", with typo tolerance) also write `runbook.md` and `runbook.json` next to the evidence. Use `--no-evidence` to force plain model Q&A. `ask` never mutates: a mutation-style request (e.g. "can you restart nginx?", "open port 443", "change DNS") collects read-only evidence and prints a safety boundary. |
 | `inspect host` | Host info / resources / uptime. |
 | `inspect service <unit>` | `systemctl status` of a unit. |
@@ -966,16 +966,22 @@ JSON shape (truncated):
 }
 ```
 
-## PR79 safe command coverage harness
+## PR79 / PR80 safe command coverage harness
 
 ```
 shellforgeai self-test commands
 shellforgeai self-test commands --json
+shellforgeai self-test commands --profile quick
+shellforgeai self-test commands --profile standard
+shellforgeai self-test commands --profile full
+shellforgeai self-test commands --fail-on-warn
+shellforgeai self-test commands --include-skipped
 ```
 
 `self-test commands` exercises the safe read-only operator command surface
-in-process and prints a `PASS`/`FAIL`/`SKIP` line per check plus a summary.
-It never executes:
+in-process and prints a `PASS`/`FAIL`/`WARN`/`SKIP` line per check plus a
+summary. The default profile is `standard` (PR79 coverage). It never
+executes:
 
 - cleanup execute / archive / prepare
 - proposal creation / approval / apply
@@ -986,33 +992,91 @@ It never executes:
 It also never uses `shell=True` and never shells out — checks are invoked
 through the in-process Typer/Click runner only.
 
-Checks covered:
+### Profiles
 
-- `version`, `doctor` (+`--json`), `model doctor`
-- `ops status` (+`--json`)
-- `audit retention` (+`--json`)
-- `audit cleanup review` (+`--json`)
-- `audit cleanup execute-readiness <missing-plan> --json` (expected refusal)
-- `audit cleanup report <missing-receipt> --json` (expected refusal)
-- `compose inspect shellforgeai` (+`--json`)
-- `compose env-check --target shellforgeai --json`
-- `compose env-contract --target shellforgeai --json`
-- `compose env-plan --target shellforgeai --json`
-- `validate-runbook --latest` (skipped when no artifact exists)
-- `ask` locally-routed safe prompts (`show metadata hygiene`, `clean up now`)
-- Deterministic ask mutation-refusal routing (no model call)
+- `quick` — cheap and environment-independent. Runs `version`, `doctor`
+  (+`--json`), `model doctor`, `tools list`, `ops status` (+`--json`), and
+  the deterministic ask-mutation refusal smoke. No artifact-dependent
+  checks; designed to be reliable immediately after a deploy and the
+  recommended first post-deploy gate.
+- `standard` (default) — PR79 coverage. Adds `audit retention`,
+  `audit cleanup review`, the `audit cleanup execute-readiness <missing>`
+  and `audit cleanup report <missing>` negative refusal paths,
+  `compose inspect` / `env-check` / `env-contract` / `env-plan` against
+  the local target, `validate-runbook --latest`, and the locally-routed
+  `ask` smokes (`show metadata hygiene`, `clean up now`). May warn when
+  optional artifacts (latest runbook, compose target) are missing.
+- `full` — `standard` plus broader read-only coverage: `audit list`,
+  `audit timeline --latest --json`, `compose list --json`. May warn more
+  often; still never mutates.
 
-Skipped checks include an explicit reason (no runbook artifact, compose
-target unavailable, docker inventory unavailable). For `--json` output the
-schema includes `schema_version`, `mode` (with `read_only=true`,
-`mutation_performed=false`, `docker_compose_executed=false`,
-`cleanup_executed=false`, `mission_executed=false`, `apply_executed=false`,
-`natural_language_execution=false`), `summary` (passed/failed/skipped),
-per-check `command`/`category`/`status`/`reason` rows, a `warnings` list,
-a `failures` list, a `safety` block, and an
-`optional_disposable_mutation_lane` placeholder that is `implemented:false`
-and `executed:false` (the optional mutation lane is not implemented in
-PR79 and never runs anything).
+### Status / warn / skip / fail semantics
 
-Exit code is `0` for `ok` or `warn` (skipped checks present) and `1` only
-when at least one check failed.
+- `pass` — command succeeded and the expected safety invariant held.
+- `warn` — command succeeded but the environment/artifact state is
+  incomplete (e.g. no latest runbook artifact, compose target absent
+  from the local Docker inventory). Not a mutation risk and not a
+  command failure. Each warned row carries `warn:true` plus a reason.
+- `skip` — the check was intentionally not run (profile-excluded or a
+  prerequisite missing). Carries a reason.
+- `fail` — the command failed unexpectedly, a safety invariant was
+  violated, JSON was unparsable when JSON was expected, or a mutation
+  flag was unexpectedly true.
+
+The overall `status` is `failed` if any row failed, `warn` if any row
+warned, otherwise `ok`.
+
+### `--fail-on-warn`
+
+`--fail-on-warn` exits non-zero when the overall status would be `warn`.
+Warnings remain warnings: the underlying JSON `status` is still `warn`
+and a separate `ci_status: "failed_on_warn"` field is emitted. This flag
+is intended for CI strictness and does not convert warnings into runtime
+failures.
+
+### `--include-skipped`
+
+By default the human output omits profile-excluded `skip` rows (they are
+not in the active profile) and surfaces only warnings. `--include-skipped`
+renders every row so operators can see what the harness considered.
+
+### JSON schema (`--json`)
+
+```
+{
+  "schema_version": "1",
+  "status": "ok|warn|failed",
+  "profile": "quick|standard|full",
+  "available_profiles": ["quick", "standard", "full"],
+  "default_profile": "standard",
+  "summary": {"passed": …, "failed": …, "warned": …, "skipped": …},
+  "checks": [
+    {"name": …, "command": [...], "status": "pass|fail|skip",
+     "category": …, "read_only": true, "mutation": false,
+     "warn": false, "reason": null}
+  ],
+  "safety": {
+    "read_only": true,
+    "mutation_performed": false,
+    "cleanup_execute_run": false,
+    "mission_execute_run": false,
+    "apply_execute_run": false,
+    "docker_compose_executed": false,
+    "docker_compose_mutation": false,
+    "natural_language_execution": false,
+    "arbitrary_command_execution": false
+  },
+  "warnings": [{"name": …, "reason": …}],
+  "skipped": [{"name": …, "reason": …}],
+  "failures": [{"name": …, "reason": …}],
+  "next_safe_commands": [...],
+  "optional_disposable_mutation_lane": {"implemented": false, …}
+}
+```
+
+The PR79 `mode` block and the PR79 `no_*` safety keys
+(`no_cleanup_execute`, …) are retained for backward compatibility.
+
+Exit code is `0` for `ok` or `warn` (warnings present), `1` when at
+least one check failed, `1` when `--fail-on-warn` is used and there is
+at least one warning, and `2` for an unknown profile.

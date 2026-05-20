@@ -51,7 +51,7 @@ def test_self_test_commands_exists(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
     out = runner.invoke(app, ["self-test", "commands"])
     assert out.exit_code == 0, out.stdout
-    assert "ShellForgeAI safe command coverage" in out.stdout
+    assert "ShellForgeAI self-test commands" in out.stdout
 
 
 def test_self_test_commands_human_marks_read_only_true(tmp_path: Path, monkeypatch) -> None:
@@ -133,10 +133,14 @@ def test_self_test_commands_json_check_rows(tmp_path: Path, monkeypatch) -> None
     payload = json.loads(out.stdout)
     assert payload["checks"], "expected at least one check"
     for row in payload["checks"]:
+        # PR80: per-row status remains in {pass, fail, skip}; the warn
+        # severity is carried as a per-row boolean (``warn``).
         assert row["status"] in {"pass", "fail", "skip"}
         assert row["category"] in {"status", "json", "compose", "cleanup", "ask", "safety"}
         assert row["read_only"] is True
         assert row["mutation"] is False
+        assert "warn" in row
+        assert isinstance(row["warn"], bool)
         assert isinstance(row["command"], list) and row["command"][0] == "shellforgeai"
 
 
