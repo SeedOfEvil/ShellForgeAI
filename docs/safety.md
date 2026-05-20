@@ -781,3 +781,33 @@ existing proposal/mission/apply safety gates.
 Everything outside this table is read-only / preview-only / proposal-only
 / refused. `apply` for any non-PR47 proposal kind remains
 validation/preflight-only.
+
+## PR79 safe command coverage harness safety
+
+`shellforgeai self-test commands` (and `--json`) is a strictly read-only
+operator coverage harness. It exercises core CLI command surfaces in
+sequence and reports pass/fail/skip. It does not:
+
+- run `audit cleanup execute`, `audit cleanup prepare`, or
+  `audit cleanup archive`,
+- create cleanup plans, cleanup archives, cleanup receipts, proposals,
+  missions, apply bundles, exports, or actions,
+- execute `apply`, mission execute, lab container restart, or any docker
+  / docker compose mutation,
+- broaden natural-language behavior — it only verifies that the existing
+  router already flags the phrases it checks as mutation requests; no
+  new phrases are added to the router,
+- shell out — invocations go through the in-process Typer/Click runner
+  and never use `shell=True`,
+- depend on a live Docker daemon, real `/data`, root, internet, or
+  systemd/journal access for its automated tests.
+
+If a check cannot run (no runbook artifact, compose target absent from
+Docker inventory, Docker unavailable), the harness records it as
+`skip` with an explicit reason. Real failures are surfaced as `fail`
+with their exit code or exception type, not hidden.
+
+The optional disposable mutation lane is intentionally **not** implemented
+in PR79: the JSON payload reports it as `implemented=false`,
+`executed=false`, `status=manual_only`. A future PR (with its own gate,
+allowlist, receipt, and audit event) would be required to enable it.

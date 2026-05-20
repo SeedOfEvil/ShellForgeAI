@@ -229,6 +229,9 @@ mission_app.add_typer(mission_restart_app, name="restart")
 mission_app.add_typer(mission_compose_restart_app, name="compose-restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 ops_app = typer.Typer(help="Read-only operator status board.")
+self_test_app = typer.Typer(
+    help="Safe read-only command coverage harness (PR79). No mutation, no execute.",
+)
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -240,6 +243,7 @@ app.add_typer(guard_app, name="guard")
 app.add_typer(mission_app, name="mission")
 app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
+app.add_typer(self_test_app, name="self-test")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -9591,3 +9595,57 @@ def ops_status(json_out: Annotated[bool, typer.Option("--json")] = False) -> Non
     console.print("- compose_mutation: false")
     console.print("- arbitrary_command_execution: false")
     console.print("- apply gate: required")
+
+
+@self_test_app.command("commands")
+def self_test_commands(
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only")] = False,
+) -> None:
+    """PR79 safe command coverage harness (read-only).
+
+    Exercises core ShellForgeAI CLI command surfaces in-process and reports
+    pass/fail/skipped without mutating infrastructure. Never executes
+    cleanup, apply, mission, docker compose restart, or natural-language
+    mutation.
+    """
+    from shellforgeai.core.self_test import run_self_test_commands
+
+    payload = run_self_test_commands()
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload["status"] != "failed" else 1)
+
+    console.print("ShellForgeAI safe command coverage")
+    console.print("")
+    console.print("Mode:")
+    for key, value in payload["mode"].items():
+        console.print(f"- {key}: {str(value).lower()}")
+    console.print("")
+    console.print("Checks:")
+    for check in payload["checks"]:
+        label = check["status"].upper()
+        line = f"{label} {check['name']}"
+        if check["status"] in {"skip", "fail"} and check.get("reason"):
+            line += f"  ({check['reason']})"
+        console.print(line)
+    console.print("")
+    console.print("Summary:")
+    console.print(f"- passed: {payload['summary']['passed']}")
+    console.print(f"- failed: {payload['summary']['failed']}")
+    console.print(f"- skipped: {payload['summary']['skipped']}")
+    console.print(f"- status: {payload['status']}")
+    console.print("")
+    console.print("Safety:")
+    console.print("- no cleanup execute")
+    console.print("- no cleanup archive")
+    console.print("- no cleanup prepare")
+    console.print("- no mission execute")
+    console.print("- no proposal created")
+    console.print("- no mission created")
+    console.print("- no apply")
+    console.print("- no docker compose restart")
+    console.print("- no production mutation")
+    console.print("- no natural-language execution")
+    console.print("- no shell=true")
+    if payload["status"] == "failed":
+        raise typer.Exit(1)
