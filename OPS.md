@@ -1124,3 +1124,43 @@ scoped to ShellForgeAI-owned metadata under `<data_dir>`. PR77 does
 not change that scope, does not add arbitrary path deletion, does not
 mutate Docker/Compose/services/packages/firewall/network/system, and
 does not let natural-language `ask` flows execute cleanup.
+
+## PR79 safe operator command pass
+
+After a deploy / image sync / restart, run the safe command coverage
+harness to confirm the read-only command surface still works:
+
+```
+shellforgeai self-test commands
+shellforgeai self-test commands --json
+```
+
+The harness exercises `version`, `doctor`, `model doctor`, `ops status`,
+`audit retention`, `audit cleanup review`, the
+`audit cleanup execute-readiness <missing-plan>` and
+`audit cleanup report <missing-receipt>` negative refusal paths,
+`compose inspect / env-check / env-contract / env-plan` against the
+local target, `validate-runbook --latest`, two locally-routed
+`ask` smokes, and a deterministic ask-mutation refusal-routing check.
+
+Operator expectations:
+
+- `status: ok` — every check passed.
+- `status: warn` — every check passed but at least one was skipped
+  (e.g. no runbook artifact on the host, compose target absent from
+  the local Docker inventory). Read the `(reason)` next to each
+  `SKIP` line; do not treat skips as failures.
+- `status: failed` — at least one check failed. Investigate the
+  `(reason)` next to the `FAIL` line before continuing other work.
+
+The harness is read-only. It does not execute cleanup, apply, mission,
+docker compose restart, proposal/mission/archive/plan creation, or
+natural-language mutation, and it never uses `shell=True`. It is safe
+to run on Docker01 against production data.
+
+Use it:
+
+1. After image sync / container recreate on Docker01.
+2. After approving and merging a new PR locally, before live QA.
+3. As a quick smoke any time the operator wants a quick "everything
+   still safe?" signal.

@@ -208,9 +208,15 @@ shellforgeai audit retention
 shellforgeai audit cleanup review
 shellforgeai compose env-contract --target shellforgeai
 shellforgeai compose env-plan --target shellforgeai
+shellforgeai self-test commands
+shellforgeai self-test commands --json
 ```
 
-None of the above mutate anything.
+None of the above mutate anything. PR79 adds the
+`self-test commands` safe coverage harness — it exercises the read-only
+command surface in-process, reports `PASS`/`FAIL`/`SKIP` per check, and
+never executes cleanup, apply, mission, docker/compose restart,
+proposal/mission/archive/plan creation, or natural-language mutation.
 
 ---
 

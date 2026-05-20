@@ -451,6 +451,34 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 5. Never jump to broad production mutation. The product stays a Tier-3
    triage tool with narrow, audited mutation lanes.
 
+## PR79 milestone: safe command coverage harness
+
+- Added `shellforgeai self-test commands` (and `--json`), a read-only
+  operator command coverage harness that exercises the safe CLI surface
+  and reports `PASS`/`FAIL`/`SKIP` per check with a strict JSON payload.
+- Covers `version`, `doctor`, `model doctor`, `ops status` (+`--json`),
+  `audit retention` (+`--json`), `audit cleanup review` (+`--json`),
+  the `audit cleanup execute-readiness <missing-plan>` and
+  `audit cleanup report <missing-receipt>` negative refusal paths,
+  `compose inspect`/`env-check`/`env-contract`/`env-plan` against the
+  local target, `validate-runbook --latest`, locally-routed `ask`
+  smokes (`show metadata hygiene`, `clean up now`), and a
+  deterministic ask-mutation refusal-routing check.
+- The harness never executes cleanup, apply, mission, docker compose
+  restart, proposal/mission/archive/plan creation, or natural-language
+  mutation; it never uses `shell=True`; it never broadens
+  natural-language behavior. Skipped checks include an explicit
+  reason so operators can distinguish "not applicable in this
+  environment" from a real failure.
+- Operator entry point documented in [`OPS.md`](../OPS.md) and
+  [`docs/cli.md`](cli.md); safety boundary documented in
+  [`docs/safety.md`](safety.md). The optional disposable mutation lane
+  is intentionally not implemented and remains `status=manual_only`,
+  `implemented=false`, `executed=false` in the JSON payload.
+- Repo-local fixtures/mocks only; no live Docker / root / Docker01 /
+  internet / systemd dependency for the test suite. No PR56–PR78 gate
+  weakening, no new runtime capability, no new mutation surface.
+
 ## PR78 milestone: release / handoff baseline after PR56–PR77
 
 - Added [`docs/release-baseline.md`](release-baseline.md), the concise
