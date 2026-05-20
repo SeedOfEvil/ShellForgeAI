@@ -451,6 +451,17 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 5. Never jump to broad production mutation. The product stays a Tier-3
    triage tool with narrow, audited mutation lanes.
 
+## PR78 milestone: release / handoff baseline after PR56–PR77
+
+- Added [`docs/release-baseline.md`](release-baseline.md), the concise
+  operator/QA/contributor baseline summarizing current capabilities,
+  the mutation boundary, safety invariants, Docker01 caveats, the
+  cleanup operator sequence, the Compose disposable proof posture,
+  the standard PR validation checklist, and the next roadmap tracks.
+- Linked the baseline from `README.md` and `OPS.md`.
+- Release/handoff packaging only: no runtime behavior, CLI behavior,
+  mutation surface, safety gate, or test behavior changed.
+
 ## Non-goals (current, unchanged)
 
 - Becoming a shell or generic remote-execution agent.

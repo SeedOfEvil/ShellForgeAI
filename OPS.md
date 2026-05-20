@@ -2,6 +2,16 @@
 
 Operator smoke tests and runbook tips.
 
+## Current baseline / handoff
+
+The PR78 release/handoff baseline is the current operator reference
+for what ShellForgeAI can do today, what is safely gated, what is
+intentionally blocked, the safe cleanup sequence, and the Compose
+disposable proof posture. Start there if you are picking the tool up
+after the PR56–PR77 arc:
+
+- [`docs/release-baseline.md`](docs/release-baseline.md)
+
 ## Interactive smoke test
 
 ```bash

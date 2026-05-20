@@ -144,6 +144,10 @@ explicit CLI lane.
 
 ## Deeper documentation
 
+- [`docs/release-baseline.md`](docs/release-baseline.md) — PR78
+  release/handoff baseline after the PR56–PR77 capability arc
+  (capabilities, mutation boundary, safety invariants, operator
+  workflows, next tracks).
 - [`docs/cli.md`](docs/cli.md) — CLI reference, organized by operator workflow.
 - [`docs/safety.md`](docs/safety.md) — mutation boundaries and refusal rules.
 - [`docs/architecture.md`](docs/architecture.md) — runtime, workflow spine,
