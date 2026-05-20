@@ -854,3 +854,49 @@ Natural-language mutation refusal is unchanged. PR81 does not broaden the
 ask router; mutation phrases ("restart the top suspect", "fix the
 crashloop", "clean up disk now") continue to refuse with the existing
 PR74–PR80 wording.
+
+## PR82 broad ask triage grounding safety
+
+`shellforgeai ask` routes broad read-only Docker / 2AM triage prompts
+("what's on fire?", "2AM triage", "the Docker box feels broken", "rank
+Docker suspects", "broadly scan the current scene", "rank all
+sfai-battle-lab suspects by severity", "what should I inspect first?",
+"show current Docker suspects", "what containers look suspicious?") to
+the PR81 deterministic triage engine (`triage_ranking.collect_scene` +
+`rank_scene`) rather than to a model-only rephrase. The handler reads
+the scene through the same read-only Docker collectors PR81 uses,
+preserves the deterministic ranking/severity/confidence/evidence, and
+renders the answer with a Safety block (`read_only: true`,
+`mutation_performed: false`, no restart/stop/delete/prune/apply/cleanup),
+per-suspect read-only `Safe next` commands (always `shellforgeai
+diagnose …`), and a Next-safe-steps footer pointing at the explicit
+`triage docker --json` and `diagnose docker --save-plan --with-runbook`
+commands.
+
+The broad ask triage route may rank suspects, but it never executes
+fixes. It does not:
+
+- restart/stop/remove containers,
+- run `docker compose` mutation,
+- run `cleanup prepare/archive/execute`,
+- create proposals or missions,
+- run `apply`,
+- use `shell=True` or any natural-language execution path.
+
+Mutation phrasings tied to the ranking ("restart the top suspect",
+"fix the crashloop", "clean up disk pressure now", "stop
+noisy-errors", "apply the top fix", "create a restart proposal for
+the top suspect", "docker compose restart the top one", "delete old
+files causing disk pressure") refuse from ask with the PR82
+no-mutation wording (`I can rank suspects read-only, but I will not
+execute fixes from ask.` / `No restart, cleanup, apply, or proposal
+was executed.`) and redirect the operator to the explicit gated CLI
+(`shellforgeai triage docker`, `shellforgeai diagnose docker
+--container <name> --json`). The PR47 lab-restart refusal and the
+PR58/PR63 Compose mutation refusal remain the source of truth for
+container-level / compose-level mutation execution requests.
+
+The broad ask triage path is fixture-driven for testability — the
+test suite drives the scoring engine directly via
+`triage_ranking.collect_scene` patches, so battle-lab regression
+coverage runs without a live Docker daemon and never mutates the host.

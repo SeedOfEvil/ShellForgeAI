@@ -64,6 +64,7 @@ from shellforgeai.core.ask_routing import (
     extract_container_target,
     has_compose_artifact_reference_phrase,
     is_apply_approved_intent,
+    is_broad_docker_triage_intent,
     is_compose_mutation_request,
     is_compose_service_mutation_proposal_request,
     is_create_proposals_intent,
@@ -73,6 +74,7 @@ from shellforgeai.core.ask_routing import (
     is_lab_restart_verification_ask_intent,
     is_mission_compose_context_query,
     is_restart_proposal_compose_context_query,
+    is_triage_mutation_intent,
     network_reachability_brief,
     route_ask_intent,
     target_container_status,
@@ -8293,6 +8295,188 @@ def _handle_guard_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _render_broad_triage_answer(payload: dict[str, Any]) -> str:
+    """PR82 ask-shaped renderer for deterministic triage payloads.
+
+    Distinct from ``triage_ranking.render_human`` so the broad ask answer
+    stays 2AM-readable and matches the PR82 brief shape (Safety block,
+    ranked suspects with severity / confidence / Evidence / Safe next,
+    a Watch line, and a Next safe steps footer). Deterministic — never
+    re-ranks, never invents suspects, never collapses one container's
+    evidence onto another.
+    """
+    lines: list[str] = []
+    lines.append("Read-only Docker triage ranking")
+    lines.append("")
+    lines.append("Safety:")
+    lines.append("- read_only: true")
+    lines.append("- mutation_performed: false")
+    lines.append("- no restart/stop/delete/prune/apply/cleanup was executed")
+    lines.append("")
+    summary = payload.get("summary") or {}
+    lines.append(
+        "Scene: "
+        f"containers_seen={summary.get('containers_seen', 0)} "
+        f"suspects={summary.get('suspects_ranked', 0)} "
+        f"critical={summary.get('critical', 0)} "
+        f"high={summary.get('high', 0)} "
+        f"medium={summary.get('medium', 0)} "
+        f"watch={summary.get('watch', 0)}"
+    )
+    lines.append("")
+    suspects = payload.get("suspects") or []
+    if not suspects:
+        lines.append("No suspects ranked from current scene.")
+        lines.append("Try a fresh read-only check:")
+        lines.append("- shellforgeai triage docker --json")
+        lines.append("- shellforgeai diagnose docker --json")
+        lines.append("")
+    for s in suspects:
+        rank = s.get("rank", "?")
+        name = s.get("name", "")
+        severity = s.get("severity", "")
+        confidence = s.get("confidence", "")
+        lines.append(f"{rank}. {name} — {severity} / {confidence} confidence")
+        why_list = list(s.get("why") or [])
+        ev_list = list(s.get("evidence") or [])
+        bullets: list[str] = []
+        for w in why_list[:3]:
+            if w and w not in bullets:
+                bullets.append(w)
+        for ev in ev_list:
+            if len(bullets) >= 3:
+                break
+            t = ev.get("type") if isinstance(ev, dict) else None
+            v = ev.get("value") if isinstance(ev, dict) else None
+            if t is None:
+                continue
+            bullet = f"{t}: {v}"
+            if bullet not in bullets:
+                bullets.append(bullet)
+        if bullets:
+            lines.append("   Evidence:")
+            for b in bullets:
+                lines.append(f"   - {b}")
+        next_cmds = s.get("safe_next_commands") or []
+        if next_cmds:
+            lines.append("   Safe next:")
+            for cmd in next_cmds:
+                lines.append(f"   - {cmd}")
+        lines.append("")
+    watch = payload.get("watch") or []
+    if watch:
+        lines.append("Watch:")
+        for w in watch:
+            why = "; ".join((w.get("why") or [])[:1]) or "monitor"
+            lines.append(f"- {w.get('name', '')}: {why}")
+        lines.append("")
+    lines.append("Next safe steps:")
+    next_safe = list(payload.get("next_safe_commands") or [])
+    if "shellforgeai triage docker --json" not in next_safe:
+        next_safe = ["shellforgeai triage docker --json", *next_safe]
+    for cmd in next_safe:
+        lines.append(f"- {cmd}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _handle_broad_triage_ask(runtime: RuntimeContext, question: str) -> bool:
+    """PR82 — route broad read-only Docker/2AM ask prompts to deterministic triage.
+
+    When the prompt is broad triage intent ("what's on fire?", "2AM
+    triage", "the Docker box feels broken", "rank Docker suspects",
+    "broadly scan the current scene", "rank all sfai-battle-lab
+    suspects by severity", "what containers look suspicious?", etc.),
+    this handler calls the PR81 deterministic triage engine
+    (``triage_ranking.collect_scene`` + ``rank_scene``) directly and
+    summarizes the result. No LLM re-ranking. No mutation. No
+    proposal/mission/apply/cleanup. No Docker/Compose execution.
+
+    Mutation-style asks tied to the ranking ("restart the top suspect",
+    "fix the crashloop", "clean up disk pressure now", "stop
+    noisy-errors", "apply the top fix") are refused here with the PR82
+    no-mutation wording.
+    """
+    from shellforgeai.core import triage_ranking as triage_mod
+
+    if is_triage_mutation_intent(question):
+        console.print("I can rank suspects read-only, but I will not execute fixes from ask.")
+        console.print("")
+        console.print("No restart, cleanup, apply, or proposal was executed.")
+        console.print("")
+        console.print("Start with:")
+        console.print("- shellforgeai triage docker")
+        console.print("- shellforgeai diagnose docker --container <name> --json")
+        _append_audit_event(
+            runtime,
+            kind="ask",
+            action="broad_triage_mutation_refused",
+            status="refused",
+            summary="ask refused: triage mutation cannot run from natural language",
+            details={
+                "operation": "broad_triage_mutation_refused",
+                "mutation_performed": False,
+                "remediation_execution": False,
+                "cleanup_executed": False,
+                "proposal_created": False,
+                "mission_created": False,
+                "apply_executed": False,
+                "docker_compose_executed": False,
+                "container_restarted": False,
+                "natural_language_execution": False,
+                "shell_true": False,
+            },
+        )
+        return True
+    if not is_broad_docker_triage_intent(question):
+        return False
+    try:
+        scene = triage_mod.collect_scene()
+        payload = triage_mod.rank_scene(scene)
+    except Exception as exc:
+        console.print(
+            f"Read-only triage failed: {type(exc).__name__}: {exc}. "
+            "Try: shellforgeai triage docker --json"
+        )
+        _append_audit_event(
+            runtime,
+            kind="ask",
+            action="broad_triage_collection_failed",
+            status="warn",
+            summary="ask: deterministic triage collection failed",
+            details={
+                "operation": "broad_triage_collection_failed",
+                "mutation_performed": False,
+                "remediation_execution": False,
+            },
+        )
+        return True
+    console.print(_render_broad_triage_answer(payload), end="")
+    summary = payload.get("summary") or {}
+    _append_audit_event(
+        runtime,
+        kind="ask",
+        action="broad_triage_rendered",
+        status="ok",
+        summary="ask: deterministic Docker triage ranking summarized",
+        details={
+            "operation": "broad_triage_rendered",
+            "containers_seen": summary.get("containers_seen", 0),
+            "suspects_ranked": summary.get("suspects_ranked", 0),
+            "mutation_performed": False,
+            "remediation_execution": False,
+            "cleanup_executed": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+        },
+    )
+    return True
+
+
 def _handle_actions_ask(runtime: RuntimeContext, question: str) -> bool:
     """Handle actions compile/show/run asks. No execution."""
     intent = is_actions_ask_intent(question)
@@ -8631,6 +8815,8 @@ def ask(
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):
+            return
+        if _handle_broad_triage_ask(runtime, question):
             return
         if _handle_mission_restart_ask(runtime, question):
             return

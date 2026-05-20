@@ -1198,7 +1198,7 @@ exercises ShellForgeAI's own CLI surface.
 3. As a quick smoke any time the operator wants an "everything still
    safe?" signal.
 
-## PR81 — 2AM triage ranking workflow (read-only)
+## PR81 / PR82 — 2AM triage ranking workflow (read-only)
 
 When the page is "the server feels broken" or "what's on fire?" — not a
 named container — start with the broad-first read-only ladder. None of
@@ -1223,14 +1223,29 @@ these steps mutate anything.
    currently healthy) are listed below suspects on purpose — they are
    visible but do not outrank real failures.
 
-3. **Inspect the top suspect's evidence** using the safe next command
+3. **Ask broad triage questions in natural language (PR82)** — the
+   `ask` command routes broad Docker / 2AM prompts to the same PR81
+   deterministic engine instead of falling back on the model:
+
+       shellforgeai ask "2AM triage"
+       shellforgeai ask "what's on fire?"
+       shellforgeai ask "rank all sfai-battle-lab suspects by severity"
+
+   The answer is grounded in `triage_ranking.collect_scene` +
+   `rank_scene`. It preserves the deterministic ranking, severity,
+   confidence, and per-container evidence; it never invents suspects
+   and never collapses one container's evidence onto another. Every
+   suspect carries a read-only `Safe next` command (always
+   `shellforgeai diagnose …`).
+
+4. **Inspect the top suspect's evidence** using the safe next command
    the report printed — always a `shellforgeai diagnose …` invocation:
 
        shellforgeai diagnose docker --container <name> --json
        # or
        shellforgeai diagnose logs --target <name> --json
 
-4. **Only then** decide whether to engage an existing gated workflow:
+5. **Only then** decide whether to engage an existing gated workflow:
    restart proposal (PR50/PR58), restart mission (PR52/PR53), or the
    cleanup ladder (PR74–PR77). The triage ranking command does not
    create proposals, missions, plans, archives, or apply receipts.
@@ -1238,10 +1253,15 @@ these steps mutate anything.
 Do **not** jump from "ranking" to "restart". The ranking is evidence
 synthesis only. A restart still requires the explicit proposal /
 mission / apply gates with their own approvals and rollback previews.
+The PR82 ask route is identical in shape: it ranks suspects, but
+refuses mutation phrasings ("restart the top suspect", "fix the
+crashloop", "clean up disk pressure now", "stop noisy-errors", "apply
+the top fix") and redirects to the explicit gated CLI.
 
 The triage ranking command never starts, stops, restarts, removes, or
 prunes containers, never runs docker compose mutation, never runs
 `apply`, `cleanup execute`, `mission execute`, or any natural-language
 execution path, and never uses `shell=True`. Mutation-style asks
 ("restart the top suspect", "fix the crashloop", "clean up disk now")
-continue to refuse with the existing PR74–PR80 wording.
+continue to refuse with the existing PR74–PR80 wording, plus the PR82
+no-mutation wording on broad-triage prompts.
