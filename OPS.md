@@ -1073,3 +1073,44 @@ sequence is:
 plans/archives/receipts, never touch Docker/Compose/services/packages/
 firewall/network/system, and never accept natural-language cleanup
 execution.
+
+## PR77 last-mile cleanup execution checklist
+
+PR77 is UX/safety polish around the final cleanup boundary — no new
+mutation surface, no gate weakening. Use this checklist when running
+real `/data` cleanup on Docker01 or any live host:
+
+1. `audit cleanup review` (read-only).
+2. `audit cleanup prepare --category <cat> ...` (creates plan + archive,
+   stops before execute).
+3. `audit cleanup execute-readiness <plan-id>` and **read the output**:
+   - Confirm `read_only: true`,
+     `deletion_performed: false`,
+     `cleanup_executed: false`,
+     `ready_for_execute_confirm: true`.
+   - Confirm the `Validated gates` block: plan present, matching
+     archive present, archive validation passed, plan fingerprint
+     matched, explicit confirm still required.
+   - If `Blockers:` appear, **stop**. Do not execute until they are
+     resolved.
+4. **Operator decision.** This is the only step where a human chooses
+   to delete. Do not run `execute` just because readiness is `true`;
+   readiness means gates are satisfied, not that deletion is
+   approved.
+5. `audit cleanup execute <plan-id> --confirm` (the only command that
+   deletes). Without `--confirm` it refuses, prints
+   `Nothing was deleted.`, and lists `matching archive`,
+   `archive validation`, `matching plan fingerprint`,
+   `explicit --confirm` as required.
+6. `audit cleanup report <receipt>` and read the
+   `Post-execute checks:` block.
+7. `audit cleanup validate <receipt>` to re-check receipt safety
+   flags.
+8. `audit retention` and `shellforgeai doctor` to confirm the host is
+   still healthy.
+
+Reminder: ShellForgeAI is a Tier-3 triage tool. Cleanup remains
+scoped to ShellForgeAI-owned metadata under `<data_dir>`. PR77 does
+not change that scope, does not add arbitrary path deletion, does not
+mutate Docker/Compose/services/packages/firewall/network/system, and
+does not let natural-language `ask` flows execute cleanup.

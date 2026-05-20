@@ -278,6 +278,23 @@ The status safety block is invariant: `apply_mode=validation-only`, `execution_a
   cleanup execution. The matching `audit cleanup report` command is also
   read-only. Cleanup execute remains gated by `--confirm`, matching
   archive, archive validation, and matching plan fingerprint.
+- PR77 polishes the operator-facing UX around the final boundary
+  without changing any gate. `audit cleanup execute-readiness` now
+  emits explicit top-level `ready_for_execute_confirm`,
+  `operator_action_required`, `read_only`, `cleanup_executed`, and
+  `deletion_performed` fields, plus a `gates` block, and the human
+  output states `This command did not delete anything.` whether the
+  plan is ready or blocked. The blocked branch refuses to show the
+  execute command as safe. `audit cleanup execute` refusal without
+  `--confirm` now lists `matching archive`, `archive validation`,
+  `matching plan fingerprint`, and `explicit --confirm` as required
+  gates and explicitly says `Nothing was deleted.` `audit cleanup
+  report` now exposes a `post_execute_checks` array
+  (`audit cleanup validate <receipt>`, `audit retention`,
+  `audit cleanup review`, `doctor`). None of these changes broaden
+  cleanup scope, automate cleanup, or weaken PR55/PR71 gates;
+  readiness and report remain strictly read-only, and only
+  `audit cleanup execute <plan> --confirm` deletes.
 
 ## PR46 — first guarded mutation gate
 

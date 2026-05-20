@@ -532,7 +532,7 @@ Guardrails:
 - `audit cleanup execute` also refuses unless a matching, valid cleanup archive exists for the same plan fingerprint.
 - Ask remains report-only for metadata hygiene; natural-language cleanup execution requests are refused.
 
-### Cleanup execute readiness and report (PR76)
+### Cleanup execute readiness and report (PR76 + PR77)
 
 `audit cleanup execute-readiness <plan-id-or-path>` is a read-only
 readiness check that answers whether the operator may run
@@ -546,18 +546,41 @@ shellforgeai audit cleanup execute-readiness <plan-id-or-path>
 shellforgeai audit cleanup execute-readiness <plan-id-or-path> --json
 ```
 
+PR77 polish makes the boundary between "ready" and "approved" explicit.
+The human output starts with a `Status:` block (`ready_for_execute_confirm`,
+`read_only`, `deletion_performed`, `cleanup_executed`,
+`operator_action_required`), then a `Validated gates:` block (plan,
+matching archive, archive validation, plan fingerprint, explicit confirm),
+then an `Operator warning:` block that explicitly states the command did
+not delete anything and that readiness means gates are satisfied — not
+that deletion is approved. When blocked, the output lists blockers and
+adds `Do not execute until blockers are resolved.` instead of showing the
+execute command.
+
 `execute-readiness` creates no plans, no archives, no receipts, and
-deletes nothing. `--json` emits strict JSON with `schema_version="1"`
-and a `safety` block pinning `read_only=true`, `cleanup_executed=false`,
-`deletion_performed=false`, `arbitrary_paths_allowed=false`,
-`docker_mutation=false`, `system_mutation=false`,
-`natural_language_execution=false`, `explicit_confirm_required=true`.
+deletes nothing. `--json` emits strict JSON with `schema_version="1"`,
+top-level `ready_for_execute_confirm`, `operator_action_required`,
+`read_only`, `cleanup_executed`, `deletion_performed` mirrors, a `gates`
+block, and a `safety` block pinning `read_only=true`,
+`cleanup_executed=false`, `deletion_performed=false`,
+`arbitrary_paths_allowed=false`, `docker_mutation=false`,
+`system_mutation=false`, `natural_language_execution=false`,
+`explicit_confirm_required=true`.
+
+`audit cleanup execute` without `--confirm` refuses with explicit gate
+reasons (matching archive, archive validation, matching plan
+fingerprint, explicit `--confirm`) and `Nothing was deleted.` It points
+back at `audit cleanup execute-readiness` instead of guessing.
 
 `audit cleanup report <receipt-path-or-dir>` summarizes an execute
 receipt (plan/archive linkage, deleted/failed/bytes/skipped, receipt
 safety, fingerprint cross-check) and supports `--json`. It is
-read-only. Cleanup execute still requires plan + matching archive +
-archive validation + matching plan fingerprint + `--confirm`.
+read-only. PR77 adds a `Post-execute checks:` block in human output and
+a `post_execute_checks` array in JSON, including
+`audit cleanup validate <receipt>`, `audit retention`,
+`audit cleanup review`, and `doctor`. Cleanup execute still requires
+plan + matching archive + archive validation + matching plan
+fingerprint + `--confirm`.
 
 ### Cleanup prepare workflow (PR75)
 

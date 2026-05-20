@@ -223,8 +223,37 @@ final operator decision workflow is:
 
 ```
 review -> prepare -> execute-readiness -> operator approval ->
-execute --confirm -> report
+execute --confirm -> report -> validate receipt
 ```
+
+### Last-mile operator checklist (PR77)
+
+PR77 polishes the final boundary so an operator never confuses "ready
+to execute" with "executed." The full last-mile sequence is:
+
+1. `audit cleanup review` — read-only operator decision aid.
+2. `audit cleanup prepare --category <cat> ...` — guided review →
+   plan → archive → validate. Stops before execute.
+3. `audit cleanup execute-readiness <plan-id>` — read-only gate
+   re-check. Tells you `ready_for_execute_confirm=true|false` and
+   explicitly states `deletion_performed=false`,
+   `cleanup_executed=false`. **Do not run execute just because
+   readiness is true; readiness means gates are satisfied, not that
+   deletion is approved.**
+4. **Explicit operator approval.** Only the human decides.
+5. `audit cleanup execute <plan-id> --confirm` — the only command
+   that deletes. Refuses without `--confirm` and prints
+   `Nothing was deleted.` along with the required gate list.
+6. `audit cleanup report <receipt>` — summarizes the receipt and
+   prints a `Post-execute checks:` block.
+7. `audit cleanup validate <receipt>` — checks receipt safety flags.
+8. `audit retention` and `audit doctor` — confirm cleanup landed and
+   the audit lane is still healthy.
+
+Readiness and report are strictly read-only. They never call
+`cleanup execute`, never mutate Docker/Compose/system, and natural-
+language `ask` paths cannot reach `cleanup execute` — only the typed
+CLI with `--confirm` does.
 
 ## Cleanup (PR55 + PR71 hardened gate)
 
