@@ -1197,3 +1197,51 @@ exercises ShellForgeAI's own CLI surface.
 2. After approving and merging a new PR locally, before live QA.
 3. As a quick smoke any time the operator wants an "everything still
    safe?" signal.
+
+## PR81 — 2AM triage ranking workflow (read-only)
+
+When the page is "the server feels broken" or "what's on fire?" — not a
+named container — start with the broad-first read-only ladder. None of
+these steps mutate anything.
+
+1. **Self-test, quick profile** to confirm the CLI is healthy:
+
+       shellforgeai self-test commands --profile quick
+
+   Expect `status: passed` or `status: warn` (PR79/PR80 semantics).
+
+2. **Rank the Docker scene** with PR81 triage ranking:
+
+       shellforgeai triage docker
+
+   or strict JSON for capture:
+
+       shellforgeai triage docker --json
+
+   Read the ranked suspects in order. Severity / confidence / classes
+   are deterministic; no LLM. Watch-list entries (e.g. high CPU but
+   currently healthy) are listed below suspects on purpose — they are
+   visible but do not outrank real failures.
+
+3. **Inspect the top suspect's evidence** using the safe next command
+   the report printed — always a `shellforgeai diagnose …` invocation:
+
+       shellforgeai diagnose docker --container <name> --json
+       # or
+       shellforgeai diagnose logs --target <name> --json
+
+4. **Only then** decide whether to engage an existing gated workflow:
+   restart proposal (PR50/PR58), restart mission (PR52/PR53), or the
+   cleanup ladder (PR74–PR77). The triage ranking command does not
+   create proposals, missions, plans, archives, or apply receipts.
+
+Do **not** jump from "ranking" to "restart". The ranking is evidence
+synthesis only. A restart still requires the explicit proposal /
+mission / apply gates with their own approvals and rollback previews.
+
+The triage ranking command never starts, stops, restarts, removes, or
+prunes containers, never runs docker compose mutation, never runs
+`apply`, `cleanup execute`, `mission execute`, or any natural-language
+execution path, and never uses `shell=True`. Mutation-style asks
+("restart the top suspect", "fix the crashloop", "clean up disk now")
+continue to refuse with the existing PR74–PR80 wording.
