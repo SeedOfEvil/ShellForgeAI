@@ -175,6 +175,161 @@ def is_mutation_request(text: str) -> bool:
     return any(p in lowered for p in _MUTATION_PHRASES)
 
 
+# PR82 — broad read-only Docker/2AM triage ask intent.
+#
+# Detect ops-shaped natural-language prompts that mean "rank the Docker
+# scene" rather than naming a specific container. These route to the
+# deterministic PR81 ``triage docker`` engine and never to a model-only
+# rephrase or to mutation. The phrase list stays narrow and read-only —
+# mutation intent (``restart …``, ``fix …``, ``clean up …``) continues
+# to refuse via the existing PR47/PR74-PR80 paths.
+_BROAD_DOCKER_TRIAGE_PHRASES: tuple[str, ...] = (
+    "what's on fire",
+    "whats on fire",
+    "what is on fire",
+    "2am triage",
+    "2 am triage",
+    "2am docker",
+    "docker box feels broken",
+    "the docker box feels broken",
+    "docker feels broken",
+    "docker is broken",
+    "broadly scan the current scene",
+    "broadly scan the scene",
+    "broad scan of the scene",
+    "broad scan of docker",
+    "rank docker suspects",
+    "rank the docker suspects",
+    "rank all docker suspects",
+    "rank docker containers",
+    "rank the docker containers",
+    "rank all sfai-battle-lab suspects",
+    "rank all battle-lab suspects",
+    "rank all battle lab suspects",
+    "rank sfai-battle-lab suspects",
+    "rank battle-lab suspects",
+    "rank battle lab suspects",
+    "what should i inspect first",
+    "what should i look at first",
+    "show current docker suspects",
+    "show docker suspects",
+    "show me docker suspects",
+    "what containers look suspicious",
+    "which containers look suspicious",
+    "what docker containers look suspicious",
+    "which docker containers look suspicious",
+    "scan the scene",
+    "scan the current scene",
+    "scan docker scene",
+    "scan the docker scene",
+    "triage the docker box",
+    "triage docker box",
+    "triage docker scene",
+    "rank the suspects",
+)
+
+
+_BROAD_TRIAGE_TOKEN_HINTS: tuple[tuple[str, ...], ...] = (
+    # "rank … docker … suspects" style phrasings that survive paraphrase.
+    ("rank", "docker", "suspect"),
+    ("rank", "docker", "container"),
+    ("rank", "battle-lab", "suspect"),
+    ("rank", "battle lab", "suspect"),
+    ("rank", "sfai-battle-lab", "suspect"),
+    ("scan", "docker", "scene"),
+    ("scan", "current", "scene"),
+    ("triage", "docker", "scene"),
+)
+
+
+def is_broad_docker_triage_intent(text: str) -> bool:
+    """Detect a broad read-only Docker triage ask intent.
+
+    True when the prompt asks for a broad scene-level ranking of Docker
+    suspects ("what's on fire?", "2AM triage", "the Docker box feels
+    broken", "rank Docker suspects", "broadly scan the current scene",
+    "rank all sfai-battle-lab suspects", "what containers look
+    suspicious?", etc.). Always returns False if the prompt also
+    matches a mutation phrase — mutation refusal is handled by the
+    existing PR47/PR74-PR80 paths and the triage-mutation helper.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if is_mutation_request(raw):
+        return False
+    if is_triage_mutation_intent(raw):
+        return False
+    lowered = _normalize_intent_text(raw)
+    raw_lower = raw.lower()
+    if any(phrase in lowered or phrase in raw_lower for phrase in _BROAD_DOCKER_TRIAGE_PHRASES):
+        return True
+    return any(all(tok in lowered for tok in tokens) for tokens in _BROAD_TRIAGE_TOKEN_HINTS)
+
+
+# PR82 — natural-language mutation phrasings tied to triage rankings.
+#
+# These prompts mean "ShellForgeAI, please go fix the top suspect"
+# rather than "rank them". They must refuse from ask: the broad ask
+# triage route never executes restart/cleanup/apply/proposal/mission
+# work, and the existing CLI gates remain the only path.
+_TRIAGE_MUTATION_PHRASES: tuple[str, ...] = (
+    "restart the top suspect",
+    "restart top suspect",
+    "restart the top",
+    "fix the top suspect",
+    "fix the crashloop",
+    "fix crashloop",
+    "fix the crash loop",
+    "fix crash loop",
+    "fix the noisy errors",
+    "fix the noisy-errors",
+    "fix the bad-http",
+    "fix the bad http",
+    "fix the disk pressure",
+    "fix the disk-pressure",
+    "fix permission denied",
+    "fix the permission denied",
+    "fix the permission-denied",
+    "clean up disk pressure",
+    "clean up disk-pressure",
+    "clean up disk pressure now",
+    "clean up disk space",
+    "stop noisy-errors",
+    "stop noisy errors",
+    "stop the noisy-errors",
+    "stop the noisy errors",
+    "stop the noisy",
+    "apply the top fix",
+    "apply top fix",
+    "apply the fix",
+    "create a restart proposal for the top suspect",
+    "create restart proposal for the top suspect",
+    "create restart proposal for top suspect",
+    "docker compose restart the top",
+    "docker compose restart the top one",
+    "compose restart the top",
+    "delete old files causing disk pressure",
+    "delete files causing disk pressure",
+)
+
+
+def is_triage_mutation_intent(text: str) -> bool:
+    """Detect mutation phrasings that follow a triage ranking.
+
+    Used by the broad-triage ask handler so prompts like ``restart the
+    top suspect`` / ``fix the crashloop`` / ``clean up disk pressure
+    now`` refuse cleanly from ask. This helper never triggers a
+    deterministic triage render and never executes mutation.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    lowered = _normalize_intent_text(raw)
+    raw_lower = raw.lower()
+    return any(phrase in lowered or phrase in raw_lower for phrase in _TRIAGE_MUTATION_PHRASES)
+
+
 _LAB_RESTART_ASK_TOKENS = (
     "restart the container",
     "restart container",

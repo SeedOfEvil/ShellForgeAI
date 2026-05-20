@@ -451,6 +451,73 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 5. Never jump to broad production mutation. The product stays a Tier-3
    triage tool with narrow, audited mutation lanes.
 
+## PR82 milestone: broad ask triage grounding
+
+Live QA on Docker01 (PR81 followup, head `b0d33b4`) confirmed
+deterministic `shellforgeai triage docker` ranking of all five
+battle-lab suspects (`sfai-crashloop`, `sfai-bad-http`,
+`sfai-disk-pressure`, `sfai-noisy-errors`, `sfai-permission-denied`)
+with the read-only safety invariants clean (`read_only=true`,
+`mutation_performed=false`, every cleanup/proposal/mission/apply/
+docker-compose/container-restart/natural-language/shell-true flag
+`false`).
+
+Remaining PR81 gap: broad model-backed ask was not reliably consuming
+the deterministic triage output. The PR82 fix wires broad Docker /
+2AM ask prompts to call `triage_ranking.collect_scene` +
+`rank_scene` directly and render the deterministic ranking from the
+ask handler — no LLM re-ranking, no invented suspects, no
+per-container evidence collapse.
+
+- New ask intent detector
+  `ask_routing.is_broad_docker_triage_intent` matches read-only
+  broad-Docker prompts: "what's on fire?", "2AM triage", "the Docker
+  box feels broken", "rank Docker suspects", "broadly scan the
+  current scene", "rank all sfai-battle-lab suspects by severity",
+  "what should I inspect first?", "show current Docker suspects",
+  "what containers look suspicious?".
+- New mutation-intent detector
+  `ask_routing.is_triage_mutation_intent` matches phrases that follow
+  a ranking ("restart the top suspect", "fix the crashloop", "clean
+  up disk pressure now", "stop noisy-errors", "apply the top fix",
+  "create a restart proposal for the top suspect", "docker compose
+  restart the top one", "delete old files causing disk pressure").
+  These refuse from ask with the PR82 no-mutation wording and
+  redirect to the explicit gated CLI; they never render the
+  deterministic ranking.
+- New `cli._handle_broad_triage_ask` is wired into `ask` before the
+  existing PR47/PR74-PR80 handlers. It reuses the PR81 engine
+  directly (no subprocess, no `shellforgeai triage docker` shell-out)
+  and renders a 2AM-readable answer with Safety / Scene summary /
+  ranked suspects (severity / confidence / Evidence / Safe next) /
+  optional Watch / Next safe steps footer.
+- The deterministic ranking, severity/confidence, classes, per-
+  container evidence, and per-suspect `safe_next_commands` are taken
+  unchanged from the PR81 engine. Per-container evidence isolation
+  (PR81 followup anti-attribution guards) survives the renderer:
+  `sfai-bad-http` does not pick up `disk_pressure` or
+  `permission_denied` evidence, etc.
+- Tests added: `tests/test_pr82_broad_ask_triage.py` covers route
+  detection (read-only and mutation), the deterministic grounding
+  rules (ordering, severity preservation, no invented suspects, no
+  omitted fixture suspects, per-container evidence isolation), the
+  ask-shape requirements (all five battle-lab suspects rendered,
+  crashloop pinned as top, safety statement present, read-only next
+  commands, no execution commands), mutation refusal for all five
+  PR82 mutation phrasings, the empty-scene and collection-failure
+  paths, and safety regressions (handler source has no
+  `shell=True`, no mutation-helper calls; broad ask path does not
+  fall through to `diagnose_target` or `build_provider`; audit
+  events for both render and refusal record every mutation flag
+  `false`).
+- No mutation behavior added. The ask route never restarts/stops/
+  removes containers, never runs `docker compose` mutation, never
+  runs `cleanup prepare/archive/execute`, never creates proposals
+  or missions, never runs `apply`, and never uses `shell=True`. PR81
+  deterministic triage tests, PR79/PR80 self-test profile tests,
+  PR74–PR77 cleanup gates, PR56–PR69 compose gates, and the
+  natural-language mutation refusal tests all continue to pass.
+
 ## PR81 milestone: battle-lab triage ranking and scene awareness
 
 ### PR81 followup — Docker01 live QA fixes
