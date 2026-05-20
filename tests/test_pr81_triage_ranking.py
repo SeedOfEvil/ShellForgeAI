@@ -384,3 +384,393 @@ def test_triage_does_not_call_mutation_methods(monkeypatch):
     assert p["safety"]["cleanup_executed"] is False
     assert p["safety"]["docker_compose_executed"] is False
     assert p["safety"]["container_restarted"] is False
+
+
+# ===========================================================================
+# PR81-followup: realistic battle-lab fixtures (timestamp-prefixed log text)
+# Per-container evidence isolation, missing scenarios, watch lane, and the
+# bad-http anti-attribution guard.
+# ===========================================================================
+
+
+def _realistic_battle_lab_scene() -> dict:
+    """Battle-lab scene mirroring the Docker01 live QA observation.
+
+    Logs are timestamp-prefixed (the real container log shape) so the line
+    classifier must not require ERROR to be at the start of the line.
+    """
+    crashloop_log = "\n".join(
+        f"2024-05-20T14:50:0{i} CRITICAL boot failure: payment-init exited with 42"
+        for i in range(6)
+    )
+    noisy_log = "\n".join(
+        [
+            "2024-05-20T14:50:01 ERROR payment-worker timeout after 30s",
+            "2024-05-20T14:50:02 WARN queue depth high (1024)",
+            "2024-05-20T14:50:03 ERROR payment-worker timeout after 30s",
+            "2024-05-20T14:50:04 WARN queue depth high (1100)",
+            "2024-05-20T14:50:05 ERROR payment-worker timeout after 30s",
+            "2024-05-20T14:50:06 WARN queue depth high (1200)",
+            "2024-05-20T14:50:07 Exception: PaymentTimeoutError",
+        ]
+    )
+    bad_http_log = "\n".join(
+        [
+            "2024/05/20 14:50:01 [error] 1#1: *5 connect() to 127.0.0.1:9999 "
+            "failed (111: Connection refused) while connecting to upstream",
+            "2024/05/20 14:50:02 [error] 1#1: *6 connect() to 127.0.0.1:9999 "
+            "failed (111: Connection refused) while connecting to upstream",
+            "2024/05/20 14:50:03 192.168.0.1 - - [20/May/2024:14:50:03 +0000] "
+            '"GET / HTTP/1.1" 502 150',
+            "2024/05/20 14:50:04 192.168.0.1 - - [20/May/2024:14:50:04 +0000] "
+            '"GET /api HTTP/1.1" 502 150',
+            # Nginx sometimes prints a single permission-denied as an errno
+            # decoration — this must NOT pin permission_denied class on this
+            # bad-http suspect.
+            "2024/05/20 14:50:05 [crit] 1#1: open() failed "
+            "(13: Permission denied) — single stray entry",
+        ]
+    )
+    disk_log = "\n".join(
+        [
+            "2024-05-20T14:50:01 ERROR write failed: simulated disk pressure, filler=96.0M",
+            "2024-05-20T14:50:02 ERROR write failed: simulated disk pressure, filler=97.0M",
+            "2024-05-20T14:50:03 ERROR write failed: simulated disk pressure, filler=98.0M",
+        ]
+    )
+    perm_log = "\n".join(
+        [
+            "2024-05-20T14:50:01 ERROR permission denied reading /blocked/secret.txt",
+            "2024-05-20T14:50:02 ERROR permission denied reading /blocked/secret.txt",
+            "2024-05-20T14:50:03 ERROR permission denied reading /blocked/secret.txt",
+            "2024-05-20T14:50:04 ERROR EACCES on /blocked",
+        ]
+    )
+    return {
+        "containers": [
+            {
+                "name": "sfai-crashloop",
+                "state": "restarting",
+                "exit_code": 42,
+                "restart_count": 173,
+                "oom_killed": False,
+                "health": None,
+                "log_text": crashloop_log,
+            },
+            {
+                "name": "sfai-noisy-errors",
+                "state": "running",
+                "exit_code": 0,
+                "restart_count": 0,
+                "oom_killed": False,
+                "health": "healthy",
+                "log_text": noisy_log,
+            },
+            {
+                "name": "sfai-bad-http",
+                "state": "running",
+                "exit_code": 0,
+                "restart_count": 0,
+                "oom_killed": False,
+                "health": "unhealthy",
+                "log_text": bad_http_log,
+            },
+            {
+                "name": "sfai-disk-pressure",
+                "state": "running",
+                "exit_code": 0,
+                "restart_count": 0,
+                "oom_killed": False,
+                "health": "healthy",
+                "log_text": disk_log,
+            },
+            {
+                "name": "sfai-permission-denied",
+                "state": "running",
+                "exit_code": 0,
+                "restart_count": 0,
+                "oom_killed": False,
+                "health": "healthy",
+                "log_text": perm_log,
+            },
+            {
+                "name": "shellforgeai",
+                "state": "running",
+                "exit_code": 0,
+                "restart_count": 0,
+                "oom_killed": False,
+                "health": "healthy",
+                "cpu_percent": 95.0,
+                "log_text": "",
+            },
+            {
+                "name": "sfai-quiet",
+                "state": "running",
+                "exit_code": 0,
+                "restart_count": 0,
+                "oom_killed": False,
+                "health": "healthy",
+                "log_text": "2024-05-20T14:50:01 INFO heartbeat ok",
+            },
+        ]
+    }
+
+
+# --- per-container evidence isolation -------------------------------------
+
+
+def test_disk_pressure_evidence_does_not_attach_to_bad_http():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    s = _by_name(payload["suspects"])
+    assert "sfai-bad-http" in s
+    assert "disk_pressure" not in s["sfai-bad-http"]["classes"]
+
+
+def test_permission_denied_evidence_does_not_attach_to_bad_http():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    s = _by_name(payload["suspects"])
+    assert "sfai-bad-http" in s
+    assert "permission_denied" not in s["sfai-bad-http"]["classes"]
+
+
+def test_each_suspects_classes_come_from_its_own_evidence():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    s = _by_name(payload["suspects"])
+    # disk_pressure class only on sfai-disk-pressure
+    disk_owners = [n for n, e in s.items() if "disk_pressure" in e["classes"]]
+    assert disk_owners == ["sfai-disk-pressure"]
+    # permission_denied class only on sfai-permission-denied
+    perm_owners = [n for n, e in s.items() if "permission_denied" in e["classes"]]
+    assert perm_owners == ["sfai-permission-denied"]
+    # noisy_errors class only on sfai-noisy-errors
+    noisy_owners = [n for n, e in s.items() if "noisy_errors" in e["classes"]]
+    assert noisy_owners == ["sfai-noisy-errors"]
+    # bad_http class only on sfai-bad-http
+    http_owners = [n for n, e in s.items() if "bad_http" in e["classes"]]
+    assert http_owners == ["sfai-bad-http"]
+
+
+def test_global_scene_evidence_is_not_copied_to_every_suspect():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    for s in payload["suspects"]:
+        # No suspect should ever pick up every class — that would mean global
+        # evidence leaked into per-container classification.
+        assert len(s["classes"]) < 5, s
+
+
+# --- broad triage covers ALL active battle-lab scenarios ------------------
+
+
+def test_all_active_battle_lab_scenarios_are_ranked():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    names = {s["name"] for s in payload["suspects"]}
+    expected = {
+        "sfai-crashloop",
+        "sfai-noisy-errors",
+        "sfai-bad-http",
+        "sfai-disk-pressure",
+        "sfai-permission-denied",
+    }
+    assert expected.issubset(names), names
+
+
+def test_noisy_errors_ranks_on_timestamp_prefixed_logs():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    s = _by_name(payload["suspects"])
+    assert "sfai-noisy-errors" in s
+    assert "noisy_errors" in s["sfai-noisy-errors"]["classes"]
+
+
+def test_disk_pressure_ranks_on_simulated_marker():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    s = _by_name(payload["suspects"])
+    assert "sfai-disk-pressure" in s
+    assert "disk_pressure" in s["sfai-disk-pressure"]["classes"]
+
+
+def test_running_containers_can_still_rank_as_suspects():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    running_suspects = [s["name"] for s in payload["suspects"] if s["name"] != "sfai-crashloop"]
+    # noisy, bad-http, disk, perm are all running yet must appear.
+    assert {
+        "sfai-noisy-errors",
+        "sfai-bad-http",
+        "sfai-disk-pressure",
+        "sfai-permission-denied",
+    }.issubset(set(running_suspects))
+
+
+def test_crashloop_outranks_noisy_and_watch():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    names = [s["name"] for s in payload["suspects"]]
+    assert names[0] == "sfai-crashloop"
+    assert "shellforgeai" not in names  # high-CPU healthy belongs in watch
+
+
+def test_high_cpu_healthy_is_watch_not_critical():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    watch_names = {w["name"] for w in payload["watch"]}
+    assert "shellforgeai" in watch_names
+    w = next(w for w in payload["watch"] if w["name"] == "shellforgeai")
+    assert w["severity"] == "watch"
+    # And NOT in suspects.
+    assert "shellforgeai" not in [s["name"] for s in payload["suspects"]]
+
+
+def test_at_least_five_scenarios_in_suspects_or_watch():
+    payload = rank_scene(_realistic_battle_lab_scene())
+    total = {s["name"] for s in payload["suspects"]} | {w["name"] for w in payload["watch"]}
+    assert len(total) >= 5
+
+
+# --- log classifier sanity -------------------------------------------------
+
+
+def test_classify_logs_matches_timestamp_prefixed_error():
+    from shellforgeai.core.triage_ranking import classify_logs
+
+    text = "2024-05-20T14:50:01 ERROR payment-worker timeout"
+    out = classify_logs(text)
+    assert out.get("noisy_error", 0) >= 1
+
+
+def test_classify_logs_matches_simulated_disk_pressure():
+    from shellforgeai.core.triage_ranking import classify_logs
+
+    text = "2024-05-20 ERROR write failed: simulated disk pressure, filler=96.0M"
+    out = classify_logs(text)
+    assert out.get("disk_pressure", 0) >= 1
+
+
+def test_classify_logs_matches_nginx_upstream_refused():
+    from shellforgeai.core.triage_ranking import classify_logs
+
+    text = "connect() to 127.0.0.1:9999 failed (111: Connection refused)"
+    out = classify_logs(text)
+    assert out.get("bad_http", 0) >= 1
+
+
+def test_classify_logs_is_per_text_only():
+    from shellforgeai.core.triage_ranking import classify_logs
+
+    # First call shouldn't leak state into the second.
+    classify_logs("ERROR everywhere ERROR ERROR")
+    out = classify_logs("nothing interesting here")
+    assert out == {}
+
+
+# --- human / JSON contract on realistic fixture ---------------------------
+
+
+def test_human_output_includes_all_realistic_battle_lab_names(monkeypatch):
+    monkeypatch.setattr(triage_mod, "collect_scene", lambda *a, **k: _realistic_battle_lab_scene())
+    out = runner.invoke(app, ["triage", "docker"])
+    assert out.exit_code == 0
+    for name in (
+        "sfai-crashloop",
+        "sfai-noisy-errors",
+        "sfai-bad-http",
+        "sfai-disk-pressure",
+        "sfai-permission-denied",
+    ):
+        assert name in out.stdout, name
+    assert "Evidence:" in out.stdout
+
+
+def test_json_realistic_includes_classes_evidence_and_all_names(monkeypatch):
+    monkeypatch.setattr(triage_mod, "collect_scene", lambda *a, **k: _realistic_battle_lab_scene())
+    out = runner.invoke(app, ["triage", "docker", "--json"])
+    assert out.exit_code == 0
+    p = json.loads(out.stdout)
+    names = {s["name"] for s in p["suspects"]}
+    for n in (
+        "sfai-crashloop",
+        "sfai-noisy-errors",
+        "sfai-bad-http",
+        "sfai-disk-pressure",
+        "sfai-permission-denied",
+    ):
+        assert n in names, n
+    for s in p["suspects"]:
+        assert s.get("classes")
+        assert s.get("evidence")
+
+
+# --- collect_scene: per-container isolation, no live docker --------------
+
+
+def test_collect_scene_uses_per_container_logs_only(monkeypatch):
+    """``collect_scene`` must classify each container's log text in isolation.
+
+    We stub the underlying docker collectors and verify the resulting scene
+    has log_text populated per container and no cross-container theme leak.
+    """
+    from shellforgeai.tools import containers as containers_tool
+    from shellforgeai.tools.base import ToolResult
+
+    inventory = {
+        "containers": [
+            {"name": "alpha", "state": "running"},
+            {"name": "beta", "state": "running"},
+        ]
+    }
+
+    def fake_containers(all_containers=True):
+        return ToolResult(tool="docker.containers", stdout=json.dumps(inventory))
+
+    def fake_inspect(name):
+        return ToolResult(
+            tool="docker.inspect",
+            stdout=json.dumps(
+                {
+                    "name": name,
+                    "exit_code": 0,
+                    "restart_count": 0,
+                    "oom_killed": False,
+                    "health": "healthy",
+                }
+            ),
+        )
+
+    def fake_logs(name, tail=200, max_bytes=65536):
+        if name == "alpha":
+            body = (
+                "2024-05-20 ERROR write failed: simulated disk pressure, "
+                "filler=96.0M\n"
+                "2024-05-20 ERROR write failed: simulated disk pressure, "
+                "filler=97.0M\n"
+            )
+        else:
+            body = "2024-05-20 INFO beta is fine\n"
+        return ToolResult(tool="docker.container_logs", stdout=body)
+
+    monkeypatch.setattr(containers_tool, "containers", fake_containers)
+    monkeypatch.setattr(containers_tool, "inspect", fake_inspect)
+    monkeypatch.setattr(containers_tool, "container_logs", fake_logs)
+    monkeypatch.setattr(triage_mod, "_collect_cpu_stats", lambda: {})
+
+    scene = triage_mod.collect_scene()
+    by_name = {c["name"]: c for c in scene["containers"]}
+    assert "simulated disk pressure" in by_name["alpha"]["log_text"]
+    assert "simulated disk pressure" not in by_name["beta"]["log_text"]
+
+    payload = rank_scene(scene)
+    s = _by_name(payload["suspects"])
+    assert "alpha" in s
+    assert "disk_pressure" in s["alpha"]["classes"]
+    assert "beta" not in s  # quiet container, not ranked
+
+
+def test_collect_scene_no_daemon_returns_empty(monkeypatch):
+    from shellforgeai.tools import containers as containers_tool
+    from shellforgeai.tools.base import ToolResult
+
+    monkeypatch.setattr(
+        containers_tool,
+        "containers",
+        lambda all_containers=True: ToolResult(
+            tool="docker.containers", ok=False, exit_code=127, stderr="no docker"
+        ),
+    )
+    scene = triage_mod.collect_scene()
+    assert scene == {"containers": []}

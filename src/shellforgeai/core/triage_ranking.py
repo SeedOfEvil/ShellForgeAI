@@ -1,14 +1,20 @@
 """PR81 — Read-only Docker triage ranking ("scene awareness").
 
-Given a Docker scene snapshot (container inventory + log themes + bounded
-metrics), deterministically rank multiple suspects with severity, confidence,
-evidence, and a safe next read-only command per suspect. No LLM, no mutation,
-no natural-language execution.
+Given a Docker scene snapshot (container inventory + per-container logs +
+bounded metrics), deterministically rank multiple suspects with severity,
+confidence, evidence, and a safe next read-only command per suspect. No LLM,
+no mutation, no natural-language execution.
 
-The scoring runs on a plain dict scene payload so tests can drive it from
-fixtures without a live Docker daemon. The collector ``collect_scene`` adapts
-the existing read-only ``docker.containers`` / ``docker.problem_summary``
-collectors into that shape.
+PR81-followup: triage owns its own per-container log classifier (rather than
+relying on ``docker.problem_summary``'s narrower line-anchored patterns), so
+running-but-noisy containers, disk-pressure scenarios, and ``ERROR ...`` lines
+prefixed by timestamps are detected per-container. ``collect_scene`` independently
+inspects + tails logs + classifies for each container in the inventory and
+optionally pulls ``docker stats`` for the high-CPU watch lane. Evidence is
+scoped per container; cross-attribution between containers does not occur.
+
+The scoring runs on a plain scene dict so tests drive it from fixtures
+without a live Docker daemon.
 
 Forbidden in this module:
 - container start/stop/restart/remove
@@ -23,6 +29,7 @@ Forbidden in this module:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 SCHEMA_VERSION = "1"
@@ -52,16 +59,135 @@ _SEV_RANK = {
     SEV_WATCH: 0,
 }
 
-# Log theme keys produced by tools/containers._classify_log
-_BAD_HTTP_THEMES = (
-    "connection_refused",
-    "upstream_unreachable",
-    "timeout",
+# --- per-container log classifier -----------------------------------------
+#
+# These patterns are intentionally line-anchor-free (no ``^``) so they fire on
+# timestamp-prefixed lines like ``2024-05-20 14:50:01 ERROR payment-worker
+# timeout``. Each pattern produces a semantic theme key consumed directly by
+# the scorers below. Classification runs per container; the resulting theme
+# dict is local to that container and is never copied to peers.
+
+_TRIAGE_LOG_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # noisy errors: ERROR/FATAL/Exception/Traceback/queue-depth markers
+    (
+        "noisy_error",
+        re.compile(
+            r"(?i)\b(?:ERROR|FATAL|Exception|Traceback|queue depth high|"
+            r"repeated startup failure)\b"
+        ),
+    ),
+    ("warn_signal", re.compile(r"(?i)\bWARN(?:ING)?\b")),
+    # disk pressure: lab + production phrasings
+    (
+        "disk_pressure",
+        re.compile(
+            r"(?i)("
+            r"simulated disk pressure|write failed|no space left|"
+            r"disk pressure|filler\s*=|ENOSPC|low free|"
+            r"low\s+(?:disk|free)\s+space|out of disk"
+            r")"
+        ),
+    ),
+    # bad HTTP / upstream / refused endpoint
+    (
+        "bad_http",
+        re.compile(
+            r"(?i)("
+            r"\b50[23]\b|bad gateway|connection refused|connect\(\)\s+failed|"
+            r"upstream (?:refused|unreachable|host|connect(?:ion)?|down|"
+            r"timeout|prematurely closed|server temporarily disabled)|"
+            r"econnrefused|127\.0\.0\.1:9999"
+            r")"
+        ),
+    ),
+    # DNS resolution failure
+    (
+        "dns_failure",
+        re.compile(
+            r"(?i)(temporary failure in name resolution|name or service not known|"
+            r"could not resolve host|no such host|getaddrinfo|nxdomain|servfail)"
+        ),
+    ),
+    # generic timeout (separate from bad_http on purpose)
+    (
+        "timeout",
+        re.compile(
+            r"(?i)(connection timed out|i/o timeout|read timed out|"
+            r"timeout connecting|upstream timeout|deadline exceeded|\btimed out\b)"
+        ),
+    ),
+    # permission / access failures
+    (
+        "permission_denied",
+        re.compile(
+            r"(?i)("
+            r"permission denied|\bEACCES\b|access denied|"
+            r"operation not permitted|read[- ]only file ?system"
+            r")"
+        ),
+    ),
+    # explicit crashloop boot marker
+    (
+        "crashloop_boot",
+        re.compile(
+            r"(?i)(CRITICAL boot failure|panic:\s|fatal error:|abort:|"
+            r"unrecoverable startup error)"
+        ),
+    ),
 )
-_DNS_THEMES = ("dns_failure",)
-_NOISY_THEMES = ("error_line", "traceback", "config_error")
-_DISK_THEMES = ("read_only_fs",)
-_PERM_THEMES = ("permission_denied",)
+
+# Legacy theme keys (from ``tools/containers._classify_log``) that scorers
+# also accept so existing collectors and fixtures keep working.
+_LEGACY_THEME_ALIASES: dict[str, str] = {
+    "error_line": "noisy_error",
+    "traceback": "noisy_error",
+    "config_error": "noisy_error",
+    "warn_line": "warn_signal",
+    "connection_refused": "bad_http",
+    "upstream_unreachable": "bad_http",
+    "read_only_fs": "permission_denied",
+}
+
+
+def classify_logs(text: str) -> dict[str, int]:
+    """Per-container log classifier producing semantic theme counts.
+
+    Returns ``{}`` for empty/None input. Counts are clamped at 0 minimum.
+    Each pattern is scoped to the text passed in — never shared across
+    containers.
+    """
+    out: dict[str, int] = {}
+    if not text:
+        return out
+    for name, pat in _TRIAGE_LOG_PATTERNS:
+        n = len(pat.findall(text))
+        if n:
+            out[name] = n
+    return out
+
+
+def _themes(c: dict[str, Any]) -> dict[str, int]:
+    """Return semantic theme counts for a container, merging legacy keys.
+
+    If ``log_text`` is present we classify it directly (most accurate).
+    Otherwise we read ``log_themes`` and translate legacy aliases.
+    """
+    text = c.get("log_text")
+    themes = classify_logs(text) if isinstance(text, str) and text else {}
+    raw = c.get("log_themes") or {}
+    for k, v in raw.items():
+        try:
+            n = int(v or 0)
+        except (TypeError, ValueError):
+            continue
+        if n <= 0:
+            continue
+        key = _LEGACY_THEME_ALIASES.get(k, k)
+        themes[key] = themes.get(key, 0) + n
+    return themes
+
+
+# --- helpers ---------------------------------------------------------------
 
 
 def _safe_next_logs(name: str) -> str:
@@ -81,14 +207,20 @@ def _max_sev(a: str, b: str) -> str:
 
 
 # --- per-class scorers -----------------------------------------------------
+#
+# Every scorer receives a single container snapshot. Each scorer only reads
+# fields scoped to that container; no scorer reaches into a shared scene or
+# peer container. Theme attribution is bounded by thresholds so a single
+# stray nginx errno line (``connect() failed (13: Permission denied)``) does
+# not pin the ``permission_denied`` class onto a clear bad-http suspect.
 
 
-def _score_crashloop(c: dict[str, Any]) -> dict[str, Any] | None:
+def _score_crashloop(c: dict[str, Any], themes: dict[str, int]) -> dict[str, Any] | None:
     state = (c.get("state") or "").lower()
     restart_count = int(c.get("restart_count") or 0)
     exit_code = c.get("exit_code")
     oom = bool(c.get("oom_killed"))
-    log_themes = c.get("log_themes") or {}
+    boot = int(themes.get("crashloop_boot", 0) or 0)
     triggered = False
     classes: list[str] = []
     evidence: list[dict[str, Any]] = []
@@ -108,7 +240,7 @@ def _score_crashloop(c: dict[str, Any]) -> dict[str, Any] | None:
         if CLASS_RESTART_STORM not in classes:
             classes.append(CLASS_RESTART_STORM)
         evidence.append({"type": "restart_count", "value": restart_count, "weight": 30})
-        why.append("restart storm detected")
+        why.append(f"restart storm detected (restart_count={restart_count})")
         severity = _max_sev(severity, SEV_CRITICAL if restart_count >= 5 else SEV_HIGH)
         score += 30 + min(restart_count, 12)
     if state == "exited" and exit_code is not None and exit_code != 0:
@@ -127,16 +259,14 @@ def _score_crashloop(c: dict[str, Any]) -> dict[str, Any] | None:
         why.append("OOM killed")
         severity = _max_sev(severity, SEV_HIGH)
         score += 25
-    # Repeated startup/failure pattern in logs reinforces crashloop signal.
-    if triggered and (log_themes.get("traceback", 0) or log_themes.get("error_line", 0) >= 2):
-        evidence.append(
-            {
-                "type": "repeated_startup_failure",
-                "value": True,
-                "weight": 10,
-            }
-        )
-        score += 10
+    if boot:
+        triggered = True
+        if CLASS_CRASHLOOP not in classes:
+            classes.append(CLASS_CRASHLOOP)
+        evidence.append({"type": "log_theme:crashloop_boot", "value": boot, "weight": 15})
+        why.append(f"explicit crashloop boot marker x{boot}")
+        severity = _max_sev(severity, SEV_HIGH)
+        score += 15
 
     if not triggered:
         return None
@@ -149,21 +279,29 @@ def _score_crashloop(c: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _score_bad_http(c: dict[str, Any]) -> dict[str, Any] | None:
-    log_themes = c.get("log_themes") or {}
-    hits = {k: int(log_themes.get(k, 0) or 0) for k in _BAD_HTTP_THEMES + _DNS_THEMES}
-    total = sum(hits.values())
-    if total <= 0:
+def _score_bad_http(c: dict[str, Any], themes: dict[str, int]) -> dict[str, Any] | None:
+    http = int(themes.get("bad_http", 0) or 0)
+    dns = int(themes.get("dns_failure", 0) or 0)
+    # timeout alone does not classify as bad_http; only count it when accompanied
+    # by direct upstream/refused evidence to keep noisy-errors and bad_http
+    # distinct.
+    timeout = int(themes.get("timeout", 0) or 0) if http >= 1 else 0
+    total = http + dns + timeout
+    if http <= 0 and dns <= 0:
         return None
     evidence: list[dict[str, Any]] = []
-    why: list[str] = []
-    for theme, count in hits.items():
-        if count > 0:
-            evidence.append({"type": f"log_theme:{theme}", "value": count, "weight": 15})
-            why.append(f"log evidence: {theme} x{count}")
+    why: list[str] = ["HTTP/upstream failure evidence"]
+    if http:
+        evidence.append({"type": "log_theme:bad_http", "value": http, "weight": 20})
+        why.append(f"log evidence: bad_http x{http}")
+    if dns:
+        evidence.append({"type": "log_theme:dns_failure", "value": dns, "weight": 15})
+        why.append(f"log evidence: dns_failure x{dns}")
+    if timeout:
+        evidence.append({"type": "log_theme:timeout", "value": timeout, "weight": 10})
+        why.append(f"log evidence: timeout x{timeout}")
     severity = SEV_HIGH if total >= 3 else SEV_MEDIUM
     score = 55 + min(total * 5, 25)
-    why.insert(0, "HTTP/upstream failure evidence")
     return {
         "classes": [CLASS_BAD_HTTP],
         "severity": severity,
@@ -173,28 +311,38 @@ def _score_bad_http(c: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _score_noisy_errors(c: dict[str, Any]) -> dict[str, Any] | None:
+def _score_noisy_errors(c: dict[str, Any], themes: dict[str, int]) -> dict[str, Any] | None:
     state = (c.get("state") or "").lower()
-    if state != "running":
+    if state not in {"running", ""}:
+        # Crashloop scorer already captures exited/restarting/dead cases.
         return None
-    log_themes = c.get("log_themes") or {}
-    err = int(log_themes.get("error_line", 0) or 0)
-    tb = int(log_themes.get("traceback", 0) or 0)
-    cfg = int(log_themes.get("config_error", 0) or 0)
-    total = err + tb + cfg
-    if total < 2:
+    err = int(themes.get("noisy_error", 0) or 0)
+    warn = int(themes.get("warn_signal", 0) or 0)
+    if err < 2 and warn < 2:
         return None
+    # Anti-attribution guard: if those ERROR/WARN lines are already explained
+    # by a specific category (disk pressure, bad HTTP, permission denied,
+    # crashloop boot), do NOT also pin "noisy_errors" on this container — the
+    # signal is already accounted for elsewhere with its own evidence.
+    specific = (
+        int(themes.get("bad_http", 0) or 0)
+        + int(themes.get("disk_pressure", 0) or 0)
+        + int(themes.get("permission_denied", 0) or 0)
+        + int(themes.get("crashloop_boot", 0) or 0)
+    )
+    if specific >= max(err, 1):
+        return None
+    total = err + warn
     evidence = [
-        {"type": "log_theme:error_line", "value": err, "weight": 10},
-        {"type": "log_theme:traceback", "value": tb, "weight": 10},
+        {"type": "log_theme:noisy_error", "value": err, "weight": 12},
     ]
-    if cfg:
-        evidence.append({"type": "log_theme:config_error", "value": cfg, "weight": 5})
-    severity = SEV_HIGH if total >= 6 else SEV_MEDIUM
-    score = 40 + min(total * 3, 25)
+    if warn:
+        evidence.append({"type": "log_theme:warn_signal", "value": warn, "weight": 6})
+    severity = SEV_HIGH if total >= 8 else SEV_MEDIUM
+    score = 45 + min(total * 3, 30)
     why = [
-        "repeated error lines while container is still running",
-        f"error density: error_line={err} traceback={tb} config_error={cfg}",
+        "repeated error/warn lines while container is running",
+        f"error density: noisy_error={err} warn_signal={warn}",
     ]
     return {
         "classes": [CLASS_NOISY_ERRORS],
@@ -205,34 +353,35 @@ def _score_noisy_errors(c: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _score_disk_pressure(c: dict[str, Any]) -> dict[str, Any] | None:
-    log_themes = c.get("log_themes") or {}
-    ro = int(log_themes.get("read_only_fs", 0) or 0)
+def _score_disk_pressure(c: dict[str, Any], themes: dict[str, int]) -> dict[str, Any] | None:
+    disk = int(themes.get("disk_pressure", 0) or 0)
     no_space = bool(c.get("log_no_space_left"))
     disk_free_pct = c.get("disk_free_pct")
-    triggered = ro > 0 or no_space
+    if (
+        disk <= 0
+        and not no_space
+        and not (isinstance(disk_free_pct, (int, float)) and disk_free_pct <= 10)
+    ):
+        return None
     evidence: list[dict[str, Any]] = []
     why: list[str] = []
     score = 0
     severity = SEV_LOW
-    if ro:
-        evidence.append({"type": "log_theme:read_only_fs", "value": ro, "weight": 20})
-        why.append("read-only filesystem evidence in logs")
-        severity = _max_sev(severity, SEV_HIGH)
-        score += 50
+    if disk:
+        evidence.append({"type": "log_theme:disk_pressure", "value": disk, "weight": 25})
+        why.append(f"disk-pressure log evidence x{disk}")
+        severity = _max_sev(severity, SEV_HIGH if disk >= 3 else SEV_MEDIUM)
+        score += 55 + min(disk * 3, 20)
     if no_space:
         evidence.append({"type": "log_no_space_left", "value": True, "weight": 25})
         why.append("logs mention 'no space left'")
         severity = _max_sev(severity, SEV_HIGH)
-        score += 55
+        score += 50
     if isinstance(disk_free_pct, (int, float)) and disk_free_pct <= 10:
-        triggered = True
         evidence.append({"type": "disk_free_pct", "value": disk_free_pct, "weight": 20})
         why.append(f"low free disk: {disk_free_pct}%")
         severity = _max_sev(severity, SEV_HIGH if disk_free_pct <= 5 else SEV_MEDIUM)
         score += 45
-    if not triggered:
-        return None
     return {
         "classes": [CLASS_DISK_PRESSURE],
         "severity": severity,
@@ -242,27 +391,28 @@ def _score_disk_pressure(c: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _score_permission_denied(c: dict[str, Any]) -> dict[str, Any] | None:
-    log_themes = c.get("log_themes") or {}
-    perm = int(log_themes.get("permission_denied", 0) or 0)
-    ro = int(log_themes.get("read_only_fs", 0) or 0)
-    if perm <= 0 and ro <= 0:
+def _score_permission_denied(c: dict[str, Any], themes: dict[str, int]) -> dict[str, Any] | None:
+    perm = int(themes.get("permission_denied", 0) or 0)
+    if perm <= 0:
         return None
-    evidence: list[dict[str, Any]] = []
-    why: list[str] = []
-    score = 0
-    severity = SEV_MEDIUM
-    if perm:
-        evidence.append({"type": "log_theme:permission_denied", "value": perm, "weight": 20})
-        why.append(f"permission denied evidence x{perm}")
-        score += 50 + min(perm * 3, 15)
-        if perm >= 3:
-            severity = SEV_HIGH
-    if ro and not perm:
-        # Read-only FS without permission_denied still implies access failure.
-        evidence.append({"type": "log_theme:read_only_fs", "value": ro, "weight": 15})
-        why.append("read-only filesystem evidence")
-        score += 40
+    # Anti-attribution guard: nginx and other HTTP servers occasionally log
+    # ``connect() failed (13: Permission denied)`` as part of an upstream
+    # failure. When the dominant signal is bad_http and the permission_denied
+    # count is weak (1), suppress to avoid pinning the wrong class on a clear
+    # bad-http suspect.
+    http = int(themes.get("bad_http", 0) or 0)
+    if http >= 3 and perm < 2:
+        return None
+    # Require at least 2 hits to call this its own class (single mentions
+    # are common collateral in mixed log streams).
+    if perm < 2:
+        return None
+    evidence: list[dict[str, Any]] = [
+        {"type": "log_theme:permission_denied", "value": perm, "weight": 20},
+    ]
+    why = [f"permission denied evidence x{perm}"]
+    score = 50 + min(perm * 3, 20)
+    severity = SEV_HIGH if perm >= 4 else SEV_MEDIUM
     return {
         "classes": [CLASS_PERMISSION_DENIED],
         "severity": severity,
@@ -272,21 +422,22 @@ def _score_permission_denied(c: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _score_high_cpu_watch(c: dict[str, Any]) -> dict[str, Any] | None:
+def _score_high_cpu_watch(c: dict[str, Any], themes: dict[str, int]) -> dict[str, Any] | None:
     state = (c.get("state") or "").lower()
     cpu = c.get("cpu_percent")
     if state != "running" or not isinstance(cpu, (int, float)):
         return None
     if cpu < 80:
         return None
-    log_themes = c.get("log_themes") or {}
-    error_total = (
-        int(log_themes.get("error_line", 0) or 0)
-        + int(log_themes.get("traceback", 0) or 0)
-        + sum(int(log_themes.get(k, 0) or 0) for k in _BAD_HTTP_THEMES)
+    # If the container has any meaningful error/disk/permission signal it is
+    # already covered by a higher-severity lane — keep watch a quiet bucket.
+    suppress = (
+        int(themes.get("noisy_error", 0) or 0) >= 2
+        or int(themes.get("bad_http", 0) or 0) >= 2
+        or int(themes.get("disk_pressure", 0) or 0) >= 1
+        or int(themes.get("permission_denied", 0) or 0) >= 2
     )
-    if error_total >= 2:
-        # Errors present — do not classify as quiet watch case.
+    if suppress:
         return None
     health = (c.get("health") or "").lower()
     if health in {"unhealthy", "starting"}:
@@ -336,6 +487,7 @@ def _rank_one(container: dict[str, Any]) -> dict[str, Any] | None:
     name = container.get("name") or ""
     if not name:
         return None
+    themes = _themes(container)
     classes: list[str] = []
     evidence: list[dict[str, Any]] = []
     why: list[str] = []
@@ -343,7 +495,7 @@ def _rank_one(container: dict[str, Any]) -> dict[str, Any] | None:
     score = 0
     watch_only = True
     for scorer in _SCORERS:
-        out = scorer(container)
+        out = scorer(container, themes)
         if not out:
             continue
         for cls in out["classes"]:
@@ -374,26 +526,8 @@ def _rank_one(container: dict[str, Any]) -> dict[str, Any] | None:
 def rank_scene(scene: dict[str, Any]) -> dict[str, Any]:
     """Rank a Docker scene payload.
 
-    Input shape::
-        {
-          "containers": [
-            {
-              "name": "...",
-              "state": "running|exited|restarting|dead|...",
-              "exit_code": int|None,
-              "restart_count": int,
-              "oom_killed": bool,
-              "health": "healthy|unhealthy|...",
-              "log_themes": {"error_line": 3, ...},
-              "cpu_percent": float|None,
-              "disk_free_pct": float|None,
-              "log_no_space_left": bool,
-            },
-            ...
-          ]
-        }
-
-    Returns the full strict JSON-shaped report dict.
+    Each container is scored independently. Themes/evidence/classes/why are
+    scoped to that container only and are never copied to peer containers.
     """
     containers = scene.get("containers") or []
     suspects: list[dict[str, Any]] = []
@@ -410,17 +544,16 @@ def rank_scene(scene: dict[str, Any]) -> dict[str, Any]:
                     "severity": SEV_WATCH,
                     "confidence": ranked["confidence"],
                     "classes": ranked["classes"],
+                    "evidence": ranked["evidence"],
                     "why": ranked["why"],
                     "safe_next_commands": ranked["safe_next_commands"],
                 }
             )
         else:
             suspects.append(ranked)
-    # Stable deterministic ordering: severity desc, score desc, name asc.
     suspects.sort(key=lambda s: (-_SEV_RANK[s["severity"]], -int(s["score"]), s["name"]))
     for i, s in enumerate(suspects, start=1):
         s["rank"] = i
-        # Move rank to front for human-friendliness.
         s_keys = ["rank"] + [k for k in s if k != "rank"]
         s.update({k: s[k] for k in s_keys})
     watch.sort(key=lambda w: w["name"])
@@ -476,50 +609,60 @@ def rank_scene(scene: dict[str, Any]) -> dict[str, Any]:
 # --- scene collection from read-only Docker evidence -----------------------
 
 
-def _scene_from_problem_summary(
-    inventory_payload: dict[str, Any], summary_payload: dict[str, Any]
-) -> dict[str, Any]:
-    """Adapt existing docker.problem_summary output into a scoring scene.
+def _collect_cpu_stats() -> dict[str, float]:
+    """Read bounded ``docker stats --no-stream`` for the watch lane.
 
-    All inputs come from existing read-only collectors. No subprocess work
-    happens here; this is a pure transformation for testability.
+    Returns ``{name: cpu_percent}``. Empty when stats are unavailable. Never
+    runs in shell mode; failures are silently swallowed because the watch
+    lane is a "nice to have" — the main ranking does not depend on it.
     """
-    by_name: dict[str, dict[str, Any]] = {}
-    for row in inventory_payload.get("containers") or []:
-        name = row.get("name") or ""
+    from shellforgeai.tools import host
+    from shellforgeai.util.subprocess import run_command
+
+    if not (host.command_exists("docker").ok or False):
+        return {}
+    cmd = [
+        "docker",
+        "stats",
+        "--no-stream",
+        "--format",
+        "{{.Name}}\t{{.CPUPerc}}",
+    ]
+    try:
+        r = run_command(cmd, timeout=8)
+    except Exception:
+        return {}
+    if r.exit_code != 0 or not (r.stdout or "").strip():
+        return {}
+    out: dict[str, float] = {}
+    for line in r.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        name = parts[0].strip()
+        cpu_raw = parts[1].strip().rstrip("%")
         if not name:
             continue
-        by_name[name] = {
-            "name": name,
-            "state": (row.get("state") or "").lower(),
-            "image": row.get("image"),
-            "status": row.get("status"),
-        }
-    for bucket in ("failing", "noisy"):
-        for entry in summary_payload.get(bucket) or []:
-            name = entry.get("name") or ""
-            if not name:
-                continue
-            row = by_name.setdefault(
-                name,
-                {"name": name, "state": (entry.get("state") or "").lower()},
-            )
-            row["exit_code"] = entry.get("exit_code")
-            row["restart_count"] = entry.get("restart_count") or 0
-            row["oom_killed"] = bool(entry.get("oom_killed"))
-            row["health"] = entry.get("health")
-            row["log_themes"] = entry.get("log_themes") or {}
-            sample = entry.get("log_sample") or []
-            if sample and any("no space left" in (s or "").lower() for s in sample):
-                row["log_no_space_left"] = True
-    return {"containers": list(by_name.values())}
+        try:
+            out[name] = float(cpu_raw)
+        except ValueError:
+            continue
+    return out
 
 
 def collect_scene(context: Any = None) -> dict[str, Any]:
     """Build a triage scene from live read-only Docker collectors.
 
-    Returns ``{"containers": []}`` (empty) when the daemon is unavailable;
-    that becomes a "no suspects" report rather than an error.
+    Per-container, this function:
+    - reads the inventory via ``docker.containers``,
+    - runs ``docker.inspect`` for state/restart/exit/health,
+    - tails ``docker.container_logs`` and classifies them with the
+      triage-owned per-container classifier above,
+    - optionally pulls ``docker stats`` for the watch lane.
+
+    Each container's evidence is scoped to that container — log text is never
+    shared across peers. Returns ``{"containers": []}`` if the Docker CLI is
+    unavailable; that becomes a "no suspects" report rather than an error.
     """
     from shellforgeai.tools import containers as containers_tool
 
@@ -530,14 +673,45 @@ def collect_scene(context: Any = None) -> dict[str, Any]:
         inv_payload = json.loads(inv.stdout)
     except (ValueError, json.JSONDecodeError):
         return {"containers": []}
-    summary = containers_tool.problem_summary()
-    summary_payload: dict[str, Any] = {}
-    if summary.ok and (summary.stdout or "").strip():
-        try:
-            summary_payload = json.loads(summary.stdout)
-        except (ValueError, json.JSONDecodeError):
-            summary_payload = {}
-    return _scene_from_problem_summary(inv_payload, summary_payload)
+
+    cpu_by_name = _collect_cpu_stats()
+
+    out_rows: list[dict[str, Any]] = []
+    for row in inv_payload.get("containers") or []:
+        name = row.get("name") or ""
+        if not name:
+            continue
+        state = (row.get("state") or "").lower()
+        info: dict[str, Any] = {}
+        ins = containers_tool.inspect(name)
+        if ins.ok and (ins.stdout or "").strip():
+            try:
+                info = json.loads(ins.stdout)
+            except (ValueError, json.JSONDecodeError):
+                info = {}
+        # Per-container log read — scoped to this container only.
+        log_text = ""
+        if state in {"running", "restarting", "exited", "dead"}:
+            lr = containers_tool.container_logs(name, tail=200)
+            if lr.ok:
+                log_text = lr.stdout or ""
+        log_no_space = bool(log_text and "no space left" in log_text.lower())
+        out_rows.append(
+            {
+                "name": name,
+                "state": state,
+                "image": row.get("image"),
+                "status": row.get("status"),
+                "exit_code": info.get("exit_code"),
+                "restart_count": info.get("restart_count") or 0,
+                "oom_killed": bool(info.get("oom_killed")),
+                "health": info.get("health"),
+                "log_text": log_text,
+                "log_no_space_left": log_no_space,
+                "cpu_percent": cpu_by_name.get(name),
+            }
+        )
+    return {"containers": out_rows}
 
 
 # --- human rendering -------------------------------------------------------
@@ -574,6 +748,9 @@ def render_human(payload: dict[str, Any]) -> str:
         lines.append("   Why ranked here:")
         for w in s.get("why") or []:
             lines.append(f"   - {w}")
+        lines.append("   Evidence:")
+        for ev in s.get("evidence") or []:
+            lines.append(f"   - {ev.get('type')}: {ev.get('value')}")
         lines.append("   Safe next command:")
         for cmd in s.get("safe_next_commands") or []:
             lines.append(f"   - {cmd}")

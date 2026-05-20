@@ -453,6 +453,70 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 
 ## PR81 milestone: battle-lab triage ranking and scene awareness
 
+### PR81 followup — Docker01 live QA fixes
+
+Live QA on Docker01 (image `lab/shellforgeai:pr81-3ba2373`) caught four
+blockers in the initial PR81 cut:
+
+1. **`sfai-noisy-errors` was missing** despite continuous ERROR/WARN log
+   evidence. Root cause: the underlying `tools/containers._classify_log`
+   regex requires `^\s*ERROR` (line-anchored), so real timestamp-prefixed
+   lines (`2024-05-20T... ERROR ...`) never matched and the container
+   was never added to the `noisy` bucket that fed the scene.
+2. **`sfai-disk-pressure` was missing** for the same class of reason:
+   no regex matched `simulated disk pressure`, `write failed`,
+   `filler=`, or `ENOSPC`.
+3. **`sfai-bad-http` was misattributed `disk_pressure` and
+   `permission_denied`** classes. nginx upstream-refused log lines can
+   include incidental `(13: Permission denied)` errno decorations; the
+   original scorer triggered on a single hit and pinned the wrong
+   class onto a clear bad-http suspect.
+4. **Watch lane was empty** even though the ShellForgeAI container
+   was running with high CPU. Root cause: `collect_scene()` enriched
+   only containers in the `failing`/`noisy` buckets and never pulled
+   `docker stats`, so the watch-lane scorer never had `cpu_percent`
+   to work with.
+
+Followup fixes:
+
+- The triage module now owns its **own per-container log classifier**
+  (`triage_ranking.classify_logs`) with line-anchor-free patterns and
+  battle-lab phrasings (`simulated disk pressure`, `filler=`,
+  `connect() failed`, `127.0.0.1:9999`, `CRITICAL boot failure`,
+  `queue depth high`, `EACCES`, `ENOSPC`, `502/503`, etc.). Classifier
+  state is scoped to the input text — never shared across peers.
+- `collect_scene()` now independently runs `inspect` + `container_logs`
+  + classifier for **each** container in the inventory and optionally
+  reads bounded `docker stats --no-stream` for the watch lane. Each
+  container's evidence is scoped to that container only.
+- Scorers got cross-class anti-attribution guards:
+  - `_score_permission_denied` requires `perm >= 2` and is suppressed
+    when the dominant signal is bad_http with weak permission_denied.
+  - `_score_disk_pressure` requires explicit disk-pressure evidence
+    (simulated/write failed/no space/filler/ENOSPC or low free pct),
+    no longer triggering on read-only-fs alone.
+  - `_score_noisy_errors` is suppressed when the ERROR/WARN lines are
+    already explained by a more specific class (bad_http,
+    disk_pressure, permission_denied, crashloop_boot) so disk-pressure
+    and bad-http suspects don't double-up as "noisy".
+  - `_score_high_cpu_watch` is suppressed when any meaningful
+    error/disk/permission signal exists, keeping watch a quiet bucket.
+- Legacy theme keys from `tools/containers._classify_log` continue to
+  be accepted via an alias map so older collectors and fixtures still
+  work.
+- Tests added: per-container evidence isolation, realistic
+  timestamp-prefixed log fixtures matching the Docker01 scene, the
+  `collect_scene` per-container isolation contract with stubbed
+  collectors, and classifier sanity tests. PR79/PR80 self-test profile
+  tests, PR74–PR77 cleanup gates, and the natural-language mutation
+  refusal tests all continue to pass.
+
+PR81 remains read-only. No mutation behavior was added; every JSON
+payload still reports `safety.read_only=true` and every mutation flag
+explicitly `false`.
+
+### PR81 initial cut
+
 - Added a read-only Docker triage ranking command: `shellforgeai triage
   docker [--json]`. It inventories the current Docker scene using the
   existing read-only `docker.containers` + `docker.problem_summary`
