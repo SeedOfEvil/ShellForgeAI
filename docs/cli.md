@@ -1092,3 +1092,5 @@ at least one warning, and `2` for an unknown profile.
 
 - `shellforgeai triage docker snapshot --save` writes read-only triage handoff metadata only (no proposal/mission/apply/cleanup execution).
 - `shellforgeai triage docker snapshot validate <snapshot-id> [--json]` validates required files, JSON parse/schema/mode/safety invariants, and manifest checksums when present.
+- `shellforgeai triage docker snapshot export <snapshot-id|path> [--json] [--output <relative-path-under-data-dir/exports>]` packages a saved triage snapshot into a portable ShellForgeAI-owned export directory under `<data_dir>/exports/...` with `triage-snapshot.json`, `triage-snapshot.md`, optional `triage-details.json`, `manifest.json`, and `export-manifest.json`.
+- `shellforgeai triage docker snapshot export-validate <export-path> [--json]` re-validates required files, JSON parse, manifest mode, checksums, and no-mutation safety invariants for the triage export bundle.

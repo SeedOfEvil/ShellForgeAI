@@ -39,6 +39,7 @@ from typing import Any
 SCHEMA_VERSION = "1"
 MODE = "docker_triage_ranking"
 SNAPSHOT_MODE = "docker_triage_snapshot"
+SNAPSHOT_EXPORT_MODE = "docker_triage_snapshot_export"
 
 # --- scoring classes -------------------------------------------------------
 
@@ -1196,3 +1197,198 @@ def render_snapshot_validation_human(payload: dict[str, Any]) -> str:
     for w in payload.get("warnings") or []:
         lines.append(f"- warning: {w}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def export_snapshot_artifact(
+    snapshot_ref: str, data_dir: Path, *, output: Path | None = None
+) -> dict[str, Any]:
+    validation = validate_snapshot_artifact(snapshot_ref, data_dir)
+    base_safety = {
+        "read_only": True,
+        "artifact_export_only": True,
+        "mutation_performed": False,
+        "cleanup_executed": False,
+        "proposal_created": False,
+        "mission_created": False,
+        "apply_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_path_write": False,
+    }
+    if validation.get("status") == "not_found":
+        return {
+            "schema_version": "1",
+            "status": "not_found",
+            "mode": "docker_triage_snapshot_export",
+            "source_snapshot": validation.get("artifact") or {},
+            "safety": base_safety,
+            "warnings": ["snapshot not found"],
+        }
+    if validation.get("status") != "ok":
+        return {
+            "schema_version": "1",
+            "status": "failed",
+            "mode": "docker_triage_snapshot_export",
+            "source_snapshot": validation.get("artifact") or {},
+            "safety": base_safety,
+            "warnings": ["source snapshot validation failed"],
+        }
+    source = Path((validation.get("artifact") or {}).get("path") or "")
+    if not source.exists():
+        return {
+            "schema_version": "1",
+            "status": "not_found",
+            "mode": "docker_triage_snapshot_export",
+            "source_snapshot": validation.get("artifact") or {},
+            "safety": base_safety,
+            "warnings": ["snapshot not found"],
+        }
+    export_id = f"export_{source.name}"
+    out_root = data_dir / "exports"
+    export_dir = output or (out_root / export_id)
+    if output is not None and (output.is_absolute() or ".." in output.parts):
+        return {
+            "schema_version": "1",
+            "status": "error",
+            "mode": "docker_triage_snapshot_export",
+            "source_snapshot": validation.get("artifact") or {},
+            "safety": base_safety,
+            "warnings": ["unsafe output path"],
+        }
+    export_dir = export_dir.resolve()
+    if not str(export_dir).startswith(str(out_root.resolve())):
+        return {
+            "schema_version": "1",
+            "status": "error",
+            "mode": "docker_triage_snapshot_export",
+            "source_snapshot": validation.get("artifact") or {},
+            "safety": base_safety,
+            "warnings": ["unsafe output path"],
+        }
+    export_dir.mkdir(parents=True, exist_ok=False)
+    files = ["triage-snapshot.json", "triage-snapshot.md", "manifest.json"]
+    if (source / "triage-details.json").exists():
+        files.append("triage-details.json")
+    for name in files:
+        (export_dir / name).write_bytes((source / name).read_bytes())
+    checksums = {name: _sha256_file(export_dir / name) for name in files}
+    (export_dir / "checksums.sha256").write_text(
+        "".join(f"{v}  {k}\n" for k, v in checksums.items()), encoding="utf-8"
+    )
+    export_manifest = {
+        "schema_version": "1",
+        "mode": SNAPSHOT_EXPORT_MODE,
+        "export_id": export_dir.name,
+        "source_snapshot": {"id": source.name, "path": str(source), "validated": True},
+        "files": files,
+        "checksums": checksums,
+        "safety": base_safety,
+    }
+    (export_dir / "export-manifest.json").write_text(
+        json.dumps(export_manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    return {
+        "schema_version": "1",
+        "status": "exported",
+        "mode": "docker_triage_snapshot_export",
+        "source_snapshot": {"id": source.name, "path": str(source), "validated": True},
+        "export": {
+            "id": export_dir.name,
+            "path": str(export_dir),
+            "files": files + ["export-manifest.json"],
+            "written": True,
+        },
+        "checksums": {"enabled": True, "algorithm": "sha256"},
+        "safety": base_safety,
+        "next_safe_commands": [
+            f"shellforgeai triage docker snapshot export-validate {export_dir}",
+            f"shellforgeai validate-export {export_dir}",
+        ],
+        "warnings": [],
+    }
+
+
+def validate_snapshot_export(export_ref: str) -> dict[str, Any]:
+    export_dir = Path(export_ref)
+    checks = {
+        "required_files": False,
+        "json_parse": False,
+        "manifest": False,
+        "checksums": False,
+        "source_snapshot_safety": False,
+        "export_safety": False,
+    }
+    if not export_dir.exists():
+        return {
+            "schema_version": "1",
+            "status": "not_found",
+            "mode": "docker_triage_snapshot_export_validate",
+            "export": {"path": str(export_dir)},
+            "checks": checks,
+            "warnings": ["export not found"],
+        }
+    req = ["triage-snapshot.json", "triage-snapshot.md", "manifest.json", "export-manifest.json"]
+    if not all((export_dir / r).exists() for r in req):
+        return {
+            "schema_version": "1",
+            "status": "failed",
+            "mode": "docker_triage_snapshot_export_validate",
+            "export": {"path": str(export_dir)},
+            "checks": checks,
+            "warnings": ["missing required file"],
+        }
+    checks["required_files"] = True
+    try:
+        snap = json.loads((export_dir / "triage-snapshot.json").read_text(encoding="utf-8"))
+        em = json.loads((export_dir / "export-manifest.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {
+            "schema_version": "1",
+            "status": "error",
+            "mode": "docker_triage_snapshot_export_validate",
+            "export": {"path": str(export_dir)},
+            "checks": checks,
+            "warnings": ["malformed json"],
+        }
+    checks["json_parse"] = True
+    checks["manifest"] = em.get("mode") == SNAPSHOT_EXPORT_MODE
+    checks["checksums"] = True
+    for rel, expected in (em.get("checksums") or {}).items():
+        if not (export_dir / rel).exists() or _sha256_file(export_dir / rel) != expected:
+            checks["checksums"] = False
+            break
+    ss = snap.get("safety") or {}
+    checks["source_snapshot_safety"] = bool(ss.get("read_only") is True) and not any(
+        bool(ss.get(k))
+        for k in (
+            "mutation_performed",
+            "cleanup_executed",
+            "proposal_created",
+            "mission_created",
+            "apply_executed",
+            "docker_compose_executed",
+            "container_restarted",
+            "natural_language_execution",
+            "shell_true",
+        )
+    )
+    exs = em.get("safety") or {}
+    checks["export_safety"] = bool(exs.get("read_only") is True) and not bool(
+        exs.get("mutation_performed")
+    )
+    status = "ok" if all(checks.values()) else "failed"
+    return {
+        "schema_version": "1",
+        "status": status,
+        "mode": "docker_triage_snapshot_export_validate",
+        "export": {"path": str(export_dir)},
+        "checks": checks,
+        "summary": {
+            "containers_seen": (snap.get("summary") or {}).get("containers_seen", 0),
+            "suspects_ranked": (snap.get("summary") or {}).get("suspects_ranked", 0),
+        },
+        "safety": exs,
+        "warnings": [],
+    }
