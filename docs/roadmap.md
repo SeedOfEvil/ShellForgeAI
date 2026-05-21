@@ -703,3 +703,5 @@ explicitly `false`.
 - Auto-apply of model-generated plans.
 
 - PR83 (May 20, 2026): added read-only deterministic Docker triage detail drilldown (`triage docker detail <suspect>` / `--rank <n>`) with strict JSON mode (`mode=docker_triage_detail`), rank-context/higher-lower neighbors, explicit evidence + why sections, safe-next read-only commands, and unchanged no-mutation safety invariants.
+
+- PR84 (May 21, 2026): added read-only `triage docker snapshot` incident handoff packaging with strict JSON mode (`mode=docker_triage_snapshot`), scene summary, ranked suspects, optional compact details (`--include-details`), `--top N` suspect limiting, safe-next command guidance, and unchanged no-mutation safety invariants.

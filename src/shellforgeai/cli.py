@@ -10004,3 +10004,28 @@ def triage_docker_detail(
     console.print(render_detail_human(payload), end="")
     if payload.get("status") == "error":
         raise typer.Exit(1)
+
+
+@triage_docker_app.command("snapshot")
+def triage_docker_snapshot(
+    top: Annotated[int, typer.Option("--top", min=1, help="Limit to top N suspects.")] = 5,
+    include_details: Annotated[
+        bool, typer.Option("--include-details", help="Include compact detail evidence.")
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """PR84 read-only Docker triage incident snapshot / handoff."""
+    from shellforgeai.core.triage_ranking import (
+        build_snapshot_payload,
+        collect_scene,
+        rank_scene,
+        render_snapshot_human,
+    )
+
+    scene = collect_scene()
+    ranked = rank_scene(scene)
+    payload = build_snapshot_payload(scene, ranked, top=top, include_details=include_details)
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+    console.print(render_snapshot_human(payload), end="")
