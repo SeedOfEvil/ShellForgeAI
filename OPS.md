@@ -1278,3 +1278,13 @@ Recommended read-only workflow:
 4. `shellforgeai triage docker detail <suspect>`
 5. targeted read-only diagnose (`diagnose docker --save-plan --with-runbook`)
 6. only then decide whether to enter proposal/mission gates
+
+
+## PR85 update — 2AM triage snapshot save/validate handoff
+
+1. `shellforgeai self-test commands --profile quick`
+2. `shellforgeai triage docker`
+3. `shellforgeai triage docker snapshot --save --include-details`
+4. `shellforgeai triage docker snapshot validate <snapshot-id>`
+5. Hand off the saved snapshot path/id
+6. Only then decide whether explicit proposal/mission gates are needed

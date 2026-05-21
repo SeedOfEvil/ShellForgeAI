@@ -28,8 +28,12 @@ Forbidden in this module:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = "1"
@@ -944,8 +948,6 @@ def build_snapshot_payload(
 
 
 def _now_utc() -> str:
-    from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
@@ -989,4 +991,208 @@ def render_snapshot_human(payload: dict[str, Any]) -> str:
     lines.append("- read_only: true")
     lines.append("- mutation_performed: false")
     lines.append("- no restart/stop/delete/prune/apply/cleanup executed")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _snapshot_id() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"triage_snapshot_{stamp}_{uuid.uuid4().hex[:6]}"
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def save_snapshot_artifact(
+    snapshot: dict[str, Any], data_dir: Path, *, source_command: str
+) -> dict[str, Any]:
+    artifact_id = _snapshot_id()
+    artifact_dir = data_dir / "artifacts" / artifact_id
+    artifact_dir.mkdir(parents=True, exist_ok=False)
+    json_path = artifact_dir / "triage-snapshot.json"
+    md_path = artifact_dir / "triage-snapshot.md"
+    details_path = artifact_dir / "triage-details.json"
+    json_path.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
+    md_path.write_text(render_snapshot_human(snapshot), encoding="utf-8")
+    files = ["triage-snapshot.json", "triage-snapshot.md"]
+    if snapshot.get("details"):
+        details_path.write_text(
+            json.dumps(snapshot.get("details") or [], indent=2) + "\n", encoding="utf-8"
+        )
+        files.append("triage-details.json")
+    manifest = {
+        "schema_version": "1",
+        "mode": "docker_triage_snapshot_artifact",
+        "artifact_id": artifact_id,
+        "generated_at": _now_utc(),
+        "source_command": source_command,
+        "files": files,
+        "checksums": {name: _sha256_file(artifact_dir / name) for name in files},
+    }
+    (artifact_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    files.append("manifest.json")
+    return {
+        "schema_version": "1",
+        "status": "saved",
+        "mode": "docker_triage_snapshot_save",
+        "artifact": {"id": artifact_id, "path": str(artifact_dir), "files": files, "written": True},
+        "snapshot": snapshot,
+        "safety": {**(snapshot.get("safety") or {}), "arbitrary_path_write": False},
+        "next_safe_commands": [
+            f"shellforgeai triage docker snapshot validate {artifact_id}",
+            "shellforgeai triage docker detail --rank 1",
+            f"shellforgeai export {artifact_dir}",
+        ],
+        "warnings": [],
+    }
+
+
+def validate_snapshot_artifact(snapshot_ref: str, data_dir: Path) -> dict[str, Any]:
+    candidate = Path(snapshot_ref)
+    if candidate.is_absolute() or "/" in snapshot_ref:
+        artifact_dir = candidate
+    else:
+        if ".." in snapshot_ref or "\\" in snapshot_ref:
+            return {
+                "schema_version": "1",
+                "status": "error",
+                "mode": "docker_triage_snapshot_validate",
+                "warnings": ["unsafe snapshot id"],
+                "checks": {},
+            }
+        artifact_dir = data_dir / "artifacts" / snapshot_ref
+    checks = {
+        "required_files": False,
+        "json_parse": False,
+        "schema_version": False,
+        "mode": False,
+        "safety": False,
+        "checksums": False,
+    }
+    if not artifact_dir.exists():
+        return {
+            "schema_version": "1",
+            "status": "not_found",
+            "mode": "docker_triage_snapshot_validate",
+            "artifact": {"id": artifact_dir.name, "path": str(artifact_dir)},
+            "checks": checks,
+            "warnings": ["snapshot not found"],
+        }
+    json_path = artifact_dir / "triage-snapshot.json"
+    md_path = artifact_dir / "triage-snapshot.md"
+    if not json_path.exists() or not md_path.exists():
+        return {
+            "schema_version": "1",
+            "status": "failed",
+            "mode": "docker_triage_snapshot_validate",
+            "artifact": {"id": artifact_dir.name, "path": str(artifact_dir)},
+            "checks": checks,
+            "warnings": ["missing required files"],
+        }
+    checks["required_files"] = True
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {
+            "schema_version": "1",
+            "status": "error",
+            "mode": "docker_triage_snapshot_validate",
+            "artifact": {"id": artifact_dir.name, "path": str(artifact_dir)},
+            "checks": checks,
+            "warnings": ["triage-snapshot.json unreadable"],
+        }
+    checks["json_parse"] = True
+    checks["schema_version"] = payload.get("schema_version") == "1"
+    checks["mode"] = payload.get("mode") == SNAPSHOT_MODE
+    s = payload.get("safety") or {}
+    blocked = any(
+        bool(s.get(k))
+        for k in (
+            "mutation_performed",
+            "cleanup_executed",
+            "proposal_created",
+            "mission_created",
+            "apply_executed",
+            "docker_compose_executed",
+            "container_restarted",
+            "natural_language_execution",
+            "shell_true",
+        )
+    )
+    checks["safety"] = not blocked and bool(s.get("read_only") is True)
+    manifest_path = artifact_dir / "manifest.json"
+    checks["checksums"] = True
+    if manifest_path.exists():
+        mf = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for rel, expected in (mf.get("checksums") or {}).items():
+            if not (artifact_dir / rel).exists() or _sha256_file(artifact_dir / rel) != expected:
+                checks["checksums"] = False
+                break
+    status = "ok" if all(checks.values()) else "failed"
+    return {
+        "schema_version": "1",
+        "status": status,
+        "mode": "docker_triage_snapshot_validate",
+        "artifact": {"id": artifact_dir.name, "path": str(artifact_dir)},
+        "checks": checks,
+        "summary": {
+            "containers_seen": (payload.get("summary") or {}).get("containers_seen", 0),
+            "suspects_ranked": (payload.get("summary") or {}).get("suspects_ranked", 0),
+        },
+        "safety": s,
+        "warnings": [],
+    }
+
+
+def render_saved_snapshot_human(payload: dict[str, Any]) -> str:
+    art = payload.get("artifact") or {}
+    snap = payload.get("snapshot") or {}
+    summary = snap.get("summary") or {}
+    lines = ["Docker triage snapshot saved", "", "Snapshot:"]
+    lines.append(f"- id: {art.get('id')}")
+    lines.append(f"- path: {art.get('path')}")
+    lines.append("- files:")
+    for name in art.get("files") or []:
+        lines.append(f"  - {name}")
+    lines += [
+        "",
+        "Summary:",
+        f"- containers seen: {summary.get('containers_seen', 0)}",
+        f"- suspects ranked: {summary.get('suspects_ranked', 0)}",
+        f"- critical: {summary.get('critical', 0)}",
+        f"- high: {summary.get('high', 0)}",
+        "",
+        "Safety:",
+        "- read_only: true",
+        "- mutation_performed: false",
+        "- no restart/stop/delete/prune/apply/cleanup executed",
+        "",
+        "Next safe commands:",
+    ]
+    for cmd in payload.get("next_safe_commands") or []:
+        lines.append(f"- {cmd}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_snapshot_validation_human(payload: dict[str, Any]) -> str:
+    lines = [
+        "Triage snapshot validation passed"
+        if payload.get("status") == "ok"
+        else "Triage snapshot validation failed",
+        "",
+        f"Status: {payload.get('status')}",
+    ]
+    art = payload.get("artifact") or {}
+    if art:
+        lines += ["", "Snapshot:", f"- id: {art.get('id')}", f"- path: {art.get('path')}"]
+    if payload.get("checks"):
+        lines += ["", "Checks:"]
+        for k, v in (payload.get("checks") or {}).items():
+            lines.append(f"- {k.replace('_', ' ')}: {'ok' if v else 'failed'}")
+    for w in payload.get("warnings") or []:
+        lines.append(f"- warning: {w}")
     return "\n".join(lines).rstrip() + "\n"

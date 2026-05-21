@@ -908,3 +908,8 @@ coverage runs without a live Docker daemon and never mutates the host.
 ## PR84 triage snapshot safety
 
 `shellforgeai triage docker snapshot` is read-only incident handoff packaging. It reuses deterministic triage ranking/detail evidence to emit scene summary, ranked suspects, optional compact details, safe next read-only commands, and explicit safety flags. It does not restart/stop/remove/prune containers, does not run cleanup, does not create proposals/missions, does not run apply/remediation execution, and natural-language mutation requests remain refused.
+
+
+## PR85 triage snapshot save/validate safety
+
+`shellforgeai triage docker snapshot --save` writes only ShellForgeAI-owned artifact metadata under `<data_dir>/artifacts` (snapshot JSON/Markdown + manifest/checksums metadata) and never executes remediation. `shellforgeai triage docker snapshot validate` is read-only verification of required files/JSON/safety/checksums and never creates proposals/missions or runs cleanup/apply/compose mutation. Snapshot id/path resolution is constrained to avoid arbitrary path writes/traversal.
