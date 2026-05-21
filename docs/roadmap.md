@@ -701,3 +701,5 @@ explicitly `false`.
 - Production Compose orchestration.
 - Hidden mutation under workspace trust.
 - Auto-apply of model-generated plans.
+
+- PR83 (May 20, 2026): added read-only deterministic Docker triage detail drilldown (`triage docker detail <suspect>` / `--rank <n>`) with strict JSON mode (`mode=docker_triage_detail`), rank-context/higher-lower neighbors, explicit evidence + why sections, safe-next read-only commands, and unchanged no-mutation safety invariants.

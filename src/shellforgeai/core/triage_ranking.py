@@ -717,6 +717,121 @@ def collect_scene(context: Any = None) -> dict[str, Any]:
 # --- human rendering -------------------------------------------------------
 
 
+def build_detail_payload(
+    scene: dict[str, Any],
+    ranked: dict[str, Any],
+    *,
+    suspect_name: str | None = None,
+    rank: int | None = None,
+) -> dict[str, Any]:
+    target_input = (
+        suspect_name if suspect_name is not None else (f"rank:{rank}" if rank is not None else "")
+    )
+    suspects = ranked.get("suspects") or []
+    base = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": "docker_triage_detail",
+        "target": {"input": target_input, "name": None, "rank": None, "rank_total": len(suspects)},
+        "safety": ranked.get("safety", {}),
+        "warnings": [],
+    }
+    if rank is not None and rank <= 0:
+        return {**base, "status": "error", "warnings": ["rank must be >= 1"]}
+
+    selected = None
+    if suspect_name is not None:
+        for s in suspects:
+            if s.get("name") == suspect_name:
+                selected = s
+                break
+        if selected is None:
+            return {
+                **base,
+                "status": "not_found",
+                "target": {**base["target"], "name": suspect_name},
+                "available_suspects": [s.get("name") for s in suspects],
+                "warnings": ["suspect not found"],
+            }
+    elif rank is not None:
+        if rank > len(suspects):
+            return {
+                **base,
+                "status": "error",
+                "warnings": [f"rank out of range: {rank} (suspects={len(suspects)})"],
+            }
+        selected = suspects[rank - 1]
+    else:
+        return {**base, "status": "error", "warnings": ["suspect name or --rank is required"]}
+
+    rank_val = int(selected.get("rank", 0))
+    higher = [s.get("name") for s in suspects if int(s.get("rank", 0)) < rank_val]
+    lower = [s.get("name") for s in suspects if int(s.get("rank", 0)) > rank_val]
+    return {
+        **base,
+        "status": "ok",
+        "target": {
+            "input": target_input,
+            "name": selected.get("name"),
+            "rank": rank_val,
+            "rank_total": len(suspects),
+        },
+        "suspect": selected,
+        "scene_context": {
+            "containers_seen": int(
+                (ranked.get("summary") or {}).get(
+                    "containers_seen", len(scene.get("containers") or [])
+                )
+            ),
+            "suspects_ranked": len(suspects),
+            "higher_ranked": higher,
+            "lower_ranked": lower,
+        },
+    }
+
+
+def render_detail_human(payload: dict[str, Any]) -> str:
+    if payload.get("status") != "ok":
+        lines = ["Docker triage detail", "", f"Status: {payload.get('status')}"]
+        tgt = payload.get("target") or {}
+        lines.append(f"Target: {tgt.get('input')}")
+        for w in payload.get("warnings") or []:
+            lines.append(f"- {w}")
+        if payload.get("available_suspects"):
+            lines.append("Available suspects:")
+            for name in payload["available_suspects"]:
+                lines.append(f"- {name}")
+        lines.append("Try: shellforgeai triage docker")
+        return "\n".join(lines).rstrip() + "\n"
+
+    s = payload["suspect"]
+    tgt = payload["target"]
+    lines = [f"Docker triage detail: {s['name']}", "", "Rank:"]
+    lines.append(f"- rank: {tgt['rank']} of {tgt['rank_total']}")
+    lines.append(f"- severity: {s['severity']}")
+    lines.append(f"- confidence: {s['confidence']}")
+    lines.append(f"- score: {s['score']}")
+    lines.append(f"- classes: {', '.join(s.get('classes') or [])}")
+    lines.append("")
+    lines.append("Why ranked here:")
+    for w in s.get("why") or []:
+        lines.append(f"- {w}")
+    lines.append("")
+    lines.append("Evidence:")
+    for ev in s.get("evidence") or []:
+        lines.append(f"- {ev.get('type')}: {ev.get('value')}")
+    lines.append("")
+    lines.append("Safe next commands:")
+    for cmd in s.get("safe_next_commands") or []:
+        lines.append(f"- {cmd}")
+    lines.append("- shellforgeai triage docker --json")
+    lines.append("")
+    lines.append("Safety:")
+    lines.append("- read_only: true")
+    lines.append("- mutation_performed: false")
+    lines.append("- no restart/stop/delete/prune/apply/cleanup executed")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def render_human(payload: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.append("Docker triage suspects")

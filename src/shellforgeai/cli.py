@@ -237,6 +237,7 @@ self_test_app = typer.Typer(
 triage_app = typer.Typer(
     help="PR81 read-only triage ranking. Scans the scene and ranks suspects. No mutation.",
 )
+triage_docker_app = typer.Typer(help="Read-only Docker triage ranking/detail views.")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -250,6 +251,7 @@ app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(triage_app, name="triage")
+triage_app.add_typer(triage_docker_app, name="docker")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -9942,8 +9944,9 @@ def self_test_commands(
         raise typer.Exit(1)
 
 
-@triage_app.command("docker")
+@triage_docker_app.callback(invoke_without_command=True)
 def triage_docker(
+    ctx: typer.Context,
     json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
 ) -> None:
     """PR81 read-only Docker triage ranking ("scene awareness").
@@ -9960,6 +9963,8 @@ def triage_docker(
         render_human,
     )
 
+    if ctx.invoked_subcommand is not None:
+        return
     scene = collect_scene()
     payload = rank_scene(scene)
 
@@ -9968,3 +9973,34 @@ def triage_docker(
         return
 
     console.print(render_human(payload), end="")
+
+
+@triage_docker_app.command("detail")
+def triage_docker_detail(
+    suspect: Annotated[str | None, typer.Argument(help="Suspect name.")] = None,
+    rank: Annotated[
+        int | None, typer.Option("--rank", min=1, help="Rank number to inspect.")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """PR83 read-only Docker triage detail drilldown for one ranked suspect."""
+    from shellforgeai.core.triage_ranking import (
+        build_detail_payload,
+        collect_scene,
+        rank_scene,
+        render_detail_human,
+    )
+
+    if suspect is not None and rank is not None:
+        raise typer.BadParameter("provide suspect or --rank, not both")
+    scene = collect_scene()
+    ranked = rank_scene(scene)
+    payload = build_detail_payload(scene, ranked, suspect_name=suspect, rank=rank)
+    if json_out:
+        typer.echo(json.dumps(payload))
+        if payload.get("status") == "ok":
+            return
+        raise typer.Exit(1 if payload.get("status") == "error" else 0)
+    console.print(render_detail_human(payload), end="")
+    if payload.get("status") == "error":
+        raise typer.Exit(1)

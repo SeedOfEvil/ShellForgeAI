@@ -900,3 +900,7 @@ The broad ask triage path is fixture-driven for testability — the
 test suite drives the scoring engine directly via
 `triage_ranking.collect_scene` patches, so battle-lab regression
 coverage runs without a live Docker daemon and never mutates the host.
+
+## PR83 triage detail drilldown safety
+
+`shellforgeai triage docker detail` is read-only evidence drilldown. It reuses deterministic triage scoring, selects one suspect by name or rank, and reports evidence/why/next read-only checks. It never restarts/stops/removes containers, never runs compose mutation, never executes cleanup/apply/mission, and never creates proposals or missions. Natural-language mutation requests remain refused.
