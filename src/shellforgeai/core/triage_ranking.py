@@ -34,6 +34,7 @@ from typing import Any
 
 SCHEMA_VERSION = "1"
 MODE = "docker_triage_ranking"
+SNAPSHOT_MODE = "docker_triage_snapshot"
 
 # --- scoring classes -------------------------------------------------------
 
@@ -880,4 +881,112 @@ def render_human(payload: dict[str, Any]) -> str:
     lines.append("Next safe steps:")
     for cmd in payload.get("next_safe_commands") or []:
         lines.append(f"- {cmd}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def build_snapshot_payload(
+    scene: dict[str, Any],
+    ranked: dict[str, Any],
+    *,
+    top: int = 5,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    suspects = list(ranked.get("suspects") or [])
+    if top < 1:
+        top = 1
+    selected = suspects[:top]
+    status = "ok" if suspects else "warn"
+    details: list[dict[str, Any]] = []
+    if include_details:
+        for s in selected:
+            details.append(
+                {
+                    "name": s.get("name"),
+                    "evidence": (s.get("evidence") or [])[:6],
+                }
+            )
+    next_safe = [
+        "shellforgeai triage docker detail --rank 1",
+        "shellforgeai diagnose docker --save-plan --with-runbook",
+        "shellforgeai self-test commands --profile quick",
+    ]
+    warnings = list(ranked.get("warnings") or [])
+    if not suspects:
+        warnings.append("no suspects found")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": status,
+        "mode": SNAPSHOT_MODE,
+        "generated_at": _now_utc(),
+        "read_only": True,
+        "summary": dict(
+            ranked.get("summary") or {"containers_seen": len(scene.get("containers") or [])}
+        ),
+        "suspects": [
+            {
+                "rank": s.get("rank"),
+                "name": s.get("name"),
+                "kind": s.get("kind"),
+                "severity": s.get("severity"),
+                "confidence": s.get("confidence"),
+                "score": s.get("score"),
+                "classes": s.get("classes") or [],
+                "why": s.get("why") or [],
+                "detail_command": f"shellforgeai triage docker detail {s.get('name')}",
+            }
+            for s in selected
+        ],
+        "details": details,
+        "next_safe_commands": next_safe,
+        "safety": dict(ranked.get("safety") or {}),
+        "warnings": warnings,
+    }
+
+
+def _now_utc() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def render_snapshot_human(payload: dict[str, Any]) -> str:
+    lines = ["Docker triage snapshot", "", "Scene:"]
+    summary = payload.get("summary") or {}
+    lines.append(f"- containers seen: {summary.get('containers_seen', 0)}")
+    lines.append(f"- suspects ranked: {summary.get('suspects_ranked', 0)}")
+    lines.append(f"- critical: {summary.get('critical', 0)}")
+    lines.append(f"- high: {summary.get('high', 0)}")
+    lines.append(f"- generated_at: {payload.get('generated_at')}")
+    lines.append("- mode: read-only")
+    lines.append("")
+    lines.append("Ranked suspects:")
+    suspects = payload.get("suspects") or []
+    if not suspects:
+        lines.append("- no suspects found")
+    for s in suspects:
+        lines.append(f"{s['rank']}. {s['name']}")
+        lines.append(f"   Severity: {s['severity']}")
+        lines.append(f"   Confidence: {s['confidence']}")
+        lines.append(f"   Classes: {', '.join(s.get('classes') or [])}")
+        lines.append("   Why:")
+        for why in s.get("why") or []:
+            lines.append(f"   - {why}")
+        lines.append("   Detail:")
+        lines.append(f"   - {s.get('detail_command')}")
+    if payload.get("details"):
+        lines.append("")
+        lines.append("Detail evidence:")
+        for d in payload["details"]:
+            lines.append(f"- {d.get('name')}:")
+            for ev in d.get("evidence") or []:
+                lines.append(f"  - {ev.get('type')}: {ev.get('value')}")
+    lines.append("")
+    lines.append("Safe next commands:")
+    for cmd in payload.get("next_safe_commands") or []:
+        lines.append(f"- {cmd}")
+    lines.append("")
+    lines.append("Safety:")
+    lines.append("- read_only: true")
+    lines.append("- mutation_performed: false")
+    lines.append("- no restart/stop/delete/prune/apply/cleanup executed")
     return "\n".join(lines).rstrip() + "\n"

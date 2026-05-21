@@ -1267,3 +1267,14 @@ continue to refuse with the existing PR74–PR80 wording, plus the PR82
 no-mutation wording on broad-triage prompts.
 
 - PR83 drilldown step added after broad ranking: `shellforgeai triage docker detail <suspect>` (or `--rank <n>`) to inspect why/evidence before any gated remediation workflow.
+
+
+## PR84 update — 2AM triage snapshot handoff
+
+Recommended read-only workflow:
+1. `shellforgeai self-test commands --profile quick`
+2. `shellforgeai triage docker`
+3. `shellforgeai triage docker snapshot`
+4. `shellforgeai triage docker detail <suspect>`
+5. targeted read-only diagnose (`diagnose docker --save-plan --with-runbook`)
+6. only then decide whether to enter proposal/mission gates
