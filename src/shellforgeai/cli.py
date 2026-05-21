@@ -238,6 +238,11 @@ triage_app = typer.Typer(
     help="PR81 read-only triage ranking. Scans the scene and ranks suspects. No mutation.",
 )
 triage_docker_app = typer.Typer(help="Read-only Docker triage ranking/detail views.")
+triage_docker_snapshot_app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help="PR85 triage snapshot save/validate artifact workflow (read-only metadata writes).",
+)
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -252,6 +257,7 @@ app.add_typer(ops_app, name="ops")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(triage_app, name="triage")
 triage_app.add_typer(triage_docker_app, name="docker")
+triage_docker_app.add_typer(triage_docker_snapshot_app, name="snapshot")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
 # interpretation to prevent crashes on bracketed data like mount sources.
 console = Console(markup=False)
@@ -10006,26 +10012,67 @@ def triage_docker_detail(
         raise typer.Exit(1)
 
 
-@triage_docker_app.command("snapshot")
+@triage_docker_snapshot_app.callback()
 def triage_docker_snapshot(
+    ctx: typer.Context,
     top: Annotated[int, typer.Option("--top", min=1, help="Limit to top N suspects.")] = 5,
     include_details: Annotated[
         bool, typer.Option("--include-details", help="Include compact detail evidence.")
     ] = False,
+    save: Annotated[bool, typer.Option("--save", help="Save snapshot artifact packet.")] = False,
     json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
 ) -> None:
     """PR84 read-only Docker triage incident snapshot / handoff."""
+    if ctx.invoked_subcommand is not None:
+        return
     from shellforgeai.core.triage_ranking import (
         build_snapshot_payload,
         collect_scene,
         rank_scene,
+        render_saved_snapshot_human,
         render_snapshot_human,
+        save_snapshot_artifact,
     )
 
     scene = collect_scene()
     ranked = rank_scene(scene)
     payload = build_snapshot_payload(scene, ranked, top=top, include_details=include_details)
+    if save:
+        source_command = "shellforgeai triage docker snapshot --save"
+        if include_details:
+            source_command += " --include-details"
+        if top != 5:
+            source_command += f" --top {top}"
+        saved = save_snapshot_artifact(
+            payload, Path(load_settings().app.data_dir), source_command=source_command
+        )
+        if json_out:
+            typer.echo(json.dumps(saved))
+            return
+        console.print(render_saved_snapshot_human(saved), end="")
+        return
     if json_out:
         typer.echo(json.dumps(payload))
         return
     console.print(render_snapshot_human(payload), end="")
+
+
+@triage_docker_snapshot_app.command("validate")
+def triage_docker_snapshot_validate(
+    snapshot: Annotated[str, typer.Argument(help="Snapshot artifact id or path.")],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    from shellforgeai.core.triage_ranking import (
+        render_snapshot_validation_human,
+        validate_snapshot_artifact,
+    )
+
+    payload = validate_snapshot_artifact(snapshot, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+        if payload.get("status") == "ok":
+            return
+        raise typer.Exit(1)
+    console.print(render_snapshot_validation_human(payload), end="")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
