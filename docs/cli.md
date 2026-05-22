@@ -1102,7 +1102,7 @@ at least one warning, and `2` for an unknown profile.
 
 - `shellforgeai remediation plan --target sfai-noisy-errors --scenario sfai-noisy-errors [--json]` creates a dry-run disposable-only plan artifact with fingerprint, pre/post checks, rollback note, and explicit no-mutation safety flags.
 - `shellforgeai remediation validate <plan-id> [--json]` validates kind/fingerprint/labels/safety fields and fails nonzero on unsafe plans.
-- `shellforgeai remediation execute <plan-id> --execute --confirm [--json]` performs the bounded disposable action only after explicit confirmation and writes a receipt with pre/post state + verification.
+- `shellforgeai remediation execute <plan-id> --execute --confirm [--json]` runs a governed disposable remediation proof executor (not live Docker remediation) only after explicit confirmation and writes a receipt with pre/post state + verification.
 - `shellforgeai remediation status <receipt-id> [--json]` reports receipt verification and safety flags.
 
 Safety: production `shellforgeai`, unlabeled/non-allowlisted targets, broad selectors (`all`, `*`, `everything`), unsupported scenarios, and suspicious targets are refused.

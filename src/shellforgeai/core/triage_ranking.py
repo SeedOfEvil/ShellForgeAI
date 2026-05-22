@@ -715,6 +715,7 @@ def collect_scene(context: Any = None) -> dict[str, Any]:
                 "log_text": log_text,
                 "log_no_space_left": log_no_space,
                 "cpu_percent": cpu_by_name.get(name),
+                "labels": row.get("labels") if isinstance(row.get("labels"), dict) else {},
             }
         )
     return {"containers": out_rows}

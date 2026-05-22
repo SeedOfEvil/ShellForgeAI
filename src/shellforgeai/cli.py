@@ -10277,7 +10277,14 @@ def remediation_plan(
     from shellforgeai.core.disposable_remediation import write_plan
 
     settings = load_settings()
-    labels = triage_ranking.collect_scene().get("container_labels", {}).get(target, {})
+    scene = triage_ranking.collect_scene()
+    labels = {}
+    for row in scene.get("containers") or []:
+        if row.get("name") == target:
+            raw = row.get("labels")
+            if isinstance(raw, dict):
+                labels = {str(k): str(v) for k, v in raw.items()}
+            break
     payload = write_plan(
         data_dir=Path(settings.app.data_dir), target=target, scenario=scenario, labels=labels
     )
@@ -10292,7 +10299,9 @@ def remediation_plan(
         console.print("      --scenario sfai-noisy-errors")
         raise typer.Exit(1)
     plan = payload["plan"]
-    console.print("Disposable remediation plan created")
+    console.print(
+        "Disposable remediation plan created (governed proof executor; not live Docker remediation)"
+    )
     console.print(f"- target: {plan['target']}")
     console.print(f"- scenario: {plan['scenario']}")
     console.print(f"- action preview: {plan['action_preview']}")
@@ -10435,6 +10444,7 @@ def remediation_execute(
     if json_out:
         typer.echo(json.dumps(payload))
     else:
+        console.print("Governed proof executor ran (not live Docker remediation).")
         console.print(
             f"Executed target {plan['target']} verification={payload['verification']['status']}"
         )
