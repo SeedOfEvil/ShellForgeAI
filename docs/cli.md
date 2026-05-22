@@ -1106,3 +1106,11 @@ at least one warning, and `2` for an unknown profile.
 - `shellforgeai remediation status <receipt-id> [--json]` reports receipt verification and safety flags.
 
 Safety: production `shellforgeai`, unlabeled/non-allowlisted targets, broad selectors (`all`, `*`, `everything`), unsupported scenarios, and suspicious targets are refused.
+
+
+## PR90 remediation executor modes
+
+- `shellforgeai remediation execute <plan-id> --execute --confirm [--executor proof|docker-disposable] [--json]`.
+- Default executor mode is `proof` and performs **no real Docker mutation**.
+- Real mutation requires explicit `--executor docker-disposable` plus all disposable/allowlist gates at execution time.
+- `docker-disposable` mode is bounded to exact `docker restart <target>` only for exact eligible targets; broad or production targets are refused.

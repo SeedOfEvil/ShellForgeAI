@@ -10332,6 +10332,10 @@ def remediation_validate(
             "mode": "disposable_remediation_validate",
             "plan_id": plan_id,
             "checks": [] if ok else errs,
+            "executor_readiness": {
+                "proof": {"ready": ok, "blockers": [] if ok else errs},
+                "docker-disposable": {"ready": ok, "blockers": [] if ok else errs},
+            },
             "safety": plan.get("safety", {}),
             "warnings": [],
         }
@@ -10350,15 +10354,18 @@ def remediation_execute(
     plan_id: Annotated[str, typer.Argument()],
     execute: Annotated[bool, typer.Option("--execute")] = False,
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    executor: Annotated[str, typer.Option("--executor")] = "proof",
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    from shellforgeai.core import triage_ranking
     from shellforgeai.core.disposable_remediation import (
+        container_state_from_scene,
         load_plan,
+        run_exact_docker_restart,
         safety_block,
         validate_plan,
         write_receipt,
     )
-    from shellforgeai.core.lab_restart import ExecResult, FakeCommandExecutor
 
     if not (execute and confirm):
         msg = "Refused: explicit --execute --confirm required."
@@ -10402,11 +10409,60 @@ def remediation_execute(
         else:
             [console.print(f"- {e}") for e in errs]
         raise typer.Exit(1)
-    pre = {"running": True, "restart_count": 0}
-    ex = FakeCommandExecutor(result=ExecResult(ok=True, exit_code=0, stdout="restarted", stderr=""))
-    res = ex.run(["docker", "restart", plan["target"]], timeout_seconds=30)
-    post = {"running": True, "restart_count": 1}
-    verified = bool(res.ok and post["running"] and post["restart_count"] > pre["restart_count"])
+    if executor not in {"proof", "docker-disposable"}:
+        payload = {
+            "status": "blocked",
+            "mode": "disposable_remediation_execute",
+            "warnings": ["unknown executor mode"],
+        }
+        typer.echo(json.dumps(payload) if json_out else "Refused: unknown executor mode.")
+        raise typer.Exit(1)
+    scene_pre = triage_ranking.collect_scene()
+    pre = container_state_from_scene(scene_pre, plan["target"]) or {"name": plan["target"]}
+    pre_labels = pre.get("labels") or {}
+    pre_disposable = any(
+        pre_labels.get(k) == v
+        for k, v in (
+            ("shellforgeai.disposable", "true"),
+            ("sfai.battle", "true"),
+            ("shellforgeai.test_harness", "battle-lab"),
+        )
+    )
+    pre_allowlisted = pre_labels.get("shellforgeai.allow_restart") == "true"
+    restart_attempted = False
+    restart_succeeded = False
+    exit_code = 0
+    stdout = ""
+    stderr = ""
+    if executor == "docker-disposable":
+        if not (pre_disposable and pre_allowlisted):
+            payload = {
+                "status": "blocked",
+                "mode": "disposable_remediation_execute",
+                "executor_mode": executor,
+                "warnings": ["target not disposable+allowlisted at execution time"],
+            }
+            typer.echo(
+                json.dumps(payload)
+                if json_out
+                else "Refused: target is not eligible for docker-disposable executor."
+            )
+            raise typer.Exit(1)
+        restart_attempted = True
+        restart_succeeded, exit_code, stdout, stderr = run_exact_docker_restart(plan["target"])
+    scene_post = triage_ranking.collect_scene()
+    post = container_state_from_scene(scene_post, plan["target"]) or {"name": plan["target"]}
+    pre_started = str(pre.get("StartedAt") or "")
+    post_started = str(post.get("StartedAt") or "")
+    pre_count = int(pre.get("restart_count") or 0)
+    post_count = int(post.get("restart_count") or 0)
+    restart_verified = (post_started and pre_started and pre_started != post_started) or (
+        post_count > pre_count
+    )
+    restart_succeeded = (
+        restart_succeeded and restart_verified if executor == "docker-disposable" else False
+    )
+    verified = True if executor == "proof" else bool(restart_succeeded)
     receipt_id = f"drr_{uuid.uuid4().hex[:12]}"
     receipt = {
         "schema_version": 1,
@@ -10417,23 +10473,42 @@ def remediation_execute(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "target": plan["target"],
         "scenario": plan["scenario"],
+        "executor_mode": executor,
+        "proof_executor": executor == "proof",
+        "real_docker_executor": executor == "docker-disposable",
         "action_attempted": plan["action_preview"],
-        "action_executed": True,
+        "action_executed": executor == "docker-disposable",
+        "docker_restart_attempted": restart_attempted,
+        "docker_restart_succeeded": restart_succeeded,
+        "exact_target_only": True,
+        "unrelated_targets_touched": False,
         "pre_state": pre,
         "post_state": post,
-        "verification": {"status": "passed" if verified else "failed"},
-        "return_code": res.exit_code,
-        "stdout_summary": res.stdout[:120],
-        "stderr_summary": res.stderr[:120],
+        "verification": {
+            "status": "passed" if verified else "failed",
+            "restart_verified": restart_verified,
+        },
+        "return_code": exit_code,
+        "stdout_summary": stdout[:120],
+        "stderr_summary": stderr[:120],
         "rollback_or_recovery_status": "none",
         "safety": safety_block(
-            mutation=True, restarted=True, disposable=True, allowlisted=True, production=False
+            mutation=executor == "docker-disposable" and restart_succeeded,
+            restarted=executor == "docker-disposable" and restart_succeeded,
+            disposable=True,
+            allowlisted=True,
+            production=False,
         ),
     }
     write_receipt(data_dir, receipt)
     payload = {
         "status": "executed" if verified else "failed",
         "mode": "disposable_remediation_execute",
+        "executor_mode": executor,
+        "proof_executor": executor == "proof",
+        "real_docker_executor": executor == "docker-disposable",
+        "docker_restart_attempted": restart_attempted,
+        "docker_restart_succeeded": restart_succeeded,
         "receipt_id": receipt_id,
         "plan_id": plan_id,
         "target": plan["target"],
@@ -10444,10 +10519,12 @@ def remediation_execute(
     if json_out:
         typer.echo(json.dumps(payload))
     else:
-        console.print("Governed proof executor ran (not live Docker remediation).")
-        console.print(
-            f"Executed target {plan['target']} verification={payload['verification']['status']}"
-        )
+        if executor == "proof":
+            console.print("Remediation proof executed")
+            console.print("No real Docker restart was performed.")
+        else:
+            console.print("Disposable Docker remediation executed")
+            console.print(f"- target: {plan['target']}")
         console.print(f"Receipt: {receipt_id}")
     if payload["status"] != "executed":
         raise typer.Exit(1)

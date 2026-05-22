@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -126,6 +127,11 @@ def write_plan(
         "verification_criteria": "container running and restart indicator changed",
         "execution_allowed": False,
         "mutation_performed": False,
+        "executor_modes_supported": ["proof", "docker-disposable"],
+        "default_executor": "proof",
+        "real_execution_requires_explicit_executor": True,
+        "docker_disposable_eligible": True,
+        "why_real_execution_blocked": [],
     }
     plan["safety"] = safety_block(
         mutation=False, restarted=False, disposable=True, allowlisted=True, production=False
@@ -185,3 +191,35 @@ def load_receipt(data_dir: Path, receipt_id: str) -> dict[str, Any] | None:
     if not p.exists():
         return None
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def container_state_from_scene(scene: dict[str, Any], target: str) -> dict[str, Any] | None:
+    for row in scene.get("containers") or []:
+        if row.get("name") == target:
+            labels_raw = row.get("labels") if isinstance(row.get("labels"), dict) else {}
+            labels = {str(k): str(v) for k, v in labels_raw.items()}
+            return {
+                "id": row.get("id"),
+                "name": row.get("name"),
+                "labels": labels,
+                "status": row.get("status") or row.get("state"),
+                "StartedAt": row.get("StartedAt") or row.get("started_at"),
+                "restart_count": row.get("restart_count"),
+                "image": row.get("image"),
+                "compose": {
+                    "project": labels.get("com.docker.compose.project"),
+                    "service": labels.get("com.docker.compose.service"),
+                },
+            }
+    return None
+
+
+def run_exact_docker_restart(target: str) -> tuple[bool, int, str, str]:
+    cp = subprocess.run(
+        ["docker", "restart", target],
+        capture_output=True,
+        text=True,
+        shell=False,
+        check=False,
+    )
+    return (cp.returncode == 0, cp.returncode, cp.stdout, cp.stderr)

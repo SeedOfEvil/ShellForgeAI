@@ -923,3 +923,13 @@ PR89 adds a **governed disposable remediation proof** CLI (`remediation plan/val
 
 
 PR89 execution path currently uses a governed disposable proof executor for receipt/verification flow validation and is explicitly **not live Docker remediation**.
+
+
+## PR90 disposable executor mode contract
+
+PR90 introduces explicit executor modes for disposable remediation execution:
+
+- `proof` (default): artifact/receipt proof only, no real Docker restart, `proof_executor=true`, `real_docker_executor=false`.
+- `docker-disposable` (explicit opt-in): exact-target-only `docker restart <target>` for disposable + `shellforgeai.allow_restart=true` targets, with pre/post verification and production refusal.
+
+Safety remains invariant: no natural-language execution, no arbitrary command execution, no `shell=True`, no Docker Compose mutation, and no production mutation.

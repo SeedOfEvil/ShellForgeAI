@@ -132,7 +132,7 @@ def test_cli_plan_refusals(tmp_path, monkeypatch):
     assert r_broad.exit_code == 1
 
 
-def test_execute_gates_and_receipt(tmp_path):
+def test_execute_gates_and_receipt(tmp_path, monkeypatch):
     data = tmp_path / "data"
     data.mkdir(parents=True, exist_ok=True)
     p = write_plan(
@@ -149,6 +149,17 @@ def test_execute_gates_and_receipt(tmp_path):
     r2 = runner.invoke(app, ["remediation", "execute", plan_id, "--execute"], env=_env(tmp_path))
     assert r2.exit_code == 1
 
+    monkeypatch.setattr(
+        "shellforgeai.core.triage_ranking.collect_scene",
+        lambda: _scene(
+            {
+                "sfai-noisy-errors": {
+                    "shellforgeai.disposable": "true",
+                    "shellforgeai.allow_restart": "true",
+                }
+            }
+        ),
+    )
     r3 = runner.invoke(
         app,
         ["remediation", "execute", plan_id, "--execute", "--confirm", "--json"],
@@ -166,3 +177,36 @@ def test_execute_gates_and_receipt(tmp_path):
     assert rec["plan_id"] == plan_id
     assert rec["plan_fingerprint"]
     assert "pre_state" in rec and "post_state" in rec and "verification" in rec
+    assert rec["proof_executor"] is True
+    assert rec["real_docker_executor"] is False
+    assert rec["docker_restart_attempted"] is False
+    assert rec["safety"]["container_restarted"] is False
+
+
+def test_docker_disposable_requires_eligible_labels(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    p = write_plan(
+        data_dir=data,
+        target="x",
+        scenario="sfai-noisy-errors",
+        labels={"shellforgeai.disposable": "true", "shellforgeai.allow_restart": "true"},
+    )
+    plan_id = p["plan_id"]
+    monkeypatch.setattr("shellforgeai.core.triage_ranking.collect_scene", lambda: _scene({"x": {}}))
+    r = runner.invoke(
+        app,
+        [
+            "remediation",
+            "execute",
+            plan_id,
+            "--execute",
+            "--confirm",
+            "--executor",
+            "docker-disposable",
+            "--json",
+        ],
+        env=_env(tmp_path),
+    )
+    assert r.exit_code == 1
+    assert json.loads(r.stdout)["status"] == "blocked"
