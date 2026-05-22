@@ -10113,6 +10113,103 @@ def triage_docker_snapshot_export(
         console.print(f"  - {f}")
 
 
+@triage_docker_snapshot_app.command("compare")
+def triage_docker_snapshot_compare(
+    snapshot_a: Annotated[str, typer.Argument(help="Before snapshot id or path.")],
+    snapshot_b: Annotated[str, typer.Argument(help="After snapshot id or path.")],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    top: Annotated[int, typer.Option("--top", min=1)] = 5,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+    include_evidence: Annotated[bool, typer.Option("--include-evidence")] = False,
+) -> None:
+    from shellforgeai.core.triage_ranking import (
+        compare_snapshot_payload,
+        render_snapshot_compare_human,
+        validate_snapshot_artifact,
+    )
+
+    data_dir = Path(load_settings().app.data_dir)
+    va = validate_snapshot_artifact(snapshot_a, data_dir)
+    vb = validate_snapshot_artifact(snapshot_b, data_dir)
+    if va.get("status") != "ok" or vb.get("status") != "ok":
+        payload = {
+            "schema_version": 1,
+            "mode": "docker_triage_snapshot_compare",
+            "status": "error",
+            "read_only": True,
+            "mutation_performed": False,
+            "warnings": ["snapshot validation failed"],
+            "summary": {},
+            "regressions": [],
+            "recoveries": [],
+            "stable": [],
+            "new_suspects": [],
+            "removed_suspects": [],
+            "safety": {"read_only": True, "mutation_performed": False},
+        }
+    else:
+        sa = json.loads(
+            Path((va.get("artifact") or {}).get("path") or "")
+            .joinpath("triage-snapshot.json")
+            .read_text(encoding="utf-8")
+        )
+        sb = json.loads(
+            Path((vb.get("artifact") or {}).get("path") or "")
+            .joinpath("triage-snapshot.json")
+            .read_text(encoding="utf-8")
+        )
+        payload = compare_snapshot_payload(
+            sa,
+            sb,
+            top=top,
+            only_changed=only_changed,
+            include_stable=include_stable,
+            include_evidence=include_evidence,
+        )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        if payload.get("status") == "ok":
+            return
+        raise typer.Exit(1)
+    console.print(render_snapshot_compare_human(payload), end="")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@triage_docker_snapshot_app.command("compare-export")
+def triage_docker_snapshot_compare_export(
+    export_a: Annotated[str, typer.Argument(help="Before export path.")],
+    export_b: Annotated[str, typer.Argument(help="After export path.")],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    top: Annotated[int, typer.Option("--top", min=1)] = 5,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+    include_evidence: Annotated[bool, typer.Option("--include-evidence")] = False,
+) -> None:
+    from shellforgeai.core.triage_ranking import (
+        compare_snapshot_exports,
+        render_snapshot_compare_human,
+    )
+
+    payload = compare_snapshot_exports(
+        export_a,
+        export_b,
+        top=top,
+        only_changed=only_changed,
+        include_stable=include_stable,
+        include_evidence=include_evidence,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        if payload.get("status") == "ok":
+            return
+        raise typer.Exit(1)
+    console.print(render_snapshot_compare_human(payload), end="")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
 @triage_docker_snapshot_app.command("export-validate")
 def triage_docker_snapshot_export_validate(
     ctx: typer.Context,
