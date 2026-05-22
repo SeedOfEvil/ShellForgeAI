@@ -1805,6 +1805,20 @@ def build_snapshot_timeline(
 
 
 def render_snapshot_timeline_human(payload: dict[str, Any]) -> str:
+    def _timeline_item_name(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get("name") or item.get("suspect") or "unknown")
+        if isinstance(item, str):
+            return item
+        return str(item)
+
+    def _timeline_item_dict(item: Any) -> dict[str, Any]:
+        if isinstance(item, dict):
+            return item
+        if isinstance(item, str):
+            return {"name": item}
+        return {"name": _timeline_item_name(item)}
+
     lines = ["Docker triage timeline", "", "Window:"]
     w = payload.get("window") or {}
     lines.append(f"- snapshots analyzed: {w.get('snapshots_analyzed', 0)}")
@@ -1822,12 +1836,20 @@ def render_snapshot_timeline_human(payload: dict[str, Any]) -> str:
             continue
         lines += ["", f"{section.capitalize()}:"]
         for i, item in enumerate(vals, 1):
-            lines.append(f"{i}. {item.get('name')}")
-            sev_hist = item.get("severity_history") or [None]
-            lines.append(f"   severity: {sev_hist[0]} -> {item.get('latest_severity')}")
-            lines.append(
-                f"   rank: {(item.get('rank_history') or [None])[0]} -> {item.get('latest_rank')}"
-            )
+            parsed = _timeline_item_dict(item)
+            lines.append(f"{i}. {_timeline_item_name(item)}")
+            sev_hist = parsed.get("severity_history") or []
+            if sev_hist or parsed.get("latest_severity") is not None:
+                first_sev = sev_hist[0] if sev_hist else parsed.get("latest_severity")
+                lines.append(f"   severity: {first_sev} -> {parsed.get('latest_severity')}")
+            rank_hist = parsed.get("rank_history") or []
+            if rank_hist or parsed.get("latest_rank") is not None:
+                first_rank = rank_hist[0] if rank_hist else parsed.get("latest_rank")
+                lines.append(f"   rank: {first_rank} -> {parsed.get('latest_rank')}")
+            if parsed.get("snapshots_seen") is not None:
+                lines.append(f"   seen: {parsed.get('snapshots_seen')} snapshots")
+            if parsed.get("latest_status"):
+                lines.append(f"   trend: {parsed.get('latest_status')}")
     lines += [
         "",
         "Safety:",

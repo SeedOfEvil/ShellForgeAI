@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from shellforgeai.cli import app
+from shellforgeai.core import triage_ranking
 
 runner = CliRunner()
 
@@ -132,3 +133,81 @@ def test_timeline_insufficient_and_invalid(monkeypatch, tmp_path: Path):
     out2 = runner.invoke(app, ["triage", "docker", "timeline", "--json"])
     p2 = json.loads(out2.stdout)
     assert any("skipped invalid snapshot" in w for w in p2["warnings"])
+
+
+def test_timeline_renderer_stable_dict_string_mixed():
+    payload = {
+        "window": {"snapshots_analyzed": 3, "first_snapshot": "a", "latest_snapshot": "c"},
+        "summary": {
+            "stable": 3,
+            "escalating": 0,
+            "recovering": 0,
+            "flapping": 0,
+            "recurring": 0,
+            "new": 0,
+            "resolved": 0,
+        },
+        "stable": [
+            {
+                "name": "sfai-noisy-errors",
+                "latest_severity": "high",
+                "severity_history": ["high"],
+                "latest_rank": 2,
+                "rank_history": [2],
+                "snapshots_seen": 3,
+                "latest_status": "stable",
+            },
+            "sfai-permission-denied",
+            {"name": "sfai-other"},
+        ],
+    }
+    out = triage_ranking.render_snapshot_timeline_human(payload)
+    assert "Stable:" in out
+    assert "sfai-noisy-errors" in out
+    assert "sfai-permission-denied" in out
+    assert "Safety:" in out
+    assert "read_only: true" in out
+    assert "mutation_performed: false" in out
+
+
+def test_cli_timeline_include_stable_handles_string_entries(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+
+    def _fake_timeline(*args, **kwargs):
+        return {
+            "schema_version": "1",
+            "status": "ok",
+            "mode": "docker_triage_timeline",
+            "window": {"snapshots_analyzed": 2, "first_snapshot": "a", "latest_snapshot": "b"},
+            "summary": {
+                "suspects_seen": 2,
+                "escalating": 0,
+                "recovering": 0,
+                "flapping": 0,
+                "recurring": 0,
+                "stable": 1,
+                "new": 0,
+                "resolved": 0,
+            },
+            "escalating": [],
+            "recovering": [],
+            "flapping": [],
+            "recurring": [],
+            "stable": ["sfai-noisy-errors"],
+            "new_suspects": [],
+            "resolved_suspects": [],
+            "safety": {"read_only": True, "mutation_performed": False},
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("shellforgeai.core.triage_ranking.build_snapshot_timeline", _fake_timeline)
+    out = runner.invoke(
+        app, ["triage", "docker", "timeline", "--window", "5", "--top", "5", "--include-stable"]
+    )
+    assert out.exit_code == 0
+    assert "Stable:" in out.stdout
+    assert "sfai-noisy-errors" in out.stdout
+
+    out_json = runner.invoke(app, ["triage", "docker", "timeline", "--include-stable", "--json"])
+    assert out_json.exit_code == 0
+    assert json.loads(out_json.stdout)["mode"] == "docker_triage_timeline"
