@@ -1392,3 +1392,182 @@ def validate_snapshot_export(export_ref: str) -> dict[str, Any]:
         "safety": exs,
         "warnings": [],
     }
+
+
+SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _suspect_index(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    idx = {}
+    for s in snapshot.get("suspects") or []:
+        name = (s.get("name") or "").strip()
+        if name:
+            idx[name] = s
+    return idx
+
+
+def _evidence_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int]:
+    b = {
+        str(e.get("type")): int(e.get("value") or 0)
+        for e in (before.get("evidence") or [])
+        if str(e.get("type") or "") and str(e.get("value") or "").lstrip("-").isdigit()
+    }
+    a = {
+        str(e.get("type")): int(e.get("value") or 0)
+        for e in (after.get("evidence") or [])
+        if str(e.get("type") or "") and str(e.get("value") or "").lstrip("-").isdigit()
+    }
+    keys = set(b) | set(a)
+    return {k: a.get(k, 0) - b.get(k, 0) for k in sorted(keys) if a.get(k, 0) - b.get(k, 0) != 0}
+
+
+def compare_snapshot_payload(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    *,
+    top: int = 5,
+    only_changed: bool = False,
+    include_stable: bool = False,
+    include_evidence: bool = False,
+) -> dict[str, Any]:
+    bidx = _suspect_index(before)
+    aidx = _suspect_index(after)
+    names = sorted(set(bidx) | set(aidx))
+    regressions = []
+    recoveries = []
+    stable = []
+    new_suspects = []
+    removed_suspects = []
+    for name in names:
+        b = bidx.get(name)
+        a = aidx.get(name)
+        if b is None:
+            new_suspects.append(name)
+            continue
+        if a is None:
+            removed_suspects.append(name)
+            continue
+        drift = []
+        bsev, asev = b.get("severity"), a.get("severity")
+        if bsev != asev:
+            drift.append(f"severity: {bsev} -> {asev}")
+        bconf, aconf = b.get("confidence"), a.get("confidence")
+        if bconf != aconf:
+            drift.append(f"confidence: {bconf} -> {aconf}")
+        if b.get("rank") != a.get("rank"):
+            drift.append(f"rank: {b.get('rank')} -> {a.get('rank')}")
+        if (b.get("classes") or []) != (a.get("classes") or []):
+            drift.append("classes changed")
+        ev_delta = _evidence_delta(b, a) if include_evidence else {}
+        for k, v in ev_delta.items():
+            drift.append(f"{k}: {v:+d}")
+        entry = {
+            "name": name,
+            "before_rank": b.get("rank"),
+            "after_rank": a.get("rank"),
+            "before_severity": bsev,
+            "after_severity": asev,
+            "before_confidence": bconf,
+            "after_confidence": aconf,
+            "before_classes": b.get("classes") or [],
+            "after_classes": a.get("classes") or [],
+            "evidence_delta": ev_delta,
+            "drift_summary": drift,
+            "recommended_safe_next_command": f"shellforgeai triage docker detail {name}",
+        }
+        sev_up = SEVERITY_ORDER.get(str(asev), 0) > SEVERITY_ORDER.get(str(bsev), 0)
+        if drift:
+            if sev_up or (a.get("rank") or 999) < (b.get("rank") or 999):
+                regressions.append(entry)
+            else:
+                recoveries.append(entry)
+        else:
+            stable.append(entry)
+    regressions.sort(
+        key=lambda x: (
+            (SEVERITY_ORDER.get(str(x.get("after_severity")), 0)) * -1,
+            x.get("after_rank") or 999,
+            x["name"],
+        )
+    )
+    recoveries.sort(key=lambda x: (x.get("after_rank") or 999, x["name"]))
+    stable.sort(key=lambda x: (x.get("after_rank") or 999, x["name"]))
+    if top < 1:
+        top = 1
+    regressions = regressions[:top]
+    if only_changed or not include_stable:
+        stable = []
+    scene_before = before.get("summary") or {}
+    scene_after = after.get("summary") or {}
+    return {
+        "schema_version": 1,
+        "mode": "docker_triage_snapshot_compare",
+        "status": "ok",
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": {
+            "suspects_before": len(bidx),
+            "suspects_after": len(aidx),
+            "new": len(new_suspects),
+            "recovered": len(removed_suspects),
+            "escalated": len(regressions),
+            "scene_before": scene_before,
+            "scene_after": scene_after,
+        },
+        "regressions": regressions,
+        "recoveries": recoveries,
+        "stable": stable,
+        "new_suspects": new_suspects,
+        "removed_suspects": removed_suspects,
+        "warnings": [],
+        "safety": {"read_only": True, "mutation_performed": False},
+    }
+
+
+def render_snapshot_compare_human(payload: dict[str, Any]) -> str:
+    s = payload.get("summary") or {}
+    lines = ["Scene drift summary:"]
+    for k in ("suspects_before", "suspects_after", "new", "recovered", "escalated"):
+        lines.append(f"- {k}: {s.get(k, 0)}")
+    lines += ["", "Top regressions:"]
+    regs = payload.get("regressions") or []
+    if not regs:
+        lines.append("- none")
+    for i, r in enumerate(regs, 1):
+        lines.append(f"{i}. {r.get('name')}")
+        for d in r.get("drift_summary") or []:
+            lines.append(f"   {d}")
+    if payload.get("recoveries"):
+        lines += ["", "Recovered:"]
+        for r in payload.get("recoveries") or []:
+            lines.append(f"- {r.get('name') if isinstance(r, dict) else r}")
+    if payload.get("stable"):
+        lines += ["", "Stable:"]
+        for r in payload.get("stable"):
+            lines.append(f"- {r.get('name')}")
+    lines += ["", "Safety:", "- read_only=true", "- mutation_performed=false"]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def compare_snapshot_exports(export_a: str, export_b: str, **kwargs: Any) -> dict[str, Any]:
+    va = validate_snapshot_export(export_a)
+    vb = validate_snapshot_export(export_b)
+    if va.get("status") != "ok" or vb.get("status") != "ok":
+        return {
+            "schema_version": 1,
+            "mode": "docker_triage_snapshot_compare",
+            "status": "error",
+            "read_only": True,
+            "mutation_performed": False,
+            "warnings": ["export validation failed"],
+            "summary": {},
+            "regressions": [],
+            "recoveries": [],
+            "stable": [],
+            "new_suspects": [],
+            "removed_suspects": [],
+            "safety": {"read_only": True, "mutation_performed": False},
+        }
+    sa = json.loads((Path(export_a) / "triage-snapshot.json").read_text(encoding="utf-8"))
+    sb = json.loads((Path(export_b) / "triage-snapshot.json").read_text(encoding="utf-8"))
+    return compare_snapshot_payload(sa, sb, **kwargs)
