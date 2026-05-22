@@ -1288,3 +1288,14 @@ Recommended read-only workflow:
 4. `shellforgeai triage docker snapshot validate <snapshot-id>`
 5. Hand off the saved snapshot path/id
 6. Only then decide whether explicit proposal/mission gates are needed
+
+## PR86 update — 2AM triage snapshot export/validate handoff
+
+1. `shellforgeai self-test commands --profile quick`
+2. `shellforgeai triage docker`
+3. `shellforgeai triage docker snapshot --save --include-details`
+4. `shellforgeai triage docker snapshot validate <snapshot-id>`
+5. `shellforgeai triage docker snapshot export <snapshot-id>`
+6. `shellforgeai triage docker snapshot export-validate <export-path>`
+7. Hand off the export path
+8. Only then decide whether explicit proposal/mission gates are needed

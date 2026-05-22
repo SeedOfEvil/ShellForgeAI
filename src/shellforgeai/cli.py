@@ -10074,5 +10074,65 @@ def triage_docker_snapshot_validate(
             return
         raise typer.Exit(1)
     console.print(render_snapshot_validation_human(payload), end="")
+
+
+@triage_docker_snapshot_app.command("export")
+def triage_docker_snapshot_export(
+    ctx: typer.Context,
+    snapshot: Annotated[str, typer.Argument(help="Snapshot artifact id or path.")],
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+    output: Annotated[
+        Path | None, typer.Option("--output", help="Output path under <data_dir>/exports.")
+    ] = None,
+) -> None:
+    from shellforgeai.core.triage_ranking import export_snapshot_artifact
+
+    payload = export_snapshot_artifact(snapshot, Path(load_settings().app.data_dir), output=output)
+    if as_json:
+        console.print_json(json.dumps(payload))
+        if payload.get("status") == "exported":
+            return
+        raise typer.Exit(code=1)
+    if payload.get("status") != "exported":
+        console.print("Triage snapshot export failed")
+        for w in payload.get("warnings") or []:
+            console.print(f"- {w}")
+        raise typer.Exit(code=1)
+    exp = payload.get("export") or {}
+    src = payload.get("source_snapshot") or {}
+    console.print("Triage snapshot export created")
+    console.print("\nSource snapshot:")
+    console.print(f"- id: {src.get('id')}")
+    console.print(f"- path: {src.get('path')}")
+    console.print(f"- validation: {'passed' if src.get('validated') else 'failed'}")
+    console.print("\nExport:")
+    console.print(f"- id: {exp.get('id')}")
+    console.print(f"- path: {exp.get('path')}")
+    console.print("- files:")
+    for f in exp.get("files") or []:
+        console.print(f"  - {f}")
+
+
+@triage_docker_snapshot_app.command("export-validate")
+def triage_docker_snapshot_export_validate(
+    ctx: typer.Context,
+    export_path: Annotated[str, typer.Argument(help="Export path.")],
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.triage_ranking import validate_snapshot_export
+
+    _ = _ctx(ctx)
+    payload = validate_snapshot_export(export_path)
+    if as_json:
+        console.print_json(json.dumps(payload))
+        if payload.get("status") == "ok":
+            return
+        raise typer.Exit(code=1)
+    if payload.get("status") != "ok":
+        console.print("Triage snapshot export validation failed")
+        for w in payload.get("warnings") or []:
+            console.print(f"- {w}")
+        raise typer.Exit(code=1)
+    console.print("Triage snapshot export validation passed")
     if payload.get("status") != "ok":
         raise typer.Exit(1)
