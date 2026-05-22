@@ -10012,6 +10012,36 @@ def triage_docker_detail(
         raise typer.Exit(1)
 
 
+@triage_docker_app.command("timeline")
+def triage_docker_timeline(
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    window: Annotated[int, typer.Option("--window", min=1)] = 5,
+    top: Annotated[int, typer.Option("--top", min=1)] = 5,
+    only_regressions: Annotated[bool, typer.Option("--only-regressions")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+) -> None:
+    from shellforgeai.core.triage_ranking import (
+        build_snapshot_timeline,
+        render_snapshot_timeline_human,
+    )
+
+    payload = build_snapshot_timeline(
+        Path(load_settings().app.data_dir),
+        window=window,
+        top=top,
+        only_regressions=only_regressions,
+        include_stable=include_stable,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        if payload.get("status") == "ok":
+            return
+        raise typer.Exit(1)
+    console.print(render_snapshot_timeline_human(payload), end="")
+    if payload.get("status") not in ("ok", "warn"):
+        raise typer.Exit(1)
+
+
 @triage_docker_snapshot_app.callback()
 def triage_docker_snapshot(
     ctx: typer.Context,

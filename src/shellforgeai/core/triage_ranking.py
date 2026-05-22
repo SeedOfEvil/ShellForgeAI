@@ -1571,3 +1571,268 @@ def compare_snapshot_exports(export_a: str, export_b: str, **kwargs: Any) -> dic
     sa = json.loads((Path(export_a) / "triage-snapshot.json").read_text(encoding="utf-8"))
     sb = json.loads((Path(export_b) / "triage-snapshot.json").read_text(encoding="utf-8"))
     return compare_snapshot_payload(sa, sb, **kwargs)
+
+
+def build_snapshot_timeline(
+    data_dir: Path,
+    *,
+    window: int = 5,
+    top: int = 5,
+    only_regressions: bool = False,
+    include_stable: bool = False,
+) -> dict[str, Any]:
+    artifacts_root = data_dir / "artifacts"
+    safety = {
+        "read_only": True,
+        "mutation_performed": False,
+        "cleanup_executed": False,
+        "proposal_created": False,
+        "mission_created": False,
+        "apply_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+    }
+    if not artifacts_root.exists():
+        return {
+            "schema_version": "1",
+            "status": "not_found",
+            "mode": "docker_triage_timeline",
+            "window": {"snapshots_analyzed": 0},
+            "summary": {},
+            "escalating": [],
+            "recovering": [],
+            "flapping": [],
+            "recurring": [],
+            "stable": [],
+            "new_suspects": [],
+            "resolved_suspects": [],
+            "safety": safety,
+            "warnings": ["no snapshots found"],
+        }
+    entries: list[tuple[str, dict[str, Any]]] = []
+    warnings: list[str] = []
+    dirs = sorted([p for p in artifacts_root.iterdir() if p.is_dir()], key=lambda p: p.name)
+    for d in dirs:
+        v = validate_snapshot_artifact(d.name, data_dir)
+        if v.get("status") != "ok":
+            warnings.append(f"skipped invalid snapshot: {d.name}")
+            continue
+        snap = json.loads((d / "triage-snapshot.json").read_text(encoding="utf-8"))
+        entries.append((d.name, snap))
+    if window > 0:
+        entries = entries[-window:]
+    if len(entries) < 2:
+        return {
+            "schema_version": "1",
+            "status": "warn",
+            "mode": "docker_triage_timeline",
+            "window": {"snapshots_analyzed": len(entries)},
+            "summary": {},
+            "escalating": [],
+            "recovering": [],
+            "flapping": [],
+            "recurring": [],
+            "stable": [],
+            "new_suspects": [],
+            "resolved_suspects": [],
+            "safety": safety,
+            "warnings": warnings + ["at least 2 valid snapshots required"],
+        }
+    snapshot_names = [x[0] for x in entries]
+    latest_idx = len(entries) - 1
+    hist: dict[str, dict[str, Any]] = {}
+    for i, (_sid, snap) in enumerate(entries):
+        for s in snap.get("suspects") or []:
+            name = (s.get("name") or "").strip()
+            if not name:
+                continue
+            h = hist.setdefault(
+                name,
+                {
+                    "name": name,
+                    "seen": [],
+                    "rank_history": [],
+                    "severity_history": [],
+                    "confidence_history": [],
+                    "class_history": [],
+                    "evidence_count_history": [],
+                },
+            )
+            h["seen"].append(i)
+            h["rank_history"].append(s.get("rank"))
+            h["severity_history"].append(s.get("severity"))
+            h["confidence_history"].append(s.get("confidence"))
+            h["class_history"].append(s.get("classes") or [])
+            h["evidence_count_history"].append(len(s.get("why") or []))
+    sev = SEVERITY_ORDER
+    escalating = []
+    recovering = []
+    flapping = []
+    recurring = []
+    stable = []
+    new_s = []
+    resolved = []
+    for name, h in hist.items():
+        seen = h["seen"]
+        present_latest = latest_idx in seen
+        rank_hist = [r for r in h["rank_history"] if isinstance(r, int)]
+        sev_hist = [str(x) for x in h["severity_history"]]
+        evidence = h["evidence_count_history"]
+        miss = len(entries) - len(seen)
+        is_flap = any((b - a) > 1 for a, b in zip(seen, seen[1:], strict=False))
+        sev_first = sev.get(sev_hist[0], 0)
+        sev_last = sev.get(sev_hist[-1], 0)
+        rank_first = rank_hist[0] if rank_hist else None
+        rank_last = rank_hist[-1] if rank_hist else None
+        is_escalating = present_latest and (
+            (sev_last > sev_first)
+            or (rank_first is not None and rank_last is not None and rank_last < rank_first)
+            or (evidence and evidence[-1] > evidence[0])
+        )
+        is_recovering = (
+            present_latest
+            and (
+                (sev_last < sev_first)
+                or (rank_first is not None and rank_last is not None and rank_last > rank_first)
+                or (evidence and evidence[-1] < evidence[0])
+            )
+        ) or (not present_latest)
+        is_stable = (
+            miss == 0
+            and len(set(sev_hist)) == 1
+            and len(set(rank_hist or [None])) == 1
+            and not is_flap
+        )
+        trend = "stable"
+        if present_latest and len(seen) == 1:
+            trend = "new"
+            new_s.append(name)
+        elif not present_latest:
+            trend = "resolved"
+            resolved.append(name)
+        elif is_flap:
+            trend = "flapping"
+            flapping.append(name)
+        elif is_escalating:
+            trend = "escalating"
+            escalating.append(name)
+        elif is_recovering:
+            trend = "recovering"
+            recovering.append(name)
+        elif len(seen) > 1:
+            trend = "recurring"
+            recurring.append(name)
+        if is_stable:
+            stable.append(name)
+        item = {
+            "name": name,
+            "first_seen": snapshot_names[seen[0]],
+            "last_seen": snapshot_names[seen[-1]],
+            "snapshots_seen": len(seen),
+            "snapshots_missing": miss,
+            "latest_rank": rank_last,
+            "rank_history": rank_hist,
+            "latest_severity": sev_hist[-1] if sev_hist else None,
+            "severity_history": sev_hist,
+            "latest_confidence": h["confidence_history"][-1] if h["confidence_history"] else None,
+            "confidence_history": h["confidence_history"],
+            "class_history": h["class_history"],
+            "evidence_count_history": evidence,
+            "highest_severity": max(sev_hist, key=lambda x: sev.get(x, 0)) if sev_hist else None,
+            "worst_rank": max(rank_hist) if rank_hist else None,
+            "best_rank": min(rank_hist) if rank_hist else None,
+            "latest_status": trend,
+            "recommended_safe_next_command": f"shellforgeai triage docker detail {name}",
+        }
+        if trend == "escalating":
+            escalating[-1] = item
+        elif trend == "recovering":
+            recovering[-1] = item
+        elif trend == "flapping":
+            flapping[-1] = item
+        elif trend == "recurring":
+            recurring[-1] = item
+        elif trend == "stable":
+            stable[-1] = item
+    if top < 1:
+        top = 1
+    escalating = escalating[:top]
+    recovering = recovering[:top]
+    flapping = flapping[:top]
+    recurring = recurring[:top]
+    shown_stable = stable[:top] if include_stable and not only_regressions else []
+    if only_regressions:
+        recovering = []
+        recurring = []
+        shown_stable = []
+    return {
+        "schema_version": "1",
+        "status": "ok",
+        "mode": "docker_triage_timeline",
+        "read_only": True,
+        "mutation_performed": False,
+        "window": {
+            "snapshots_analyzed": len(entries),
+            "first_snapshot": snapshot_names[0],
+            "latest_snapshot": snapshot_names[-1],
+        },
+        "summary": {
+            "suspects_seen": len(hist),
+            "escalating": len(escalating),
+            "recovering": len(recovering),
+            "flapping": len(flapping),
+            "recurring": len(recurring),
+            "stable": len(stable),
+            "new": len(new_s),
+            "resolved": len(resolved),
+        },
+        "escalating": escalating,
+        "recovering": recovering,
+        "flapping": flapping,
+        "recurring": recurring,
+        "stable": shown_stable,
+        "new_suspects": new_s,
+        "resolved_suspects": resolved,
+        "next_safe_commands": [
+            "shellforgeai triage docker snapshot",
+            "shellforgeai triage docker detail --rank 1",
+        ],
+        "safety": safety,
+        "warnings": warnings,
+    }
+
+
+def render_snapshot_timeline_human(payload: dict[str, Any]) -> str:
+    lines = ["Docker triage timeline", "", "Window:"]
+    w = payload.get("window") or {}
+    lines.append(f"- snapshots analyzed: {w.get('snapshots_analyzed', 0)}")
+    if w.get("first_snapshot"):
+        lines.append(f"- first snapshot: {w.get('first_snapshot')}")
+        lines.append(f"- latest snapshot: {w.get('latest_snapshot')}")
+    lines.append("- mode: read-only")
+    lines += ["", "Summary:"]
+    s = payload.get("summary") or {}
+    for k in ("escalating", "recovering", "flapping", "recurring", "stable", "new", "resolved"):
+        lines.append(f"- {k}: {s.get(k, 0)}")
+    for section in ("escalating", "flapping", "recovering", "stable"):
+        vals = payload.get(section) or []
+        if not vals:
+            continue
+        lines += ["", f"{section.capitalize()}:"]
+        for i, item in enumerate(vals, 1):
+            lines.append(f"{i}. {item.get('name')}")
+            sev_hist = item.get("severity_history") or [None]
+            lines.append(f"   severity: {sev_hist[0]} -> {item.get('latest_severity')}")
+            lines.append(
+                f"   rank: {(item.get('rank_history') or [None])[0]} -> {item.get('latest_rank')}"
+            )
+    lines += [
+        "",
+        "Safety:",
+        "- read_only: true",
+        "- mutation_performed: false",
+        "- no restart/stop/delete/prune/apply/cleanup executed",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
