@@ -1299,3 +1299,14 @@ Recommended read-only workflow:
 6. `shellforgeai triage docker snapshot export-validate <export-path>`
 7. Hand off the export path
 8. Only then decide whether explicit proposal/mission gates are needed
+
+
+
+### PR89 governed disposable remediation proof workflow
+1. triage
+2. detail/snapshot/timeline if needed
+3. `shellforgeai remediation plan --target sfai-noisy-errors --scenario sfai-noisy-errors`
+4. `shellforgeai remediation validate <plan-id>`
+5. `shellforgeai remediation execute <plan-id> --execute --confirm` only with explicit operator approval
+6. `shellforgeai remediation status <receipt-id>`
+7. verify production `shellforgeai` remained untouched

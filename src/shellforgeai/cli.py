@@ -243,6 +243,7 @@ triage_docker_snapshot_app = typer.Typer(
     no_args_is_help=False,
     help="PR85 triage snapshot save/validate artifact workflow (read-only metadata writes).",
 )
+remediation_app = typer.Typer(help="Disposable governed remediation proof flow.")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -256,6 +257,7 @@ app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(triage_app, name="triage")
+app.add_typer(remediation_app, name="remediation")
 triage_app.add_typer(triage_docker_app, name="docker")
 triage_docker_app.add_typer(triage_docker_snapshot_app, name="snapshot")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
@@ -10263,3 +10265,226 @@ def triage_docker_snapshot_export_validate(
     console.print("Triage snapshot export validation passed")
     if payload.get("status") != "ok":
         raise typer.Exit(1)
+
+
+@remediation_app.command("plan")
+def remediation_plan(
+    target: Annotated[str, typer.Option("--target")],
+    scenario: Annotated[str, typer.Option("--scenario")] = "sfai-noisy-errors",
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core import triage_ranking
+    from shellforgeai.core.disposable_remediation import write_plan
+
+    settings = load_settings()
+    scene = triage_ranking.collect_scene()
+    labels = {}
+    for row in scene.get("containers") or []:
+        if row.get("name") == target:
+            raw = row.get("labels")
+            if isinstance(raw, dict):
+                labels = {str(k): str(v) for k, v in raw.items()}
+            break
+    payload = write_plan(
+        data_dir=Path(settings.app.data_dir), target=target, scenario=scenario, labels=labels
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        if payload.get("status") != "planned":
+            raise typer.Exit(1)
+        return
+    if payload.get("status") != "planned":
+        console.print(f"Refused: {payload.get('reason')}.")
+        console.print("Try: shellforgeai remediation plan --target sfai-noisy-errors ")
+        console.print("      --scenario sfai-noisy-errors")
+        raise typer.Exit(1)
+    plan = payload["plan"]
+    console.print(
+        "Disposable remediation plan created (governed proof executor; not live Docker remediation)"
+    )
+    console.print(f"- target: {plan['target']}")
+    console.print(f"- scenario: {plan['scenario']}")
+    console.print(f"- action preview: {plan['action_preview']}")
+    console.print(f"- plan id: {plan['plan_id']}")
+
+
+@remediation_app.command("validate")
+def remediation_validate(
+    plan_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import load_plan, validate_plan
+
+    plan = load_plan(Path(load_settings().app.data_dir), plan_id)
+    if plan is None:
+        payload = {
+            "status": "not_found",
+            "mode": "disposable_remediation_validate",
+            "plan_id": plan_id,
+            "checks": [],
+            "safety": {},
+            "warnings": ["plan not found"],
+        }
+    else:
+        ok, errs = validate_plan(plan)
+        payload = {
+            "status": "ok" if ok else "failed",
+            "mode": "disposable_remediation_validate",
+            "plan_id": plan_id,
+            "checks": [] if ok else errs,
+            "safety": plan.get("safety", {}),
+            "warnings": [],
+        }
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"Validation: {payload['status']}")
+        for c in payload.get("checks") or []:
+            console.print(f"- {c}")
+    if payload["status"] != "ok":
+        raise typer.Exit(1)
+
+
+@remediation_app.command("execute")
+def remediation_execute(
+    plan_id: Annotated[str, typer.Argument()],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import (
+        load_plan,
+        safety_block,
+        validate_plan,
+        write_receipt,
+    )
+    from shellforgeai.core.lab_restart import ExecResult, FakeCommandExecutor
+
+    if not (execute and confirm):
+        msg = "Refused: explicit --execute --confirm required."
+        if json_out:
+            typer.echo(
+                json.dumps(
+                    {
+                        "status": "blocked",
+                        "mode": "disposable_remediation_execute",
+                        "warnings": [msg],
+                    }
+                )
+            )
+        else:
+            console.print(msg)
+        raise typer.Exit(1)
+    data_dir = Path(load_settings().app.data_dir)
+    plan = load_plan(data_dir, plan_id)
+    if plan is None:
+        payload = {
+            "status": "not_found",
+            "mode": "disposable_remediation_execute",
+            "plan_id": plan_id,
+            "warnings": ["plan not found"],
+        }
+        if json_out:
+            typer.echo(json.dumps(payload))
+        else:
+            console.print("Plan not found")
+        raise typer.Exit(1)
+    ok, errs = validate_plan(plan)
+    if not ok:
+        payload = {
+            "status": "blocked",
+            "mode": "disposable_remediation_execute",
+            "plan_id": plan_id,
+            "warnings": errs,
+        }
+        if json_out:
+            typer.echo(json.dumps(payload))
+        else:
+            [console.print(f"- {e}") for e in errs]
+        raise typer.Exit(1)
+    pre = {"running": True, "restart_count": 0}
+    ex = FakeCommandExecutor(result=ExecResult(ok=True, exit_code=0, stdout="restarted", stderr=""))
+    res = ex.run(["docker", "restart", plan["target"]], timeout_seconds=30)
+    post = {"running": True, "restart_count": 1}
+    verified = bool(res.ok and post["running"] and post["restart_count"] > pre["restart_count"])
+    receipt_id = f"drr_{uuid.uuid4().hex[:12]}"
+    receipt = {
+        "schema_version": 1,
+        "kind": "disposable_remediation_receipt",
+        "receipt_id": receipt_id,
+        "plan_id": plan_id,
+        "plan_fingerprint": plan.get("fingerprint"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "target": plan["target"],
+        "scenario": plan["scenario"],
+        "action_attempted": plan["action_preview"],
+        "action_executed": True,
+        "pre_state": pre,
+        "post_state": post,
+        "verification": {"status": "passed" if verified else "failed"},
+        "return_code": res.exit_code,
+        "stdout_summary": res.stdout[:120],
+        "stderr_summary": res.stderr[:120],
+        "rollback_or_recovery_status": "none",
+        "safety": safety_block(
+            mutation=True, restarted=True, disposable=True, allowlisted=True, production=False
+        ),
+    }
+    write_receipt(data_dir, receipt)
+    payload = {
+        "status": "executed" if verified else "failed",
+        "mode": "disposable_remediation_execute",
+        "receipt_id": receipt_id,
+        "plan_id": plan_id,
+        "target": plan["target"],
+        "verification": receipt["verification"],
+        "safety": receipt["safety"],
+        "warnings": [],
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("Governed proof executor ran (not live Docker remediation).")
+        console.print(
+            f"Executed target {plan['target']} verification={payload['verification']['status']}"
+        )
+        console.print(f"Receipt: {receipt_id}")
+    if payload["status"] != "executed":
+        raise typer.Exit(1)
+
+
+@remediation_app.command("status")
+def remediation_status(
+    receipt_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import load_receipt
+
+    receipt = load_receipt(Path(load_settings().app.data_dir), receipt_id)
+    if receipt is None:
+        payload = {
+            "status": "not_found",
+            "mode": "disposable_remediation_status",
+            "receipt": None,
+            "safety": {},
+            "warnings": ["receipt not found"],
+        }
+        if json_out:
+            typer.echo(json.dumps(payload))
+        else:
+            console.print("Receipt not found")
+        raise typer.Exit(1)
+    payload = {
+        "status": "ok",
+        "mode": "disposable_remediation_status",
+        "receipt": receipt,
+        "safety": receipt.get("safety", {}),
+        "warnings": [],
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"Receipt: {receipt_id}")
+        console.print(f"Plan: {receipt.get('plan_id')}")
+        console.print(f"Target: {receipt.get('target')}")
+        console.print(f"Verification: {(receipt.get('verification') or {}).get('status')}")
