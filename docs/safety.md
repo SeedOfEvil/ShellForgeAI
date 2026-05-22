@@ -916,4 +916,7 @@ coverage runs without a live Docker daemon and never mutates the host.
 
 `shellforgeai triage docker snapshot export` packages a previously saved triage snapshot into a ShellForgeAI-owned export directory under `<data_dir>/exports` and records export manifest/checksum metadata. `shellforgeai triage docker snapshot export-validate` is read-only verification of that bundle (files, JSON parse, checksums, safety flags). These commands do not execute cleanup/proposals/missions/apply/remediation and reject unsafe output paths.
 
+
+PR89 adds a **governed disposable remediation proof** CLI (`remediation plan/validate/execute/status`) scoped to an explicit disposable and allowlisted battle-lab target only. Safety gates refuse production `shellforgeai`, unlabeled targets, missing allowlist labels, broad selectors (`all`, `*`, `everything`), unsupported scenarios, and suspicious target strings. Execution is blocked unless `--execute --confirm` is provided, and natural-language execution remains refused. Receipts include post-check verification and immutable safety flags (`shell_true=false`, `arbitrary_command_execution=false`, no cleanup/mission/apply/compose mutation).
+
 `shellforgeai triage docker timeline` is read-only incident trend analysis over previously saved triage snapshots under `<data_dir>/artifacts`. It validates snapshots before use, computes timeline drift intelligence only, and does not execute cleanup/proposal/mission/apply/remediation or Docker/Compose mutation.
