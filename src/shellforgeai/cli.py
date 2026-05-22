@@ -10090,7 +10090,9 @@ def triage_docker_snapshot_export(
     payload = export_snapshot_artifact(snapshot, Path(load_settings().app.data_dir), output=output)
     if as_json:
         console.print_json(json.dumps(payload))
-        return
+        if payload.get("status") == "exported":
+            return
+        raise typer.Exit(code=1)
     if payload.get("status") != "exported":
         console.print("Triage snapshot export failed")
         for w in payload.get("warnings") or []:
@@ -10123,7 +10125,9 @@ def triage_docker_snapshot_export_validate(
     payload = validate_snapshot_export(export_path)
     if as_json:
         console.print_json(json.dumps(payload))
-        return
+        if payload.get("status") == "ok":
+            return
+        raise typer.Exit(code=1)
     if payload.get("status") != "ok":
         console.print("Triage snapshot export validation failed")
         for w in payload.get("warnings") or []:
