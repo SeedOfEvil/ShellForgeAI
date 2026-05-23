@@ -719,3 +719,5 @@ explicitly `false`.
 - PR92 (May 23, 2026): operator preflight packet for governed remediation (`remediation preflight`) with strict read-only decision UX, live target eligibility re-checks, exact bounded action preview, verification expectations, recovery note, ready-vs-blocked status, and automation-safe JSON output.
 
 - PR93 (May 23, 2026): disposable remediation rollback posture + verification scaffold (`remediation rollback-preflight`, `remediation rollback-validate`), receipt rollback metadata, strict read-only packets, automatic rollback disabled, and no rollback execution path.
+
+- PR94 (May 23, 2026): adds governed disposable rollback execution (`remediation rollback-execute`) plus rollback receipts, rollback status, and rollback receipt integrity validation.

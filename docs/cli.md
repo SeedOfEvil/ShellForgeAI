@@ -1126,8 +1126,10 @@ Safety: production `shellforgeai`, unlabeled/non-allowlisted targets, broad sele
 - Real mutation requires explicit `--executor docker-disposable` plus all disposable/allowlist gates at execution time.
 - `docker-disposable` mode is bounded to exact `docker restart <target>` only for exact eligible targets; broad or production targets are refused.
 
-## PR93 remediation rollback preflight + validate
+## PR93/PR94 remediation rollback workflow
 - `shellforgeai remediation rollback-preflight <receipt-id> [--json]` emits a read-only rollback posture packet for a disposable remediation receipt.
-- `shellforgeai remediation rollback-validate <receipt-id> [--json]` validates rollback readiness gates from receipt + safety invariants.
+- `shellforgeai remediation rollback-validate <receipt-id-or-rollback-receipt-id> [--json]` validates rollback readiness (original receipt) and rollback execution integrity (rollback receipt).
+- `shellforgeai remediation rollback-execute <receipt-id> --execute --confirm [--json]` executes bounded disposable recovery restart on the exact prior target only and writes a rollback receipt.
+- `shellforgeai remediation rollback-status <rollback-receipt-id> [--json]` reports rollback receipt verification/safety summary.
 - Rollback strategy is explicit and bounded: `repeat_exact_target_restart` for the same exact disposable target.
 - These commands do **not** execute rollback and always keep `automatic_rollback=false`.

@@ -10768,3 +10768,184 @@ def remediation_rollback_validate(
             console.print(f"- {k}: {'ok' if v else 'failed'}")
     if payload.get("status") != "ok":
         raise typer.Exit(1)
+
+
+@remediation_app.command("rollback-execute")
+def remediation_rollback_execute(
+    receipt_id: Annotated[str, typer.Argument()],
+    execute: Annotated[bool, typer.Option("--execute")] = False,
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    import uuid
+    from datetime import UTC, datetime
+
+    from shellforgeai.core.disposable_remediation import (
+        ROLLBACK_RECEIPT_KIND,
+        inspect_exact_target_state,
+        load_receipt,
+        rollback_preflight_payload,
+        rollback_validate_payload,
+        run_exact_docker_restart,
+        write_receipt,
+    )
+
+    if not (execute and confirm):
+        msg = "Refused: explicit --execute --confirm required."
+        payload = {
+            "status": "blocked",
+            "mode": "disposable_remediation_rollback_execute",
+            "warnings": [msg],
+        }
+        typer.echo(json.dumps(payload) if json_out else msg)
+        raise typer.Exit(1)
+    data_dir = Path(load_settings().app.data_dir)
+    rv = rollback_validate_payload(data_dir, receipt_id)
+    rp = rollback_preflight_payload(data_dir, receipt_id)
+    if rv.get("status") != "ok" or rp.get("status") != "ready":
+        payload = {
+            "status": "blocked",
+            "mode": "disposable_remediation_rollback_execute",
+            "warnings": ["rollback readiness checks failed"],
+        }
+        typer.echo(
+            json.dumps(payload) if json_out else "Refused: rollback readiness checks failed."
+        )
+        raise typer.Exit(1)
+    rec = load_receipt(data_dir, receipt_id)
+    if not rec:
+        typer.echo(
+            json.dumps(
+                {
+                    "status": "not_found",
+                    "mode": "disposable_remediation_rollback_execute",
+                    "warnings": ["receipt not found"],
+                }
+            )
+            if json_out
+            else "Receipt not found"
+        )
+        raise typer.Exit(1)
+    target = str(rec.get("target") or "")
+    pre = inspect_exact_target_state(target) or {"name": target}
+    attempted = True
+    ok, rc, stdout, stderr = run_exact_docker_restart(target)
+    post = inspect_exact_target_state(target) or {"name": target}
+    started_changed = str(pre.get("StartedAt") or "") != str(post.get("StartedAt") or "")
+    target_match = str(post.get("name") or target) == target
+    command_ok = rc == 0 and ok
+    verified = bool(command_ok and target_match and started_changed)
+    rbid = f"drrb_{uuid.uuid4().hex[:12]}"
+    receipt = {
+        "schema_version": "1",
+        "kind": ROLLBACK_RECEIPT_KIND,
+        "rollback_receipt_id": rbid,
+        "receipt_id": rbid,
+        "original_receipt_id": receipt_id,
+        "original_plan_id": rec.get("plan_id"),
+        "original_plan_fingerprint": rec.get("plan_fingerprint"),
+        "created_at": datetime.now(UTC).isoformat(),
+        "target": target,
+        "rollback_action": "bounded_recovery_restart",
+        "exact_target_only": True,
+        "automatic_rollback": False,
+        "action_attempted": attempted,
+        "action_executed": command_ok,
+        "executor_mode": "docker-disposable",
+        "argv": ["docker", "restart", target],
+        "pre_state": pre,
+        "post_state": post,
+        "verification": {
+            "status": "passed" if verified else "failed",
+            "rollback_verified": verified,
+            "started_at_changed": started_changed,
+            "target_match": target_match,
+            "command_ok": command_ok,
+        },
+        "return_code": rc,
+        "stdout_summary": stdout[:120],
+        "stderr_summary": stderr[:120],
+        "source_receipt_summary": {"receipt_id": receipt_id, "target": target},
+        "safety": {
+            "production_target": False,
+            "target_allowlisted": True,
+            "disposable": True,
+            "mutation_performed": command_ok,
+            "rollback_executed": command_ok,
+            "cleanup_executed": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": command_ok,
+            "shell_true": False,
+            "natural_language_execution": False,
+            "arbitrary_command_execution": False,
+        },
+    }
+    write_receipt(data_dir, receipt)
+    payload = {
+        "schema_version": "1",
+        "status": "executed" if verified else "failed",
+        "mode": "disposable_remediation_rollback_execute",
+        "original_receipt_id": receipt_id,
+        "rollback_receipt_id": rbid,
+        "target": target,
+        "rollback": {
+            "action": "bounded_recovery_restart",
+            "exact_target_only": True,
+            "automatic_rollback": False,
+            "explicit_confirm_required": True,
+            "docker_restart_attempted": attempted,
+            "docker_restart_succeeded": command_ok,
+        },
+        "verification": receipt["verification"],
+        "safety": receipt["safety"],
+        "warnings": [],
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("Disposable rollback executed")
+        console.print(f"- Original receipt: {receipt_id}")
+        console.print(f"- Rollback receipt: {rbid}")
+        console.print(f"- Target: {target}")
+    if payload["status"] != "executed":
+        raise typer.Exit(1)
+
+
+@remediation_app.command("rollback-status")
+def remediation_rollback_status(
+    rollback_receipt_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import load_receipt, rollback_validate_payload
+
+    data_dir = Path(load_settings().app.data_dir)
+    receipt = load_receipt(data_dir, rollback_receipt_id)
+    if not receipt:
+        payload = {
+            "status": "not_found",
+            "mode": "disposable_remediation_rollback_status",
+            "warnings": ["receipt not found"],
+        }
+        typer.echo(json.dumps(payload) if json_out else "Rollback receipt not found")
+        raise typer.Exit(1)
+    v = rollback_validate_payload(data_dir, rollback_receipt_id)
+    payload = {
+        "status": "ok" if v.get("status") == "ok" else "error",
+        "mode": "disposable_remediation_rollback_status",
+        "rollback_receipt": receipt,
+        "validation": v,
+        "safety": receipt.get("safety", {}),
+        "warnings": [],
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"Rollback receipt: {rollback_receipt_id}")
+        console.print(f"Original receipt: {receipt.get('original_receipt_id')}")
+        console.print(f"Target: {receipt.get('target')}")
+        console.print(f"Verification: {(receipt.get('verification') or {}).get('status')}")
+    if payload["status"] != "ok":
+        raise typer.Exit(1)
