@@ -1133,3 +1133,7 @@ Safety: production `shellforgeai`, unlabeled/non-allowlisted targets, broad sele
 - `shellforgeai remediation rollback-status <rollback-receipt-id> [--json]` reports rollback receipt verification/safety summary.
 - Rollback strategy is explicit and bounded: `repeat_exact_target_restart` for the same exact disposable target.
 - These commands do **not** execute rollback and always keep `automatic_rollback=false`.
+
+- `shellforgeai remediation bundle <plan-id-or-receipt-id>`: read-only lifecycle handoff summary.
+- `shellforgeai remediation bundle <id> --save`: write lifecycle JSON/Markdown bundle under data_dir artifacts.
+- `shellforgeai remediation bundle validate <bundle-id-or-path>`: validate saved lifecycle bundle.
