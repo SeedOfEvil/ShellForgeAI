@@ -715,3 +715,5 @@ explicitly `false`.
 
 
 - PR91: disposable remediation receipt validation + handoff reporting (read-only, audit-grade checks; no new execution power).
+
+- PR92 (May 23, 2026): operator preflight packet for governed remediation (`remediation preflight`) with strict read-only decision UX, live target eligibility re-checks, exact bounded action preview, verification expectations, recovery note, ready-vs-blocked status, and automation-safe JSON output.

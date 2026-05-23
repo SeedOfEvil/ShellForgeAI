@@ -361,6 +361,135 @@ def report_receipt_payload(data_dir: Path, receipt_id_or_path: str) -> dict[str,
     }
 
 
+def build_preflight_payload(
+    *,
+    data_dir: Path,
+    plan_id: str,
+    executor: str,
+    scene_state: dict[str, Any] | None,
+    inspect_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    base_safety = {
+        "read_only": True,
+        "mutation_performed": False,
+        "execution_performed": False,
+        "cleanup_executed": False,
+        "proposal_created": False,
+        "mission_created": False,
+        "apply_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+    }
+    packet = {
+        "schema_version": "1",
+        "mode": "disposable_remediation_preflight",
+        "status": "error",
+        "plan": {"plan_id": plan_id},
+        "target": {},
+        "planned_action": {},
+        "verification_expectation": {},
+        "recovery": {},
+        "decision": {"preflight_status": "error", "reasons": []},
+        "safety": base_safety,
+        "warnings": [],
+    }
+    plan = load_plan(data_dir, plan_id)
+    if plan is None:
+        packet["status"] = "not_found"
+        packet["decision"]["preflight_status"] = "blocked"
+        packet["decision"]["reasons"] = ["plan not found"]
+        packet["warnings"] = ["plan not found"]
+        return packet
+    if executor not in {"proof", "docker-disposable"}:
+        packet["status"] = "blocked"
+        packet["decision"]["preflight_status"] = "blocked"
+        packet["decision"]["reasons"] = ["unknown executor mode"]
+        return packet
+    ok, errs = validate_plan(plan)
+    state = inspect_state or scene_state or {"name": plan.get("target")}
+    labels = state.get("labels") if isinstance(state.get("labels"), dict) else {}
+    labels = {str(k): str(v) for k, v in labels.items()}
+    disposable = _has_any_label(labels, DISPOSABLE_LABELS)
+    allowlisted = _has_any_label(labels, ALLOWLIST_LABELS)
+    production = _is_production_target(str(plan.get("target") or ""))
+    reasons = list(errs)
+    if _is_broad_target(str(plan.get("target") or "")):
+        reasons.append("broad target refused")
+    if production:
+        reasons.append("production target refused")
+    if not disposable:
+        reasons.append("target missing disposable labels")
+    if not allowlisted:
+        reasons.append("target missing allowlist labels")
+    if executor not in (plan.get("executor_modes_supported") or []):
+        reasons.append("executor mode unsupported by plan")
+    reasons = sorted(set(reasons))
+    ready = ok and not reasons
+    packet["status"] = "ready" if ready else "blocked"
+    packet["plan"] = {
+        "plan_id": plan_id,
+        "fingerprint": plan.get("fingerprint"),
+        "scenario": plan.get("scenario"),
+        "executor": executor,
+        "default_executor": plan.get("default_executor", "proof"),
+        "executor_modes_supported": plan.get("executor_modes_supported") or ["proof"],
+    }
+    packet["target"] = {
+        "name": plan.get("target"),
+        "kind": plan.get("target_kind", "container"),
+        "container_id": state.get("id"),
+        "image": state.get("image"),
+        "running": state.get("running"),
+        "health": state.get("health") or "",
+        "started_at": state.get("StartedAt"),
+        "restart_count": state.get("restart_count"),
+        "compose_project": ((state.get("compose") or {}).get("project")),
+        "compose_service": ((state.get("compose") or {}).get("service")),
+        "labels": labels,
+        "disposable": disposable,
+        "target_allowlisted": allowlisted,
+        "production_target": production,
+    }
+    packet["planned_action"] = {
+        "action_preview": plan.get("action_preview"),
+        "command_display": plan.get("action_preview"),
+        "argv": ["docker", "restart", str(plan.get("target"))],
+        "exact_target_only": True,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+    }
+    packet["verification_expectation"] = {
+        "expected_signal": "proof_receipt_only" if executor == "proof" else "started_at_changed",
+        "pre_state_required": True,
+        "post_state_required": True,
+        "receipt_required": True,
+        "post_check_criteria": plan.get("post_checks") or [],
+    }
+    packet["recovery"] = {
+        "automatic_rollback": False,
+        "recovery_available": False,
+        "recovery_validated": False,
+        "note": plan.get("rollback_or_recovery_note"),
+        "human_recovery_command": "",
+    }
+    packet["decision"] = {
+        "preflight_status": "ready" if ready else "blocked",
+        "reasons": reasons,
+        "operator_approval_required": True,
+        "approval_warning": (
+            "Ready means gates are satisfied. It does not mean you approved execution."
+        ),
+    }
+    if ready:
+        packet["decision"]["execute_command"] = (
+            f"shellforgeai remediation execute {plan_id} --executor {executor} --execute --confirm"
+        )
+    return packet
+
+
 def container_state_from_scene(scene: dict[str, Any], target: str) -> dict[str, Any] | None:
     for row in scene.get("containers") or []:
         if row.get("name") == target:
