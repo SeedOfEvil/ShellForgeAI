@@ -81,6 +81,55 @@ def safety_block(
     }
 
 
+def evaluate_eligibility(
+    *, target: str, scenario: str, labels: dict[str, str] | None
+) -> dict[str, Any]:
+    normalized_labels = {str(k): str(v) for k, v in (labels or {}).items()}
+    blocked: list[str] = []
+    if _is_broad_target(target):
+        blocked.append("broad target refused")
+    if not _safe_target(target):
+        blocked.append("suspicious target refused")
+    production = _is_production_target(target)
+    if production:
+        blocked.append("production target refused")
+    if scenario != SUPPORTED_SCENARIO:
+        blocked.append("unsupported scenario")
+    if labels is None:
+        blocked.append("labels unavailable")
+    disposable = _has_any_label(normalized_labels, DISPOSABLE_LABELS)
+    allowlisted = _has_any_label(normalized_labels, ALLOWLIST_LABELS)
+    if labels is not None and not disposable:
+        blocked.append("target missing disposable labels")
+    if labels is not None and not allowlisted:
+        blocked.append("target missing allowlist labels")
+
+    proof_ready = (
+        not production
+        and scenario == SUPPORTED_SCENARIO
+        and disposable
+        and not _is_broad_target(target)
+    )
+    docker_ready = proof_ready and allowlisted
+
+    proof_reason = "" if proof_ready else "executor unavailable"
+    docker_reason = "" if docker_ready else "executor unavailable"
+
+    eligibility = "eligible_for_plan" if proof_ready and docker_ready else "blocked"
+    return {
+        "eligibility": eligibility,
+        "production_target": production,
+        "disposable": disposable,
+        "target_allowlisted": allowlisted,
+        "labels": normalized_labels,
+        "executors": {
+            "proof": {"ready": proof_ready, "reason": proof_reason},
+            "docker-disposable": {"ready": docker_ready, "reason": docker_reason},
+        },
+        "blocked_reasons": blocked,
+    }
+
+
 def derive_rollback_payload(receipt: dict[str, Any]) -> dict[str, Any]:
     target = str(receipt.get("target") or "")
     mode = str(receipt.get("executor_mode") or "")

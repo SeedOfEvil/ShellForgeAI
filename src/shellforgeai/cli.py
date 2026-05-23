@@ -10269,6 +10269,160 @@ def triage_docker_snapshot_export_validate(
         raise typer.Exit(1)
 
 
+@remediation_app.command("eligibility")
+def remediation_eligibility(
+    target: Annotated[str | None, typer.Option("--target")] = None,
+    scenario: Annotated[str, typer.Option("--scenario")] = "sfai-noisy-errors",
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core import triage_ranking
+    from shellforgeai.core.disposable_remediation import evaluate_eligibility
+
+    scene = triage_ranking.collect_scene()
+    ranked = triage_ranking.rank_scene(scene)
+    suspects = list((ranked or {}).get("suspects") or [])
+    rows = {str(c.get("name") or ""): c for c in (scene.get("containers") or [])}
+
+    selected: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    status = "ok"
+    if target:
+        t = target.strip()
+        if t.lower() in {"all", "*", "everything", "all containers", "all services"}:
+            status = "blocked"
+            selected = [{"name": t, "severity": "unknown", "confidence": "unknown", "classes": []}]
+        else:
+            match = next((s for s in suspects if s.get("name") == t), None)
+            if match is None:
+                if t in rows:
+                    match = {
+                        "name": t,
+                        "severity": "unknown",
+                        "confidence": "unknown",
+                        "classes": [],
+                    }
+                else:
+                    status = "blocked"
+                    warnings.append("target not found")
+                    match = {
+                        "name": t,
+                        "severity": "unknown",
+                        "confidence": "unknown",
+                        "classes": [],
+                    }
+            selected = [match]
+    else:
+        selected = suspects
+
+    targets = []
+    for s in selected:
+        name = str(s.get("name") or "")
+        labels = rows.get(name, {}).get("labels") if name in rows else None
+        evald = evaluate_eligibility(target=name, scenario=scenario, labels=labels)
+        blocked_reasons = list(evald.get("blocked_reasons") or [])
+        if name and name not in rows:
+            blocked_reasons.append("target not found")
+        item = {
+            "name": name,
+            "triage": {
+                "severity": s.get("severity", "unknown"),
+                "confidence": s.get("confidence", "unknown"),
+                "classes": list(s.get("classes") or []),
+            },
+            "scenario": scenario,
+            **evald,
+            "suggested_plan_command": (
+                f"shellforgeai remediation plan --target {name} --scenario {scenario}"
+                if evald.get("eligibility") == "eligible_for_plan"
+                else ""
+            ),
+        }
+        item["blocked_reasons"] = blocked_reasons
+        targets.append(item)
+
+    eligible = [t for t in targets if t.get("eligibility") == "eligible_for_plan"]
+    blocked = [t for t in targets if t.get("eligibility") != "eligible_for_plan"]
+    if not targets:
+        status = "empty"
+    elif status != "blocked" and blocked and not eligible:
+        status = "blocked"
+
+    payload = {
+        "schema_version": "1",
+        "status": status,
+        "mode": "remediation_eligibility",
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": {
+            "targets_seen": len(targets),
+            "eligible_for_plan": len(eligible),
+            "blocked": len(blocked),
+            "production_blocked": sum(1 for t in targets if t.get("production_target")),
+        },
+        "targets": targets,
+        "safety": {
+            "read_only": True,
+            "mutation_performed": False,
+            "plan_created": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "cleanup_executed": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+        },
+        "next_safe_commands": [
+            *(t["suggested_plan_command"] for t in eligible if t.get("suggested_plan_command")),
+            *[
+                f"shellforgeai triage docker detail {t.get('name')}"
+                for t in blocked
+                if t.get("name")
+            ],
+            "shellforgeai remediation audit --latest",
+        ],
+        "warnings": warnings,
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload["status"] in {"ok", "empty"} else 1)
+
+    console.print("Remediation eligibility map")
+    console.print("\nSafety:")
+    console.print("- read_only: true")
+    console.print("- mutation_performed: false")
+    console.print("- no plan created")
+    console.print("- no remediation executed")
+    console.print("- no Docker/Compose mutation")
+    console.print("\nSummary:")
+    for k, v in payload["summary"].items():
+        console.print(f"- {k}: {v}")
+    console.print("\nEligible targets:")
+    if not eligible:
+        console.print("- none")
+    for t in eligible:
+        console.print(f"- {t['name']} ({t['triage']['severity']})")
+        console.print(f"  Suggested command: {t['suggested_plan_command']}")
+    console.print("\nBlocked targets:")
+    if not blocked:
+        console.print("- none")
+    for t in blocked:
+        console.print(f"- {t['name']} ({t['triage']['severity']})")
+        for r in t.get("blocked_reasons") or ["executor unavailable"]:
+            console.print(f"  - {r}")
+    console.print("\nSuggested safe commands:")
+    for cmd in payload["next_safe_commands"]:
+        if cmd:
+            console.print(f"- {cmd}")
+    console.print("\nWarning: this command created no plan and executed nothing.")
+    if payload["status"] not in {"ok", "empty"}:
+        raise typer.Exit(1)
+
+
 @remediation_app.command("plan")
 def remediation_plan(
     target: Annotated[str, typer.Option("--target")],

@@ -724,3 +724,5 @@ explicitly `false`.
 
 - PR95: Added disposable remediation lifecycle bundle + bundle validation commands for audit handoff.
 - PR96 (May 23, 2026): added `remediation audit` read-only lifecycle visibility and safety audit summary (latest bundle linkage, artifact health warnings, strict JSON output, and invariant reporting with no remediation/rollback execution).
+
+- PR97: Read-only triage-to-remediation eligibility mapping (`remediation eligibility`) with explicit safety flags and plan-only command suggestions.
