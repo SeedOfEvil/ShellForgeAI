@@ -10273,15 +10273,22 @@ def triage_docker_snapshot_export_validate(
 def remediation_eligibility(
     target: Annotated[str | None, typer.Option("--target")] = None,
     scenario: Annotated[str, typer.Option("--scenario")] = "sfai-noisy-errors",
+    explain: Annotated[bool, typer.Option("--explain")] = False,
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     from shellforgeai.core import triage_ranking
-    from shellforgeai.core.disposable_remediation import evaluate_eligibility
+    from shellforgeai.core.disposable_remediation import (
+        build_eligibility_explain_report,
+        evaluate_eligibility,
+    )
 
     scene = triage_ranking.collect_scene()
     ranked = triage_ranking.rank_scene(scene)
     suspects = list((ranked or {}).get("suspects") or [])
     rows = {str(c.get("name") or ""): c for c in (scene.get("containers") or [])}
+
+    if explain and not target:
+        raise typer.BadParameter("--explain currently requires --target")
 
     selected: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -10313,6 +10320,68 @@ def remediation_eligibility(
             selected = [match]
     else:
         selected = suspects
+
+    if explain and target:
+        name = selected[0].get("name", "")
+        has_row = name in rows
+        labels = rows.get(name, {}).get("labels") if has_row else None
+        payload = build_eligibility_explain_report(
+            target=name,
+            scenario=scenario,
+            labels=labels,
+            target_found=has_row,
+            explicit_target=True,
+        )
+        if status == "blocked":
+            payload["status"] = "blocked"
+            if "broad target refused" not in payload["eligibility"]["blocked_reasons"]:
+                payload["eligibility"]["blocked_reasons"].append("broad target refused")
+        if json_out:
+            typer.echo(json.dumps(payload))
+            raise typer.Exit(0 if payload["status"] == "ok" else 1)
+        console.print(f"Remediation eligibility explanation: {payload['target']['name']}")
+        console.print("\nSummary:")
+        console.print(f"- eligibility: {payload['eligibility']['state']}")
+        console.print(f"- production_target: {str(payload['target']['production_target']).lower()}")
+        console.print(f"- disposable: {str(payload['target']['disposable']).lower()}")
+        console.print(
+            f"- target_allowlisted: {str(payload['target']['target_allowlisted']).lower()}"
+        )
+        console.print("- plan_created: false")
+        console.print("- remediation_executed: false")
+        console.print("\nLabels found:")
+        if payload["labels"]["found"]:
+            for k, v in payload["labels"]["found"].items():
+                console.print(f"- {k}={v}")
+        else:
+            console.print("- none")
+        console.print("\nGates:")
+        for g in payload["gates"]:
+            console.print(f"- {g['name']}: {g['status']}")
+        console.print("\nBlocking reasons:")
+        if payload["eligibility"]["blocked_reasons"]:
+            for r in payload["eligibility"]["blocked_reasons"]:
+                console.print(f"- {r}")
+        else:
+            console.print("- none")
+        console.print("\nWhat would make this eligible:")
+        for w in payload["what_would_make_eligible"]:
+            console.print(f"- {w}")
+        if payload.get("suggested_plan_command"):
+            console.print("\nSuggested plan command:")
+            console.print(f"- {payload['suggested_plan_command']}")
+        console.print("\nSafe next commands:")
+        for cmd in payload["next_safe_commands"]:
+            console.print(f"- {cmd}")
+        console.print("\nSafety:")
+        console.print("- read_only: true")
+        console.print("- mutation_performed: false")
+        console.print("- no plan was created")
+        console.print("- no remediation was executed")
+        console.print("- no rollback was executed")
+        if payload["status"] != "ok":
+            raise typer.Exit(1)
+        return
 
     targets = []
     for s in selected:

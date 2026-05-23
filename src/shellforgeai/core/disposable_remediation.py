@@ -130,6 +130,223 @@ def evaluate_eligibility(
     }
 
 
+def build_eligibility_explain_report(
+    *,
+    target: str,
+    scenario: str,
+    labels: dict[str, str] | None,
+    target_found: bool,
+    explicit_target: bool,
+) -> dict[str, Any]:
+    evald = evaluate_eligibility(target=target, scenario=scenario, labels=labels)
+    normalized_labels = dict(evald.get("labels") or {})
+    production = bool(evald.get("production_target"))
+    disposable = bool(evald.get("disposable"))
+    allowlisted = bool(evald.get("target_allowlisted"))
+    blocked_reasons = list(evald.get("blocked_reasons") or [])
+    if not target_found and "target not found" not in blocked_reasons:
+        blocked_reasons.append("target not found")
+
+    labels_missing: list[str] = []
+    required_labels = [
+        "shellforgeai.disposable=true or accepted battle-lab disposable equivalent",
+        "shellforgeai.allow_restart=true",
+    ]
+    if not disposable:
+        labels_missing.append(
+            "shellforgeai.disposable=true or accepted battle-lab disposable equivalent"
+        )
+    if not allowlisted:
+        labels_missing.append("shellforgeai.allow_restart=true")
+
+    gates = [
+        {
+            "name": "target_found",
+            "status": "passed" if target_found else "failed",
+            "reason": "target found in current triage scene"
+            if target_found
+            else "target not found in current triage scene",
+            "remediation_hint": "Use `shellforgeai triage docker` and inspect suspects."
+            if not target_found
+            else "",
+        },
+        {
+            "name": "explicit_target",
+            "status": "passed" if explicit_target else "not_applicable",
+            "reason": "target explicitly provided by operator"
+            if explicit_target
+            else "no explicit target requested",
+            "remediation_hint": (
+                "Run `shellforgeai remediation eligibility --target <name> --explain`."
+            )
+            if not explicit_target
+            else "",
+        },
+        {
+            "name": "broad_target_refused",
+            "status": "failed" if _is_broad_target(target) else "passed",
+            "reason": "broad targets are refused in governed remediation lane"
+            if _is_broad_target(target)
+            else "target scope is exact",
+            "remediation_hint": "Use one exact target name." if _is_broad_target(target) else "",
+        },
+        {
+            "name": "production_target_refused",
+            "status": "failed" if production else "passed",
+            "reason": "production target refused" if production else "target is non-production",
+            "remediation_hint": "Use read-only triage/diagnostics and governed operational process."
+            if production
+            else "",
+        },
+        {
+            "name": "disposable_label_present",
+            "status": "passed" if disposable else "failed",
+            "reason": "disposable label present"
+            if disposable
+            else "target missing disposable labels",
+            "remediation_hint": "Inspect labels with `shellforgeai triage docker detail <name>`."
+            if not disposable
+            else "",
+        },
+        {
+            "name": "allowlist_label_present",
+            "status": "passed" if allowlisted else "failed",
+            "reason": "allowlist label present"
+            if allowlisted
+            else "target missing shellforgeai.allow_restart=true",
+            "remediation_hint": (
+                "Add shellforgeai.allow_restart=true only to an intentional disposable lab target."
+            )
+            if not allowlisted and not production
+            else "",
+        },
+        {
+            "name": "scenario_supported",
+            "status": "passed" if scenario == SUPPORTED_SCENARIO else "failed",
+            "reason": "scenario supported"
+            if scenario == SUPPORTED_SCENARIO
+            else "unsupported scenario",
+            "remediation_hint": f"Use --scenario {SUPPORTED_SCENARIO}."
+            if scenario != SUPPORTED_SCENARIO
+            else "",
+        },
+        {
+            "name": "scenario_matches_target",
+            "status": "not_applicable",
+            "reason": "scenario-to-target mapping is advisory in this read-only lane",
+            "remediation_hint": "",
+        },
+        {
+            "name": "labels_available",
+            "status": "passed" if labels is not None else "failed",
+            "reason": "labels available" if labels is not None else "labels unavailable",
+            "remediation_hint": "Collect fresh triage and target detail." if labels is None else "",
+        },
+        {
+            "name": "proof_executor_ready",
+            "status": "passed" if evald["executors"]["proof"]["ready"] else "blocked",
+            "reason": "proof executor ready"
+            if evald["executors"]["proof"]["ready"]
+            else "proof executor blocked by failed safety gates",
+            "remediation_hint": "Resolve failed gates first."
+            if not evald["executors"]["proof"]["ready"]
+            else "",
+        },
+        {
+            "name": "docker_disposable_executor_ready",
+            "status": "passed" if evald["executors"]["docker-disposable"]["ready"] else "blocked",
+            "reason": "docker-disposable executor ready"
+            if evald["executors"]["docker-disposable"]["ready"]
+            else "docker-disposable executor blocked by failed safety gates",
+            "remediation_hint": "Resolve disposable and allowlist label gates first."
+            if not evald["executors"]["docker-disposable"]["ready"]
+            else "",
+        },
+        {
+            "name": "shell_true_false",
+            "status": "passed",
+            "reason": "shell=True is disabled by policy",
+            "remediation_hint": "",
+        },
+        {
+            "name": "arbitrary_command_execution_false",
+            "status": "passed",
+            "reason": "arbitrary command execution is disabled by policy",
+            "remediation_hint": "",
+        },
+        {
+            "name": "natural_language_execution_false",
+            "status": "passed",
+            "reason": "natural-language execution is disabled by policy",
+            "remediation_hint": "",
+        },
+    ]
+
+    eligible = evald.get("eligibility") == "eligible_for_plan"
+    what_would_make_eligible = (
+        ["Already eligible for plan creation."]
+        if eligible
+        else (
+            ["Production targets are intentionally not eligible in this lane."]
+            if production
+            else [
+                "Add shellforgeai.allow_restart=true only to an intentional disposable lab target."
+            ]
+        )
+    )
+    return {
+        "schema_version": "1",
+        "status": "ok" if eligible else ("not_found" if not target_found else "blocked"),
+        "mode": "remediation_eligibility_explain",
+        "target": {
+            "name": target,
+            "found": target_found,
+            "production_target": production,
+            "disposable": disposable,
+            "target_allowlisted": allowlisted,
+        },
+        "eligibility": {
+            "state": evald.get("eligibility"),
+            "scenario": scenario,
+            "blocked_reasons": blocked_reasons,
+        },
+        "labels": {
+            "found": normalized_labels,
+            "required": required_labels,
+            "missing": labels_missing,
+        },
+        "gates": gates,
+        "executors": evald.get("executors"),
+        "what_would_make_eligible": what_would_make_eligible,
+        "suggested_plan_command": (
+            f"shellforgeai remediation plan --target {target} --scenario {scenario}"
+            if eligible
+            else ""
+        ),
+        "next_safe_commands": [
+            f"shellforgeai triage docker detail {target}",
+            f"shellforgeai remediation eligibility --target {target} --json",
+        ],
+        "safety": {
+            "read_only": True,
+            "mutation_performed": False,
+            "plan_created": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "cleanup_executed": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+        },
+        "warnings": [],
+    }
+
+
 def derive_rollback_payload(receipt: dict[str, Any]) -> dict[str, Any]:
     target = str(receipt.get("target") or "")
     mode = str(receipt.get("executor_mode") or "")

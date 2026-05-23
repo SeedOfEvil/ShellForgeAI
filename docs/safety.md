@@ -919,6 +919,7 @@ coverage runs without a live Docker daemon and never mutates the host.
 
 
 PR97 adds `shellforgeai remediation eligibility` as a **read-only** triage-to-remediation map. It never creates a plan, never executes remediation/rollback/cleanup, and only suggests safe plan-stage commands (for example `remediation plan`, `triage docker detail`, `remediation audit`).
+PR98 adds `shellforgeai remediation eligibility --target <name> --explain` as a **read-only explain/report** mode. It explains gate outcomes and label blockers only, includes explicit no-mutation safety flags, never creates plans, never executes remediation/rollback/cleanup, and never suggests bypassing safety gates. Production targets remain intentionally ineligible; do not add `shellforgeai.allow_restart=true` to production targets.
 
 PR89 adds a **governed disposable remediation proof** CLI (`remediation plan/validate/execute/status`) scoped to an explicit disposable and allowlisted battle-lab target only. Safety gates refuse production `shellforgeai`, unlabeled targets, missing allowlist labels, broad selectors (`all`, `*`, `everything`), unsupported scenarios, and suspicious target strings. Execution is blocked unless `--execute --confirm` is provided, and natural-language execution remains refused. Receipts include post-check verification and immutable safety flags (`shell_true=false`, `arbitrary_command_execution=false`, no cleanup/mission/apply/compose mutation).
 
