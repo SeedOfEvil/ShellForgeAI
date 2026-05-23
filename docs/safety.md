@@ -963,3 +963,7 @@ Safety remains invariant: no natural-language execution, no arbitrary command ex
 - Remediation lifecycle bundles are read-only packaging/report artifacts.
 - `remediation bundle` and `remediation bundle validate` never execute remediation or rollback.
 - `remediation audit` is read-only lifecycle visibility: it only reads plan/receipt/rollback/bundle artifacts, summarizes latest lifecycle state, reports invariant/safety flags, and can surface unsafe historical artifacts as warnings without mutating those artifacts.
+
+
+### Diagnose/Triage cohesion (read-only)
+Diagnose enrichment for known Docker/battle-lab targets is read-only: it does not create plans, does not execute remediation/rollback/cleanup, and only suggests canonical read-only next commands.

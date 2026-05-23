@@ -730,3 +730,5 @@ explicitly `false`.
 
 - PR99 (May 23, 2026): added `remediation self-test` readiness doctor with quick/standard/full profiles, strict JSON mode, fail-on-warn CI behavior, remediation-lane contract checks, and explicit default read-only/non-mutation safety invariants.
 - PR100 (May 23, 2026): normalized canonical safe-next command suggestions across triage, triage detail, remediation eligibility/explain, remediation self-test, and ask refusal/broad-triage output to remove stale `diagnose ... --target` forms and prefer read-only triage detail + eligibility explain guidance.
+
+- Diagnose now adds deterministic Docker triage context for known battle-lab container targets and recommends canonical read-only next commands (`triage docker detail` + `remediation eligibility --explain`).

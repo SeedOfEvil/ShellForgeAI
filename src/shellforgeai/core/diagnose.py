@@ -25,8 +25,13 @@ from shellforgeai.core.collectors import (
     collect_service_evidence,
     collect_ssh_evidence,
 )
+from shellforgeai.core.command_suggestions import (
+    remediation_eligibility_explain_command,
+    triage_detail_command,
+)
 from shellforgeai.core.evidence import EvidenceBundle, TargetType, classify_target
 from shellforgeai.core.plans import Plan, PlanStep
+from shellforgeai.core.triage_ranking import rank_scene
 from shellforgeai.util.text import extract_lines_matching
 
 
@@ -49,6 +54,61 @@ class DiagnosisResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     audit_path: str | None = None
+    triage_context: dict[str, object] = Field(default_factory=dict)
+    container_scope: dict[str, object] = Field(default_factory=dict)
+    safe_next_commands: list[str] = Field(default_factory=list)
+    safety: dict[str, bool] = Field(default_factory=dict)
+
+
+def _docker_triage_context(
+    items, target: str
+) -> tuple[dict[str, object], dict[str, object], list[str]]:
+    import json as _json
+
+    summary = next((i for i in items if i.source == "docker.problem_summary" and i.ok), None)
+    if summary is None:
+        return {}, {}, []
+    try:
+        payload = _json.loads(summary.content or summary.summary or "{}")
+    except (ValueError, _json.JSONDecodeError):
+        return {}, {}, []
+    scene = {"containers": (payload.get("failing") or []) + (payload.get("noisy") or [])}
+    ranked = rank_scene(scene)
+    hit = next(
+        (s for s in ranked.get("suspects") or [] if str(s.get("name") or "") == target), None
+    )
+    if hit is None:
+        return {}, {}, []
+    detail = triage_detail_command(target)
+    eligibility = remediation_eligibility_explain_command(target)
+    return (
+        {
+            "detected": True,
+            "target": target,
+            "kind": "docker_container",
+            "rank": hit.get("rank"),
+            "severity": hit.get("severity"),
+            "confidence": hit.get("confidence"),
+            "classes": list(hit.get("classes") or []),
+            "evidence_summary": list(hit.get("why") or []),
+            "detail_command": detail,
+            "eligibility_command": eligibility,
+        },
+        {
+            "detected": True,
+            "host_checks_demoted": True,
+            "notes": [
+                "Host service checks are not primary for this target.",
+                "Use triage docker detail for container scenario evidence.",
+            ],
+        },
+        [
+            detail,
+            triage_detail_command(target, json=True),
+            eligibility,
+            remediation_eligibility_explain_command(target, json=True),
+        ],
+    )
 
 
 def finding_severity_counts(findings: list[Finding]) -> dict[str, int]:
@@ -770,6 +830,30 @@ def diagnose_target(
         notes=["Restart/reload actions are deferred and require operator approval."],
     )
     findings.extend(_findings_from_docker(items))
+    triage_context, container_scope, safe_next_commands = _docker_triage_context(items, target)
+    if triage_context.get("detected"):
+        demoted_refs: list[str] = []
+        kept: list[Finding] = []
+        for f in findings:
+            lower = f.title.lower()
+            if "systemd" in lower or "journalctl" in lower or "service manager" in lower:
+                demoted_refs.extend(f.evidence_refs)
+                continue
+            kept.append(f)
+        findings = kept
+        if demoted_refs:
+            findings.append(
+                Finding(
+                    severity="info",
+                    title="Container-scope note",
+                    detail=(
+                        "Host service checks are not primary for this container target; "
+                        "use triage docker detail for scenario-specific evidence."
+                    ),
+                    evidence_refs=demoted_refs,
+                    confidence="high",
+                )
+            )
     bundle = EvidenceBundle(target=target, target_type=ttype, items=items, warnings=warnings)
     return DiagnosisResult(
         session_id=context.session.session_id,
@@ -779,4 +863,20 @@ def diagnose_target(
         findings=findings,
         proposed_plan=plan,
         warnings=warnings,
+        triage_context=triage_context,
+        container_scope=container_scope,
+        safe_next_commands=safe_next_commands,
+        safety={
+            "read_only": True,
+            "mutation_performed": False,
+            "plan_created": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "cleanup_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+        },
     )
