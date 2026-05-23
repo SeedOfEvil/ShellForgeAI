@@ -772,6 +772,188 @@ def remediation_bundle_dir(data_dir: Path) -> Path:
     return data_dir / "artifacts" / "remediation-bundles"
 
 
+def build_remediation_audit_payload(data_dir: Path, *, latest_only: bool = False) -> dict[str, Any]:
+    plans_dir = plan_artifacts_dir(data_dir)
+    receipts_dir = receipt_artifacts_dir(data_dir)
+    bundles_dir = remediation_bundle_dir(data_dir)
+    artifacts: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    invalid_artifacts = 0
+
+    plans: dict[str, dict[str, Any]] = {}
+    exec_receipts: dict[str, dict[str, Any]] = {}
+    rollback_receipts: dict[str, dict[str, Any]] = {}
+    bundles: list[tuple[float, str, dict[str, Any]]] = []
+
+    def _load_json(path: Path, kind: str) -> dict[str, Any] | None:
+        nonlocal invalid_artifacts
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            artifacts.append({"kind": kind, "id": path.stem, "path": str(path), "valid_json": True})
+            return payload if isinstance(payload, dict) else {}
+        except Exception as exc:
+            invalid_artifacts += 1
+            warnings.append(f"{kind} unreadable: {path.name}: {exc}")
+            artifacts.append(
+                {
+                    "kind": kind,
+                    "id": path.stem,
+                    "path": str(path),
+                    "valid_json": False,
+                    "warning": str(exc),
+                }
+            )
+            return None
+
+    for p in sorted(plans_dir.glob("drp_*.json")) if plans_dir.exists() else []:
+        payload = _load_json(p, "plan")
+        if payload is not None:
+            plans[str(payload.get("plan_id") or p.stem)] = payload
+    for p in sorted(receipts_dir.glob("drr_*.json")) if receipts_dir.exists() else []:
+        payload = _load_json(p, "execution_receipt")
+        if payload is not None:
+            exec_receipts[str(payload.get("receipt_id") or p.stem)] = payload
+    for p in sorted(receipts_dir.glob("drrb_*.json")) if receipts_dir.exists() else []:
+        payload = _load_json(p, "rollback_receipt")
+        if payload is not None:
+            rollback_receipts[str(payload.get("rollback_receipt_id") or p.stem)] = payload
+    for p in (
+        sorted(bundles_dir.glob("*/remediation-lifecycle.json")) if bundles_dir.exists() else []
+    ):
+        payload = _load_json(p, "lifecycle_bundle")
+        if payload is not None:
+            bundles.append((p.stat().st_mtime, p.parent.name, payload))
+
+    latest_bundle_id = ""
+    latest_lifecycle = {
+        "bundle_id": "",
+        "plan_id": "",
+        "receipt_id": "",
+        "rollback_receipt_id": "",
+        "target": "",
+        "production_target": False,
+        "disposable": True,
+        "target_allowlisted": True,
+        "execution_verified": False,
+        "rollback_verified": False,
+    }
+    if bundles:
+        _, latest_bundle_id, latest_bundle = max(bundles, key=lambda row: row[0])
+        lc = latest_bundle.get("lifecycle") or {}
+        latest_lifecycle.update(
+            {
+                "bundle_id": latest_bundle_id,
+                "plan_id": str(lc.get("plan_id") or ""),
+                "receipt_id": str(lc.get("receipt_id") or ""),
+                "rollback_receipt_id": str(lc.get("rollback_receipt_id") or ""),
+                "target": str(lc.get("target") or ""),
+                "production_target": bool(lc.get("production_target")),
+                "disposable": bool(lc.get("disposable", True)),
+                "target_allowlisted": bool(lc.get("target_allowlisted", True)),
+                "execution_verified": bool(
+                    (latest_bundle.get("execution") or {}).get("restart_verified")
+                ),
+                "rollback_verified": bool(
+                    (latest_bundle.get("rollback") or {}).get("rollback_verified")
+                ),
+            }
+        )
+    elif exec_receipts:
+        rid = sorted(exec_receipts.keys())[-1]
+        rec = exec_receipts[rid]
+        safe = rec.get("safety") if isinstance(rec.get("safety"), dict) else {}
+        latest_lifecycle.update(
+            {
+                "receipt_id": rid,
+                "plan_id": str(rec.get("plan_id") or ""),
+                "target": str(rec.get("target") or ""),
+                "production_target": bool(safe.get("production_target")),
+                "disposable": bool(safe.get("disposable", True)),
+                "target_allowlisted": bool(safe.get("target_allowlisted", True)),
+                "execution_verified": bool((rec.get("verification") or {}).get("restart_verified")),
+            }
+        )
+        for rb in rollback_receipts.values():
+            if rb.get("original_receipt_id") == rid:
+                latest_lifecycle["rollback_receipt_id"] = str(rb.get("rollback_receipt_id") or "")
+                latest_lifecycle["rollback_verified"] = bool(
+                    (rb.get("verification") or {}).get("rollback_verified")
+                )
+                break
+
+    safety_flags = {
+        "production_mutation_recorded": False,
+        "docker_compose_mutation_recorded": False,
+        "cleanup_execution_recorded": False,
+        "mission_apply_execution_recorded": False,
+        "shell_true_recorded": False,
+        "arbitrary_command_execution_recorded": False,
+        "natural_language_execution_recorded": False,
+    }
+    for payload in [*plans.values(), *exec_receipts.values(), *rollback_receipts.values()]:
+        safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}
+        safety_flags["production_mutation_recorded"] |= bool(safety.get("production_target"))
+        safety_flags["docker_compose_mutation_recorded"] |= bool(
+            safety.get("docker_compose_executed")
+        )
+        safety_flags["cleanup_execution_recorded"] |= bool(safety.get("cleanup_executed"))
+        safety_flags["mission_apply_execution_recorded"] |= bool(
+            safety.get("apply_executed") or safety.get("mission_created")
+        )
+        safety_flags["shell_true_recorded"] |= bool(safety.get("shell_true"))
+        safety_flags["arbitrary_command_execution_recorded"] |= bool(
+            safety.get("arbitrary_command_execution")
+        )
+        safety_flags["natural_language_execution_recorded"] |= bool(
+            safety.get("natural_language_execution")
+        )
+
+    for key, flagged in safety_flags.items():
+        if flagged:
+            warnings.append(f"unsafe historical artifact: {key}=true")
+    if latest_lifecycle.get("receipt_id") and not exec_receipts.get(
+        str(latest_lifecycle["receipt_id"])
+    ):
+        warnings.append("latest lifecycle links missing execution receipt")
+        invalid_artifacts += 1
+
+    if latest_only and latest_bundle_id:
+        artifacts = [a for a in artifacts if f"/{latest_bundle_id}/" in a.get("path", "")]
+    status = "ok"
+    if not plans and not exec_receipts and not rollback_receipts and not bundles:
+        status = "empty"
+        warnings.append("no disposable remediation lifecycle artifacts found")
+    elif warnings or invalid_artifacts > 0:
+        status = "warn"
+    payload = {
+        "schema_version": "1",
+        "mode": "disposable_remediation_audit",
+        "status": status,
+        "summary": {
+            "plans": len(plans),
+            "execution_receipts": len(exec_receipts),
+            "rollback_receipts": len(rollback_receipts),
+            "bundles": len(bundles),
+            "invalid_artifacts": invalid_artifacts,
+            "latest_lifecycle_id": latest_bundle_id,
+        },
+        "latest_lifecycle": latest_lifecycle,
+        "safety_audit": {
+            "read_only": True,
+            "mutation_performed": False,
+            **safety_flags,
+        },
+        "artifacts": artifacts,
+        "warnings": warnings,
+        "next_safe_commands": [
+            "shellforgeai remediation bundle-validate <bundle-id>",
+            "shellforgeai remediation receipt validate <receipt-id>",
+            "shellforgeai remediation rollback-status <rollback-receipt-id>",
+        ],
+    }
+    return payload
+
+
 def build_lifecycle_bundle_payload(data_dir: Path, token: str) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "1",

@@ -1137,3 +1137,8 @@ Safety: production `shellforgeai`, unlabeled/non-allowlisted targets, broad sele
 - `shellforgeai remediation bundle <plan-id-or-receipt-id>`: read-only lifecycle handoff summary.
 - `shellforgeai remediation bundle <id> --save`: write lifecycle JSON/Markdown bundle under data_dir artifacts.
 - `shellforgeai remediation bundle validate <bundle-id-or-path>`: validate saved lifecycle bundle.
+- `shellforgeai remediation audit [--latest] [--json]`: read-only lifecycle safety audit for remediation plan/receipt/rollback/bundle artifacts; summarizes latest lifecycle, safety flags, invalid artifacts, and safe next commands.
+
+Examples:
+- `shellforgeai remediation audit`
+- `shellforgeai remediation audit --latest --json`

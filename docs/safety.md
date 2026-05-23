@@ -956,3 +956,4 @@ Safety remains invariant: no natural-language execution, no arbitrary command ex
 
 - Remediation lifecycle bundles are read-only packaging/report artifacts.
 - `remediation bundle` and `remediation bundle validate` never execute remediation or rollback.
+- `remediation audit` is read-only lifecycle visibility: it only reads plan/receipt/rollback/bundle artifacts, summarizes latest lifecycle state, reports invariant/safety flags, and can surface unsafe historical artifacts as warnings without mutating those artifacts.

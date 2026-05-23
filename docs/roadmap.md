@@ -723,3 +723,4 @@ explicitly `false`.
 - PR94 (May 23, 2026): adds governed disposable rollback execution (`remediation rollback-execute`) plus rollback receipts, rollback status, and rollback receipt integrity validation.
 
 - PR95: Added disposable remediation lifecycle bundle + bundle validation commands for audit handoff.
+- PR96 (May 23, 2026): added `remediation audit` read-only lifecycle visibility and safety audit summary (latest bundle linkage, artifact health warnings, strict JSON output, and invariant reporting with no remediation/rollback execution).
