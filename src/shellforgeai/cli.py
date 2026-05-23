@@ -244,6 +244,7 @@ triage_docker_snapshot_app = typer.Typer(
     help="PR85 triage snapshot save/validate artifact workflow (read-only metadata writes).",
 )
 remediation_app = typer.Typer(help="Disposable governed remediation proof flow.")
+remediation_receipt_app = typer.Typer(help="Disposable remediation receipt utilities.")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -258,6 +259,7 @@ app.add_typer(ops_app, name="ops")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(triage_app, name="triage")
 app.add_typer(remediation_app, name="remediation")
+remediation_app.add_typer(remediation_receipt_app, name="receipt")
 triage_app.add_typer(triage_docker_app, name="docker")
 triage_docker_app.add_typer(triage_docker_snapshot_app, name="snapshot")
 # Treat all runtime/model/evidence strings as untrusted; disable Rich markup
@@ -10551,6 +10553,72 @@ def remediation_execute(
             console.print(f"- target: {plan['target']}")
         console.print(f"Receipt: {receipt_id}")
     if payload["status"] != "executed":
+        raise typer.Exit(1)
+
+
+@remediation_receipt_app.command("validate")
+def remediation_receipt_validate(
+    receipt_id_or_path: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import validate_receipt_payload
+
+    payload = validate_receipt_payload(Path(load_settings().app.data_dir), receipt_id_or_path)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"Disposable remediation receipt validation: {payload['status']}")
+        for k, v in (payload.get("checks") or {}).items():
+            console.print(f"- {k}: {'ok' if v else 'failed'}")
+        for w in payload.get("warnings") or []:
+            console.print(f"- warning: {w}")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@remediation_app.command("report")
+def remediation_report(
+    receipt_id_or_path: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import report_receipt_payload
+
+    payload = report_receipt_payload(Path(load_settings().app.data_dir), receipt_id_or_path)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        if payload.get("status") != "ok":
+            console.print("Disposable remediation report unavailable")
+            for w in payload.get("warnings") or []:
+                console.print(f"- {w}")
+            raise typer.Exit(1)
+        rec = payload["receipt"]
+        summary = payload["summary"]
+        safety = payload["safety"]
+        console.print("Disposable remediation report")
+        console.print("\nReceipt:")
+        console.print(f"- receipt: {rec.get('receipt_id')}")
+        console.print(f"- plan: {rec.get('plan_id')}")
+        console.print(f"- executor: {summary.get('executor_mode')}")
+        console.print(f"- target: {summary.get('target')}")
+        console.print(f"- scenario: {summary.get('scenario')}")
+        console.print("\nSafety:")
+        for key in [
+            "production_target",
+            "disposable",
+            "target_allowlisted",
+            "shell_true",
+            "arbitrary_command_execution",
+            "docker_compose_executed",
+            "cleanup_executed",
+            "natural_language_execution",
+        ]:
+            console.print(f"- {key}: {str(safety.get(key)).lower()}")
+        console.print("\nHandoff:")
+        console.print(f"- validation: {payload['handoff'].get('validation_status')}")
+        for cmd in payload.get("next_safe_commands") or []:
+            console.print(f"- next: {cmd}")
+    if payload.get("status") != "ok":
         raise typer.Exit(1)
 
 

@@ -1303,6 +1303,17 @@ Recommended read-only workflow:
 
 
 ### PR89 governed disposable remediation proof workflow
+
+### PR91 disposable remediation receipt validation and handoff
+
+Governed workflow now includes:
+1. `shellforgeai remediation plan ...`
+2. `shellforgeai remediation validate <plan-id>`
+3. `shellforgeai remediation execute <plan-id> --executor ... --execute --confirm`
+4. `shellforgeai remediation receipt validate <receipt-id-or-path>`
+5. `shellforgeai remediation report <receipt-id-or-path>`
+6. handoff using report + next safe commands
+
 1. triage
 2. detail/snapshot/timeline if needed
 3. `shellforgeai remediation plan --target sfai-noisy-errors --scenario sfai-noisy-errors`

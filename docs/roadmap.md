@@ -712,3 +712,6 @@ explicitly `false`.
 - PR88 (May 22, 2026): added read-only `triage docker timeline` rolling incident history over saved snapshots (chronological validation + escalation/recovery/flapping/recurring/stable/new/resolved trend reporting, strict JSON mode, and unchanged no-mutation safety invariants).
 
 - PR90 (May 22, 2026): introduces disposable remediation executor mode contract (`proof` default vs explicit `docker-disposable`) and bounded exact-target Docker restart lane for eligible disposable allowlisted targets only, with strict safety/receipt and JSON status semantics.
+
+
+- PR91: disposable remediation receipt validation + handoff reporting (read-only, audit-grade checks; no new execution power).
