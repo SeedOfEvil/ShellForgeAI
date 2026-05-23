@@ -12,6 +12,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 PLAN_KIND = "disposable_remediation_plan"
 RECEIPT_KIND = "disposable_remediation_receipt"
+ROLLBACK_RECEIPT_KIND = "disposable_remediation_rollback_receipt"
 SUPPORTED_SCENARIO = "sfai-noisy-errors"
 BROAD_TARGETS = {"all", "*", "everything", "all containers", "all services"}
 SAFE_TARGET_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$")
@@ -246,7 +247,7 @@ def resolve_receipt_path(data_dir: Path, receipt_id_or_path: str) -> tuple[Path 
         if not str(rp).startswith(str(receipts_root) + "/"):
             return (None, "unsafe receipt path")
         return (rp, None)
-    if not re.fullmatch(r"drr_[a-f0-9]{12}", token):
+    if not re.fullmatch(r"drr[b]?_[a-f0-9]{12}", token):
         return (None, "malformed receipt id")
     rp = (receipts_root / f"{token}.json").resolve()
     if not str(rp).startswith(str(receipts_root) + "/"):
@@ -416,15 +417,54 @@ def rollback_validate_payload(data_dir: Path, receipt_id_or_path: str) -> dict[s
         },
         "warnings": [],
     }
+    path, err = resolve_receipt_path(data_dir, receipt_id_or_path)
+    if path is None:
+        base["status"] = "not_found" if err == "receipt not found" else "error"
+        base["warnings"] = [err or "receipt not found"]
+        return base
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        base["status"] = "error"
+        base["warnings"] = [f"receipt JSON unreadable: {exc}"]
+        return base
+    if not receipt:
+        base["status"] = "not_found"
+        base["warnings"] = ["receipt not found"]
+        return base
+    if receipt.get("kind") == ROLLBACK_RECEIPT_KIND:
+        safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+        verification = (
+            receipt.get("verification") if isinstance(receipt.get("verification"), dict) else {}
+        )
+        checks = {
+            "kind": True,
+            "original_receipt_id_present": bool(receipt.get("original_receipt_id")),
+            "target_present": bool(receipt.get("target")),
+            "production_target_refused": safety.get("production_target") is False,
+            "allowlisted": safety.get("target_allowlisted") is True,
+            "disposable": safety.get("disposable") is True,
+            "exact_target_only": bool(receipt.get("exact_target_only")) is True,
+            "automatic_rollback_disabled": bool(receipt.get("automatic_rollback")) is False,
+            "shell_true_false": safety.get("shell_true") is False,
+            "arbitrary_command_execution_false": safety.get("arbitrary_command_execution") is False,
+            "docker_compose_executed_false": safety.get("docker_compose_executed") is False,
+            "cleanup_executed_false": safety.get("cleanup_executed") is False,
+            "verification_present": bool(verification),
+            "target_match": verification.get("target_match") is True,
+            "command_ok": verification.get("command_ok") is True,
+            "started_at_changed": verification.get("started_at_changed") is True,
+            "rollback_verified": verification.get("rollback_verified") is True,
+        }
+        base["status"] = "ok" if all(checks.values()) else "failed"
+        base["receipt_id"] = str(receipt.get("rollback_receipt_id") or receipt_id_or_path)
+        base["checks"] = checks
+        base["safety"] = safety
+        return base
     v = validate_receipt_payload(data_dir, receipt_id_or_path)
     if v["status"] in {"not_found", "error"}:
         base["status"] = v["status"]
         base["warnings"] = list(v.get("warnings") or [])
-        return base
-    receipt = load_receipt(data_dir, str(v.get("receipt", {}).get("receipt_id") or ""))
-    if not receipt:
-        base["status"] = "not_found"
-        base["warnings"] = ["receipt not found"]
         return base
     rb = (
         receipt.get("rollback")

@@ -951,5 +951,5 @@ Safety remains invariant: no natural-language execution, no arbitrary command ex
 
 ## PR93 disposable remediation rollback posture safety
 - Rollback for disposable remediation is modeled as bounded recovery only: `rollback_kind=bounded_recovery_restart` and `rollback_strategy=repeat_exact_target_restart`.
-- `remediation rollback-preflight` and `remediation rollback-validate` are read-only and never execute rollback.
+- `remediation rollback-preflight` is read-only. `remediation rollback-execute` is disposable-only, exact-target-only, requires explicit `--execute --confirm`, blocks production/unlabeled targets, and writes rollback receipts with StartedAt verification.
 - Automatic rollback stays disabled (`automatic_rollback=false`), and production rollback remains refused.
