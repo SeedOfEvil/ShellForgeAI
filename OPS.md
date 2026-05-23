@@ -1310,3 +1310,16 @@ Recommended read-only workflow:
 5. `shellforgeai remediation execute <plan-id> --execute --confirm` only with explicit operator approval
 6. `shellforgeai remediation status <receipt-id>`
 7. verify production `shellforgeai` remained untouched
+
+
+## PR90 operator flow (disposable executor modes)
+
+Live QA note: proof mode is non-mutating; docker-disposable mode is exact-target-only, and successful verification requires exact-target pre/post evidence (for example changed `StartedAt`).
+
+1. Run triage (read-only).
+2. Create remediation plan.
+3. Validate plan.
+4. Optionally execute `--executor proof` (or default) to verify artifact flow without mutation.
+5. Execute `--executor docker-disposable --execute --confirm` only for exact disposable+allowlisted target.
+6. Check `remediation status <receipt-id>` and verify restart evidence.
+7. Confirm production `shellforgeai` remained untouched.
