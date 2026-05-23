@@ -193,6 +193,174 @@ def load_receipt(data_dir: Path, receipt_id: str) -> dict[str, Any] | None:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def resolve_receipt_path(data_dir: Path, receipt_id_or_path: str) -> tuple[Path | None, str | None]:
+    receipts_root = receipt_artifacts_dir(data_dir).resolve()
+    token = (receipt_id_or_path or "").strip()
+    if not token:
+        return (None, "malformed receipt id")
+    if "/" in token or "\\" in token:
+        candidate = Path(token)
+        if not candidate.is_absolute():
+            return (None, "unsafe receipt path")
+        if not candidate.exists():
+            return (None, "receipt not found")
+        rp = candidate.resolve()
+        if not str(rp).startswith(str(receipts_root) + "/"):
+            return (None, "unsafe receipt path")
+        return (rp, None)
+    if not re.fullmatch(r"drr_[a-f0-9]{12}", token):
+        return (None, "malformed receipt id")
+    rp = (receipts_root / f"{token}.json").resolve()
+    if not str(rp).startswith(str(receipts_root) + "/"):
+        return (None, "unsafe receipt path")
+    if not rp.exists():
+        return (None, "receipt not found")
+    return (rp, None)
+
+
+def validate_receipt_payload(data_dir: Path, receipt_id_or_path: str) -> dict[str, Any]:
+    path, err = resolve_receipt_path(data_dir, receipt_id_or_path)
+    base = {
+        "schema_version": "1",
+        "mode": "disposable_remediation_receipt_validate",
+        "status": "error",
+        "receipt": {},
+        "checks": {},
+        "safety": {},
+        "warnings": [],
+    }
+    if path is None:
+        base["status"] = "not_found" if err == "receipt not found" else "error"
+        base["warnings"] = [err or "receipt not found"]
+        return base
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        base["warnings"] = [f"receipt JSON unreadable: {exc}"]
+        return base
+    checks: dict[str, bool] = {}
+    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    plan = (
+        load_plan(data_dir, str(receipt.get("plan_id") or "")) if receipt.get("plan_id") else None
+    )
+    checks["receipt_exists"] = True
+    checks["json_parse"] = True
+    checks["kind"] = receipt.get("kind") == RECEIPT_KIND
+    checks["plan_id_present"] = bool(receipt.get("plan_id"))
+    checks["plan_fingerprint_present"] = bool(receipt.get("plan_fingerprint"))
+    checks["plan_fingerprint_matches"] = plan is None or receipt.get(
+        "plan_fingerprint"
+    ) == plan.get("fingerprint")
+    tgt = str(receipt.get("target") or "")
+    checks["target_explicit"] = bool(tgt) and not _is_broad_target(tgt) and _safe_target(tgt)
+    checks["production_target_false"] = safety.get("production_target") is False
+    checks["disposable_true"] = safety.get("disposable") is True
+    checks["target_allowlisted_true"] = safety.get("target_allowlisted") is True
+    checks["executor_mode_known"] = receipt.get("executor_mode") in {"proof", "docker-disposable"}
+    checks["pre_state_present"] = isinstance(receipt.get("pre_state"), dict)
+    checks["post_state_present"] = isinstance(receipt.get("post_state"), dict)
+    checks["verification_present"] = isinstance(receipt.get("verification"), dict)
+    checks["restart_verified"] = (
+        True
+        if receipt.get("executor_mode") == "proof"
+        else bool((receipt.get("verification") or {}).get("restart_verified"))
+    )
+    checks["safety"] = isinstance(receipt.get("safety"), dict)
+    failed_reason = bool(receipt.get("failure_reason") or receipt.get("stderr_summary"))
+    mode = receipt.get("executor_mode")
+    if mode == "proof":
+        checks["proof_invariants"] = (
+            receipt.get("real_docker_executor") is False
+            and receipt.get("docker_restart_attempted") is False
+            and safety.get("mutation_performed") is False
+            and safety.get("container_restarted") is False
+        )
+    if mode == "docker-disposable":
+        rc0 = int(receipt.get("return_code") or 0) == 0
+        if receipt.get("verification", {}).get("status") == "failed":
+            checks["failure_reason_present"] = failed_reason
+        else:
+            checks["docker_disposable_invariants"] = (
+                receipt.get("real_docker_executor") is True
+                and receipt.get("docker_restart_attempted") is True
+                and (receipt.get("action_executed") is True if rc0 else True)
+                and checks["restart_verified"] is True
+                and receipt.get("docker_restart_succeeded") is True
+                and safety.get("container_restarted") is True
+            )
+    for k in [
+        "shell_true",
+        "arbitrary_command_execution",
+        "natural_language_execution",
+        "cleanup_executed",
+        "apply_executed",
+        "docker_compose_executed",
+    ]:
+        checks[f"{k}_false"] = safety.get(k) is False
+    all_ok = (
+        all(bool(v) for v in checks.values())
+        and bool(receipt.get("schema_version"))
+        and bool(receipt.get("receipt_id"))
+    )
+    base["status"] = "ok" if all_ok else "failed"
+    base["receipt"] = {
+        "receipt_id": receipt.get("receipt_id"),
+        "plan_id": receipt.get("plan_id"),
+        "executor_mode": receipt.get("executor_mode"),
+        "target": receipt.get("target"),
+        "scenario": receipt.get("scenario"),
+    }
+    base["checks"] = checks
+    base["safety"] = safety
+    return base
+
+
+def report_receipt_payload(data_dir: Path, receipt_id_or_path: str) -> dict[str, Any]:
+    v = validate_receipt_payload(data_dir, receipt_id_or_path)
+    if v["status"] in {"not_found", "error"}:
+        return {
+            "schema_version": "1",
+            "status": v["status"],
+            "mode": "disposable_remediation_report",
+            "receipt": {},
+            "summary": {},
+            "handoff": {},
+            "next_safe_commands": [],
+            "safety": {},
+            "warnings": v.get("warnings") or [],
+        }
+    rid = v["receipt"].get("receipt_id") or "<receipt-id>"
+    return {
+        "schema_version": "1",
+        "status": "ok" if v["status"] == "ok" else "error",
+        "mode": "disposable_remediation_report",
+        "receipt": v["receipt"],
+        "summary": {
+            "executor_mode": v["receipt"].get("executor_mode"),
+            "target": v["receipt"].get("target"),
+            "scenario": v["receipt"].get("scenario"),
+            "action_executed": bool(v["safety"].get("mutation_performed")),
+            "restart_verified": bool(v["checks"].get("restart_verified")),
+            "production_target": v["safety"].get("production_target"),
+            "disposable": v["safety"].get("disposable"),
+            "target_allowlisted": v["safety"].get("target_allowlisted"),
+        },
+        "handoff": {
+            "validation_status": v["status"],
+            "production_mutation_recorded": bool(v["safety"].get("production_target")),
+            "compose_mutation_recorded": bool(v["safety"].get("docker_compose_executed")),
+            "cleanup_execution_recorded": bool(v["safety"].get("cleanup_executed")),
+        },
+        "next_safe_commands": [
+            f"shellforgeai remediation receipt validate {rid}",
+            f"shellforgeai remediation status {rid} --json",
+            "shellforgeai triage docker snapshot --save --include-details",
+        ],
+        "safety": v["safety"],
+        "warnings": v.get("warnings") or [],
+    }
+
+
 def container_state_from_scene(scene: dict[str, Any], target: str) -> dict[str, Any] | None:
     for row in scene.get("containers") or []:
         if row.get("name") == target:

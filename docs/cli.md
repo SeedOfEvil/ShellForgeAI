@@ -1110,6 +1110,14 @@ Safety: production `shellforgeai`, unlabeled/non-allowlisted targets, broad sele
 
 ## PR90 remediation executor modes
 
+## PR91 remediation receipt validation and report
+
+- `shellforgeai remediation receipt validate <receipt-id-or-path> [--json]` performs strict read-only receipt checks (kind/fingerprint/target/safety/executor invariants) and exits nonzero on `failed|not_found|error`.
+- `shellforgeai remediation report <receipt-id-or-path> [--json]` renders a concise handoff summary (what happened, safety posture, validation status, and next safe commands).
+- Proof executor receipts are explicitly reported as non-mutating (`docker_restart_attempted=false`, `mutation_performed=false`).
+- Docker-disposable receipts require exact-target restart proof for successful validation (`verification.restart_verified=true`).
+
+
 - `shellforgeai remediation execute <plan-id> --execute --confirm [--executor proof|docker-disposable] [--json]`.
 - Default executor mode is `proof` and performs **no real Docker mutation**.
 - Real mutation requires explicit `--executor docker-disposable` plus all disposable/allowlist gates at execution time.
