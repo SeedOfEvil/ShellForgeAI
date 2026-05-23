@@ -1334,3 +1334,14 @@ Live QA note: proof mode is non-mutating; docker-disposable mode is exact-target
 5. Execute `--executor docker-disposable --execute --confirm` only for exact disposable+allowlisted target.
 6. Check `remediation status <receipt-id>` and verify restart evidence.
 7. Confirm production `shellforgeai` remained untouched.
+
+## PR93 governed remediation rollback posture workflow
+- `shellforgeai remediation plan`
+- `shellforgeai remediation validate`
+- `shellforgeai remediation preflight`
+- explicit operator confirm + `remediation execute`
+- `remediation receipt validate` / `remediation report`
+- `remediation rollback-preflight`
+- `remediation rollback-validate`
+
+Rollback packet commands are decision support only (posture/preconditions/verification preview). They do not execute rollback.
