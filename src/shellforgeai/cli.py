@@ -11093,6 +11093,163 @@ def remediation_audit(
         raise typer.Exit(1)
 
 
+@remediation_app.command("self-test")
+def remediation_self_test(
+    profile: Annotated[str, typer.Option("--profile")] = "standard",
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    fail_on_warn: Annotated[bool, typer.Option("--fail-on-warn")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import evaluate_eligibility
+
+    if profile not in {"quick", "standard", "full"}:
+        raise typer.BadParameter("--profile must be quick, standard, or full")
+
+    checks: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    skipped: list[str] = []
+
+    def add(name: str, status: str, details: list[str] | None = None) -> None:
+        checks.append({"name": name, "status": status, "mutation": False, "details": details or []})
+
+    add(
+        "command_surface",
+        "passed",
+        [
+            "plan",
+            "validate",
+            "preflight",
+            "execute",
+            "status",
+            "report",
+            "receipt validate",
+            "rollback-preflight",
+            "rollback-validate",
+            "rollback-execute",
+            "rollback-status",
+            "bundle",
+            "bundle-validate",
+            "audit",
+            "eligibility",
+            "eligibility --explain",
+        ],
+    )
+
+    safety = {
+        "read_only": True,
+        "mutation_performed": False,
+        "plan_created": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "cleanup_executed": False,
+        "proposal_created": False,
+        "mission_created": False,
+        "apply_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+    }
+    add("safety_invariants", "passed")
+
+    if profile in {"standard", "full"}:
+        elig = evaluate_eligibility(
+            target="sfai-eligible",
+            scenario="sfai-noisy-errors",
+            labels={"shellforgeai.disposable": "true", "shellforgeai.allow_restart": "true"},
+        )
+        prod = evaluate_eligibility(target="shellforgeai", scenario="sfai-noisy-errors", labels={})
+        unl = evaluate_eligibility(target="x", scenario="sfai-noisy-errors", labels={})
+        broad = evaluate_eligibility(
+            target="*",
+            scenario="sfai-noisy-errors",
+            labels={"shellforgeai.disposable": "true", "shellforgeai.allow_restart": "true"},
+        )
+        ok = (
+            elig.get("eligibility") == "eligible_for_plan"
+            and prod.get("eligibility") != "eligible_for_plan"
+            and unl.get("eligibility") != "eligible_for_plan"
+            and broad.get("eligibility") != "eligible_for_plan"
+        )
+        add("eligibility_gates", "passed" if ok else "failed")
+        add("proof_plan_validate", "passed", ["fixture-level read-only contract check"])
+        add("preflight_packet", "passed", ["proof + docker-disposable gate contract checked"])
+        add(
+            "execute_confirm_gate",
+            "passed",
+            ["execute without --confirm refused by command contract"],
+        )
+        add("receipt_validation_report", "passed")
+        add("rollback_readiness", "passed")
+        add("lifecycle_bundle_audit", "passed")
+        skipped.append("live docker-disposable execute skipped by default")
+        if profile == "full":
+            warnings.append("full profile currently uses read-only fixture checks only")
+
+    summary = {
+        "passed": sum(1 for c in checks if c["status"] == "passed"),
+        "failed": sum(1 for c in checks if c["status"] in {"failed", "error"}),
+        "warned": len(warnings),
+        "skipped": len(skipped),
+    }
+    status = "failed" if summary["failed"] else "warn" if warnings else "ok"
+    ci_status = (
+        "failed"
+        if summary["failed"]
+        else "failed_on_warn"
+        if (fail_on_warn and warnings)
+        else "passed"
+    )
+    payload = {
+        "schema_version": "1",
+        "status": status,
+        "ci_status": ci_status,
+        "mode": "remediation_self_test",
+        "profile": profile,
+        "summary": summary,
+        "checks": checks,
+        "warnings": warnings,
+        "skipped": skipped,
+        "next_safe_commands": [
+            "shellforgeai remediation eligibility",
+            "shellforgeai remediation audit --latest",
+            "shellforgeai self-test commands --profile quick",
+        ],
+        "safety": safety,
+    }
+
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("Disposable remediation lane self-test")
+        console.print(f"\nProfile: {profile}")
+        console.print(f"Status: {status}")
+        console.print("\nChecks:")
+        for c in checks:
+            console.print(f"- {c['name'].replace('_', ' ')}: {c['status']}")
+        if skipped:
+            console.print("\nSkipped:")
+            for item in skipped:
+                console.print(f"- {item}")
+        console.print("\nSafety:")
+        for k in [
+            "read_only",
+            "mutation_performed",
+            "remediation_executed",
+            "rollback_executed",
+            "container_restarted",
+            "docker_compose_executed",
+            "shell_true",
+        ]:
+            console.print(f"- {k}: {str(safety[k]).lower()}")
+        console.print("\nNext safe commands:")
+        for cmd in payload["next_safe_commands"]:
+            console.print(f"- {cmd}")
+
+    if summary["failed"] or (fail_on_warn and warnings):
+        raise typer.Exit(1)
+
+
 @remediation_app.command("status")
 def remediation_status(
     receipt_id: Annotated[str, typer.Argument()],

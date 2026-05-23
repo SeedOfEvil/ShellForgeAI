@@ -1354,6 +1354,12 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 
 
 ## PR97 operator flow (read-only remediation eligibility map)
+
+## PR99 post-deploy remediation-lane readiness workflow
+1. `shellforgeai self-test commands --profile quick`
+2. `shellforgeai remediation self-test --profile quick`
+3. `shellforgeai remediation self-test --profile standard --json`
+4. Only then run a manual disposable live proof if needed (outside default self-test).
 1. `shellforgeai triage docker`
 2. `shellforgeai remediation eligibility`
 3. `shellforgeai remediation eligibility --target <target> --explain`

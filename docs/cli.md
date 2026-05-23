@@ -1100,6 +1100,14 @@ at least one warning, and `2` for an unknown profile.
 
 ## PR89 disposable remediation proof
 
+## PR99 remediation self-test
+- `shellforgeai remediation self-test [--profile quick|standard|full] [--json] [--fail-on-warn]` runs a **read-only** remediation-lane readiness/self-test doctor.
+- Default behavior is non-mutating: no remediation execute, no rollback execute, no cleanup execute, no Docker Compose mutation, and no natural-language execution.
+- Example commands:
+  - `shellforgeai remediation self-test`
+  - `shellforgeai remediation self-test --profile quick --json`
+  - `shellforgeai remediation self-test --fail-on-warn`
+
 - `shellforgeai remediation plan --target sfai-noisy-errors --scenario sfai-noisy-errors [--json]` creates a dry-run disposable-only plan artifact with fingerprint, pre/post checks, rollback note, and explicit no-mutation safety flags.
 - `shellforgeai remediation eligibility [--target <name>] [--scenario sfai-noisy-errors] [--json]` maps current triage suspects to read-only remediation eligibility and executor readiness (proof / docker-disposable), explains blockers, and suggests safe **plan-only** next commands. It does **not** create plans and does **not** execute remediation.
 - `shellforgeai remediation eligibility --target <name> --explain [--json]` prints a read-only gate-by-gate eligibility explanation report (labels found/missing, failed gates, executor readiness, blocked reasons, what would make the target eligible, and safe next commands). In JSON mode it emits strict machine-parseable output with `mode=remediation_eligibility_explain`.
