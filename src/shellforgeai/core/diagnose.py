@@ -31,7 +31,7 @@ from shellforgeai.core.command_suggestions import (
 )
 from shellforgeai.core.evidence import EvidenceBundle, TargetType, classify_target
 from shellforgeai.core.plans import Plan, PlanStep
-from shellforgeai.core.triage_ranking import rank_scene
+from shellforgeai.core.triage_ranking import collect_scene, rank_scene
 from shellforgeai.util.text import extract_lines_matching
 
 
@@ -67,7 +67,45 @@ def _docker_triage_context(
 
     summary = next((i for i in items if i.source == "docker.problem_summary" and i.ok), None)
     if summary is None:
-        return {}, {}, []
+        try:
+            ranked = rank_scene(collect_scene())
+        except Exception:
+            return {}, {}, []
+        hit = next(
+            (s for s in ranked.get("suspects") or [] if str(s.get("name") or "") == target), None
+        )
+        if hit is None:
+            return {}, {}, []
+        detail = triage_detail_command(target)
+        eligibility = remediation_eligibility_explain_command(target)
+        return (
+            {
+                "detected": True,
+                "target": target,
+                "kind": "docker_container",
+                "rank": hit.get("rank"),
+                "severity": hit.get("severity"),
+                "confidence": hit.get("confidence"),
+                "classes": list(hit.get("classes") or []),
+                "evidence_summary": list(hit.get("why") or []),
+                "detail_command": detail,
+                "eligibility_command": eligibility,
+            },
+            {
+                "detected": True,
+                "host_checks_demoted": True,
+                "notes": [
+                    "Host service checks are not primary for this target.",
+                    "Use triage docker detail for container scenario evidence.",
+                ],
+            },
+            [
+                detail,
+                triage_detail_command(target, json=True),
+                eligibility,
+                remediation_eligibility_explain_command(target, json=True),
+            ],
+        )
     try:
         payload = _json.loads(summary.content or summary.summary or "{}")
     except (ValueError, _json.JSONDecodeError):
