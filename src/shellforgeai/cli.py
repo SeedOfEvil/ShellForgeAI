@@ -10351,6 +10351,72 @@ def remediation_validate(
         raise typer.Exit(1)
 
 
+@remediation_app.command("preflight")
+def remediation_preflight(
+    plan_id: Annotated[str, typer.Argument()],
+    executor: Annotated[str, typer.Option("--executor")] = "proof",
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core import triage_ranking
+    from shellforgeai.core.disposable_remediation import (
+        build_preflight_payload,
+        container_state_from_scene,
+        inspect_exact_target_state,
+        load_plan,
+    )
+
+    data_dir = Path(load_settings().app.data_dir)
+    plan = load_plan(data_dir, plan_id)
+    target = str((plan or {}).get("target") or "")
+    scene = triage_ranking.collect_scene()
+    scene_state = container_state_from_scene(scene, target) if target else None
+    inspect_state = inspect_exact_target_state(target) if target else None
+    payload = build_preflight_payload(
+        data_dir=data_dir,
+        plan_id=plan_id,
+        executor=executor,
+        scene_state=scene_state,
+        inspect_state=inspect_state,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("Remediation preflight packet")
+        console.print("\nPlan:")
+        for k in ["plan_id", "scenario", "executor", "fingerprint"]:
+            console.print(f"- {k}: {payload.get('plan', {}).get(k)}")
+        console.print("\nTarget:")
+        t = payload.get("target") or {}
+        for k in [
+            "name",
+            "kind",
+            "disposable",
+            "target_allowlisted",
+            "production_target",
+            "started_at",
+            "restart_count",
+        ]:
+            console.print(f"- {k}: {t.get(k)}")
+        console.print("\nPlanned action:")
+        console.print(f"- {(payload.get('planned_action') or {}).get('command_display')}")
+        console.print("- shell_true: false")
+        console.print("- arbitrary_command_execution: false")
+        console.print("\nSafety:")
+        for k, v in (payload.get("safety") or {}).items():
+            console.print(f"- {k}: {str(v).lower()}")
+        console.print("\nOperator decision:")
+        d = payload.get("decision") or {}
+        console.print(f"- preflight_status: {d.get('preflight_status')}")
+        for r in d.get("reasons") or []:
+            console.print(f"- reason: {r}")
+        console.print(f"- {d.get('approval_warning')}")
+        if d.get("execute_command"):
+            console.print("\nTo execute:")
+            console.print(d["execute_command"])
+    if payload.get("status") not in {"ready", "warning"}:
+        raise typer.Exit(1)
+
+
 @remediation_app.command("execute")
 def remediation_execute(
     plan_id: Annotated[str, typer.Argument()],
