@@ -36,6 +36,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from shellforgeai.core.command_suggestions import (
+    remediation_eligibility_explain_command,
+    remediation_self_test_command,
+    triage_detail_command,
+    triage_snapshot_command,
+    triage_timeline_command,
+)
+
 SCHEMA_VERSION = "1"
 MODE = "docker_triage_ranking"
 SNAPSHOT_MODE = "docker_triage_snapshot"
@@ -197,15 +205,15 @@ def _themes(c: dict[str, Any]) -> dict[str, int]:
 
 
 def _safe_next_logs(name: str) -> str:
-    return f"shellforgeai diagnose logs --target {name} --json"
+    return triage_detail_command(name, json=True)
 
 
 def _safe_next_docker(name: str) -> str:
-    return f"shellforgeai diagnose docker --container {name} --json"
+    return triage_detail_command(name, json=True)
 
 
 def _safe_next_disk() -> str:
-    return "shellforgeai diagnose disk --json"
+    return triage_snapshot_command()
 
 
 def _max_sev(a: str, b: str) -> str:
@@ -482,11 +490,15 @@ def _confidence_from_score(score: int) -> str:
 
 
 def _safe_next_for(name: str, classes: list[str]) -> list[str]:
+    cmds = [
+        _safe_next_docker(name),
+        remediation_eligibility_explain_command(name),
+    ]
     if CLASS_DISK_PRESSURE in classes:
-        return [_safe_next_disk(), _safe_next_docker(name)]
+        return [_safe_next_disk(), *cmds]
     if CLASS_CRASHLOOP in classes or CLASS_RESTART_STORM in classes:
-        return [_safe_next_docker(name)]
-    return [_safe_next_logs(name)]
+        return cmds
+    return [_safe_next_logs(name), remediation_eligibility_explain_command(name, json=True)]
 
 
 def _rank_one(container: dict[str, Any]) -> dict[str, Any] | None:
@@ -573,8 +585,9 @@ def rank_scene(scene: dict[str, Any]) -> dict[str, Any]:
         warnings.append("no suspects ranked from provided scene")
 
     next_safe_commands = [
-        "shellforgeai diagnose docker --save-plan --with-runbook",
-        "shellforgeai self-test commands --profile quick",
+        "shellforgeai triage docker detail --rank 1",
+        remediation_self_test_command(profile="quick"),
+        triage_snapshot_command(include_details=True),
     ]
 
     payload: dict[str, Any] = {
@@ -913,8 +926,8 @@ def build_snapshot_payload(
             )
     next_safe = [
         "shellforgeai triage docker detail --rank 1",
-        "shellforgeai diagnose docker --save-plan --with-runbook",
-        "shellforgeai self-test commands --profile quick",
+        triage_snapshot_command(include_details=True),
+        remediation_self_test_command(profile="standard"),
     ]
     warnings = list(ranked.get("warnings") or [])
     if not suspects:
@@ -1797,7 +1810,8 @@ def build_snapshot_timeline(
         "new_suspects": new_s,
         "resolved_suspects": resolved,
         "next_safe_commands": [
-            "shellforgeai triage docker snapshot",
+            triage_snapshot_command(),
+            triage_timeline_command(include_stable=True),
             "shellforgeai triage docker detail --rank 1",
         ],
         "safety": safety,

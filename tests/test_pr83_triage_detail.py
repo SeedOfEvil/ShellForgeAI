@@ -134,7 +134,7 @@ def test_detail_json_contract(monkeypatch):
     assert isinstance(p["suspect"]["why"], list) and p["suspect"]["why"]
     for cmd in p["suspect"]["safe_next_commands"]:
         low = cmd.lower()
-        assert low.startswith("shellforgeai diagnose ") or low.startswith("shellforgeai triage ")
+        assert low.startswith("shellforgeai triage ") or low.startswith("shellforgeai remediation ")
         assert "restart" not in low
         assert "apply" not in low
     s = p["safety"]

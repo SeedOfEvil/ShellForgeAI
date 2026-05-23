@@ -79,6 +79,13 @@ from shellforgeai.core.ask_routing import (
     route_ask_intent,
     target_container_status,
 )
+from shellforgeai.core.command_suggestions import (
+    remediation_audit_latest_command,
+    remediation_eligibility_explain_command,
+    remediation_plan_command,
+    remediation_self_test_command,
+    triage_detail_command,
+)
 from shellforgeai.core.config import load_settings
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
@@ -8341,7 +8348,7 @@ def _render_broad_triage_answer(payload: dict[str, Any]) -> str:
         lines.append("No suspects ranked from current scene.")
         lines.append("Try a fresh read-only check:")
         lines.append("- shellforgeai triage docker --json")
-        lines.append("- shellforgeai diagnose docker --json")
+        lines.append("- shellforgeai triage docker --json")
         lines.append("")
     for s in suspects:
         rank = s.get("rank", "?")
@@ -8417,7 +8424,7 @@ def _handle_broad_triage_ask(runtime: RuntimeContext, question: str) -> bool:
         console.print("")
         console.print("Start with:")
         console.print("- shellforgeai triage docker")
-        console.print("- shellforgeai diagnose docker --container <name> --json")
+        console.print("- shellforgeai triage docker detail <target>")
         _append_audit_event(
             runtime,
             kind="ask",
@@ -10401,7 +10408,7 @@ def remediation_eligibility(
             "scenario": scenario,
             **evald,
             "suggested_plan_command": (
-                f"shellforgeai remediation plan --target {name} --scenario {scenario}"
+                remediation_plan_command(name, scenario)
                 if evald.get("eligibility") == "eligible_for_plan"
                 else ""
             ),
@@ -10448,11 +10455,11 @@ def remediation_eligibility(
         "next_safe_commands": [
             *(t["suggested_plan_command"] for t in eligible if t.get("suggested_plan_command")),
             *[
-                f"shellforgeai triage docker detail {t.get('name')}"
+                triage_detail_command(str(t.get("name")))
                 for t in blocked
-                if t.get("name")
+                if t.get("name") and str(t.get("name")) not in {"*", "all", "everything"}
             ],
-            "shellforgeai remediation audit --latest",
+            remediation_audit_latest_command(),
         ],
         "warnings": warnings,
     }
@@ -11211,9 +11218,9 @@ def remediation_self_test(
         "warnings": warnings,
         "skipped": skipped,
         "next_safe_commands": [
-            "shellforgeai remediation eligibility",
-            "shellforgeai remediation audit --latest",
-            "shellforgeai self-test commands --profile quick",
+            remediation_eligibility_explain_command("sfai-crashloop"),
+            remediation_audit_latest_command(),
+            remediation_self_test_command(profile="standard"),
         ],
         "safety": safety,
     }

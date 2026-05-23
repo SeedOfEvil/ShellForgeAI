@@ -1243,7 +1243,7 @@ these steps mutate anything.
 
        shellforgeai diagnose docker --container <name> --json
        # or
-       shellforgeai diagnose logs --target <name> --json
+       shellforgeai triage docker detail <name> --json
 
 5. **Only then** decide whether to engage an existing gated workflow:
    restart proposal (PR50/PR58), restart mission (PR52/PR53), or the

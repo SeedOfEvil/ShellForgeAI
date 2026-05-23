@@ -327,8 +327,8 @@ def test_broad_ask_includes_safety_statement(patched_scene):
 def test_broad_ask_includes_read_only_next_commands(patched_scene):
     out = _invoke_ask("what's on fire?")
     assert "Safe next:" in out.stdout
-    # Each suspect should get a read-only diagnose-shaped follow-up command.
-    assert "shellforgeai diagnose " in out.stdout
+    assert "shellforgeai triage docker detail" in out.stdout
+    assert "shellforgeai remediation eligibility --target" in out.stdout
     # Footer with next safe steps must include the deterministic triage cmd.
     assert "Next safe steps:" in out.stdout
     assert "shellforgeai triage docker --json" in out.stdout
@@ -500,7 +500,7 @@ def test_broad_ask_mutation_refusal_does_not_render_triage(patched_scene):
 def test_broad_ask_mutation_refusal_directs_to_explicit_cli(patched_scene):
     out = _invoke_ask("restart the top suspect")
     assert "shellforgeai triage docker" in out.stdout
-    assert "shellforgeai diagnose docker --container <name> --json" in out.stdout
+    assert "shellforgeai triage docker detail <target>" in out.stdout
 
 
 def test_broad_ask_mutation_refusal_does_not_create_proposals(patched_scene, tmp_path):

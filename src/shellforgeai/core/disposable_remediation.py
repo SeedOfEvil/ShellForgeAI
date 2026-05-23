@@ -9,6 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from shellforgeai.core.command_suggestions import (
+    remediation_eligibility_explain_command,
+    remediation_plan_command,
+    triage_detail_command,
+)
+
 SCHEMA_VERSION = 1
 PLAN_KIND = "disposable_remediation_plan"
 RECEIPT_KIND = "disposable_remediation_receipt"
@@ -318,14 +324,10 @@ def build_eligibility_explain_report(
         "gates": gates,
         "executors": evald.get("executors"),
         "what_would_make_eligible": what_would_make_eligible,
-        "suggested_plan_command": (
-            f"shellforgeai remediation plan --target {target} --scenario {scenario}"
-            if eligible
-            else ""
-        ),
+        "suggested_plan_command": (remediation_plan_command(target, scenario) if eligible else ""),
         "next_safe_commands": [
-            f"shellforgeai triage docker detail {target}",
-            f"shellforgeai remediation eligibility --target {target} --json",
+            triage_detail_command(target),
+            remediation_eligibility_explain_command(target, json=True),
         ],
         "safety": {
             "read_only": True,
@@ -659,7 +661,7 @@ def report_receipt_payload(data_dir: Path, receipt_id_or_path: str) -> dict[str,
         "next_safe_commands": [
             f"shellforgeai remediation receipt validate {rid}",
             f"shellforgeai remediation status {rid} --json",
-            "shellforgeai triage docker snapshot --save --include-details",
+            "shellforgeai triage docker snapshot --include-details",
         ],
         "safety": v["safety"],
         "warnings": v.get("warnings") or [],
@@ -1212,7 +1214,7 @@ def build_remediation_audit_payload(data_dir: Path, *, latest_only: bool = False
         "artifacts": artifacts,
         "warnings": warnings,
         "next_safe_commands": [
-            "shellforgeai remediation bundle-validate <bundle-id>",
+            "shellforgeai remediation bundle validate <bundle-id>",
             "shellforgeai remediation receipt validate <receipt-id>",
             "shellforgeai remediation rollback-status <rollback-receipt-id>",
         ],

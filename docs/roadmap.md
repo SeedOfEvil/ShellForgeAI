@@ -729,3 +729,4 @@ explicitly `false`.
 - PR98 (May 23, 2026): Read-only remediation eligibility explain/report polish (`remediation eligibility --target <name> --explain [--json]`) with gate-by-gate blocker reasoning, labels found/missing, executor readiness, safe eligibility hints, strict JSON mode, and explicit no-mutation safety flags.
 
 - PR99 (May 23, 2026): added `remediation self-test` readiness doctor with quick/standard/full profiles, strict JSON mode, fail-on-warn CI behavior, remediation-lane contract checks, and explicit default read-only/non-mutation safety invariants.
+- PR100 (May 23, 2026): normalized canonical safe-next command suggestions across triage, triage detail, remediation eligibility/explain, remediation self-test, and ask refusal/broad-triage output to remove stale `diagnose ... --target` forms and prefer read-only triage detail + eligibility explain guidance.
