@@ -1350,3 +1350,4 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 
 9. remediation bundle --save
 10. remediation bundle validate
+11. remediation audit

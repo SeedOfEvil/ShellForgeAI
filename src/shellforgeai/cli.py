@@ -10808,6 +10808,68 @@ def remediation_bundle_validate(
         raise typer.Exit(1)
 
 
+@remediation_app.command("audit")
+def remediation_audit(
+    latest: Annotated[bool, typer.Option("--latest")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import build_remediation_audit_payload
+
+    payload = build_remediation_audit_payload(
+        Path(load_settings().app.data_dir), latest_only=latest
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("Disposable remediation audit")
+        summary = payload.get("summary") or {}
+        console.print("\nSummary:")
+        console.print(f"- plans: {summary.get('plans')}")
+        console.print(f"- execution receipts: {summary.get('execution_receipts')}")
+        console.print(f"- rollback receipts: {summary.get('rollback_receipts')}")
+        console.print(f"- lifecycle bundles: {summary.get('bundles')}")
+        console.print(f"- latest lifecycle: {summary.get('latest_lifecycle_id') or 'none'}")
+        console.print(f"- status: {payload.get('status')}")
+        latest_lifecycle = payload.get("latest_lifecycle") or {}
+        console.print("\nLatest lifecycle:")
+        for key in [
+            "plan_id",
+            "receipt_id",
+            "rollback_receipt_id",
+            "target",
+            "production_target",
+            "disposable",
+            "target_allowlisted",
+            "execution_verified",
+            "rollback_verified",
+        ]:
+            console.print(f"- {key}: {str(latest_lifecycle.get(key)).lower()}")
+        safety = payload.get("safety_audit") or {}
+        console.print("\nSafety audit:")
+        for key in [
+            "production_mutation_recorded",
+            "docker_compose_mutation_recorded",
+            "cleanup_execution_recorded",
+            "mission_apply_execution_recorded",
+            "shell_true_recorded",
+            "arbitrary_command_execution_recorded",
+            "natural_language_execution_recorded",
+        ]:
+            console.print(f"- {key}: {str(safety.get(key)).lower()}")
+        console.print("\nWarnings:")
+        warns = payload.get("warnings") or []
+        if warns:
+            for w in warns:
+                console.print(f"- {w}")
+        else:
+            console.print("- none")
+        console.print("\nNext safe commands:")
+        for cmd in payload.get("next_safe_commands") or []:
+            console.print(f"- {cmd}")
+    if payload.get("status") == "error":
+        raise typer.Exit(1)
+
+
 @remediation_app.command("status")
 def remediation_status(
     receipt_id: Annotated[str, typer.Argument()],
