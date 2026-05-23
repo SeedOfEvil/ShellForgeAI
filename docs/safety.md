@@ -847,7 +847,7 @@ Every `triage docker --json` payload sets `safety.read_only=true`,
 `cleanup_executed`, `proposal_created`, `mission_created`,
 `apply_executed`, `docker_compose_executed`, `container_restarted`,
 `natural_language_execution`, and `shell_true`. Per-suspect
-`safe_next_commands` are constrained to `shellforgeai diagnose …`
+`safe_next_commands` are constrained to canonical read-only `shellforgeai triage ...` / `shellforgeai remediation eligibility ... --explain` flows
 invocations — never a restart, never a remediation execution.
 
 Natural-language mutation refusal is unchanged. PR81 does not broaden the

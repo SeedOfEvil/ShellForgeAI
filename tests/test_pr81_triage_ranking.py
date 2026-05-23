@@ -194,8 +194,8 @@ def test_safe_next_commands_are_read_only():
         for cmd in s["safe_next_commands"]:
             lowered = cmd.lower()
             # Read-only verbs only.
-            assert lowered.startswith("shellforgeai diagnose ") or lowered.startswith(
-                "shellforgeai ask "
+            assert lowered.startswith("shellforgeai triage ") or lowered.startswith(
+                "shellforgeai remediation "
             ), cmd
             for forbidden in (
                 "restart",
