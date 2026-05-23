@@ -948,3 +948,8 @@ Safety remains invariant: no natural-language execution, no arbitrary command ex
 - `shellforgeai remediation preflight <plan-id>` is strictly read-only: it does not execute remediation, does not restart targets, does not create receipts, and does not perform cleanup/mission/apply/compose mutation.
 - Preflight re-checks target eligibility using live metadata when available and applies the same production, allowlist, disposable, and broad-target refusal gates as governed execution.
 - `ready` means gates are satisfied; it is not execution approval. Actual mutation still requires `shellforgeai remediation execute <plan-id> --executor docker-disposable --execute --confirm`.
+
+## PR93 disposable remediation rollback posture safety
+- Rollback for disposable remediation is modeled as bounded recovery only: `rollback_kind=bounded_recovery_restart` and `rollback_strategy=repeat_exact_target_restart`.
+- `remediation rollback-preflight` and `remediation rollback-validate` are read-only and never execute rollback.
+- Automatic rollback stays disabled (`automatic_rollback=false`), and production rollback remains refused.

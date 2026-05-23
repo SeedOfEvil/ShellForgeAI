@@ -80,6 +80,44 @@ def safety_block(
     }
 
 
+def derive_rollback_payload(receipt: dict[str, Any]) -> dict[str, Any]:
+    target = str(receipt.get("target") or "")
+    mode = str(receipt.get("executor_mode") or "")
+    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    proof_only = mode == "proof"
+    available = (
+        mode in {"proof", "docker-disposable"}
+        and bool(target)
+        and not _is_broad_target(target)
+        and _safe_target(target)
+        and safety.get("production_target") is False
+        and safety.get("disposable") is True
+        and safety.get("target_allowlisted") is True
+    )
+    return {
+        "rollback_available": available and not proof_only,
+        "proof_only": proof_only,
+        "automatic_rollback": False,
+        "rollback_kind": "bounded_recovery_restart",
+        "rollback_strategy": "repeat_exact_target_restart",
+        "rollback_target": target,
+        "rollback_scope_exact_target_only": True,
+        "rollback_requires_explicit_confirm": True,
+        "rollback_executor_modes_supported": ["proof", "docker-disposable"],
+        "rollback_verification_signal": "started_at_changed",
+        "rollback_preconditions": [
+            "receipt validates",
+            "target remains disposable",
+            "target remains allowlisted",
+            "target is not production shellforgeai",
+        ],
+        "rollback_risk_level": "low_disposable_only",
+        "rollback_note": (
+            "This is a bounded disposable recovery restart, not full state restoration."
+        ),
+    }
+
+
 def plan_artifacts_dir(data_dir: Path) -> Path:
     return data_dir / "artifacts" / "remediation-plans"
 
@@ -359,6 +397,130 @@ def report_receipt_payload(data_dir: Path, receipt_id_or_path: str) -> dict[str,
         "safety": v["safety"],
         "warnings": v.get("warnings") or [],
     }
+
+
+def rollback_validate_payload(data_dir: Path, receipt_id_or_path: str) -> dict[str, Any]:
+    base = {
+        "schema_version": "1",
+        "status": "error",
+        "mode": "disposable_remediation_rollback_validate",
+        "receipt_id": receipt_id_or_path,
+        "checks": {},
+        "safety": {
+            "read_only": True,
+            "rollback_executed": False,
+            "mutation_performed": False,
+            "automatic_rollback": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+        },
+        "warnings": [],
+    }
+    v = validate_receipt_payload(data_dir, receipt_id_or_path)
+    if v["status"] in {"not_found", "error"}:
+        base["status"] = v["status"]
+        base["warnings"] = list(v.get("warnings") or [])
+        return base
+    receipt = load_receipt(data_dir, str(v.get("receipt", {}).get("receipt_id") or ""))
+    if not receipt:
+        base["status"] = "not_found"
+        base["warnings"] = ["receipt not found"]
+        return base
+    rb = (
+        receipt.get("rollback")
+        if isinstance(receipt.get("rollback"), dict)
+        else derive_rollback_payload(receipt)
+    )
+    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    checks = {
+        "receipt_exists": True,
+        "receipt_json_parse": True,
+        "receipt_valid": v["status"] == "ok",
+        "rollback_strategy": bool(rb.get("rollback_strategy")),
+        "exact_target_only": rb.get("rollback_scope_exact_target_only") is True,
+        "production_target_refused": safety.get("production_target") is False,
+        "disposable": safety.get("disposable") is True,
+        "allowlisted": safety.get("target_allowlisted") is True,
+        "automatic_rollback_disabled": rb.get("automatic_rollback") is False,
+        "explicit_confirm_required": rb.get("rollback_requires_explicit_confirm") is True,
+        "shell_true_false": safety.get("shell_true") is False,
+        "arbitrary_command_execution_false": safety.get("arbitrary_command_execution") is False,
+    }
+    ok = all(checks.values())
+    base["status"] = "ok" if ok else "blocked"
+    base["receipt_id"] = str(receipt.get("receipt_id") or receipt_id_or_path)
+    base["checks"] = checks
+    if "rollback" not in receipt:
+        base["warnings"].append("rollback metadata missing; derived from receipt")
+    return base
+
+
+def rollback_preflight_payload(data_dir: Path, receipt_id_or_path: str) -> dict[str, Any]:
+    rv = rollback_validate_payload(data_dir, receipt_id_or_path)
+    payload = {
+        "schema_version": "1",
+        "status": "error",
+        "mode": "disposable_remediation_rollback_preflight",
+        "receipt_id": receipt_id_or_path,
+        "plan_id": None,
+        "target": None,
+        "rollback": {},
+        "action_preview": {"argv": [], "shell_true": False, "arbitrary_command_execution": False},
+        "checks": {
+            "receipt_valid": False,
+            "target_disposable": False,
+            "target_allowlisted": False,
+            "production_target": True,
+            "exact_target_only": False,
+        },
+        "safety": {
+            "read_only": True,
+            "rollback_executed": False,
+            "mutation_performed": False,
+            "automatic_rollback": False,
+            "cleanup_executed": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+        },
+        "warnings": list(rv.get("warnings") or []),
+    }
+    if rv["status"] in {"not_found", "error"}:
+        payload["status"] = rv["status"]
+        return payload
+    receipt = load_receipt(data_dir, str(rv.get("receipt_id") or ""))
+    if not receipt:
+        payload["status"] = "not_found"
+        return payload
+    rb = (
+        receipt.get("rollback")
+        if isinstance(receipt.get("rollback"), dict)
+        else derive_rollback_payload(receipt)
+    )
+    target = str(receipt.get("target") or "")
+    payload["receipt_id"] = str(receipt.get("receipt_id") or receipt_id_or_path)
+    payload["plan_id"] = receipt.get("plan_id")
+    payload["target"] = target
+    payload["rollback"] = rb
+    payload["action_preview"] = {
+        "argv": ["docker", "restart", target],
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+    }
+    payload["checks"] = {
+        "receipt_valid": rv["checks"].get("receipt_valid") is True,
+        "target_disposable": rv["checks"].get("disposable") is True,
+        "target_allowlisted": rv["checks"].get("allowlisted") is True,
+        "production_target": not rv["checks"].get("production_target_refused"),
+        "exact_target_only": rv["checks"].get("exact_target_only") is True,
+    }
+    payload["status"] = "ready" if rv["status"] == "ok" else "blocked"
+    return payload
 
 
 def build_preflight_payload(

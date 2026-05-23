@@ -10428,6 +10428,7 @@ def remediation_execute(
     from shellforgeai.core import triage_ranking
     from shellforgeai.core.disposable_remediation import (
         container_state_from_scene,
+        derive_rollback_payload,
         inspect_exact_target_state,
         load_plan,
         run_exact_docker_restart,
@@ -10592,6 +10593,7 @@ def remediation_execute(
             production=False,
         ),
     }
+    receipt["rollback"] = derive_rollback_payload(receipt)
     write_receipt(data_dir, receipt)
     payload = {
         "status": "executed" if verified else "failed",
@@ -10723,3 +10725,46 @@ def remediation_status(
         console.print(f"Plan: {receipt.get('plan_id')}")
         console.print(f"Target: {receipt.get('target')}")
         console.print(f"Verification: {(receipt.get('verification') or {}).get('status')}")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@remediation_app.command("rollback-preflight")
+def remediation_rollback_preflight(
+    receipt_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import rollback_preflight_payload
+
+    payload = rollback_preflight_payload(Path(load_settings().app.data_dir), receipt_id)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("Disposable remediation rollback preflight")
+        console.print(f"- receipt: {payload.get('receipt_id')}")
+        console.print(f"- plan: {payload.get('plan_id')}")
+        console.print(f"- original target: {payload.get('target')}")
+        console.print(
+            f"- rollback_available: {(payload.get('rollback') or {}).get('rollback_available')}"
+        )
+        console.print("- Warning: This command did not execute rollback.")
+    if payload.get("status") != "ready":
+        raise typer.Exit(1)
+
+
+@remediation_app.command("rollback-validate")
+def remediation_rollback_validate(
+    receipt_id: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import rollback_validate_payload
+
+    payload = rollback_validate_payload(Path(load_settings().app.data_dir), receipt_id)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"Disposable remediation rollback validation: {payload.get('status')}")
+        for k, v in (payload.get("checks") or {}).items():
+            console.print(f"- {k}: {'ok' if v else 'failed'}")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
