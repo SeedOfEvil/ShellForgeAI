@@ -929,6 +929,8 @@ PR89 execution path currently uses a governed disposable proof executor for rece
 
 PR90 introduces explicit executor modes for disposable remediation execution:
 
+Verification for `docker-disposable` uses exact-target pre/post `docker inspect` evidence (bounded to the planned target only), with restart success requiring changed `StartedAt` or restart-count evidence plus successful `docker restart` return code.
+
 - `proof` (default): artifact/receipt proof only, no real Docker restart, `proof_executor=true`, `real_docker_executor=false`.
 - `docker-disposable` (explicit opt-in): exact-target-only `docker restart <target>` for disposable + `shellforgeai.allow_restart=true` targets, with pre/post verification and production refusal.
 

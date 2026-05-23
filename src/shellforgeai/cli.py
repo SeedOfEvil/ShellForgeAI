@@ -10360,6 +10360,7 @@ def remediation_execute(
     from shellforgeai.core import triage_ranking
     from shellforgeai.core.disposable_remediation import (
         container_state_from_scene,
+        inspect_exact_target_state,
         load_plan,
         run_exact_docker_restart,
         safety_block,
@@ -10435,6 +10436,19 @@ def remediation_execute(
     stdout = ""
     stderr = ""
     if executor == "docker-disposable":
+        inspect_pre = inspect_exact_target_state(plan["target"])
+        if inspect_pre is not None:
+            pre = inspect_pre
+            pre_labels = pre.get("labels") or {}
+            pre_disposable = any(
+                pre_labels.get(k) == v
+                for k, v in (
+                    ("shellforgeai.disposable", "true"),
+                    ("sfai.battle", "true"),
+                    ("shellforgeai.test_harness", "battle-lab"),
+                )
+            )
+            pre_allowlisted = pre_labels.get("shellforgeai.allow_restart") == "true"
         if not (pre_disposable and pre_allowlisted):
             payload = {
                 "status": "blocked",
@@ -10452,15 +10466,23 @@ def remediation_execute(
         restart_succeeded, exit_code, stdout, stderr = run_exact_docker_restart(plan["target"])
     scene_post = triage_ranking.collect_scene()
     post = container_state_from_scene(scene_post, plan["target"]) or {"name": plan["target"]}
+    if executor == "docker-disposable":
+        inspect_post = inspect_exact_target_state(plan["target"])
+        if inspect_post is not None:
+            post = inspect_post
     pre_started = str(pre.get("StartedAt") or "")
     post_started = str(post.get("StartedAt") or "")
     pre_count = int(pre.get("restart_count") or 0)
     post_count = int(post.get("restart_count") or 0)
-    restart_verified = (post_started and pre_started and pre_started != post_started) or (
-        post_count > pre_count
+    target_match = str(post.get("name") or "") == str(plan["target"])
+    restart_verified = target_match and bool(
+        (post_started and pre_started and pre_started != post_started) or (post_count > pre_count)
     )
+    command_ok = exit_code == 0
     restart_succeeded = (
-        restart_succeeded and restart_verified if executor == "docker-disposable" else False
+        restart_succeeded and command_ok and restart_verified
+        if executor == "docker-disposable"
+        else False
     )
     verified = True if executor == "proof" else bool(restart_succeeded)
     receipt_id = f"drr_{uuid.uuid4().hex[:12]}"
@@ -10487,6 +10509,8 @@ def remediation_execute(
         "verification": {
             "status": "passed" if verified else "failed",
             "restart_verified": restart_verified,
+            "target_match": target_match,
+            "command_ok": command_ok,
         },
         "return_code": exit_code,
         "stdout_summary": stdout[:120],

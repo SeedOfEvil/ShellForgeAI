@@ -1314,6 +1314,8 @@ Recommended read-only workflow:
 
 ## PR90 operator flow (disposable executor modes)
 
+Live QA note: proof mode is non-mutating; docker-disposable mode is exact-target-only, and successful verification requires exact-target pre/post evidence (for example changed `StartedAt`).
+
 1. Run triage (read-only).
 2. Create remediation plan.
 3. Validate plan.

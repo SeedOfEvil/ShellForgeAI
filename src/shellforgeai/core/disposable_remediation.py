@@ -215,11 +215,55 @@ def container_state_from_scene(scene: dict[str, Any], target: str) -> dict[str, 
 
 
 def run_exact_docker_restart(target: str) -> tuple[bool, int, str, str]:
-    cp = subprocess.run(
-        ["docker", "restart", target],
-        capture_output=True,
-        text=True,
-        shell=False,
-        check=False,
-    )
+    try:
+        cp = subprocess.run(
+            ["docker", "restart", target],
+            capture_output=True,
+            text=True,
+            shell=False,
+            check=False,
+        )
+    except OSError as exc:
+        return (False, 127, "", str(exc))
     return (cp.returncode == 0, cp.returncode, cp.stdout, cp.stderr)
+
+
+def inspect_exact_target_state(target: str) -> dict[str, Any] | None:
+    try:
+        cp = subprocess.run(
+            ["docker", "inspect", target],
+            capture_output=True,
+            text=True,
+            shell=False,
+            check=False,
+        )
+    except OSError:
+        return None
+    if cp.returncode != 0:
+        return None
+    try:
+        payload = json.loads(cp.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, list) or not payload:
+        return None
+    row = payload[0] if isinstance(payload[0], dict) else {}
+    state = row.get("State") if isinstance(row.get("State"), dict) else {}
+    cfg = row.get("Config") if isinstance(row.get("Config"), dict) else {}
+    labels_raw = cfg.get("Labels") if isinstance(cfg.get("Labels"), dict) else {}
+    labels = {str(k): str(v) for k, v in labels_raw.items()}
+    name = str(row.get("Name") or "").lstrip("/")
+    return {
+        "id": row.get("Id"),
+        "name": name or target,
+        "labels": labels,
+        "status": state.get("Status"),
+        "running": state.get("Running"),
+        "StartedAt": state.get("StartedAt"),
+        "restart_count": state.get("RestartCount"),
+        "image": row.get("Image"),
+        "compose": {
+            "project": labels.get("com.docker.compose.project"),
+            "service": labels.get("com.docker.compose.service"),
+        },
+    }
