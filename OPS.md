@@ -1347,3 +1347,6 @@ Live QA note: proof mode is non-mutating; docker-disposable mode is exact-target
 - `remediation rollback-status`
 
 Rollback packet commands are decision support only (posture/preconditions/verification preview). They do not execute rollback.
+
+9. remediation bundle --save
+10. remediation bundle validate

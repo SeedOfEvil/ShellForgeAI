@@ -766,3 +766,125 @@ def inspect_exact_target_state(target: str) -> dict[str, Any] | None:
             "service": labels.get("com.docker.compose.service"),
         },
     }
+
+
+def remediation_bundle_dir(data_dir: Path) -> Path:
+    return data_dir / "artifacts" / "remediation-bundles"
+
+
+def build_lifecycle_bundle_payload(data_dir: Path, token: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "1",
+        "status": "planned",
+        "mode": "disposable_remediation_lifecycle_bundle",
+        "lifecycle": {},
+        "plan": {"present": False},
+        "preflight": {},
+        "execution": {"present": False},
+        "rollback": {"executed": False},
+        "artifact": {"saved": False, "id": "", "path": ""},
+        "safety": {
+            "read_only": True,
+            "bundle_only": True,
+            "mutation_performed": False,
+            "remediation_executed_by_bundle": False,
+            "rollback_executed_by_bundle": False,
+            "cleanup_executed": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "docker_compose_executed": False,
+            "production_mutation_recorded": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+            "natural_language_execution": False,
+            "arbitrary_path_write": False,
+        },
+        "next_safe_commands": [],
+        "warnings": [],
+    }
+    plan = load_plan(data_dir, token)
+    receipt: dict[str, Any] | None = None
+    rollback_receipt: dict[str, Any] | None = None
+    if plan is None:
+        receipt = load_receipt(data_dir, token)
+    if receipt and receipt.get("kind") == ROLLBACK_RECEIPT_KIND:
+        rollback_receipt = receipt
+        receipt = load_receipt(data_dir, str(rollback_receipt.get("original_receipt_id") or ""))
+    if receipt and not plan:
+        plan = load_plan(data_dir, str(receipt.get("plan_id") or ""))
+    if receipt and not rollback_receipt:
+        for p in receipt_artifacts_dir(data_dir).glob("drrb_*.json"):
+            try:
+                rb = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if rb.get("original_receipt_id") == receipt.get("receipt_id"):
+                rollback_receipt = rb
+                break
+    if not plan and not receipt and not rollback_receipt:
+        payload["status"] = "not_found"
+        payload["warnings"] = ["plan/receipt not found"]
+        return payload
+    lifecycle = {
+        "plan_id": (plan or {}).get("plan_id"),
+        "receipt_id": (receipt or {}).get("receipt_id"),
+        "rollback_receipt_id": (rollback_receipt or {}).get("rollback_receipt_id"),
+        "target": (receipt or plan or {}).get("target"),
+        "scenario": (receipt or plan or {}).get("scenario"),
+        "executor": (receipt or {}).get("executor_mode"),
+        "production_target": bool(((receipt or {}).get("safety") or {}).get("production_target")),
+        "disposable": bool(((receipt or plan or {}).get("safety") or {}).get("disposable", True)),
+        "target_allowlisted": bool(
+            ((receipt or plan or {}).get("safety") or {}).get("target_allowlisted", True)
+        ),
+    }
+    payload["lifecycle"] = lifecycle
+    if plan:
+        ok, errs = validate_plan(plan)
+        payload["plan"] = {
+            "present": True,
+            "validation_status": "ok" if ok else "failed",
+            "fingerprint": plan.get("fingerprint"),
+            "fingerprint_matches_receipt": receipt is None
+            or receipt.get("plan_fingerprint") == plan.get("fingerprint"),
+            "warnings": errs,
+        }
+    if plan:
+        payload["preflight"] = {
+            "status": "ready" if payload["plan"]["validation_status"] == "ok" else "blocked",
+            "argv": ["docker", "restart", str(plan.get("target") or "")],
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+            "approval_required": True,
+        }
+    if receipt:
+        rv = validate_receipt_payload(data_dir, str(receipt.get("receipt_id") or ""))
+        payload["execution"] = {
+            "present": True,
+            "status": "executed"
+            if (receipt.get("verification") or {}).get("status") == "passed"
+            else "failed",
+            "receipt_valid": rv.get("status") == "ok",
+            "restart_verified": bool((receipt.get("verification") or {}).get("restart_verified")),
+            "docker_restart_succeeded": bool(receipt.get("docker_restart_succeeded")),
+        }
+    if receipt:
+        rbv = rollback_validate_payload(data_dir, str(receipt.get("receipt_id") or ""))
+        payload["rollback"]["validate_status"] = rbv.get("status")
+    if rollback_receipt:
+        rbvv = rollback_validate_payload(
+            data_dir, str(rollback_receipt.get("rollback_receipt_id") or "")
+        )
+        payload["rollback"].update(
+            {
+                "executed": True,
+                "receipt_valid": rbvv.get("status") == "ok",
+                "rollback_verified": bool(
+                    (rollback_receipt.get("verification") or {}).get("rollback_verified")
+                ),
+                "automatic_rollback": bool(rollback_receipt.get("automatic_rollback")),
+            }
+        )
+    payload["status"] = "ok" if receipt else "planned"
+    return payload

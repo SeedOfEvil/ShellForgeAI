@@ -10690,6 +10690,124 @@ def remediation_report(
         raise typer.Exit(1)
 
 
+@remediation_app.command("bundle")
+def remediation_bundle(
+    plan_or_receipt_id: Annotated[str, typer.Argument()],
+    save: Annotated[bool, typer.Option("--save")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import (
+        build_lifecycle_bundle_payload,
+        remediation_bundle_dir,
+    )
+
+    data_dir = Path(load_settings().app.data_dir)
+    payload = build_lifecycle_bundle_payload(data_dir, plan_or_receipt_id)
+    if save and payload.get("status") not in {"not_found", "error"}:
+        bundle_id = f"remediation_bundle_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        out = remediation_bundle_dir(data_dir) / bundle_id
+        out.mkdir(parents=True, exist_ok=False)
+        jpath = out / "remediation-lifecycle.json"
+        mpath = out / "remediation-lifecycle.md"
+        jpath.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        mpath.write_text(
+            "Disposable remediation lifecycle bundle\n\n"
+            f"- status: {payload.get('status')}\n"
+            f"- plan_id: {(payload.get('lifecycle') or {}).get('plan_id')}\n"
+            f"- receipt_id: {(payload.get('lifecycle') or {}).get('receipt_id')}\n"
+            "- Safety:\n"
+            "  - no production mutation\n"
+            "  - no compose mutation\n"
+            "  - no shell=True\n",
+            encoding="utf-8",
+        )
+        payload["artifact"] = {"saved": True, "id": bundle_id, "path": str(out)}
+        payload["next_safe_commands"] = [f"shellforgeai remediation bundle validate {bundle_id}"]
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        if payload.get("status") in {"not_found", "error"}:
+            console.print("Disposable remediation lifecycle bundle unavailable")
+            for w in payload.get("warnings") or []:
+                console.print(f"- {w}")
+            raise typer.Exit(1)
+        lc = payload.get("lifecycle") or {}
+        console.print("Disposable remediation lifecycle bundle")
+        console.print(f"- plan_id: {lc.get('plan_id')}")
+        console.print(f"- receipt_id: {lc.get('receipt_id')}")
+        console.print(f"- rollback_receipt_id: {lc.get('rollback_receipt_id')}")
+        console.print(f"- target: {lc.get('target')}")
+        console.print("- no production mutation")
+    if payload.get("status") in {"not_found", "error", "failed"}:
+        raise typer.Exit(1)
+
+
+@remediation_app.command("bundle-validate")
+def remediation_bundle_validate(
+    bundle_id_or_path: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.disposable_remediation import remediation_bundle_dir
+
+    data_dir = Path(load_settings().app.data_dir)
+    root = remediation_bundle_dir(data_dir)
+    p = Path(bundle_id_or_path)
+    if not p.is_absolute():
+        p = root / bundle_id_or_path
+    jpath = p / "remediation-lifecycle.json"
+    out = {
+        "schema_version": "1",
+        "status": "ok",
+        "mode": "disposable_remediation_lifecycle_bundle_validate",
+        "bundle": {"id": p.name, "path": str(p)},
+        "checks": {},
+        "safety": {
+            "read_only": True,
+            "mutation_performed": False,
+            "remediation_executed_by_validate": False,
+            "rollback_executed_by_validate": False,
+            "cleanup_executed": False,
+            "docker_compose_executed": False,
+            "production_mutation_recorded": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+            "natural_language_execution": False,
+        },
+        "warnings": [],
+    }
+    if not jpath.exists():
+        out["status"] = "not_found"
+        out["warnings"] = ["bundle not found"]
+    else:
+        try:
+            payload = json.loads(jpath.read_text(encoding="utf-8"))
+            out["checks"]["json_parse"] = True
+            out["checks"]["schema_version"] = bool(payload.get("schema_version"))
+            out["checks"]["mode"] = payload.get("mode") == "disposable_remediation_lifecycle_bundle"
+            safe = payload.get("safety") or {}
+            out["checks"]["safety"] = all(
+                safe.get(k) is False
+                for k in [
+                    "shell_true",
+                    "arbitrary_command_execution",
+                    "natural_language_execution",
+                    "docker_compose_executed",
+                    "cleanup_executed",
+                ]
+            )
+            if not all(out["checks"].values()):
+                out["status"] = "failed"
+        except Exception as exc:
+            out["status"] = "error"
+            out["warnings"] = [f"bundle JSON unreadable: {exc}"]
+    if json_out:
+        typer.echo(json.dumps(out))
+    else:
+        console.print(f"Remediation bundle validate: {out['status']}")
+    if out["status"] != "ok":
+        raise typer.Exit(1)
+
+
 @remediation_app.command("status")
 def remediation_status(
     receipt_id: Annotated[str, typer.Argument()],
