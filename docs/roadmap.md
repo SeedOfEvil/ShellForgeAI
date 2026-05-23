@@ -726,3 +726,4 @@ explicitly `false`.
 - PR96 (May 23, 2026): added `remediation audit` read-only lifecycle visibility and safety audit summary (latest bundle linkage, artifact health warnings, strict JSON output, and invariant reporting with no remediation/rollback execution).
 
 - PR97: Read-only triage-to-remediation eligibility mapping (`remediation eligibility`) with explicit safety flags and plan-only command suggestions.
+- PR98 (May 23, 2026): Read-only remediation eligibility explain/report polish (`remediation eligibility --target <name> --explain [--json]`) with gate-by-gate blocker reasoning, labels found/missing, executor readiness, safe eligibility hints, strict JSON mode, and explicit no-mutation safety flags.

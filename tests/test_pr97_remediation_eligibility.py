@@ -103,3 +103,97 @@ def test_eligibility_empty_and_human_output(tmp_path, monkeypatch):
     assert "Blocked targets:" in rh.stdout
     assert "created no plan and executed nothing" in rh.stdout
     assert "execute --confirm" not in rh.stdout
+
+
+def test_eligibility_explain_json_eligible(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "shellforgeai.core.triage_ranking.collect_scene",
+        lambda: _scene(
+            [
+                {
+                    "name": "sfai-pr97-eligible",
+                    "labels": {
+                        "shellforgeai.disposable": "true",
+                        "shellforgeai.allow_restart": "true",
+                        "shellforgeai.scenario": "sfai-noisy-errors",
+                    },
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.triage_ranking.rank_scene",
+        lambda _: {"suspects": [_sus("sfai-pr97-eligible")]},
+    )
+    r = runner.invoke(
+        app,
+        ["remediation", "eligibility", "--target", "sfai-pr97-eligible", "--explain", "--json"],
+        env=_env(tmp_path),
+    )
+    assert r.exit_code == 0
+    p = json.loads(r.stdout)
+    assert p["mode"] == "remediation_eligibility_explain"
+    assert p["eligibility"]["state"] == "eligible_for_plan"
+    assert p["labels"]["found"]["shellforgeai.allow_restart"] == "true"
+    assert p["suggested_plan_command"].startswith("shellforgeai remediation plan --target")
+    assert "execute --confirm" not in r.stdout
+    assert p["safety"]["plan_created"] is False
+
+
+def test_eligibility_explain_blocked_and_human_safety(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "shellforgeai.core.triage_ranking.collect_scene",
+        lambda: _scene(
+            [{"name": "sfai-noisy-errors", "labels": {"shellforgeai.disposable": "true"}}]
+        ),
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.triage_ranking.rank_scene",
+        lambda _: {"suspects": [_sus("sfai-noisy-errors")]},
+    )
+    rj = runner.invoke(
+        app,
+        ["remediation", "eligibility", "--target", "sfai-noisy-errors", "--explain", "--json"],
+        env=_env(tmp_path),
+    )
+    assert rj.exit_code == 1
+    pj = json.loads(rj.stdout)
+    assert pj["labels"]["missing"] == ["shellforgeai.allow_restart=true"]
+    assert any(
+        g["name"] == "docker_disposable_executor_ready" and g["status"] == "blocked"
+        for g in pj["gates"]
+    )
+    assert "allow_restart=true" in pj["what_would_make_eligible"][0]
+    rh = runner.invoke(
+        app,
+        ["remediation", "eligibility", "--target", "sfai-noisy-errors", "--explain"],
+        env=_env(tmp_path),
+    )
+    assert "Safety:" in rh.stdout
+    assert "Labels found:" in rh.stdout
+    assert "Gates:" in rh.stdout
+    assert "Blocking reasons:" in rh.stdout
+    assert "What would make this eligible:" in rh.stdout
+    assert "no plan was created" in rh.stdout
+    assert "no remediation was executed" in rh.stdout
+    assert "execute --confirm" not in rh.stdout
+
+
+def test_eligibility_explain_production_guidance(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "shellforgeai.core.triage_ranking.collect_scene",
+        lambda: _scene([{"name": "shellforgeai", "labels": {}}]),
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.triage_ranking.rank_scene",
+        lambda _: {"suspects": [_sus("shellforgeai", "critical")]},
+    )
+    r = runner.invoke(
+        app,
+        ["remediation", "eligibility", "--target", "shellforgeai", "--explain", "--json"],
+        env=_env(tmp_path),
+    )
+    p = json.loads(r.stdout)
+    assert r.exit_code == 1
+    assert "production target refused" in p["eligibility"]["blocked_reasons"]
+    assert "allow_restart" not in " ".join(p["what_would_make_eligible"]).lower()

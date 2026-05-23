@@ -1356,7 +1356,8 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 ## PR97 operator flow (read-only remediation eligibility map)
 1. `shellforgeai triage docker`
 2. `shellforgeai remediation eligibility`
-3. `shellforgeai remediation plan --target <target> --scenario <scenario>` only if operator chooses
-4. `shellforgeai remediation validate <plan-id>`
-5. `shellforgeai remediation preflight <plan-id>`
-6. explicit `shellforgeai remediation execute <plan-id> --execute --confirm` only with approval
+3. `shellforgeai remediation eligibility --target <target> --explain`
+4. `shellforgeai remediation plan --target <target> --scenario <scenario>` only if operator chooses
+5. `shellforgeai remediation validate <plan-id>`
+6. `shellforgeai remediation preflight <plan-id>`
+7. explicit `shellforgeai remediation execute <plan-id> --execute --confirm` only with approval

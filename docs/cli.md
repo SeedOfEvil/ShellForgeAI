@@ -1102,6 +1102,9 @@ at least one warning, and `2` for an unknown profile.
 
 - `shellforgeai remediation plan --target sfai-noisy-errors --scenario sfai-noisy-errors [--json]` creates a dry-run disposable-only plan artifact with fingerprint, pre/post checks, rollback note, and explicit no-mutation safety flags.
 - `shellforgeai remediation eligibility [--target <name>] [--scenario sfai-noisy-errors] [--json]` maps current triage suspects to read-only remediation eligibility and executor readiness (proof / docker-disposable), explains blockers, and suggests safe **plan-only** next commands. It does **not** create plans and does **not** execute remediation.
+- `shellforgeai remediation eligibility --target <name> --explain [--json]` prints a read-only gate-by-gate eligibility explanation report (labels found/missing, failed gates, executor readiness, blocked reasons, what would make the target eligible, and safe next commands). In JSON mode it emits strict machine-parseable output with `mode=remediation_eligibility_explain`.
+- Eligible explain example: `shellforgeai remediation eligibility --target sfai-pr97-eligible --explain` includes `eligible_for_plan` and a safe `remediation plan` suggestion only.
+- Blocked explain example: `shellforgeai remediation eligibility --target shellforgeai --explain` shows production refusal and safe read-only diagnostics (never execute commands).
 - `shellforgeai remediation validate <plan-id> [--json]` validates kind/fingerprint/labels/safety fields and fails nonzero on unsafe plans.
 - `shellforgeai remediation execute <plan-id> --execute --confirm [--json]` runs a governed disposable remediation proof executor (not live Docker remediation) only after explicit confirmation and writes a receipt with pre/post state + verification.
 - `shellforgeai remediation status <receipt-id> [--json]` reports receipt verification and safety flags.
