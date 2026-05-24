@@ -10226,6 +10226,115 @@ def ops_report_export_validate(
         raise typer.Exit(1)
 
 
+def _render_ops_report_compare_human(
+    payload: dict[str, Any], *, top: int = 5, include_stable: bool = False
+) -> str:
+    summary = payload.get("summary") or {}
+    reports = payload.get("reports") or {}
+    lines = ["Ops report compare", "", "Reports:"]
+    lines.append(f"- before: {(reports.get('before') or {}).get('id', 'unknown')}")
+    lines.append(f"- after:  {(reports.get('after') or {}).get('id', 'unknown')}")
+    lines.extend(["", "Scene drift:"])
+    for key in (
+        "suspects_before",
+        "suspects_after",
+        "new",
+        "resolved_or_missing",
+        "escalated",
+        "improved",
+        "stable",
+    ):
+        lines.append(f"- {key.replace('_', ' ')}: {summary.get(key, 0)}")
+    lines.extend(["", "Top changes:"])
+    changes = (
+        (payload.get("severity_escalations") or [])
+        + (payload.get("severity_improvements") or [])
+        + (payload.get("rank_changes") or [])
+    )
+    if not changes:
+        lines.append("- none")
+    for idx, ch in enumerate(changes[: max(1, top)], start=1):
+        lines.append(f"{idx}. {ch.get('name')}")
+        lines.append(f"   severity: {ch.get('before_severity')} -> {ch.get('after_severity')}")
+        lines.append(f"   rank: {ch.get('before_rank')} -> {ch.get('after_rank')}")
+    lines.extend(["", "Remediation lane:"])
+    lane = payload.get("remediation_lane") or {}
+    lines.append(f"- before: {lane.get('before')}")
+    lines.append(f"- after: {lane.get('after')}")
+    lines.append("- no execution recorded")
+    lines.extend(["", "Safety:", "- read_only=true", "- mutation_performed=false"])
+    if include_stable and payload.get("stable_suspects"):
+        lines.extend(["", "Stable suspects:"])
+        for name in payload.get("stable_suspects") or []:
+            lines.append(f"- {name}")
+    lines.extend(["", "Safe next commands:"])
+    for cmd in (payload.get("safe_next_commands") or [])[:5]:
+        lines.append(f"- {cmd}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@ops_report_app.command("compare")
+def ops_report_compare(
+    before_ref: Annotated[str, typer.Argument(help="Before report id or path")],
+    after_ref: Annotated[str, typer.Argument(help="After report id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+    top: Annotated[int, typer.Option("--top", min=1)] = 5,
+) -> None:
+    from shellforgeai.core.ops_report_artifact import compare_ops_reports
+
+    payload = compare_ops_reports(
+        before_ref,
+        after_ref,
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    if payload.get("status") != "ok":
+        console.print("Ops report compare failed")
+        for warning in payload.get("warnings") or []:
+            console.print(f"- {warning}")
+        raise typer.Exit(1)
+    console.print(
+        _render_ops_report_compare_human(payload, top=top, include_stable=include_stable), end=""
+    )
+
+
+@ops_report_app.command("compare-export")
+def ops_report_compare_export(
+    before_ref: Annotated[str, typer.Argument(help="Before export id or path")],
+    after_ref: Annotated[str, typer.Argument(help="After export id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+    top: Annotated[int, typer.Option("--top", min=1)] = 5,
+) -> None:
+    from shellforgeai.core.ops_report_artifact import compare_ops_report_exports
+
+    payload = compare_ops_report_exports(
+        before_ref,
+        after_ref,
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    if payload.get("status") != "ok":
+        console.print("Ops report export compare failed")
+        for warning in payload.get("warnings") or []:
+            console.print(f"- {warning}")
+        raise typer.Exit(1)
+    console.print(
+        _render_ops_report_compare_human(payload, top=top, include_stable=include_stable), end=""
+    )
+
+
 @self_test_app.command("commands")
 def self_test_commands(
     json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only")] = False,

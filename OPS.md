@@ -1391,6 +1391,9 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 1. `shellforgeai ops report`
 2. `shellforgeai ops report --save`
 3. `shellforgeai ops report validate <id>`
-4. `shellforgeai ops report export <id>`
-5. `shellforgeai ops report export-validate <path>`
+4. `shellforgeai ops report compare <old> <new>`
+5. `shellforgeai triage docker detail <changed-suspect>`
+6. `shellforgeai remediation eligibility --target <target> --explain`
+7. `shellforgeai ops report export <id>`
+8. `shellforgeai ops report export-validate <path>`
 6. Hand off the export bundle
