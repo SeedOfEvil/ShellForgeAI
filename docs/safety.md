@@ -994,4 +994,4 @@ Diagnose enrichment for known Docker/battle-lab targets is read-only: it does no
 
 
 ### Ops report handoff artifacts
-`ops report --save` and `ops report export` only write ShellForgeAI-owned metadata bundles (JSON/Markdown/manifest/checksums) under the configured data directory. They do not create plans and do not execute remediation, rollback, cleanup, Docker, or Compose mutation. `ops report validate` and `ops report export-validate` are read-only verification commands.
+`ops report --save` and `ops report export` only write ShellForgeAI-owned metadata bundles (JSON/Markdown/manifest/checksums) under the configured data directory. They do not create plans and do not execute remediation, rollback, cleanup, Docker, or Compose mutation. `ops report validate` and `ops report export-validate` are read-only verification commands. `ops report compare` and `ops report compare-export` are also read-only: they validate both inputs, compare drift (suspects/remediation-lane/safety), surface safety-flag false→true drift warnings, and never create plans or execute remediation/rollback/cleanup/restart.

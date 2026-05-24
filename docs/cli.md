@@ -1107,6 +1107,10 @@ at least one warning, and `2` for an unknown profile.
 - `shellforgeai ops report validate <report-id-or-report-directory-path>`
 - `shellforgeai ops report export <report-id-or-path>`
 - `shellforgeai ops report export-validate <export-id-or-path>`
+- `shellforgeai ops report compare <before> <after>`
+- `shellforgeai ops report compare <before> <after> --json`
+- `shellforgeai ops report compare <before> <after> --only-changed`
+- `shellforgeai ops report compare-export <before-export> <after-export>`
 
 ## PR89 disposable remediation proof
 

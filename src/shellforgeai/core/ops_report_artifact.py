@@ -21,6 +21,7 @@ FORBIDDEN_COMMAND_FRAGMENTS = (
 
 REQUIRED_REPORT_FILES = ("ops-report.json", "ops-report.md", "manifest.json")
 REQUIRED_EXPORT_FILES = (*REQUIRED_REPORT_FILES, "export-manifest.json")
+SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
 def _now_stamp() -> str:
@@ -345,3 +346,257 @@ def validate_ops_report_export(export_ref: str, data_dir: Path) -> dict[str, Any
         "checks": checks,
         "warnings": [],
     }
+
+
+def _resolve_report_payload(report_ref: str, data_dir: Path) -> tuple[dict[str, Any], Path | None]:
+    root = data_dir / "ops_reports"
+    d = _resolve_ref(report_ref, root)
+    if d is None:
+        return {"status": "error"}, None
+    if not d.exists():
+        return {"status": "not_found"}, None
+    if any(not (d / f).exists() for f in REQUIRED_REPORT_FILES):
+        return {"status": "failed"}, None
+    try:
+        report = json.loads((d / "ops-report.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {"status": "error"}, None
+    if report.get("mode") != "ops_report":
+        return {"status": "failed"}, None
+    return report, d
+
+
+def _resolve_export_payload(export_ref: str, data_dir: Path) -> tuple[dict[str, Any], Path | None]:
+    v = validate_ops_report_export(export_ref, data_dir)
+    if v.get("status") != "ok":
+        return v, None
+    export_path = Path((v.get("export") or {}).get("path") or "")
+    report = json.loads((export_path / "ops-report.json").read_text(encoding="utf-8"))
+    return report, export_path
+
+
+def _suspect_index(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for suspect in report.get("suspects") or []:
+        name = (suspect.get("name") or "").strip()
+        if name:
+            out[name] = suspect
+    return out
+
+
+def _safe_next_commands(target: str) -> list[str]:
+    return [
+        "shellforgeai ops report --json",
+        f"shellforgeai ops report validate {target}",
+        f"shellforgeai triage docker detail {target}",
+        f"shellforgeai remediation eligibility --target {target} --explain",
+        "shellforgeai remediation self-test --profile standard --json",
+        "shellforgeai remediation audit --latest --json",
+    ]
+
+
+def compare_ops_reports(
+    before_ref: str,
+    after_ref: str,
+    data_dir: Path,
+    *,
+    only_changed: bool = False,
+    include_stable: bool = False,
+) -> dict[str, Any]:
+    before, before_path = _resolve_report_payload(before_ref, data_dir)
+    if before_path is None:
+        return {
+            "schema_version": "1",
+            "mode": "ops_report_compare",
+            "status": before.get("status"),
+            "warnings": ["before report validation failed"],
+            "safety": _safety(),
+            "read_only": True,
+            "mutation_performed": False,
+        }
+    after, after_path = _resolve_report_payload(after_ref, data_dir)
+    if after_path is None:
+        return {
+            "schema_version": "1",
+            "mode": "ops_report_compare",
+            "status": after.get("status"),
+            "warnings": ["after report validation failed"],
+            "safety": _safety(),
+            "read_only": True,
+            "mutation_performed": False,
+        }
+    return _compare_payload(
+        before,
+        after,
+        before_path.name,
+        str(before_path),
+        after_path.name,
+        str(after_path),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+
+
+def compare_ops_report_exports(
+    before_ref: str,
+    after_ref: str,
+    data_dir: Path,
+    *,
+    only_changed: bool = False,
+    include_stable: bool = False,
+) -> dict[str, Any]:
+    before, before_path = _resolve_export_payload(before_ref, data_dir)
+    if before_path is None:
+        return {
+            "schema_version": "1",
+            "mode": "ops_report_compare",
+            "status": before.get("status"),
+            "warnings": ["before export validation failed"],
+            "safety": _safety(),
+            "read_only": True,
+            "mutation_performed": False,
+        }
+    after, after_path = _resolve_export_payload(after_ref, data_dir)
+    if after_path is None:
+        return {
+            "schema_version": "1",
+            "mode": "ops_report_compare",
+            "status": after.get("status"),
+            "warnings": ["after export validation failed"],
+            "safety": _safety(),
+            "read_only": True,
+            "mutation_performed": False,
+        }
+    return _compare_payload(
+        before,
+        after,
+        before_path.name,
+        str(before_path),
+        after_path.name,
+        str(after_path),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+
+
+def _compare_payload(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    before_id: str,
+    before_path: str,
+    after_id: str,
+    after_path: str,
+    *,
+    only_changed: bool,
+    include_stable: bool,
+) -> dict[str, Any]:
+    bidx = _suspect_index(before)
+    aidx = _suspect_index(after)
+    names = sorted(set(bidx) | set(aidx))
+    escalations = []
+    improvements = []
+    rank_changes = []
+    confidence_changes = []
+    class_changes = []
+    stable = []
+    new_suspects = []
+    missing = []
+    warnings = []
+    for name in names:
+        b = bidx.get(name)
+        a = aidx.get(name)
+        if b is None:
+            new_suspects.append(name)
+            continue
+        if a is None:
+            missing.append(name)
+            continue
+        bs, as_ = str(b.get("severity", "")), str(a.get("severity", ""))
+        entry = {
+            "name": name,
+            "before_rank": b.get("rank"),
+            "after_rank": a.get("rank"),
+            "before_severity": bs,
+            "after_severity": as_,
+            "before_confidence": b.get("confidence"),
+            "after_confidence": a.get("confidence"),
+            "before_classes": b.get("classes") or [],
+            "after_classes": a.get("classes") or [],
+            "change_summary": [],
+            "suggested_read_only_command": f"shellforgeai triage docker detail {name}",
+        }
+        changed = False
+        if SEVERITY_ORDER.get(as_, 0) > SEVERITY_ORDER.get(bs, 0):
+            escalations.append(entry)
+            changed = True
+        elif SEVERITY_ORDER.get(as_, 0) < SEVERITY_ORDER.get(bs, 0):
+            improvements.append(entry)
+            changed = True
+        if b.get("rank") != a.get("rank"):
+            rank_changes.append(entry)
+            changed = True
+        if b.get("confidence") != a.get("confidence"):
+            confidence_changes.append(entry)
+            changed = True
+        if sorted(entry["before_classes"]) != sorted(entry["after_classes"]):
+            class_changes.append(entry)
+            changed = True
+        if not changed:
+            stable.append(name)
+    bsafety = before.get("safety") or {}
+    asafety = after.get("safety") or {}
+    for k, v in _safety().items():
+        if v is False and bsafety.get(k) is False and asafety.get(k) is True:
+            warnings.append(f"critical safety drift: {k} changed false->true")
+    suspect_target = (
+        escalations or rank_changes or confidence_changes or class_changes or improvements
+    )
+    target_name = (
+        suspect_target[0].get("name") if suspect_target else (names[0] if names else "target")
+    )
+    payload = {
+        "schema_version": "1",
+        "mode": "ops_report_compare",
+        "status": "ok",
+        "read_only": True,
+        "mutation_performed": False,
+        "reports": {
+            "before": {"id": before_id, "path": before_path},
+            "after": {"id": after_id, "path": after_path},
+        },
+        "summary": {
+            "suspects_before": len(bidx),
+            "suspects_after": len(aidx),
+            "new": len(new_suspects),
+            "resolved_or_missing": len(missing),
+            "escalated": len(escalations),
+            "improved": len(improvements),
+            "rank_changed": len(rank_changes),
+            "stable": len(stable),
+            "remediation_lane_before": (before.get("remediation_lane") or {}).get("status"),
+            "remediation_lane_after": (after.get("remediation_lane") or {}).get("status"),
+        },
+        "new_suspects": new_suspects,
+        "resolved_or_missing_suspects": missing,
+        "severity_escalations": escalations,
+        "severity_improvements": improvements,
+        "rank_changes": rank_changes,
+        "confidence_changes": confidence_changes,
+        "class_changes": class_changes,
+        "stable_suspects": [] if only_changed else stable,
+        "remediation_lane": {
+            "changed": (
+                (before.get("remediation_lane") or {}).get("status")
+                != (after.get("remediation_lane") or {}).get("status")
+            ),
+            "before": (before.get("remediation_lane") or {}).get("status"),
+            "after": (after.get("remediation_lane") or {}).get("status"),
+            "notes": [],
+        },
+        "safety": _safety(),
+        "safe_next_commands": _safe_next_commands(target_name),
+        "warnings": warnings,
+    }
+    if include_stable and only_changed is False:
+        payload["stable_suspects"] = stable
+    return payload

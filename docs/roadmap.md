@@ -741,3 +741,5 @@ PR100 (May 23, 2026): normalized canonical safe-next command suggestions across 
 - PR106 (May 24, 2026): added deterministic pre-model ask mutation-refusal routing for obvious natural-language mutation intents (restart/stop/remove/delete/prune/fix/remediate/execute/apply/rollback/cleanup/compose mutation/system mutation terms), with explicit no-action wording and canonical read-only command suggestions; preserves PR105 deterministic ops-report ask routing and keeps execution/mutation surfaces unchanged.
 
 - PR107 (May 24, 2026): added read-only ops report artifact handoff workflow (`ops report --save`, `ops report validate`, `ops report export`, `ops report export-validate`) with manifest/checksum safety validation and strict JSON outputs.
+
+- PR108 (May 24, 2026): added read-only ops report drift comparison (`ops report compare` plus `compare-export`) with strict JSON `mode=ops_report_compare`, suspect/new-resolved/escalation/improvement/rank-confidence-class drift categories, remediation-lane drift, and safety false→true warning surfacing; no mutation execution added.
