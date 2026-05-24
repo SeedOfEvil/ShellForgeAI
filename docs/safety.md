@@ -901,6 +901,14 @@ test suite drives the scoring engine directly via
 `triage_ranking.collect_scene` patches, so battle-lab regression
 coverage runs without a live Docker daemon and never mutates the host.
 
+PR105 extends this safety model with deterministic ask-to-ops-report routing for
+common operator prompts (`it's 2am, what is on fire?`, `docker is broken, what
+should I check first?`, `show me the ops report`, `summarize current docker
+incidents`). This route bypasses model-backed ask/auth and runs the same
+read-only report builder as `shellforgeai ops report`. It still reports
+`natural_language_execution=false` because natural language only selected a
+deterministic read-only report path; no mutation path was executed.
+
 ## PR83 triage detail drilldown safety
 
 `shellforgeai triage docker detail` is read-only evidence drilldown. It reuses deterministic triage scoring, selects one suspect by name or rank, and reports evidence/why/next read-only checks. It never restarts/stops/removes containers, never runs compose mutation, never executes cleanup/apply/mission, and never creates proposals or missions. Natural-language mutation requests remain refused.
