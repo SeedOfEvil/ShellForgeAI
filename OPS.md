@@ -1367,3 +1367,12 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 5. `shellforgeai remediation validate <plan-id>`
 6. `shellforgeai remediation preflight <plan-id>`
 7. explicit `shellforgeai remediation execute <plan-id> --execute --confirm` only with approval
+
+
+2AM flow (read-only first):
+1. `shellforgeai remediation self-test --profile quick`
+2. `shellforgeai triage docker`
+3. `shellforgeai diagnose <target>` or `shellforgeai triage docker detail <target>`
+4. `shellforgeai remediation eligibility --target <target> --explain`
+5. plan only if operator chooses
+6. validate/preflight/execute only through governed lane

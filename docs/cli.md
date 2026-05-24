@@ -1154,3 +1154,9 @@ Safety: production `shellforgeai`, unlabeled/non-allowlisted targets, broad sele
 Examples:
 - `shellforgeai remediation audit`
 - `shellforgeai remediation audit --latest --json`
+
+
+### Diagnose + Docker triage cohesion
+When `shellforgeai diagnose <target>` matches a known Docker/battle-lab container, output may include deterministic triage context (severity/confidence/classes/evidence summary), a container-scope note, and canonical read-only next commands:
+- `shellforgeai triage docker detail <target>`
+- `shellforgeai remediation eligibility --target <target> --explain`
