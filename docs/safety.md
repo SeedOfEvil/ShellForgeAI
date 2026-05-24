@@ -991,3 +991,7 @@ Diagnose enrichment for known Docker/battle-lab targets is read-only: it does no
 - Refusal output states that no action was performed.
 - Refusals only suggest canonical read-only alternatives.
 - `ask` never executes remediation/rollback/cleanup/Docker/Compose mutation.
+
+
+### Ops report handoff artifacts
+`ops report --save` and `ops report export` only write ShellForgeAI-owned metadata bundles (JSON/Markdown/manifest/checksums) under the configured data directory. They do not create plans and do not execute remediation, rollback, cleanup, Docker, or Compose mutation. `ops report validate` and `ops report export-validate` are read-only verification commands.

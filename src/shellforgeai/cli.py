@@ -241,6 +241,7 @@ mission_app.add_typer(mission_restart_app, name="restart")
 mission_app.add_typer(mission_compose_restart_app, name="compose-restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 ops_app = typer.Typer(help="Read-only operator status board.")
+ops_report_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 self_test_app = typer.Typer(
     help="Safe read-only command coverage harness (PR79). No mutation, no execute.",
 )
@@ -266,6 +267,7 @@ app.add_typer(guard_app, name="guard")
 app.add_typer(mission_app, name="mission")
 app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
+ops_app.add_typer(ops_report_app, name="report")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(triage_app, name="triage")
 app.add_typer(remediation_app, name="remediation")
@@ -8522,6 +8524,19 @@ def _build_ops_report_payload(
     suspects = list(ranked.get("suspects") or [])[:top]
     out_suspects: list[dict[str, Any]] = []
     safe_next: list[str] = []
+
+    def _scenario_for_suspect(classes: list[str]) -> str:
+        lowered = {str(c).lower() for c in classes}
+        if "disk_pressure" in lowered:
+            return "sfai-disk-pressure"
+        if "bad_http" in lowered:
+            return "sfai-bad-http"
+        if "crashloop" in lowered or "restart_storm" in lowered:
+            return "sfai-crashloop"
+        if "permission_denied" in lowered:
+            return "sfai-permission-denied"
+        return "sfai-noisy-errors"
+
     for suspect in suspects:
         name = str(suspect.get("name") or "")
         evidence_summary = [
@@ -8539,22 +8554,49 @@ def _build_ops_report_payload(
         }
         if include_remediation:
             label_map = {}
+            target_found = False
             for row in scene.get("containers", []):
                 if str(row.get("name") or "") == name:
                     label_map = row.get("labels") if isinstance(row.get("labels"), dict) else {}
+                    target_found = True
                     break
-            explain = build_eligibility_explain_report(target=name, labels=label_map)
-            gates = (explain.get("gates") or {}).get("results") or []
-            remediation = {
-                "eligibility": ((explain.get("eligibility") or {}).get("state") or "unknown"),
-                "blocked_reasons": [
-                    str(g.get("reason")) for g in gates if not bool(g.get("ok")) and g.get("reason")
-                ],
-                "proof_ready": bool((explain.get("eligibility") or {}).get("proof_ready")),
-                "docker_disposable_ready": bool(
-                    (explain.get("eligibility") or {}).get("docker_disposable_ready")
-                ),
-            }
+            try:
+                explain = build_eligibility_explain_report(
+                    target=name,
+                    scenario=_scenario_for_suspect(list(suspect.get("classes") or [])),
+                    labels=label_map,
+                    target_found=target_found,
+                    explicit_target=True,
+                )
+                gates = list(explain.get("gates") or [])
+                remediation = {
+                    "eligibility": str(
+                        (explain.get("eligibility") or {}).get("state") or "unknown"
+                    ),
+                    "blocked_reasons": [
+                        str(g.get("reason"))
+                        for g in gates
+                        if str(g.get("status")) == "failed" and g.get("reason")
+                    ],
+                    "proof_ready": bool(
+                        ((explain.get("eligibility") or {}).get("executors") or {})
+                        .get("proof", {})
+                        .get("ready")
+                    ),
+                    "docker_disposable_ready": bool(
+                        ((explain.get("eligibility") or {}).get("executors") or {})
+                        .get("docker-disposable", {})
+                        .get("ready")
+                    ),
+                }
+            except Exception as exc:
+                warnings.append(f"remediation enrichment unavailable for {name}: {exc}")
+                remediation = {
+                    "eligibility": "unknown",
+                    "blocked_reasons": ["remediation enrichment unavailable"],
+                    "proof_ready": False,
+                    "docker_disposable_ready": False,
+                }
         out_suspects.append(
             {
                 "rank": suspect.get("rank"),
@@ -10049,20 +10091,39 @@ def ops_status(json_out: Annotated[bool, typer.Option("--json")] = False) -> Non
     console.print("- apply gate: required")
 
 
-@ops_app.command("report")
+@ops_report_app.callback()
 def ops_report(
+    ctx: typer.Context,
     json_out: Annotated[bool, typer.Option("--json")] = False,
     top: Annotated[int, typer.Option("--top", min=1)] = 5,
     include_details: Annotated[bool, typer.Option("--include-details")] = False,
     include_remediation: Annotated[bool, typer.Option("--include-remediation")] = False,
     include_timeline: Annotated[bool, typer.Option("--include-timeline")] = False,
+    save: Annotated[bool, typer.Option("--save")] = False,
 ) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
     payload = _build_ops_report_payload(
         top=top,
         include_details=include_details,
         include_remediation=include_remediation,
         include_timeline=include_timeline,
     )
+    if save:
+        from shellforgeai.core.ops_report_artifact import save_ops_report
+
+        saved = save_ops_report(
+            payload,
+            Path(load_settings().app.data_dir),
+            source_command="shellforgeai ops report --save",
+        )
+        if json_out:
+            typer.echo(json.dumps(saved))
+            return
+        console.print("Ops report saved")
+        console.print(f"- id: {saved.get('report_id')}")
+        console.print(f"- path: {saved.get('report_path')}")
+        return
     if json_out:
         typer.echo(json.dumps(payload))
         return
@@ -10091,6 +10152,78 @@ def ops_report(
     for idx, cmd in enumerate(payload["safe_next_commands"][:5], start=1):
         lines.append(f"{idx}. {cmd}")
     typer.echo("\n".join(lines).rstrip() + "\n")
+
+
+@ops_report_app.command("validate")
+def ops_report_validate(
+    report_ref: Annotated[str, typer.Argument(help="Report id or report directory path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.ops_report_artifact import validate_ops_report
+
+    payload = validate_ops_report(report_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    console.print(
+        "Ops report validation passed"
+        if payload.get("status") == "ok"
+        else "Ops report validation failed"
+    )
+    for k, v in (payload.get("checks") or {}).items():
+        console.print(f"- {k}: {'ok' if v else 'failed'}")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@ops_report_app.command("export")
+def ops_report_export(
+    report_ref: Annotated[str, typer.Argument(help="Report id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.ops_report_artifact import export_ops_report
+
+    payload = export_ops_report(report_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "exported" else 1)
+    if payload.get("status") != "exported":
+        console.print("Ops report export failed")
+        for w in payload.get("warnings") or []:
+            console.print(f"- {w}")
+        raise typer.Exit(1)
+    ex = payload.get("export") or {}
+    src = payload.get("source_report") or {}
+    console.print(
+        "Ops report export created"
+        if not payload.get("existing")
+        else "Ops report export already exists (reused)"
+    )
+    console.print(f"- report_id: {src.get('id')}")
+    console.print(f"- export_id: {ex.get('id')}")
+    console.print(f"- path: {ex.get('path')}")
+
+
+@ops_report_app.command("export-validate")
+def ops_report_export_validate(
+    export_ref: Annotated[str, typer.Argument(help="Export id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.ops_report_artifact import validate_ops_report_export
+
+    payload = validate_ops_report_export(export_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    console.print(
+        "Ops report export validation passed"
+        if payload.get("status") == "ok"
+        else "Ops report export validation failed"
+    )
+    for k, v in (payload.get("checks") or {}).items():
+        console.print(f"- {k}: {'ok' if v else 'failed'}")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
 
 
 @self_test_app.command("commands")
