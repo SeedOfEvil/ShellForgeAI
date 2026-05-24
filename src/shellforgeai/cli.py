@@ -75,6 +75,7 @@ from shellforgeai.core.ask_routing import (
     is_lab_restart_ask_intent,
     is_lab_restart_verification_ask_intent,
     is_mission_compose_context_query,
+    is_ops_report_ask,
     is_restart_proposal_compose_context_query,
     is_triage_mutation_intent,
     network_reachability_brief,
@@ -8498,6 +8499,141 @@ def _handle_broad_triage_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _build_ops_report_payload(
+    *,
+    top: int = 5,
+    include_details: bool = False,
+    include_remediation: bool = False,
+    include_timeline: bool = False,
+) -> dict[str, Any]:
+    from shellforgeai.core import triage_ranking
+    from shellforgeai.core.disposable_remediation import (
+        build_eligibility_explain_report,
+        build_remediation_audit_payload,
+    )
+    from shellforgeai.core.self_test import run_self_test_commands
+
+    settings = load_settings()
+    profile = load_profile(settings.app.default_profile, Path.cwd())
+    session = build_session_context(settings, profile, mode="cli", cwd=Path.cwd())
+    warnings: list[str] = []
+    scene = triage_ranking.collect_scene()
+    ranked = triage_ranking.rank_scene(scene)
+    suspects = list(ranked.get("suspects") or [])[:top]
+    out_suspects: list[dict[str, Any]] = []
+    safe_next: list[str] = []
+    for suspect in suspects:
+        name = str(suspect.get("name") or "")
+        evidence_summary = [
+            f"{ev.get('type')}: {ev.get('value')}" for ev in (suspect.get("evidence") or [])
+        ]
+        if not include_details:
+            evidence_summary = evidence_summary[:3]
+        suspect_safe = [triage_detail_command(name), remediation_eligibility_explain_command(name)]
+        safe_next.extend(suspect_safe)
+        remediation = {
+            "eligibility": "unknown",
+            "blocked_reasons": [],
+            "proof_ready": False,
+            "docker_disposable_ready": False,
+        }
+        if include_remediation:
+            label_map = {}
+            for row in scene.get("containers", []):
+                if str(row.get("name") or "") == name:
+                    label_map = row.get("labels") if isinstance(row.get("labels"), dict) else {}
+                    break
+            explain = build_eligibility_explain_report(target=name, labels=label_map)
+            gates = (explain.get("gates") or {}).get("results") or []
+            remediation = {
+                "eligibility": ((explain.get("eligibility") or {}).get("state") or "unknown"),
+                "blocked_reasons": [
+                    str(g.get("reason")) for g in gates if not bool(g.get("ok")) and g.get("reason")
+                ],
+                "proof_ready": bool((explain.get("eligibility") or {}).get("proof_ready")),
+                "docker_disposable_ready": bool(
+                    (explain.get("eligibility") or {}).get("docker_disposable_ready")
+                ),
+            }
+        out_suspects.append(
+            {
+                "rank": suspect.get("rank"),
+                "name": name,
+                "severity": suspect.get("severity"),
+                "confidence": suspect.get("confidence"),
+                "classes": suspect.get("classes") or [],
+                "evidence_summary": evidence_summary,
+                "safe_next_commands": suspect_safe,
+                "remediation": remediation,
+            }
+        )
+    safe_next.extend(
+        [
+            remediation_self_test_command(profile="standard", json=True),
+            remediation_audit_latest_command(json=True),
+        ]
+    )
+    safe_next = list(dict.fromkeys(safe_next))
+    self_test_quick = run_self_test_commands(profile="quick")
+    self_test_standard = run_self_test_commands(profile="standard")
+    remediation_lane = {
+        "self_test_quick": "passed" if self_test_quick.get("status") == "ok" else "warn",
+        "self_test_standard": "passed" if self_test_standard.get("status") == "ok" else "warn",
+        "self_test_full": "unknown",
+        "latest_audit": "unknown",
+        "notes": [],
+    }
+    if self_test_quick.get("warnings"):
+        remediation_lane["notes"].extend(self_test_quick.get("warnings") or [])
+    if self_test_standard.get("warnings"):
+        remediation_lane["notes"].extend(self_test_standard.get("warnings") or [])
+    audit_payload = build_remediation_audit_payload(session.data_dir, latest_only=True)
+    remediation_lane["latest_audit"] = str(audit_payload.get("status") or "unknown")
+    if audit_payload.get("status") == "empty":
+        remediation_lane["notes"].append("no lifecycle artifacts found")
+    if include_timeline:
+        timeline = triage_ranking.build_snapshot_timeline(session.data_dir)
+        if timeline.get("status") != "ok":
+            warnings.extend(timeline.get("warnings") or [])
+    summary = ranked.get("summary") or {}
+    return {
+        "schema_version": "1",
+        "mode": "ops_report",
+        "status": ("warn" if warnings else ("ok" if suspects else "empty")),
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": {
+            "containers_seen": int(
+                summary.get("containers_seen", len(scene.get("containers") or []))
+            ),
+            "suspects_ranked": len(suspects),
+            "critical": int(summary.get("critical", 0)),
+            "high": int(summary.get("high", 0)),
+            "remediation_lane_status": "warn" if remediation_lane["notes"] else "ok",
+        },
+        "suspects": out_suspects,
+        "remediation_lane": remediation_lane,
+        "safe_next_commands": safe_next,
+        "warnings": warnings,
+        "safety": {
+            "read_only": True,
+            "mutation_performed": False,
+            "plan_created": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "cleanup_executed": False,
+            "proposal_created": False,
+            "mission_created": False,
+            "apply_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+        },
+    }
+
+
 def _handle_actions_ask(runtime: RuntimeContext, question: str) -> bool:
     """Handle actions compile/show/run asks. No execution."""
     intent = is_actions_ask_intent(question)
@@ -8836,6 +8972,12 @@ def ask(
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):
+            return
+        if is_ops_report_ask(question):
+            payload = _build_ops_report_payload()
+            console.print("Read-only ops report (deterministic ask routing):")
+            console.print("")
+            typer.echo(_render_broad_triage_answer(payload))
             return
         if _handle_broad_triage_ask(runtime, question):
             return
@@ -9816,141 +9958,12 @@ def ops_report(
     include_remediation: Annotated[bool, typer.Option("--include-remediation")] = False,
     include_timeline: Annotated[bool, typer.Option("--include-timeline")] = False,
 ) -> None:
-    from shellforgeai.core import triage_ranking
-    from shellforgeai.core.disposable_remediation import (
-        build_eligibility_explain_report,
-        build_remediation_audit_payload,
+    payload = _build_ops_report_payload(
+        top=top,
+        include_details=include_details,
+        include_remediation=include_remediation,
+        include_timeline=include_timeline,
     )
-    from shellforgeai.core.self_test import run_self_test_commands
-
-    settings = load_settings()
-    profile = load_profile(settings.app.default_profile, Path.cwd())
-    session = build_session_context(settings, profile, mode="cli", cwd=Path.cwd())
-    warnings: list[str] = []
-    scene = triage_ranking.collect_scene()
-    ranked = triage_ranking.rank_scene(scene)
-    suspects = list(ranked.get("suspects") or [])[:top]
-
-    out_suspects: list[dict[str, Any]] = []
-    safe_next: list[str] = []
-    for suspect in suspects:
-        name = str(suspect.get("name") or "")
-        evidence_summary = [
-            f"{ev.get('type')}: {ev.get('value')}" for ev in (suspect.get("evidence") or [])
-        ]
-        if not include_details:
-            evidence_summary = evidence_summary[:3]
-        suspect_safe = [
-            triage_detail_command(name),
-            remediation_eligibility_explain_command(name),
-        ]
-        safe_next.extend(suspect_safe)
-        remediation = {
-            "eligibility": "unknown",
-            "blocked_reasons": [],
-            "proof_ready": False,
-            "docker_disposable_ready": False,
-        }
-        if include_remediation:
-            labels = scene.get("containers", [])
-            label_map = {}
-            for row in labels:
-                if str(row.get("name") or "") == name:
-                    label_map = row.get("labels") if isinstance(row.get("labels"), dict) else {}
-                    break
-            explain = build_eligibility_explain_report(target=name, labels=label_map)
-            gates = (explain.get("gates") or {}).get("results") or []
-            blocked = [
-                str(g.get("reason")) for g in gates if not bool(g.get("ok")) and g.get("reason")
-            ]
-            remediation = {
-                "eligibility": ((explain.get("eligibility") or {}).get("state") or "unknown"),
-                "blocked_reasons": blocked,
-                "proof_ready": bool((explain.get("eligibility") or {}).get("proof_ready")),
-                "docker_disposable_ready": bool(
-                    (explain.get("eligibility") or {}).get("docker_disposable_ready")
-                ),
-            }
-        out_suspects.append(
-            {
-                "rank": suspect.get("rank"),
-                "name": name,
-                "severity": suspect.get("severity"),
-                "confidence": suspect.get("confidence"),
-                "classes": suspect.get("classes") or [],
-                "evidence_summary": evidence_summary,
-                "safe_next_commands": suspect_safe,
-                "remediation": remediation,
-            }
-        )
-    safe_next.extend(
-        [
-            remediation_self_test_command(profile="standard", json=True),
-            remediation_audit_latest_command(json=True),
-        ]
-    )
-    safe_next = list(dict.fromkeys(safe_next))
-    self_test_quick = run_self_test_commands(profile="quick")
-    self_test_standard = run_self_test_commands(profile="standard")
-    remediation_lane = {
-        "self_test_quick": "passed" if self_test_quick.get("status") == "ok" else "warn",
-        "self_test_standard": "passed" if self_test_standard.get("status") == "ok" else "warn",
-        "self_test_full": "unknown",
-        "latest_audit": "unknown",
-        "notes": [],
-    }
-    if self_test_quick.get("warnings"):
-        remediation_lane["notes"].extend(self_test_quick.get("warnings") or [])
-    if self_test_standard.get("warnings"):
-        remediation_lane["notes"].extend(self_test_standard.get("warnings") or [])
-    audit_payload = build_remediation_audit_payload(session.data_dir, latest_only=True)
-    remediation_lane["latest_audit"] = str(audit_payload.get("status") or "unknown")
-    if audit_payload.get("status") == "empty":
-        remediation_lane["notes"].append("no lifecycle artifacts found")
-    if include_timeline:
-        timeline = triage_ranking.build_snapshot_timeline(session.data_dir)
-        if timeline.get("status") != "ok":
-            warnings.extend(timeline.get("warnings") or [])
-    summary = ranked.get("summary") or {}
-    status = "ok" if suspects else "empty"
-    if warnings:
-        status = "warn"
-    payload = {
-        "schema_version": "1",
-        "mode": "ops_report",
-        "status": status,
-        "read_only": True,
-        "mutation_performed": False,
-        "summary": {
-            "containers_seen": int(
-                summary.get("containers_seen", len(scene.get("containers") or []))
-            ),
-            "suspects_ranked": len(suspects),
-            "critical": int(summary.get("critical", 0)),
-            "high": int(summary.get("high", 0)),
-            "remediation_lane_status": "warn" if remediation_lane["notes"] else "ok",
-        },
-        "suspects": out_suspects,
-        "remediation_lane": remediation_lane,
-        "safe_next_commands": safe_next,
-        "warnings": warnings,
-        "safety": {
-            "read_only": True,
-            "mutation_performed": False,
-            "plan_created": False,
-            "remediation_executed": False,
-            "rollback_executed": False,
-            "cleanup_executed": False,
-            "proposal_created": False,
-            "mission_created": False,
-            "apply_executed": False,
-            "docker_compose_executed": False,
-            "container_restarted": False,
-            "natural_language_execution": False,
-            "shell_true": False,
-            "arbitrary_command_execution": False,
-        },
-    }
     if json_out:
         typer.echo(json.dumps(payload))
         return
@@ -9961,9 +9974,9 @@ def ops_report(
     for k, v in payload["summary"].items():
         lines.append(f"- {k}: {v}")
     lines.extend(["", "Top suspects:"])
-    if not out_suspects:
+    if not payload["suspects"]:
         lines.append("- none")
-    for s in out_suspects:
+    for s in payload["suspects"]:
         lines.append(f"{s['rank']}. {s['name']} — {s['severity']} / {s['confidence']} confidence")
         if s["evidence_summary"]:
             lines.append(f"   Why: {', '.join(s['evidence_summary'][:3])}")
@@ -9971,12 +9984,12 @@ def ops_report(
         lines.append(f"   Remediation gate: {s['remediation']['eligibility']}")
         lines.append(f"   Explain: {remediation_eligibility_explain_command(s['name'])}")
     lines.extend(["", "Remediation lane:"])
-    lines.append(f"- self-test quick: {remediation_lane['self_test_quick']}")
-    lines.append(f"- self-test standard: {remediation_lane['self_test_standard']}")
-    lines.append(f"- self-test full: {remediation_lane['self_test_full']}")
-    lines.append(f"- latest lifecycle audit: {remediation_lane['latest_audit']}")
+    lines.append(f"- self-test quick: {payload['remediation_lane']['self_test_quick']}")
+    lines.append(f"- self-test standard: {payload['remediation_lane']['self_test_standard']}")
+    lines.append(f"- self-test full: {payload['remediation_lane']['self_test_full']}")
+    lines.append(f"- latest lifecycle audit: {payload['remediation_lane']['latest_audit']}")
     lines.extend(["", "Recommended next steps:"])
-    for idx, cmd in enumerate(safe_next[:5], start=1):
+    for idx, cmd in enumerate(payload["safe_next_commands"][:5], start=1):
         lines.append(f"{idx}. {cmd}")
     typer.echo("\n".join(lines).rstrip() + "\n")
 

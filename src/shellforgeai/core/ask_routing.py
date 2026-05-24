@@ -241,6 +241,24 @@ _BROAD_TRIAGE_TOKEN_HINTS: tuple[tuple[str, ...], ...] = (
     ("triage", "docker", "scene"),
 )
 
+_OPS_REPORT_ASK_PHRASES: tuple[str, ...] = (
+    "operator report",
+    "ops report",
+    "2am report",
+    "2 am report",
+    "summarize current docker incidents",
+    "summarize docker incidents",
+    "what should i check first",
+    "what should i look at first",
+    "rank current suspects",
+    "rank suspects and tell me what to inspect",
+    "what is on fire in docker",
+    "2am what is on fire",
+    "2 am what is on fire",
+    "2am, what is on fire",
+    "2 am, what is on fire",
+)
+
 
 def is_broad_docker_triage_intent(text: str) -> bool:
     """Detect a broad read-only Docker triage ask intent.
@@ -265,6 +283,18 @@ def is_broad_docker_triage_intent(text: str) -> bool:
     if any(phrase in lowered or phrase in raw_lower for phrase in _BROAD_DOCKER_TRIAGE_PHRASES):
         return True
     return any(all(tok in lowered for tok in tokens) for tokens in _BROAD_TRIAGE_TOKEN_HINTS)
+
+
+def is_ops_report_ask(text: str) -> bool:
+    """Detect ask prompts that should route to deterministic ``ops report``."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if is_mutation_request(raw) or is_triage_mutation_intent(raw):
+        return False
+    lowered = _normalize_intent_text(raw)
+    raw_lower = raw.lower()
+    return any(phrase in lowered or phrase in raw_lower for phrase in _OPS_REPORT_ASK_PHRASES)
 
 
 # PR82 — natural-language mutation phrasings tied to triage rankings.
