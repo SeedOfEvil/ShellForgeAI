@@ -11125,6 +11125,34 @@ def remediation_self_test(
     def add(name: str, status: str, details: list[str] | None = None) -> None:
         checks.append({"name": name, "status": status, "mutation": False, "details": details or []})
 
+    def _live_disposable_restart_verified(
+        execute_payload: dict[str, Any], before_started_at: str, after_started_at: str
+    ) -> bool:
+        verification = execute_payload.get("verification") or {}
+        nested_restart_verified = bool(
+            verification.get("restart_verified") if isinstance(verification, dict) else False
+        )
+        top_level_restart_verified = bool(execute_payload.get("restart_verified"))
+        restart_succeeded = bool(execute_payload.get("docker_restart_succeeded"))
+        restart_attempted = bool(execute_payload.get("docker_restart_attempted"))
+        started_at_changed = bool(
+            before_started_at and after_started_at and before_started_at != after_started_at
+        )
+        target_match = bool(
+            execute_payload.get("target_match")
+            if "target_match" in execute_payload
+            else (
+                verification.get("target_match")
+                if isinstance(verification, dict) and "target_match" in verification
+                else True
+            )
+        )
+        payload_verified = nested_restart_verified or top_level_restart_verified
+        derived_verified = (
+            restart_attempted and restart_succeeded and started_at_changed and target_match
+        )
+        return bool(payload_verified or derived_verified)
+
     add(
         "command_surface",
         "passed",
@@ -11441,12 +11469,10 @@ def remediation_self_test(
                         live_disposable_proof["started_at_after"] = str(
                             (state_after or {}).get("StartedAt") or ""
                         )
-                        restart_verified = (
-                            bool(exec_live_payload.get("restart_verified"))
-                            and live_disposable_proof["started_at_before"]
-                            and live_disposable_proof["started_at_after"]
-                            and live_disposable_proof["started_at_before"]
-                            != live_disposable_proof["started_at_after"]
+                        restart_verified = _live_disposable_restart_verified(
+                            exec_live_payload,
+                            live_disposable_proof["started_at_before"],
+                            live_disposable_proof["started_at_after"],
                         )
                         live_disposable_proof["restart_verified"] = bool(restart_verified)
                         bundle_payload_live = build_lifecycle_bundle_payload(

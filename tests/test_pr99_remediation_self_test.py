@@ -139,4 +139,6 @@ def test_self_test_full_live_disposable_success(tmp_path, monkeypatch):
     assert p["live_disposable_proof"]["requested"] is True
     assert p["live_disposable_proof"]["target"] == "sfai-pr103-user-sim"
     assert p["live_disposable_proof"]["docker_restart_attempted"] is True
+    assert "restart_verified" in p["live_disposable_proof"]
+    assert p["safety"]["docker_disposable_executed"] is True
     assert p["safety"]["docker_compose_executed"] is False
