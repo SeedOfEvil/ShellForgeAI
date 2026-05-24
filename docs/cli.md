@@ -1110,6 +1110,11 @@ at least one warning, and `2` for an unknown profile.
 - `shellforgeai ops report compare <before> <after>`
 - `shellforgeai ops report compare <before> <after> --json`
 - `shellforgeai ops report compare <before> <after> --only-changed`
+- `shellforgeai ops report compare-latest`
+- `shellforgeai ops report compare-latest --json`
+- `shellforgeai ops report history`
+- `shellforgeai ops report history --json`
+- `shellforgeai ops report history --include-drift --json`
 - `shellforgeai ops report compare-export <before-export> <after-export>`
 
 ## PR89 disposable remediation proof

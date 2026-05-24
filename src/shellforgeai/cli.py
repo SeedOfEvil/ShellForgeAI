@@ -10273,6 +10273,39 @@ def _render_ops_report_compare_human(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_ops_report_history_human(payload: dict[str, Any]) -> str:
+    lines = ["Ops report history", ""]
+    summary = payload.get("summary") or {}
+    lines.append(f"Reports found: {summary.get('reports_found', 0)}")
+    lines.append("")
+    reports = payload.get("reports") or []
+    if not reports:
+        lines.append("No saved ops reports found.")
+    for idx, report in enumerate(reports, start=1):
+        lines.append(f"{idx}. {report.get('report_id')}")
+        lines.append(f"   created: {report.get('created_at') or '-'}")
+        lines.append(f"   suspects: {report.get('suspects_ranked')}")
+        lines.append(f"   critical: {report.get('critical')}")
+        lines.append(f"   high: {report.get('high')}")
+        lines.append(f"   top suspect: {report.get('top_suspect') or '-'}")
+        lines.append(f"   path: {report.get('path')}")
+    lines.extend(["", "Latest compare availability:"])
+    lines.append(
+        "- available"
+        if summary.get("valid_reports", 0) >= 2
+        else "- unavailable (need >=2 valid reports)"
+    )
+    if payload.get("warnings"):
+        lines.extend(["", "Warnings:"])
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+    lines.extend(["", "Safe next commands:"])
+    for cmd in (payload.get("safe_next_commands") or [])[:5]:
+        lines.append(f"- {cmd}")
+    lines.extend(["", "Safety:", "- read_only=true", "- mutation_performed=false"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
 @ops_report_app.command("compare")
 def ops_report_compare(
     before_ref: Annotated[str, typer.Argument(help="Before report id or path")],
@@ -10296,6 +10329,52 @@ def ops_report_compare(
         raise typer.Exit(0 if payload.get("status") == "ok" else 1)
     if payload.get("status") != "ok":
         console.print("Ops report compare failed")
+        for warning in payload.get("warnings") or []:
+            console.print(f"- {warning}")
+        raise typer.Exit(1)
+    console.print(
+        _render_ops_report_compare_human(payload, top=top, include_stable=include_stable), end=""
+    )
+
+
+@ops_report_app.command("history")
+def ops_report_history(
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 10,
+    include_drift: Annotated[bool, typer.Option("--include-drift")] = False,
+) -> None:
+    from shellforgeai.core.ops_report_artifact import ops_report_history as build_ops_report_history
+
+    payload = build_ops_report_history(
+        Path(load_settings().app.data_dir), limit=limit, include_drift=include_drift
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    console.print(_render_ops_report_history_human(payload), end="")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@ops_report_app.command("compare-latest")
+def ops_report_compare_latest(
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+    top: Annotated[int, typer.Option("--top", min=1)] = 5,
+) -> None:
+    from shellforgeai.core.ops_report_artifact import compare_latest_ops_reports
+
+    payload = compare_latest_ops_reports(
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    if payload.get("status") != "ok":
+        console.print("Ops report compare-latest unavailable")
         for warning in payload.get("warnings") or []:
             console.print(f"- {warning}")
         raise typer.Exit(1)
