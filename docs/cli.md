@@ -1101,7 +1101,7 @@ at least one warning, and `2` for an unknown profile.
 ## PR89 disposable remediation proof
 
 ## PR99 remediation self-test
-- `shellforgeai remediation self-test [--profile quick|standard|full] [--json] [--fail-on-warn]` runs a **read-only** remediation-lane readiness/self-test doctor.
+- `shellforgeai remediation self-test [--profile quick|standard|full] [--json] [--fail-on-warn]` runs a non-mutating remediation-lane readiness/self-test doctor. In PR102, `full` now exercises plan/validate/preflight/refusal/proof-execute/receipt/report/bundle/audit over an isolated temp data dir while still skipping live docker-disposable execute by default.
 - Default behavior is non-mutating: no remediation execute, no rollback execute, no cleanup execute, no Docker Compose mutation, and no natural-language execution.
 - Example commands:
   - `shellforgeai remediation self-test`

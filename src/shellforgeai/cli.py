@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 import tarfile
+import tempfile
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from typing import Annotated, Any
 
 import typer
 from rich.console import Console
+from typer.testing import CliRunner
 
 from shellforgeai.audit.storage import AuditStorage
 from shellforgeai.core import incident_index as incident_index_mod
@@ -11190,9 +11192,150 @@ def remediation_self_test(
         add("rollback_readiness", "passed")
         add("lifecycle_bundle_audit", "passed")
         skipped.append("live docker-disposable execute skipped by default")
-        if profile == "full":
-            warnings.append("full profile currently uses read-only fixture checks only")
 
+    if profile == "full":
+        from shellforgeai.core.disposable_remediation import (
+            build_lifecycle_bundle_payload,
+            build_preflight_payload,
+            build_remediation_audit_payload,
+            remediation_bundle_dir,
+            validate_receipt_payload,
+            write_plan,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="sfai-remediation-selftest-") as td:
+            temp_data_dir = Path(td)
+            tr = CliRunner()
+            plan_payload = write_plan(
+                data_dir=temp_data_dir,
+                target="sfai-eligible",
+                scenario="sfai-noisy-errors",
+                labels={"shellforgeai.disposable": "true", "shellforgeai.allow_restart": "true"},
+            )
+            plan_id = str((plan_payload.get("plan") or {}).get("plan_id") or "")
+            add(
+                "full_plan",
+                "passed" if plan_payload.get("status") == "planned" and plan_id else "failed",
+            )
+
+            env = {"SHELLFORGEAI_DATA_DIR": td}
+            validate_run = tr.invoke(app, ["remediation", "validate", plan_id, "--json"], env=env)
+            validate_payload = (
+                json.loads(validate_run.stdout) if validate_run.stdout.strip() else {}
+            )
+            add(
+                "full_validate",
+                "passed"
+                if validate_run.exit_code == 0 and validate_payload.get("status") == "ok"
+                else "failed",
+            )
+
+            preflight_proof_payload = build_preflight_payload(
+                data_dir=temp_data_dir,
+                plan_id=plan_id,
+                executor="proof",
+                scene_state=None,
+                inspect_state=None,
+            )
+            add(
+                "full_preflight_proof",
+                "passed"
+                if preflight_proof_payload.get("status") in {"ready", "warning", "blocked"}
+                else "failed",
+            )
+            preflight_docker_payload = build_preflight_payload(
+                data_dir=temp_data_dir,
+                plan_id=plan_id,
+                executor="docker-disposable",
+                scene_state=None,
+                inspect_state=None,
+            )
+            add(
+                "full_preflight_docker_disposable",
+                "passed"
+                if preflight_docker_payload.get("status") in {"ready", "warning", "blocked"}
+                else "failed",
+            )
+
+            refusal = tr.invoke(app, ["remediation", "execute", plan_id, "--json"], env=env)
+            refusal_payload = json.loads(refusal.stdout) if refusal.stdout.strip() else {}
+            add(
+                "full_execute_refusal_without_confirm",
+                "passed"
+                if refusal.exit_code != 0 and refusal_payload.get("status") == "blocked"
+                else "failed",
+            )
+
+            proof_exec = tr.invoke(
+                app,
+                [
+                    "remediation",
+                    "execute",
+                    plan_id,
+                    "--execute",
+                    "--confirm",
+                    "--executor",
+                    "proof",
+                    "--json",
+                ],
+                env=env,
+            )
+            proof_payload = json.loads(proof_exec.stdout) if proof_exec.stdout.strip() else {}
+            receipt_id = str(proof_payload.get("receipt_id") or "")
+            add(
+                "full_proof_execute",
+                "passed"
+                if proof_exec.exit_code == 0
+                and proof_payload.get("status") == "executed"
+                and proof_payload.get("docker_restart_attempted") is False
+                else "failed",
+            )
+
+            rec_val_payload = validate_receipt_payload(temp_data_dir, receipt_id)
+            add(
+                "full_receipt_validate",
+                "passed" if rec_val_payload.get("status") == "ok" else "failed",
+            )
+            rep = tr.invoke(app, ["remediation", "report", receipt_id, "--json"], env=env)
+            rep_payload = json.loads(rep.stdout) if rep.stdout.strip() else {}
+            add(
+                "full_report",
+                "passed" if rep.exit_code == 0 and rep_payload.get("status") == "ok" else "failed",
+            )
+
+            bun_payload = build_lifecycle_bundle_payload(temp_data_dir, receipt_id)
+            add(
+                "full_bundle",
+                "passed" if bun_payload.get("status") in {"ok", "planned"} else "failed",
+            )
+            bundle_id = f"remediation_bundle_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            out = remediation_bundle_dir(temp_data_dir) / bundle_id
+            out.mkdir(parents=True, exist_ok=False)
+            (out / "remediation-lifecycle.json").write_text(
+                json.dumps(bun_payload, indent=2), encoding="utf-8"
+            )
+            bun_val = tr.invoke(
+                app, ["remediation", "bundle-validate", bundle_id, "--json"], env=env
+            )
+            bun_val_payload = json.loads(bun_val.stdout) if bun_val.stdout.strip() else {}
+            add(
+                "full_bundle_validate",
+                "passed"
+                if bun_val.exit_code == 0 and bun_val_payload.get("status") == "ok"
+                else "failed",
+            )
+
+            audit_payload = build_remediation_audit_payload(temp_data_dir, latest_only=False)
+            add(
+                "full_audit",
+                "passed" if audit_payload.get("status") in {"ok", "warning"} else "failed",
+            )
+            safety["self_test_non_mutating"] = True
+            safety["proof_execution_performed"] = True
+            safety["temp_data_dir_used"] = True
+            safety["docker_disposable_executed"] = False
+            safety["remediation_executed"] = False
+            safety["container_restarted"] = False
     summary = {
         "passed": sum(1 for c in checks if c["status"] == "passed"),
         "failed": sum(1 for c in checks if c["status"] in {"failed", "error"}),
