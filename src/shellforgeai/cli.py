@@ -8666,6 +8666,103 @@ def _handle_actions_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+_ASK_MUTATION_TERMS: tuple[str, ...] = (
+    "restart",
+    "stop",
+    "start",
+    "kill",
+    "remove",
+    "delete",
+    "prune",
+    "clean up",
+    "cleanup",
+    "fix everything",
+    "fix the top suspect",
+    "fix top suspect",
+    "remediate",
+    "remediation plan",
+    "execute",
+    "apply",
+    "rollback",
+    "roll back",
+    "recreate",
+    "rebuild",
+    "compose up",
+    "compose down",
+    "compose restart",
+    "docker restart",
+    "chmod",
+    "chown",
+    "install",
+    "uninstall",
+    "reload",
+    "repair",
+    "resolve automatically",
+)
+
+
+def _handle_mutation_refusal_ask(question: str) -> bool:
+    raw = (question or "").strip()
+    if not raw:
+        return False
+    normalized = " ".join(raw.lower().split())
+    if normalized.startswith("can you "):
+        return False
+    if any(phrase in normalized for phrase in ("what would happen if", "how would i", "show me")):
+        return False
+    matched = [term for term in _ASK_MUTATION_TERMS if term in normalized]
+    if not matched:
+        return False
+    target_match = re.search(
+        r"\b(shellforgeai|sfai[-a-z0-9_.]*|docker|compose|nginx)\b", normalized
+    )
+    broad_match = re.search(
+        r"\b(all|everything|every container|all services|the server|the box)\b", normalized
+    )
+    target = (
+        broad_match.group(1) if broad_match else (target_match.group(1) if target_match else "")
+    )
+    console.print("Refused: natural-language mutation is not allowed.")
+    console.print("")
+    console.print("No action was performed.")
+    console.print(
+        "I did not restart, stop, delete, prune, apply, clean up, remediate, or roll back anything."
+    )
+    console.print("")
+    console.print("Why:")
+    console.print(f"- request appears to ask for mutation: {matched[0]}")
+    if target:
+        if broad_match:
+            console.print(f"- broad natural-language mutation targets are refused: {target}")
+        elif target == "shellforgeai":
+            console.print(f"- target appears production-like: {target}")
+        else:
+            console.print(f"- target detected: {target}")
+    console.print("")
+    console.print("Safe read-only alternatives:")
+    if "cleanup" in normalized or "clean up" in normalized:
+        console.print("- shellforgeai audit cleanup review")
+        console.print(
+            "- shellforgeai audit cleanup prepare --category exports "
+            "--max-age-days 7 --keep-latest 5"
+        )
+        console.print("- shellforgeai audit cleanup execute-readiness <plan-id>")
+    elif "rollback" in normalized or "roll back" in normalized:
+        console.print("- shellforgeai remediation audit --latest")
+    else:
+        console.print("- shellforgeai ops report")
+        console.print("- shellforgeai triage docker")
+        if target and not broad_match:
+            console.print(f"- shellforgeai triage docker detail {target}")
+            console.print(f"- shellforgeai remediation eligibility --target {target} --explain")
+        console.print("- shellforgeai remediation self-test --profile standard")
+    console.print("")
+    console.print("To perform governed disposable remediation, use the explicit CLI workflow:")
+    console.print("plan → validate → preflight → execute with explicit confirmation.")
+    console.print("Production targets remain blocked.")
+    return True
+
+
 def _handle_incident_search_ask(runtime: RuntimeContext, question: str) -> bool:
     """Handle PR40 incident-search asks against the audit-aware index.
 
@@ -9006,6 +9103,8 @@ def ask(
         if _handle_create_restart_proposal_ask(runtime, question):
             return
         if _handle_create_proposals_ask(runtime, question):
+            return
+        if _handle_mutation_refusal_ask(question):
             return
     provider = build_provider(runtime.settings)
     ctx_mode = "full" if full_context else context

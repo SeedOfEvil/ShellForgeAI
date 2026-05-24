@@ -982,3 +982,12 @@ Safety remains invariant: no natural-language execution, no arbitrary command ex
 
 ### Diagnose/Triage cohesion (read-only)
 Diagnose enrichment for known Docker/battle-lab targets is read-only: it does not create plans, does not execute remediation/rollback/cleanup, and only suggests canonical read-only next commands.
+
+## PR106 deterministic ask mutation-refusal routing safety
+
+`ask` now performs a deterministic pre-model mutation-intent check. Obvious natural-language mutation prompts (for restart/stop/remove/delete/prune/fix/remediate/execute/apply/rollback/cleanup/compose mutation/chmod/chown/install classes) are refused **before** model/Codex invocation.
+
+- No model/auth dependency is required for these refusals.
+- Refusal output states that no action was performed.
+- Refusals only suggest canonical read-only alternatives.
+- `ask` never executes remediation/rollback/cleanup/Docker/Compose mutation.
