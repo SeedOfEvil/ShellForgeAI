@@ -1360,7 +1360,9 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 2. `shellforgeai remediation self-test --profile quick`
 3. `shellforgeai remediation self-test --profile standard --json`
 4. `shellforgeai remediation self-test --profile full` now validates non-mutating lifecycle readiness end-to-end in temp artifacts (including proof execute + receipt/report/bundle/audit) and still skips live docker-disposable execute by default.
-5. Only then run a manual disposable live proof if needed (outside default self-test).
+5. Optional lab QA live disposable proof (off by default): `shellforgeai remediation self-test --profile full --include-live-disposable-execute --target <exact-disposable-target> --confirm-live-disposable --json`
+6. Validate receipt/bundle/audit outputs.
+7. Clean up the disposable target outside ShellForgeAI.
 1. `shellforgeai triage docker`
 2. `shellforgeai remediation eligibility`
 3. `shellforgeai remediation eligibility --target <target> --explain`
