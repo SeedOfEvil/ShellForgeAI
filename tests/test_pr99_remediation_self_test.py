@@ -27,7 +27,7 @@ def test_self_test_quick_and_json(tmp_path):
     assert "execute --confirm" not in " ".join(p["next_safe_commands"])
 
 
-def test_self_test_standard_and_fail_on_warn(tmp_path):
+def test_self_test_standard_and_full_profiles(tmp_path):
     r = runner.invoke(
         app, ["remediation", "self-test", "--profile", "standard", "--json"], env=_env(tmp_path)
     )
@@ -37,15 +37,18 @@ def test_self_test_standard_and_fail_on_warn(tmp_path):
     assert p["summary"]["skipped"] >= 1
     assert p["summary"]["passed"] + p["summary"]["failed"] == len(p["checks"])
 
-    rw = runner.invoke(
+    rf = runner.invoke(
         app,
         ["remediation", "self-test", "--profile", "full", "--json", "--fail-on-warn"],
         env=_env(tmp_path),
     )
-    assert rw.exit_code == 1
-    pw = json.loads(rw.stdout)
-    assert pw["warnings"]
-    assert pw["ci_status"] == "failed_on_warn"
+    assert rf.exit_code == 0
+    pf = json.loads(rf.stdout)
+    assert pf["status"] == "ok"
+    assert pf["warnings"] == []
+    assert pf["ci_status"] == "passed"
+    assert pf["safety"].get("proof_execution_performed") is True
+    assert pf["safety"].get("docker_disposable_executed") is False
 
 
 def test_self_test_invalid_profile(tmp_path):
