@@ -217,6 +217,35 @@ def export_ops_report(report_ref: str, data_dir: Path) -> dict[str, Any]:
         }
     src = Path((v.get("report") or {}).get("path") or "")
     out = data_dir / "exports" / f"export_{src.name}"
+    if out.exists():
+        vv = validate_ops_report_export(out.name, data_dir)
+        if vv.get("status") == "ok":
+            manifest = json.loads((out / "export-manifest.json").read_text(encoding="utf-8"))
+            return {
+                "schema_version": "1",
+                "mode": "ops_report_export",
+                "status": "exported",
+                "existing": True,
+                "source_report": (manifest.get("source_report") or {}),
+                "export": {
+                    "id": out.name,
+                    "path": str(out),
+                    "files": list(manifest.get("files") or []),
+                },
+                "checksums": dict(manifest.get("checksums") or {}),
+                "safety": safety,
+                "next_safe_commands": [f"shellforgeai ops report export-validate {out}"],
+            }
+        return {
+            "schema_version": "1",
+            "mode": "ops_report_export",
+            "status": "already_exists",
+            "source_report": v.get("report") or {},
+            "export": {"id": out.name, "path": str(out)},
+            "safety": safety,
+            "warnings": ["existing export path failed validation"],
+            "next_safe_commands": [f"shellforgeai ops report export-validate {out}"],
+        }
     out.mkdir(parents=True, exist_ok=False)
     files = list(REQUIRED_REPORT_FILES)
     for f in files:

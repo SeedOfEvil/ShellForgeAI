@@ -117,13 +117,15 @@ def test_ops_report_include_remediation(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "shellforgeai.core.disposable_remediation.build_eligibility_explain_report",
-        lambda target, labels=None: {
+        lambda *, target, scenario, labels=None, target_found=True, explicit_target=True: {
             "eligibility": {
                 "state": "blocked",
-                "proof_ready": False,
-                "docker_disposable_ready": False,
+                "executors": {
+                    "proof": {"ready": False},
+                    "docker-disposable": {"ready": False},
+                },
             },
-            "gates": {"results": [{"ok": False, "reason": "missing label"}]},
+            "gates": [{"status": "failed", "reason": "missing label"}],
         },
     )
     out = json.loads(

@@ -8524,6 +8524,19 @@ def _build_ops_report_payload(
     suspects = list(ranked.get("suspects") or [])[:top]
     out_suspects: list[dict[str, Any]] = []
     safe_next: list[str] = []
+
+    def _scenario_for_suspect(classes: list[str]) -> str:
+        lowered = {str(c).lower() for c in classes}
+        if "disk_pressure" in lowered:
+            return "sfai-disk-pressure"
+        if "bad_http" in lowered:
+            return "sfai-bad-http"
+        if "crashloop" in lowered or "restart_storm" in lowered:
+            return "sfai-crashloop"
+        if "permission_denied" in lowered:
+            return "sfai-permission-denied"
+        return "sfai-noisy-errors"
+
     for suspect in suspects:
         name = str(suspect.get("name") or "")
         evidence_summary = [
@@ -8541,22 +8554,49 @@ def _build_ops_report_payload(
         }
         if include_remediation:
             label_map = {}
+            target_found = False
             for row in scene.get("containers", []):
                 if str(row.get("name") or "") == name:
                     label_map = row.get("labels") if isinstance(row.get("labels"), dict) else {}
+                    target_found = True
                     break
-            explain = build_eligibility_explain_report(target=name, labels=label_map)
-            gates = (explain.get("gates") or {}).get("results") or []
-            remediation = {
-                "eligibility": ((explain.get("eligibility") or {}).get("state") or "unknown"),
-                "blocked_reasons": [
-                    str(g.get("reason")) for g in gates if not bool(g.get("ok")) and g.get("reason")
-                ],
-                "proof_ready": bool((explain.get("eligibility") or {}).get("proof_ready")),
-                "docker_disposable_ready": bool(
-                    (explain.get("eligibility") or {}).get("docker_disposable_ready")
-                ),
-            }
+            try:
+                explain = build_eligibility_explain_report(
+                    target=name,
+                    scenario=_scenario_for_suspect(list(suspect.get("classes") or [])),
+                    labels=label_map,
+                    target_found=target_found,
+                    explicit_target=True,
+                )
+                gates = list(explain.get("gates") or [])
+                remediation = {
+                    "eligibility": str(
+                        (explain.get("eligibility") or {}).get("state") or "unknown"
+                    ),
+                    "blocked_reasons": [
+                        str(g.get("reason"))
+                        for g in gates
+                        if str(g.get("status")) == "failed" and g.get("reason")
+                    ],
+                    "proof_ready": bool(
+                        ((explain.get("eligibility") or {}).get("executors") or {})
+                        .get("proof", {})
+                        .get("ready")
+                    ),
+                    "docker_disposable_ready": bool(
+                        ((explain.get("eligibility") or {}).get("executors") or {})
+                        .get("docker-disposable", {})
+                        .get("ready")
+                    ),
+                }
+            except Exception as exc:
+                warnings.append(f"remediation enrichment unavailable for {name}: {exc}")
+                remediation = {
+                    "eligibility": "unknown",
+                    "blocked_reasons": ["remediation enrichment unavailable"],
+                    "proof_ready": False,
+                    "docker_disposable_ready": False,
+                }
         out_suspects.append(
             {
                 "rank": suspect.get("rank"),
@@ -10116,7 +10156,7 @@ def ops_report(
 
 @ops_report_app.command("validate")
 def ops_report_validate(
-    report_ref: Annotated[str, typer.Argument(help="Report id or path")],
+    report_ref: Annotated[str, typer.Argument(help="Report id or report directory path")],
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     from shellforgeai.core.ops_report_artifact import validate_ops_report
@@ -10154,7 +10194,11 @@ def ops_report_export(
         raise typer.Exit(1)
     ex = payload.get("export") or {}
     src = payload.get("source_report") or {}
-    console.print("Ops report export created")
+    console.print(
+        "Ops report export created"
+        if not payload.get("existing")
+        else "Ops report export already exists (reused)"
+    )
     console.print(f"- report_id: {src.get('id')}")
     console.print(f"- export_id: {ex.get('id')}")
     console.print(f"- path: {ex.get('path')}")

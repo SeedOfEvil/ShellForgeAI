@@ -1104,7 +1104,7 @@ at least one warning, and `2` for an unknown profile.
 - `shellforgeai ops report --json`
 - `shellforgeai ops report --top 3 --include-details`
 - `shellforgeai ops report --save` / `--save --json`
-- `shellforgeai ops report validate <report-id-or-path>`
+- `shellforgeai ops report validate <report-id-or-report-directory-path>`
 - `shellforgeai ops report export <report-id-or-path>`
 - `shellforgeai ops report export-validate <export-id-or-path>`
 

@@ -69,3 +69,47 @@ def test_ops_report_validate_fails_for_forbidden_command(tmp_path, monkeypatch):
     bad = runner.invoke(app, ["ops", "report", "validate", saved["report_id"], "--json"])
     assert bad.exit_code == 1
     assert json.loads(bad.stdout)["checks"]["safe_commands"] is False
+
+
+def test_ops_report_include_remediation_json_no_traceback(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _patch_ops(monkeypatch)
+    r = runner.invoke(app, ["ops", "report", "--include-remediation", "--json"])
+    assert r.exit_code == 0
+    out = json.loads(r.stdout)
+    assert out["mode"] == "ops_report"
+    assert out["suspects"][0]["remediation"]["eligibility"] in {"blocked", "unknown", "eligible"}
+    s = out["safety"]
+    assert s["read_only"] is True
+    assert s["mutation_performed"] is False
+    assert s["plan_created"] is False
+    assert s["remediation_executed"] is False
+    assert s["rollback_executed"] is False
+    assert s["cleanup_executed"] is False
+    assert s["docker_compose_executed"] is False
+    assert s["container_restarted"] is False
+    assert s["shell_true"] is False
+    assert s["arbitrary_command_execution"] is False
+
+
+def test_ops_report_repeated_export_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    _patch_ops(monkeypatch)
+    saved = json.loads(runner.invoke(app, ["ops", "report", "--save", "--json"]).stdout)
+    rid = saved["report_id"]
+    first = runner.invoke(app, ["ops", "report", "export", rid, "--json"])
+    assert first.exit_code == 0
+    first_out = json.loads(first.stdout)
+    second = runner.invoke(app, ["ops", "report", "export", rid, "--json"])
+    assert second.exit_code == 0
+    second_out = json.loads(second.stdout)
+    assert second_out["status"] == "exported"
+    assert second_out.get("existing") is True
+    assert second_out["export"]["id"] == first_out["export"]["id"]
+    human = runner.invoke(app, ["ops", "report", "export", rid])
+    assert human.exit_code == 0
+    assert "already exists (reused)" in human.stdout
+    v = runner.invoke(
+        app, ["ops", "report", "export-validate", second_out["export"]["id"], "--json"]
+    )
+    assert v.exit_code == 0
