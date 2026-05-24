@@ -1378,3 +1378,10 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 3. `shellforgeai remediation eligibility --target <target> --explain`
 4. Plan only if operator chooses (`shellforgeai remediation plan ...`).
 5. Validate/preflight/execute only through the governed remediation lane.
+
+## PR106 update — ask mutation refusal before model
+
+2AM flow reminder:
+- `shellforgeai ask` can request read-only ops summaries (for example: `shellforgeai ask "what is on fire in docker right now? ops report please"`).
+- `shellforgeai ask` cannot execute mutation; obvious mutation asks are deterministically refused before model/Codex.
+- For any disposable proof workflow, use explicit governed CLI gates (`plan -> validate -> preflight -> execute --confirm`).
