@@ -11107,6 +11107,11 @@ def remediation_self_test(
     profile: Annotated[str, typer.Option("--profile")] = "standard",
     json_out: Annotated[bool, typer.Option("--json")] = False,
     fail_on_warn: Annotated[bool, typer.Option("--fail-on-warn")] = False,
+    include_live_disposable_execute: Annotated[
+        bool, typer.Option("--include-live-disposable-execute")
+    ] = False,
+    target: Annotated[str, typer.Option("--target")] = "",
+    confirm_live_disposable: Annotated[bool, typer.Option("--confirm-live-disposable")] = False,
 ) -> None:
     from shellforgeai.core.disposable_remediation import evaluate_eligibility
 
@@ -11158,6 +11163,22 @@ def remediation_self_test(
         "natural_language_execution": False,
         "shell_true": False,
         "arbitrary_command_execution": False,
+        "live_disposable_execute": False,
+    }
+    live_disposable_proof: dict[str, Any] = {
+        "requested": bool(include_live_disposable_execute),
+        "confirmed": bool(confirm_live_disposable),
+        "target": target,
+        "eligible": False,
+        "plan_id": "",
+        "receipt_id": "",
+        "bundle_id": "",
+        "docker_restart_attempted": False,
+        "docker_restart_succeeded": False,
+        "restart_verified": False,
+        "started_at_before": "",
+        "started_at_after": "",
+        "rollback_executed": False,
     }
     add("safety_invariants", "passed")
 
@@ -11330,12 +11351,127 @@ def remediation_self_test(
                 "full_audit",
                 "passed" if audit_payload.get("status") in {"ok", "warning"} else "failed",
             )
-            safety["self_test_non_mutating"] = True
+            safety["self_test_non_mutating"] = not include_live_disposable_execute
             safety["proof_execution_performed"] = True
             safety["temp_data_dir_used"] = True
             safety["docker_disposable_executed"] = False
             safety["remediation_executed"] = False
             safety["container_restarted"] = False
+
+            if include_live_disposable_execute:
+                if not target.strip():
+                    msg = "live disposable execute requires --target"
+                    add("full_live_disposable_proof", "failed", [msg])
+                    warnings.append(msg)
+                elif not confirm_live_disposable:
+                    msg = "live disposable execute requires --confirm-live-disposable"
+                    add("full_live_disposable_proof", "failed", [msg])
+                    warnings.append(msg)
+                elif target.strip().lower() in {"all", "*", "everything", "all containers"}:
+                    msg = "broad targets are refused in governed remediation lane"
+                    add("full_live_disposable_proof", "failed", [msg])
+                    warnings.append(msg)
+                else:
+                    from shellforgeai.core.disposable_remediation import inspect_exact_target_state
+
+                    target_name = target.strip()
+                    state_before = inspect_exact_target_state(target_name)
+                    labels = (
+                        dict(state_before.get("labels") or {})
+                        if isinstance(state_before, dict)
+                        else None
+                    )
+                    elig_live = evaluate_eligibility(
+                        target=target_name,
+                        scenario="sfai-noisy-errors",
+                        labels=labels,
+                    )
+                    live_disposable_proof["eligible"] = (
+                        elig_live.get("eligibility") == "eligible_for_plan"
+                    )
+                    if state_before is None:
+                        msg = "target not found"
+                        add("full_live_disposable_proof", "failed", [msg])
+                        warnings.append(msg)
+                    elif elig_live.get("eligibility") != "eligible_for_plan":
+                        msg = "target not eligible for live disposable execute"
+                        add("full_live_disposable_proof", "failed", [msg])
+                        warnings.append(msg)
+                    else:
+                        live_disposable_proof["started_at_before"] = str(
+                            state_before.get("StartedAt") or ""
+                        )
+                        plan_payload_live = write_plan(
+                            data_dir=temp_data_dir,
+                            target=target_name,
+                            scenario="sfai-noisy-errors",
+                            labels=labels,
+                        )
+                        plan_id_live = str(
+                            (plan_payload_live.get("plan") or {}).get("plan_id") or ""
+                        )
+                        live_disposable_proof["plan_id"] = plan_id_live
+                        exec_live = tr.invoke(
+                            app,
+                            [
+                                "remediation",
+                                "execute",
+                                plan_id_live,
+                                "--execute",
+                                "--confirm",
+                                "--executor",
+                                "docker-disposable",
+                                "--json",
+                            ],
+                            env=env,
+                        )
+                        exec_live_payload = (
+                            json.loads(exec_live.stdout) if exec_live.stdout.strip() else {}
+                        )
+                        live_disposable_proof["receipt_id"] = str(
+                            exec_live_payload.get("receipt_id") or ""
+                        )
+                        live_disposable_proof["docker_restart_attempted"] = bool(
+                            exec_live_payload.get("docker_restart_attempted")
+                        )
+                        live_disposable_proof["docker_restart_succeeded"] = bool(
+                            exec_live_payload.get("docker_restart_succeeded")
+                        )
+                        state_after = inspect_exact_target_state(target_name)
+                        live_disposable_proof["started_at_after"] = str(
+                            (state_after or {}).get("StartedAt") or ""
+                        )
+                        restart_verified = (
+                            bool(exec_live_payload.get("restart_verified"))
+                            and live_disposable_proof["started_at_before"]
+                            and live_disposable_proof["started_at_after"]
+                            and live_disposable_proof["started_at_before"]
+                            != live_disposable_proof["started_at_after"]
+                        )
+                        live_disposable_proof["restart_verified"] = bool(restart_verified)
+                        bundle_payload_live = build_lifecycle_bundle_payload(
+                            temp_data_dir,
+                            live_disposable_proof["receipt_id"],
+                        )
+                        live_bundle_id = "remediation_bundle_live_" + datetime.now(
+                            timezone.utc
+                        ).strftime("%Y%m%d%H%M%S")
+                        out_live = remediation_bundle_dir(temp_data_dir) / live_bundle_id
+                        out_live.mkdir(parents=True, exist_ok=False)
+                        (out_live / "remediation-lifecycle.json").write_text(
+                            json.dumps(bundle_payload_live, indent=2), encoding="utf-8"
+                        )
+                        live_disposable_proof["bundle_id"] = live_bundle_id
+                        add(
+                            "full_live_disposable_proof",
+                            "passed" if bool(restart_verified) else "failed",
+                        )
+                        safety["read_only"] = False
+                        safety["mutation_performed"] = bool(restart_verified)
+                        safety["remediation_executed"] = bool(restart_verified)
+                        safety["container_restarted"] = bool(restart_verified)
+                        safety["docker_disposable_executed"] = True
+                        safety["live_disposable_execute"] = True
     summary = {
         "passed": sum(1 for c in checks if c["status"] == "passed"),
         "failed": sum(1 for c in checks if c["status"] in {"failed", "error"}),
@@ -11366,6 +11502,7 @@ def remediation_self_test(
             remediation_self_test_command(profile="standard"),
         ],
         "safety": safety,
+        "live_disposable_proof": live_disposable_proof,
     }
 
     if json_out:
@@ -11381,6 +11518,16 @@ def remediation_self_test(
             console.print("\nSkipped:")
             for item in skipped:
                 console.print(f"- {item}")
+        if not include_live_disposable_execute:
+            console.print("\nLive disposable execute:")
+            console.print("- skipped by default")
+            console.print(
+                "- use explicit live disposable proof flags only in disposable lab targets"
+            )
+        elif not confirm_live_disposable:
+            console.print("\nRefused:")
+            console.print("- live disposable execute requires --confirm-live-disposable")
+            console.print("- no mutation was performed")
         console.print("\nSafety:")
         for k in [
             "read_only",

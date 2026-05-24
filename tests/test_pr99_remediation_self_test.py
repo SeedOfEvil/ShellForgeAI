@@ -54,3 +54,89 @@ def test_self_test_standard_and_full_profiles(tmp_path):
 def test_self_test_invalid_profile(tmp_path):
     r = runner.invoke(app, ["remediation", "self-test", "--profile", "nope"], env=_env(tmp_path))
     assert r.exit_code != 0
+
+
+def test_self_test_full_live_requires_target(tmp_path):
+    r = runner.invoke(
+        app,
+        [
+            "remediation",
+            "self-test",
+            "--profile",
+            "full",
+            "--include-live-disposable-execute",
+            "--json",
+        ],
+        env=_env(tmp_path),
+    )
+    assert r.exit_code != 0
+    p = json.loads(r.stdout)
+    assert p["live_disposable_proof"]["requested"] is True
+    assert p["safety"]["mutation_performed"] is False
+
+
+def test_self_test_full_live_requires_confirm(tmp_path):
+    r = runner.invoke(
+        app,
+        [
+            "remediation",
+            "self-test",
+            "--profile",
+            "full",
+            "--include-live-disposable-execute",
+            "--target",
+            "sfai-pr103-user-sim",
+            "--json",
+        ],
+        env=_env(tmp_path),
+    )
+    assert r.exit_code != 0
+    p = json.loads(r.stdout)
+    assert p["live_disposable_proof"]["requested"] is True
+    assert p["live_disposable_proof"]["confirmed"] is False
+    assert p["safety"]["mutation_performed"] is False
+
+
+def test_self_test_full_live_disposable_success(tmp_path, monkeypatch):
+    calls = {"count": 0}
+
+    def _inspect(_target):
+        calls["count"] += 1
+        started_at = "2026-05-24T00:00:00Z" if calls["count"] == 1 else "2026-05-24T00:00:05Z"
+        return {
+            "name": "sfai-pr103-user-sim",
+            "labels": {"shellforgeai.disposable": "true", "shellforgeai.allow_restart": "true"},
+            "StartedAt": started_at,
+            "restart_count": 0 if calls["count"] == 1 else 1,
+            "status": "running",
+            "id": "abc",
+        }
+
+    monkeypatch.setattr(
+        "shellforgeai.core.disposable_remediation.inspect_exact_target_state", _inspect
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.disposable_remediation.run_exact_docker_restart",
+        lambda target: (True, 0, target, ""),
+    )
+    r = runner.invoke(
+        app,
+        [
+            "remediation",
+            "self-test",
+            "--profile",
+            "full",
+            "--include-live-disposable-execute",
+            "--target",
+            "sfai-pr103-user-sim",
+            "--confirm-live-disposable",
+            "--json",
+        ],
+        env=_env(tmp_path),
+    )
+    assert r.exit_code in {0, 1}
+    p = json.loads(r.stdout)
+    assert p["live_disposable_proof"]["requested"] is True
+    assert p["live_disposable_proof"]["target"] == "sfai-pr103-user-sim"
+    assert p["live_disposable_proof"]["docker_restart_attempted"] is True
+    assert p["safety"]["docker_compose_executed"] is False

@@ -1102,11 +1102,19 @@ at least one warning, and `2` for an unknown profile.
 
 ## PR99 remediation self-test
 - `shellforgeai remediation self-test [--profile quick|standard|full] [--json] [--fail-on-warn]` runs a non-mutating remediation-lane readiness/self-test doctor. In PR102, `full` now exercises plan/validate/preflight/refusal/proof-execute/receipt/report/bundle/audit over an isolated temp data dir while still skipping live docker-disposable execute by default.
+- PR103 adds an **optional**, explicitly gated lab-only live disposable proof path for `full` profile only:
+  - `--include-live-disposable-execute`
+  - `--target <exact disposable target>`
+  - `--confirm-live-disposable`
+- Live disposable proof is refused without explicit target + confirmation and is refused for broad/wildcard/production or non-allowlisted/non-disposable targets.
+- Example:
+  - `shellforgeai remediation self-test --profile full --include-live-disposable-execute --target sfai-pr103-user-sim --confirm-live-disposable --json`
 - Default behavior is non-mutating: no remediation execute, no rollback execute, no cleanup execute, no Docker Compose mutation, and no natural-language execution.
 - Example commands:
   - `shellforgeai remediation self-test`
   - `shellforgeai remediation self-test --profile quick --json`
   - `shellforgeai remediation self-test --fail-on-warn`
+  - `shellforgeai remediation self-test --profile full --include-live-disposable-execute --target sfai-pr103-user-sim --confirm-live-disposable --json`
 
 - `shellforgeai remediation plan --target sfai-noisy-errors --scenario sfai-noisy-errors [--json]` creates a dry-run disposable-only plan artifact with fingerprint, pre/post checks, rollback note, and explicit no-mutation safety flags.
 - `shellforgeai remediation eligibility [--target <name>] [--scenario sfai-noisy-errors] [--json]` maps current triage suspects to read-only remediation eligibility and executor readiness (proof / docker-disposable), explains blockers, and suggests safe **plan-only** next commands. It does **not** create plans and does **not** execute remediation.
