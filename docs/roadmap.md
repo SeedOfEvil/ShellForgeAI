@@ -735,3 +735,5 @@ explicitly `false`.
 PR100 (May 23, 2026): normalized canonical safe-next command suggestions across triage, triage detail, remediation eligibility/explain, remediation self-test, and ask refusal/broad-triage output to remove stale `diagnose ... --target` forms and prefer read-only triage detail + eligibility explain guidance.
 
 - Diagnose now adds deterministic Docker triage context for known battle-lab container targets and recommends canonical read-only next commands (`triage docker detail` + `remediation eligibility --explain`).
+
+- PR104 (May 24, 2026): added read-only `shellforgeai ops report` 2AM operator command-center summary (strict JSON `mode=ops_report`, top suspect/evidence rollup, explicit no-mutation safety flags, safe-next command guidance, optional remediation/timeline sections, and no auto-plan/no execute behavior).
