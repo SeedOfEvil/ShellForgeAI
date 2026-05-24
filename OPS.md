@@ -1385,3 +1385,12 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 - `shellforgeai ask` can request read-only ops summaries (for example: `shellforgeai ask "what is on fire in docker right now? ops report please"`).
 - `shellforgeai ask` cannot execute mutation; obvious mutation asks are deterministically refused before model/Codex.
 - For any disposable proof workflow, use explicit governed CLI gates (`plan -> validate -> preflight -> execute --confirm`).
+
+
+## PR107 update — 2AM ops report handoff bundle
+1. `shellforgeai ops report`
+2. `shellforgeai ops report --save`
+3. `shellforgeai ops report validate <id>`
+4. `shellforgeai ops report export <id>`
+5. `shellforgeai ops report export-validate <path>`
+6. Hand off the export bundle
