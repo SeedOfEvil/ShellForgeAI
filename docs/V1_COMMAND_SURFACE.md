@@ -37,6 +37,11 @@ ShellForgeAI-owned artifacts, and whether it can mutate Docker/system state.
 | `shellforgeai model doctor` | Provider/model diagnostics | READ_ONLY | No | No | Safety routes remain deterministic without model auth. |
 | `shellforgeai v1 check --profile quick` | V1 quick readiness | READ_ONLY | No | No | Contract and safety checks only. |
 | `shellforgeai v1 check --profile standard` | V1 standard readiness | READ_ONLY | No | No | Read-only readiness checks. |
+| `shellforgeai v1 packet` | V1 readiness packet summary | READ_ONLY | No | No | Aggregates docs/surface/readiness/report/refusal/self-test/safety into non-mutating packet payload. |
+| `shellforgeai v1 packet --save` | V1 packet artifact write | ARTIFACT_WRITE | Yes | No | Writes `/data/v1_packets/<packet_id>` with packet json/md/manifest. |
+| `shellforgeai v1 packet validate <packet-ref>` | Validate saved packet | READ_ONLY | No | No | Validates packet files, checksums, safety and status consistency. |
+| `shellforgeai v1 packet export <packet-ref>` | Export saved packet | ARTIFACT_WRITE | Yes | No | Writes `/data/exports/export_<packet_id>` bundle. |
+| `shellforgeai v1 packet export-validate <export-ref>` | Validate packet export | READ_ONLY | No | No | Validates exported packet bundle and safety metadata. |
 | `shellforgeai triage docker` | Deterministic suspect ranking | READ_ONLY | No | No | No remediation execution. |
 | `shellforgeai triage docker detail <target>` | Deterministic deep detail | READ_ONLY | No | No | Container-focused evidence detail. |
 | `shellforgeai ops report` | Operator report synthesis | READ_ONLY | No | No | Evidence-backed report view. |
