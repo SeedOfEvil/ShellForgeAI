@@ -1399,3 +1399,19 @@ Rollback packet commands are decision support only (posture/preconditions/verifi
 7. `shellforgeai ops report export <id>`
 8. `shellforgeai ops report export-validate <path>`
 6. Hand off the export bundle
+
+## V1 operator lane (canonical)
+
+Use this 2AM sequence first:
+
+1. `shellforgeai doctor`
+2. `shellforgeai remediation self-test --profile quick`
+3. `shellforgeai ops report`
+4. `shellforgeai ops report --save`
+5. `shellforgeai ops report history --limit 5`
+6. `shellforgeai ops report compare-latest`
+7. `shellforgeai triage docker detail <target>`
+8. `shellforgeai remediation eligibility --target <target> --explain`
+
+Mutation remains gated/disposable only; do not treat this guide as production
+remediation automation.

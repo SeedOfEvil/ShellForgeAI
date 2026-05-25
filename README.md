@@ -98,6 +98,68 @@ execute. Status, checklist, report, and export never execute.
 
 See [`docs/safety.md`](docs/safety.md) for the full mutation boundary.
 
+## V1 hardening lane: Keep It a Knife, Not a Toolbox
+
+ShellForgeAI V1 is a **CLI-first Linux/Docker operator knife**. It safely
+inspects Linux/Docker scenes, ranks suspects, builds evidence-backed operator
+reports, preserves/exports/compares report artifacts, routes common operator
+asks deterministically, and refuses or gates mutation.
+
+### What this is (V1)
+
+- Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
+- Deterministic Docker triage and deep detail (`triage docker`,
+  `triage docker detail <target>`).
+- Deterministic operator report lifecycle (`ops report`, `--save`, `history`,
+  `compare`, `compare-latest`, `export`, `export-validate`, `validate`).
+- Deterministic ask routing for common 2AM/operator prompts, including
+  mutation refusal.
+- Governed remediation **preview/testing** lanes with explicit gates,
+  disposable-only proofs, and no casual production mutation.
+
+### What this is not (V1)
+
+- Not an autonomous infrastructure repair agent.
+- Not a production remediation bot.
+- Not a web UI, secrets manager, SIEM replacement, or monitoring platform.
+- Not a tool that runs arbitrary shell from natural language.
+- Not a system that casually restarts/deletes/prunes broad infrastructure.
+
+### 5-minute V1 quickstart
+
+```bash
+shellforgeai doctor
+shellforgeai remediation self-test --profile quick
+shellforgeai ops report
+shellforgeai ops report --save
+shellforgeai ops report history --limit 5
+shellforgeai ops report compare-latest
+shellforgeai triage docker detail <target>
+shellforgeai remediation eligibility --target <target> --explain
+```
+
+Optional governed/disposable testing only:
+
+```bash
+shellforgeai remediation self-test --profile full
+```
+
+### Canonical 2AM operator flow
+
+1. `shellforgeai doctor`
+2. `shellforgeai remediation self-test --profile quick`
+3. `shellforgeai ops report`
+4. `shellforgeai ops report --save`
+5. `shellforgeai ops report history --limit 5`
+6. `shellforgeai ops report compare-latest`
+7. `shellforgeai triage docker detail <target>`
+8. `shellforgeai remediation eligibility --target <target> --explain`
+9. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
+
+Safety promise: V1 is read-only by default, deterministic ask routes do not
+require model availability for safety/refusal paths, and production mutation is
+out of scope.
+
 ## Install
 
 Requires Python 3.12+.
@@ -144,6 +206,8 @@ explicit CLI lane.
 
 ## Deeper documentation
 
+- [`docs/v1-scope.md`](docs/v1-scope.md) — V1 scope, release contract, non-goals, and acceptance checklist.
+- [`docs/demo.md`](docs/demo.md) — 5-minute Linux/Docker operator demo with deterministic refusal path.
 - [`docs/release-baseline.md`](docs/release-baseline.md) — PR78
   release/handoff baseline after the PR56–PR77 capability arc
   (capabilities, mutation boundary, safety invariants, operator

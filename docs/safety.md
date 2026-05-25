@@ -1,5 +1,25 @@
 # Safety
 
+## V1 safety contract
+
+- Read-only by default.
+- Natural-language mutation requests are refused deterministically.
+- No `shell=True` and no arbitrary command execution from prompts.
+- Governed remediation lanes are explicit and gated.
+- Disposable-only proof language applies to remediation execution paths.
+
+### What self-tests prove
+
+- Runtime, command surface, deterministic safety routing, and mutation refusal
+  remain intact for the configured profile.
+- Self-tests do **not** grant production mutation rights or bypass gates.
+
+### What V1 does not promise
+
+- No autonomous production remediation.
+- No automatic repair or production restart from natural language.
+- No broad Docker/Compose execution outside governed disposable lanes.
+
 ShellForgeAI is built to be safe by construction. The runtime does not run
 arbitrary shell, does not mutate the host without policy approval, and
 treats model output as advisory.
