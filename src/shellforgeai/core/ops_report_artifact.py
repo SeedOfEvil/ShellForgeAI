@@ -395,6 +395,127 @@ def _safe_next_commands(target: str) -> list[str]:
     ]
 
 
+def _safe_history_next_commands() -> list[str]:
+    return [
+        "shellforgeai ops report --save",
+        "shellforgeai ops report history",
+        "shellforgeai ops report history --json",
+        "shellforgeai ops report compare-latest",
+        "shellforgeai ops report compare-latest --json",
+        "shellforgeai ops report validate <report_id> --json",
+        "shellforgeai ops report export <report_id> --json",
+        "shellforgeai triage docker detail <target>",
+        "shellforgeai remediation eligibility --target <target> --explain",
+    ]
+
+
+def ops_report_history(
+    data_dir: Path, *, limit: int = 10, include_drift: bool = False
+) -> dict[str, Any]:
+    root = data_dir / "ops_reports"
+    warnings: list[str] = []
+    entries: list[dict[str, Any]] = []
+    if root.exists():
+        for child in root.iterdir():
+            if not child.is_dir() or not child.name.startswith("ops_report_"):
+                continue
+            report_json = child / "ops-report.json"
+            if not report_json.exists():
+                warnings.append(
+                    f"invalid report artifact ignored: {child.name} (missing ops-report.json)"
+                )
+                continue
+            try:
+                report = json.loads(report_json.read_text(encoding="utf-8"))
+            except Exception:
+                warnings.append(f"invalid report artifact ignored: {child.name} (malformed json)")
+                continue
+            if report.get("mode") != "ops_report":
+                warnings.append(f"invalid report artifact ignored: {child.name} (unexpected mode)")
+                continue
+            suspects = report.get("suspects") or []
+            summary = report.get("summary") or {}
+            entries.append(
+                {
+                    "report_id": child.name,
+                    "created_at": report.get("generated_at"),
+                    "path": str(child),
+                    "valid": True,
+                    "suspects_ranked": summary.get("suspects_ranked", len(suspects)),
+                    "critical": summary.get("critical", 0),
+                    "high": summary.get("high", 0),
+                    "top_suspect": (suspects[0].get("name") if suspects else None),
+                }
+            )
+    entries.sort(key=lambda r: str(r.get("report_id") or ""), reverse=True)
+    limited = entries[: max(1, limit)]
+    latest_drift: dict[str, Any] = {}
+    if include_drift and len(entries) >= 2:
+        drift = compare_ops_reports(entries[1]["report_id"], entries[0]["report_id"], data_dir)
+        latest_drift = {
+            "status": drift.get("status"),
+            "before_report_id": entries[1]["report_id"],
+            "after_report_id": entries[0]["report_id"],
+            "summary": drift.get("summary") or {},
+            "warnings": drift.get("warnings") or [],
+            "safe_next_commands": ["shellforgeai ops report compare-latest --json"],
+        }
+    payload = {
+        "schema_version": "1",
+        "mode": "ops_report_history",
+        "status": "ok" if entries else "empty",
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": {
+            "reports_found": len(entries),
+            "valid_reports": len(entries),
+            "invalid_reports": len(warnings),
+            "limit": max(1, limit),
+            "latest_report_id": (entries[0]["report_id"] if entries else None),
+            "previous_report_id": (entries[1]["report_id"] if len(entries) > 1 else None),
+        },
+        "reports": limited,
+        "latest_drift": latest_drift,
+        "safe_next_commands": _safe_history_next_commands(),
+        "warnings": warnings,
+        "safety": _safety(),
+    }
+    return payload
+
+
+def compare_latest_ops_reports(
+    data_dir: Path, *, only_changed: bool = False, include_stable: bool = False
+) -> dict[str, Any]:
+    hist = ops_report_history(data_dir, limit=50, include_drift=False)
+    reports = hist.get("reports") or []
+    if len(reports) < 2:
+        return {
+            "schema_version": "1",
+            "mode": "ops_report_compare_latest",
+            "status": "not_enough_reports",
+            "read_only": True,
+            "mutation_performed": False,
+            "summary": {"valid_reports": len(reports), "required_reports": 2},
+            "warnings": ["at least two valid saved ops reports are required"],
+            "safe_next_commands": [
+                "shellforgeai ops report --save",
+                "shellforgeai ops report history",
+            ],
+            "safety": _safety(),
+        }
+    before = reports[1]["report_id"]
+    after = reports[0]["report_id"]
+    out = compare_ops_reports(
+        before, after, data_dir, only_changed=only_changed, include_stable=include_stable
+    )
+    out["latest"] = True
+    out["before_report_id"] = before
+    out["after_report_id"] = after
+    out["before_path"] = reports[1]["path"]
+    out["after_path"] = reports[0]["path"]
+    return out
+
+
 def compare_ops_reports(
     before_ref: str,
     after_ref: str,

@@ -743,3 +743,4 @@ PR100 (May 23, 2026): normalized canonical safe-next command suggestions across 
 - PR107 (May 24, 2026): added read-only ops report artifact handoff workflow (`ops report --save`, `ops report validate`, `ops report export`, `ops report export-validate`) with manifest/checksum safety validation and strict JSON outputs.
 
 - PR108 (May 24, 2026): added read-only ops report drift comparison (`ops report compare` plus `compare-export`) with strict JSON `mode=ops_report_compare`, suspect/new-resolved/escalation/improvement/rank-confidence-class drift categories, remediation-lane drift, and safety false→true warning surfacing; no mutation execution added.
+- PR109 (May 24, 2026): added read-only `ops report history` and `ops report compare-latest` shortcuts for saved report handoffs, including strict JSON history listing, latest-two valid report resolution, and controlled `not_enough_reports` responses without mutation behavior.
