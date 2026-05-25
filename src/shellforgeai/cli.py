@@ -10511,6 +10511,119 @@ def v1_packet_export_validate(
     raise typer.Exit(0 if payload.get("status") == "ok" else 1)
 
 
+@v1_packet_app.command("history")
+def v1_packet_history(
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    limit: Annotated[int, typer.Option("--limit")] = 10,
+) -> None:
+    from shellforgeai.core.v1_packet import packet_history
+
+    payload = packet_history(Path(load_settings().app.data_dir), limit=limit)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("V1 readiness packet history")
+        console.print("")
+        if payload.get("status") == "empty":
+            console.print("No saved packets found.")
+        else:
+            latest = (payload.get("packets") or [{}])[0]
+            console.print("Latest:")
+            console.print(f"- {latest.get('packet_id')}")
+            console.print(f"  status: {latest.get('status')}")
+            console.print("\nRecent packets:")
+            for idx, pkt in enumerate(payload.get("packets") or [], start=1):
+                console.print(f"{idx}. {pkt.get('packet_id')}")
+        console.print("\nSafety:")
+        console.print("- read_only: true")
+        console.print("- mutation_performed: false")
+        console.print("- no remediation/rollback/cleanup/Compose execution")
+    raise typer.Exit(0 if payload.get("status") in {"ok", "empty"} else 1)
+
+
+@v1_packet_app.command("compare")
+def v1_packet_compare(
+    before_ref: Annotated[str, typer.Argument()],
+    after_ref: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+    top: Annotated[int, typer.Option("--top")] = 10,
+) -> None:
+    from shellforgeai.core.v1_packet import compare_packets
+
+    if top < 1:
+        payload = {
+            "schema_version": 1,
+            "mode": "v1_packet_compare",
+            "status": "error",
+            "warnings": ["top must be >= 1"],
+            "read_only": True,
+            "mutation_performed": False,
+        }
+    else:
+        payload = compare_packets(
+            before_ref,
+            after_ref,
+            Path(load_settings().app.data_dir),
+            only_changed=only_changed,
+            include_stable=include_stable,
+        )
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        if payload.get("status") != "ok":
+            console.print("V1 packet compare failed")
+            for w in payload.get("warnings") or []:
+                console.print(f"- {w}")
+        else:
+            console.print("V1 readiness packet compare\n")
+            console.print(f"Before: {payload['before']['packet_id']}")
+            console.print(f"After:  {payload['after']['packet_id']}\n")
+            s = payload["summary"]
+            console.print(
+                "Summary: "
+                f"regressions={s['regressions']}, "
+                f"improvements={s['improvements']}, "
+                f"warnings added={s['new_warnings']}, "
+                f"warnings resolved={s['resolved_warnings']}, "
+                f"safety drift={s['safety_drift']}"
+            )
+            console.print("\nChanged:")
+            for c in (payload.get("changes") or [])[:top]:
+                console.print(f"- {c['field']}: {c['before']} -> {c['after']}")
+            if include_stable and payload.get("stable"):
+                console.print("\nStable:")
+                for c in (payload.get("stable") or [])[:top]:
+                    console.print(f"- {c['field']}: {c['before']}")
+    raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+
+
+@v1_packet_app.command("compare-latest")
+def v1_packet_compare_latest(
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+    top: Annotated[int, typer.Option("--top")] = 10,
+) -> None:
+    from shellforgeai.core.v1_packet import compare_latest_packets
+
+    payload = compare_latest_packets(
+        Path(load_settings().app.data_dir), only_changed=only_changed, include_stable=include_stable
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        if payload.get("status") != "ok":
+            console.print("V1 packet compare-latest unavailable")
+            for w in payload.get("warnings") or []:
+                console.print(f"- {w}")
+        else:
+            for c in (payload.get("changes") or [])[: max(1, top)]:
+                console.print(f"- {c['field']}: {c['before']} -> {c['after']}")
+    raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+
+
 @v1_app.command("check")
 def v1_check(
     profile: Annotated[str, typer.Option("--profile")] = "standard",

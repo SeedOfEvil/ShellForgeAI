@@ -1198,3 +1198,7 @@ When `shellforgeai diagnose <target>` matches a known Docker/battle-lab containe
 - `shellforgeai v1 check --fail-on-warn`
 
 Read-only command that verifies the documented V1 command-surface contract without executing remediation/rollback/cleanup.
+
+- `shellforgeai v1 packet history [--limit N] [--json]` lists saved V1 readiness packets (newest first).
+- `shellforgeai v1 packet compare <before-packet-id-or-path> <after-packet-id-or-path> [--json] [--only-changed] [--include-stable] [--top N]` compares two saved V1 packets read-only.
+- `shellforgeai v1 packet compare-latest [--json] [--only-changed] [--include-stable] [--top N]` compares the latest two saved V1 packets.
