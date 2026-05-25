@@ -78,3 +78,8 @@ natural language, or casually prune/delete/restart broad infrastructure.
 - Regression tests cover doc presence, V1 command spine, and safety wording.
 
 - Release acceptance includes: `shellforgeai v1 check --profile standard --json` passes.
+
+## Command inventory reference
+
+For the auditable V1 command inventory and safety classification matrix, see
+[`docs/V1_COMMAND_SURFACE.md`](V1_COMMAND_SURFACE.md).

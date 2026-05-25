@@ -1458,3 +1458,7 @@ Mutation remains gated/disposable only; do not treat this guide as production
 remediation automation.
 
 - V1 post-deploy check: `shellforgeai v1 check --profile standard --json`
+
+## V1 release readiness
+
+- When reviewing V1 release readiness, check `docs/V1_COMMAND_SURFACE.md` and run `./scripts/v1_validate.sh --full`.

@@ -2,6 +2,7 @@
 
 ## V1 safety contract
 
+- Safety classes for V1 command inventory are defined in [`docs/V1_COMMAND_SURFACE.md`](V1_COMMAND_SURFACE.md): READ_ONLY, ARTIFACT_WRITE, GOVERNED_PLAN_ONLY, GOVERNED_DISPOSABLE_MUTATION, REFUSED_BY_DEFAULT, and OUT_OF_V1.
 - Read-only by default.
 - Natural-language mutation requests are refused deterministically.
 - No `shell=True` and no arbitrary command execution from prompts.
