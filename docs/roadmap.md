@@ -756,3 +756,6 @@ PR100 (May 23, 2026): normalized canonical safe-next command suggestions across 
 
 
 - PR112 completed: V1 demo/docs command contract hardening. Canonical V1 demo commands are documented, dangerous casual demo steps are explicitly excluded, and tests enforce markdown command-surface safety/validity contracts.
+
+
+- PR114 milestone: Added `docs/V1_COMMAND_SURFACE.md` as the explicit V1 command-surface inventory and safety classification map, with doc-linking and regression coverage for safe-path command constraints.

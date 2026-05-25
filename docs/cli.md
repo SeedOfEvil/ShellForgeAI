@@ -1,3 +1,5 @@
+> For the V1 command inventory and safety classes, see [`docs/V1_COMMAND_SURFACE.md`](V1_COMMAND_SURFACE.md).
+
 # CLI reference
 
 ShellForgeAI is exposed as `shellforgeai` and `sfai`.
