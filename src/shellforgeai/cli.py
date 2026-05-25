@@ -246,6 +246,7 @@ self_test_app = typer.Typer(
     help="Safe read-only command coverage harness (PR79). No mutation, no execute.",
 )
 v1_app = typer.Typer(help="V1 readiness checks (read-only).")
+v1_packet_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 triage_app = typer.Typer(
     help="PR81 read-only triage ranking. Scans the scene and ranks suspects. No mutation.",
 )
@@ -271,6 +272,7 @@ app.add_typer(ops_app, name="ops")
 ops_app.add_typer(ops_report_app, name="report")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(v1_app, name="v1")
+v1_app.add_typer(v1_packet_app, name="packet")
 app.add_typer(triage_app, name="triage")
 app.add_typer(remediation_app, name="remediation")
 remediation_app.add_typer(remediation_receipt_app, name="receipt")
@@ -10414,6 +10416,96 @@ def ops_report_compare_export(
     console.print(
         _render_ops_report_compare_human(payload, top=top, include_stable=include_stable), end=""
     )
+
+
+@v1_packet_app.callback(invoke_without_command=True)
+def v1_packet(
+    ctx: typer.Context,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    save: Annotated[bool, typer.Option("--save")] = False,
+) -> None:
+    from shellforgeai.core.v1_packet import build_packet, save_packet
+
+    payload = build_packet(app)
+    if save:
+        saved = save_packet(payload, Path(load_settings().app.data_dir))
+        payload["packet_id"] = saved["packet_id"]
+        payload["packet_path"] = saved["packet_path"]
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") != "failed" else 1)
+    console.print("V1 readiness packet")
+    console.print("")
+    console.print(f"Status: {payload.get('status')}")
+    console.print("\nChecks:")
+    for name, check in (payload.get("checks") or {}).items():
+        console.print(f"- {name.replace('_', ' ')}: {check.get('status')}")
+    console.print("\nSafety:")
+    console.print("- read_only: true")
+    console.print("- mutation_performed: false")
+    console.print("- no remediation/rollback/cleanup/Compose execution")
+    console.print("\nSafe next commands:")
+    for cmd in payload.get("safe_next_commands") or []:
+        console.print(f"- {cmd}")
+    if save:
+        console.print("")
+        console.print(f"packet_id: {payload['packet_id']}")
+        console.print(f"packet_path: {payload['packet_path']}")
+        console.print(f"validate: shellforgeai v1 packet validate {payload['packet_id']}")
+        console.print(f"export: shellforgeai v1 packet export {payload['packet_id']}")
+    raise typer.Exit(0 if payload.get("status") != "failed" else 1)
+
+
+@v1_packet_app.command("validate")
+def v1_packet_validate(
+    packet_ref: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.v1_packet import validate_packet
+
+    payload = validate_packet(packet_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"V1 packet validate: {payload.get('status')}")
+        for w in payload.get("warnings") or []:
+            console.print(f"- {w}")
+    raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+
+
+@v1_packet_app.command("export")
+def v1_packet_export(
+    packet_ref: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.v1_packet import export_packet
+
+    payload = export_packet(packet_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"V1 packet export: {payload.get('status')}")
+        if payload.get("export"):
+            console.print(f"- export_id: {payload['export']['id']}")
+            console.print(f"- export_path: {payload['export']['path']}")
+    raise typer.Exit(0 if payload.get("status") == "exported" else 1)
+
+
+@v1_packet_app.command("export-validate")
+def v1_packet_export_validate(
+    export_ref: Annotated[str, typer.Argument()],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.v1_packet import validate_packet_export
+
+    payload = validate_packet_export(export_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print(f"V1 packet export validate: {payload.get('status')}")
+        for w in payload.get("warnings") or []:
+            console.print(f"- {w}")
+    raise typer.Exit(0 if payload.get("status") == "ok" else 1)
 
 
 @v1_app.command("check")

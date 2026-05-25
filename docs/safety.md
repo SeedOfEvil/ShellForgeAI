@@ -1020,3 +1020,4 @@ Diagnose enrichment for known Docker/battle-lab targets is read-only: it does no
 `ops report history` and `ops report compare-latest` are read-only report discovery/drift shortcuts: they scan ShellForgeAI-owned report artifacts, never save/export/delete by themselves, and never execute remediation/rollback/cleanup/restart.
 
 - `shellforgeai v1 check` is read-only/non-mutating; full profile does not execute live remediation by default.
+shellforgeai v1 packet is read-only by default; --save/export only write ShellForgeAI-owned artifacts and never mutate Docker/system state.
