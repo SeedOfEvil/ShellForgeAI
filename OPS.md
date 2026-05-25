@@ -1458,8 +1458,11 @@ Mutation remains gated/disposable only; do not treat this guide as production
 remediation automation.
 
 - V1 post-deploy check: `shellforgeai v1 check --profile standard --json`
+scripts/v1_validate.sh --full
 shellforgeai v1 packet --save
 shellforgeai v1 packet validate <packet>
+shellforgeai v1 packet history
+shellforgeai v1 packet compare-latest
 shellforgeai v1 packet export <packet>
 shellforgeai v1 packet export-validate <export>
 

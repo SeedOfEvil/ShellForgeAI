@@ -42,6 +42,9 @@ ShellForgeAI-owned artifacts, and whether it can mutate Docker/system state.
 | `shellforgeai v1 packet validate <packet-ref>` | Validate saved packet | READ_ONLY | No | No | Validates packet files, checksums, safety and status consistency. |
 | `shellforgeai v1 packet export <packet-ref>` | Export saved packet | ARTIFACT_WRITE | Yes | No | Writes `/data/exports/export_<packet_id>` bundle. |
 | `shellforgeai v1 packet export-validate <export-ref>` | Validate packet export | READ_ONLY | No | No | Validates exported packet bundle and safety metadata. |
+| `shellforgeai v1 packet history [--limit N]` | List saved packets | READ_ONLY | No | No | Lists saved V1 packets newest-first without creating/validating/exporting artifacts. |
+| `shellforgeai v1 packet compare <before> <after>` | Compare two packets | READ_ONLY | No | No | Compares saved packet artifacts by id/path for readiness/safety/check drift only. |
+| `shellforgeai v1 packet compare-latest` | Compare latest two packets | READ_ONLY | No | No | Resolves latest two saved packets and compares read-only; returns controlled not_enough_history when fewer than two. |
 | `shellforgeai triage docker` | Deterministic suspect ranking | READ_ONLY | No | No | No remediation execution. |
 | `shellforgeai triage docker detail <target>` | Deterministic deep detail | READ_ONLY | No | No | Container-focused evidence detail. |
 | `shellforgeai ops report` | Operator report synthesis | READ_ONLY | No | No | Evidence-backed report view. |

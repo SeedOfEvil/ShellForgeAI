@@ -760,3 +760,5 @@ PR100 (May 23, 2026): normalized canonical safe-next command suggestions across 
 
 - PR114 milestone: Added `docs/V1_COMMAND_SURFACE.md` as the explicit V1 command-surface inventory and safety classification map, with doc-linking and regression coverage for safe-path command constraints.
 PR115 (May 25, 2026): added `shellforgeai v1 packet` release-readiness packet generation/save/validate/export/export-validate workflow as auditable V1 handoff artifact.
+
+- PR116 (May 25, 2026): added read-only `shellforgeai v1 packet history`, `shellforgeai v1 packet compare`, and `shellforgeai v1 packet compare-latest` commands for saved readiness packet lifecycle drift tracking without packet regeneration/export/mutation.

@@ -377,3 +377,243 @@ def validate_packet_export(export_ref: str, data_dir: Path) -> dict[str, Any]:
         "checks": checks,
         "warnings": [],
     }
+
+
+def _resolve_packet_payload(packet_ref: str, data_dir: Path) -> tuple[dict[str, Any], Path | None]:
+    d = _resolve_ref(packet_ref, data_dir / "v1_packets")
+    if d is None:
+        return {"schema_version": 1, "mode": "v1_packet_compare", "status": "error"}, None
+    if d and d.is_file():
+        d = d.parent
+    if d is None or not d.exists():
+        return {"schema_version": 1, "mode": "v1_packet_compare", "status": "not_found"}, None
+    if any(not (d / f).exists() for f in REQUIRED_PACKET_FILES):
+        return {"schema_version": 1, "mode": "v1_packet_compare", "status": "error"}, None
+    try:
+        payload = json.loads((d / "v1-packet.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {"schema_version": 1, "mode": "v1_packet_compare", "status": "error"}, None
+    if payload.get("mode") != PACKET_MODE:
+        return {"schema_version": 1, "mode": "v1_packet_compare", "status": "error"}, None
+    return payload, d
+
+
+def packet_history(data_dir: Path, *, limit: int = 10) -> dict[str, Any]:
+    if limit < 1:
+        return {
+            "schema_version": 1,
+            "mode": "v1_packet_history",
+            "status": "error",
+            "read_only": True,
+            "mutation_performed": False,
+            "warnings": ["limit must be >= 1"],
+            "safety": _safety(),
+        }
+    root = data_dir / "v1_packets"
+    entries: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    if root.exists():
+        for child in root.iterdir():
+            if not child.is_dir() or not child.name.startswith("v1_packet_"):
+                continue
+            packet_file = child / "v1-packet.json"
+            if not packet_file.exists():
+                warnings.append(
+                    f"invalid packet artifact ignored: {child.name} (missing v1-packet.json)"
+                )
+                continue
+            try:
+                payload = json.loads(packet_file.read_text(encoding="utf-8"))
+            except Exception:
+                warnings.append(f"invalid packet artifact ignored: {child.name} (malformed json)")
+                continue
+            checks = payload.get("checks") or {}
+            entries.append(
+                {
+                    "packet_id": child.name,
+                    "created_at": payload.get("created_at"),
+                    "status": payload.get("status"),
+                    "path": str(child),
+                    "checks": {
+                        "quick": ((checks.get("v1_check") or {}).get("summary") or {}).get("quick"),
+                        "standard": ((checks.get("v1_check") or {}).get("summary") or {}).get(
+                            "standard"
+                        ),
+                        "full": ((checks.get("v1_check") or {}).get("summary") or {}).get("full"),
+                    },
+                    "safety_clean": all(
+                        (payload.get("safety") or {}).get(k) is v for k, v in _safety().items()
+                    ),
+                }
+            )
+    entries.sort(key=lambda e: e["packet_id"], reverse=True)
+    return {
+        "schema_version": 1,
+        "mode": "v1_packet_history",
+        "status": "ok" if entries else "empty",
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": {
+            "packets_found": len(entries),
+            "limit": limit,
+            "latest_packet_id": entries[0]["packet_id"] if entries else None,
+        },
+        "packets": entries[:limit],
+        "safety": _safety(),
+        "warnings": warnings,
+    }
+
+
+def compare_packets(
+    before_ref: str,
+    after_ref: str,
+    data_dir: Path,
+    *,
+    only_changed: bool = False,
+    include_stable: bool = False,
+) -> dict[str, Any]:
+    before, before_path = _resolve_packet_payload(before_ref, data_dir)
+    if before_path is None:
+        return {
+            "schema_version": 1,
+            "mode": "v1_packet_compare",
+            "status": before.get("status", "error"),
+            "read_only": True,
+            "mutation_performed": False,
+            "safety": _safety(),
+            "warnings": ["before packet validation failed"],
+        }
+    after, after_path = _resolve_packet_payload(after_ref, data_dir)
+    if after_path is None:
+        return {
+            "schema_version": 1,
+            "mode": "v1_packet_compare",
+            "status": after.get("status", "error"),
+            "read_only": True,
+            "mutation_performed": False,
+            "safety": _safety(),
+            "warnings": ["after packet validation failed"],
+        }
+    changes: list[dict[str, Any]] = []
+    stable: list[dict[str, Any]] = []
+    regressions: list[dict[str, Any]] = []
+    improvements: list[dict[str, Any]] = []
+    new_warnings = resolved_warnings = new_failures = resolved_failures = safety_drift = 0
+
+    def add_change(name: str, b: Any, a: Any, category: str = "change") -> None:
+        nonlocal safety_drift
+        entry = {"field": name, "before": b, "after": a, "category": category}
+        if b == a:
+            stable.append(entry)
+            return
+        changes.append(entry)
+        if category == "regression":
+            regressions.append(entry)
+        if category == "improvement":
+            improvements.append(entry)
+        if name.startswith("safety.") and b is False and a is True:
+            safety_drift += 1
+
+    add_change(
+        "status",
+        before.get("status"),
+        after.get("status"),
+        "regression"
+        if before.get("status") == "ok" and after.get("status") in {"warn", "failed"}
+        else "improvement"
+        if before.get("status") in {"warn", "failed"} and after.get("status") == "ok"
+        else "change",
+    )
+    for profile in ("quick", "standard", "full"):
+        for metric in ("passed", "failed", "warned"):
+            b = (
+                (((before.get("checks") or {}).get("v1_check") or {}).get("summary") or {}).get(
+                    profile
+                )
+                or {}
+            ).get(metric)
+            a = (
+                (((after.get("checks") or {}).get("v1_check") or {}).get("summary") or {}).get(
+                    profile
+                )
+                or {}
+            ).get(metric)
+            add_change(f"checks.{profile}.{metric}", b, a)
+    for key in _safety():
+        b = (before.get("safety") or {}).get(key)
+        a = (after.get("safety") or {}).get(key)
+        add_change(
+            f"safety.{key}",
+            b,
+            a,
+            "regression"
+            if b is False and a is True
+            else "improvement"
+            if b is True and a is False
+            else "change",
+        )
+    bw = set(before.get("warnings") or [])
+    aw = set(after.get("warnings") or [])
+    new_warnings = len(aw - bw)
+    resolved_warnings = len(bw - aw)
+    new_failures = sum(
+        1
+        for c in changes
+        if c["field"].endswith(".failed") and (c["after"] or 0) > (c["before"] or 0)
+    )
+    resolved_failures = sum(
+        1
+        for c in changes
+        if c["field"].endswith(".failed") and (c["after"] or 0) < (c["before"] or 0)
+    )
+    out_stable = stable if include_stable and not only_changed else []
+    return {
+        "schema_version": 1,
+        "mode": "v1_packet_compare",
+        "status": "ok",
+        "read_only": True,
+        "mutation_performed": False,
+        "before": {"packet_id": before_path.name, "path": str(before_path)},
+        "after": {"packet_id": after_path.name, "path": str(after_path)},
+        "summary": {
+            "regressions": len(regressions),
+            "improvements": len(improvements),
+            "new_warnings": new_warnings,
+            "resolved_warnings": resolved_warnings,
+            "new_failures": new_failures,
+            "resolved_failures": resolved_failures,
+            "safety_drift": safety_drift,
+            "stable": len(stable),
+        },
+        "changes": changes,
+        "regressions": regressions,
+        "improvements": improvements,
+        "stable": out_stable,
+        "safety": _safety(),
+        "warnings": [],
+    }
+
+
+def compare_latest_packets(
+    data_dir: Path, *, only_changed: bool = False, include_stable: bool = False
+) -> dict[str, Any]:
+    hist = packet_history(data_dir, limit=50)
+    packets = hist.get("packets") or []
+    if len(packets) < 2:
+        return {
+            "schema_version": 1,
+            "mode": "v1_packet_compare",
+            "status": "not_enough_history",
+            "read_only": True,
+            "mutation_performed": False,
+            "summary": {"packets_found": len(packets), "required_packets": 2},
+            "warnings": ["at least two saved packets are required"],
+            "safety": _safety(),
+        }
+    return compare_packets(
+        packets[1]["packet_id"],
+        packets[0]["packet_id"],
+        data_dir,
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
