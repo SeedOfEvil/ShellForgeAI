@@ -76,3 +76,5 @@ natural language, or casually prune/delete/restart broad infrastructure.
 - Docs use canonical safe commands (`ops report`, `--save`, `history`, `compare-latest`, triage detail, remediation eligibility).
 - Docs avoid casual dangerous commands outside clearly gated sections.
 - Regression tests cover doc presence, V1 command spine, and safety wording.
+
+- Release acceptance includes: `shellforgeai v1 check --profile standard --json` passes.

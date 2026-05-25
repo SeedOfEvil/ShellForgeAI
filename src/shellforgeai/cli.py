@@ -245,6 +245,7 @@ ops_report_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 self_test_app = typer.Typer(
     help="Safe read-only command coverage harness (PR79). No mutation, no execute.",
 )
+v1_app = typer.Typer(help="V1 readiness checks (read-only).")
 triage_app = typer.Typer(
     help="PR81 read-only triage ranking. Scans the scene and ranks suspects. No mutation.",
 )
@@ -269,6 +270,7 @@ app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
 ops_app.add_typer(ops_report_app, name="report")
 app.add_typer(self_test_app, name="self-test")
+app.add_typer(v1_app, name="v1")
 app.add_typer(triage_app, name="triage")
 app.add_typer(remediation_app, name="remediation")
 remediation_app.add_typer(remediation_receipt_app, name="receipt")
@@ -9385,7 +9387,7 @@ def compose_inspect(
     ref = (container or target or "").strip()
     inv = containers.containers(all_containers=True)
     if not inv.ok:
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     payload = json.loads(inv.stdout or "{}")
     rows = payload.get("containers") or []
     chosen = None
@@ -9396,7 +9398,7 @@ def compose_inspect(
                 break
         if chosen is None:
             typer.echo("Container not found.", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
     elif project:
         for row in rows:
             compose = row.get("compose") or {}
@@ -10412,6 +10414,60 @@ def ops_report_compare_export(
     console.print(
         _render_ops_report_compare_human(payload, top=top, include_stable=include_stable), end=""
     )
+
+
+@v1_app.command("check")
+def v1_check(
+    profile: Annotated[str, typer.Option("--profile")] = "standard",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    fail_on_warn: Annotated[bool, typer.Option("--fail-on-warn")] = False,
+) -> None:
+    from shellforgeai.core.v1_readiness import run_v1_readiness_check
+
+    try:
+        payload = run_v1_readiness_check(app, profile=profile)
+    except ValueError as exc:
+        if json_output:
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "mode": "v1_readiness_check",
+                        "status": "failed",
+                        "error": str(exc),
+                    }
+                )
+            )
+        else:
+            console.print(f"Error: {exc}")
+        raise typer.Exit(1) from None
+
+    if fail_on_warn and payload.get("status") == "warn" and payload.get("ci_status") != "failed":
+        payload["ci_status"] = "failed_on_warn"
+
+    if json_output:
+        typer.echo(json.dumps(payload))
+    else:
+        console.print("ShellForgeAI V1 readiness check")
+        console.print("")
+        console.print(f"Profile: {payload['profile']}")
+        console.print(f"Status: {payload['status']}")
+        console.print("\nPassed:")
+        for c in payload["checks"]:
+            if c["status"] == "passed":
+                console.print(f"- {c['name']}")
+        if payload.get("warnings"):
+            console.print("\nWarnings:")
+            for w in payload["warnings"]:
+                console.print(f"- {w}")
+        console.print("\nSafety:")
+        for k, v in payload["safety"].items():
+            console.print(f"- {k}: {str(v).lower()}")
+
+    exit_code = 1 if payload.get("status") == "failed" else 0
+    if fail_on_warn and payload.get("status") == "warn":
+        exit_code = 1
+    raise typer.Exit(exit_code)
 
 
 @self_test_app.command("commands")

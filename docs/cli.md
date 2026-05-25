@@ -1187,3 +1187,12 @@ Examples:
 When `shellforgeai diagnose <target>` matches a known Docker/battle-lab container, output may include deterministic triage context (severity/confidence/classes/evidence summary), a container-scope note, and canonical read-only next commands:
 - `shellforgeai triage docker detail <target>`
 - `shellforgeai remediation eligibility --target <target> --explain`
+
+## V1 readiness
+
+- `shellforgeai v1 check`
+- `shellforgeai v1 check --profile quick|standard|full`
+- `shellforgeai v1 check --json`
+- `shellforgeai v1 check --fail-on-warn`
+
+Read-only command that verifies the documented V1 command-surface contract without executing remediation/rollback/cleanup.
