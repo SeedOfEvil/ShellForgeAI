@@ -309,3 +309,5 @@ make check    # format + lint + type + tests
 ## License
 
 MIT. See `LICENSE`.
+
+- Run `shellforgeai v1 check` to verify the V1 knife surface.

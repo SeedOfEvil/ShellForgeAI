@@ -81,3 +81,5 @@ production remediation guide.
 - Keep artifacts for comparison/export validation, or clean up using the
   governed metadata cleanup workflow only (archive/validate/confirm gates).
 - Do not run production restart/remediation commands from this demo.
+
+- Optional gate: `shellforgeai v1 check --profile standard --json` before/after demo flow.
