@@ -10426,6 +10426,9 @@ def v1_packet(
 ) -> None:
     from shellforgeai.core.v1_packet import build_packet, save_packet
 
+    if ctx.invoked_subcommand is not None:
+        return
+
     payload = build_packet(app)
     if save:
         saved = save_packet(payload, Path(load_settings().app.data_dir))
