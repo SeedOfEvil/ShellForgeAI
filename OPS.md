@@ -1,6 +1,27 @@
 
 ## V1 canonical operator path (knife, not toolbox)
 
+## Safe compose update pattern (Docker01/lab)
+
+Use this runbook pattern to avoid accidental compose truncation:
+
+1. Take a Proxmox/LXC snapshot first.
+2. Backup compose file: `cp compose.yml compose.yml.bak-<tag>`.
+3. Write edits to a temp file (example: `compose.yml.tmp`).
+4. Validate temp file is non-empty before any replace step.
+5. Validate rendered config:
+   `docker compose -f compose.yml.tmp config >/tmp/compose-check.yml`.
+6. Only then move the temp file into place.
+7. Avoid sudo/pipeline write patterns that can truncate `compose.yml` when a command fails.
+8. Recreate and verify: source HEAD, compose image, container image,
+   `homelab.pr` label, `homelab.commit` label, health, and restart count.
+9. Keep rollback backup references until QA passes.
+
+Safety reminders for shared lab environments:
+- Do not prune volumes.
+- Do not remove running containers.
+
+
 Use this concise, safe path for the V1 demo and handoff contract:
 
 1. `shellforgeai version`
