@@ -1,3 +1,23 @@
+
+## V1 canonical operator path (knife, not toolbox)
+
+Use this concise, safe path for the V1 demo and handoff contract:
+
+1. `shellforgeai version`
+2. `shellforgeai doctor`
+3. `shellforgeai model doctor`
+4. `shellforgeai v1 check --profile quick`
+5. `shellforgeai remediation self-test --profile quick`
+6. `shellforgeai ops report --save`
+7. `shellforgeai ops report history --limit 5`
+8. `shellforgeai ops report compare-latest`
+9. `shellforgeai triage docker detail <target>`
+10. `shellforgeai remediation eligibility --target <target> --explain`
+11. `shellforgeai ask "It's 2AM; what is on fire?"`
+12. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
+
+Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path.
+
 # OPS
 
 Operator smoke tests and runbook tips.

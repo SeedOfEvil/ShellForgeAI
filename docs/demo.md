@@ -1,85 +1,102 @@
 # 5-Minute Linux/Docker Operator Demo (V1)
 
-This demo is for disposable battle-lab fixtures only. Do not use it as a
-production remediation guide.
+## What this demo proves
 
-## Preconditions
+- ShellForgeAI can inspect a Linux/Docker scene safely with read-only defaults.
+- The V1 command spine is real, current, and evidence-first.
+- Operator artifacts can be produced, saved, compared, and handed off.
+- Deterministic ask routing can summarize incidents and refuse mutation.
+
+## What this demo does not do
+
+- It does not restart production services.
+- It does not run `shellforgeai remediation execute --confirm` (gated/non-goal for this demo).
+- It does not run `shellforgeai remediation rollback-execute --confirm` (gated/non-goal for this demo).
+- It does not run `shellforgeai audit cleanup execute --confirm` (metadata cleanup is governed and gated).
+- It does not run Docker Compose mutation (`docker compose restart/up/down`) in this gated non-goal demo path.
+- It does not require secrets, external internet, or a web UI.
+
+## Prerequisites
 
 - Disposable Linux/Docker environment.
 - ShellForgeAI installed.
-- Fixture containers present (or equivalent):
-  - healthy baseline
-  - crashloop (`sfai-crashloop`)
-  - bad HTTP (`sfai-bad-http`)
-  - disk pressure (`sfai-disk-pressure`)
-  - noisy logs (`sfai-noisy-errors`)
-  - permission denied (`sfai-permission-denied`)
+- Fixture containers (or equivalent suspects):
+  - `sfai-crashloop`
+  - `sfai-bad-http` (bad HTTP)
+  - `sfai-disk-pressure` (disk pressure)
+  - `sfai-noisy-errors`
+  - `sfai-permission-denied` (permission denied)
 
-## Demo steps
+## 5-minute path
 
-1. Run scene-level operator report:
+```bash
+shellforgeai version
+shellforgeai doctor
+shellforgeai model doctor
+shellforgeai v1 check --profile quick
+shellforgeai v1 check --profile standard
+shellforgeai remediation self-test --profile quick
+shellforgeai ops report
+shellforgeai ops report --json
+shellforgeai ops report --save
+shellforgeai ops report history --limit 5
+shellforgeai ops report compare-latest
+shellforgeai triage docker
+shellforgeai triage docker detail sfai-crashloop
+shellforgeai triage docker detail sfai-bad-http
+shellforgeai triage docker detail sfai-disk-pressure
+shellforgeai triage docker detail sfai-noisy-errors
+shellforgeai triage docker detail sfai-permission-denied
+shellforgeai remediation eligibility --target sfai-crashloop --explain
+shellforgeai remediation eligibility --target sfai-noisy-errors --explain
+shellforgeai ask "It's 2AM; what is on fire?"
+shellforgeai ask "please restart shellforgeai"
+```
 
-   ```bash
-   shellforgeai ops report
-   ```
+## Expected suspects
 
-   Expected shape:
-   - `sfai-crashloop` ranked critical
-   - `sfai-bad-http` ranked high
-   - `sfai-disk-pressure` ranked high
-   - `sfai-noisy-errors` ranked high
-   - `sfai-permission-denied` ranked high/medium
+Common ranking shape in a seeded lab:
 
-2. Drill into one suspect:
+- `sfai-crashloop` (critical)
+- `sfai-bad-http` (bad HTTP) (high)
+- `sfai-disk-pressure` (disk pressure) (high)
+- `sfai-noisy-errors` (high)
+- `sfai-permission-denied` (permission denied) (high/medium)
 
-   ```bash
-   shellforgeai triage docker detail sfai-crashloop
-   ```
+## Artifact handoff
 
-3. Check governed remediation eligibility (read-only gate check):
+Use saved reports as handoff-ready evidence:
 
-   ```bash
-   shellforgeai remediation eligibility --target sfai-crashloop --explain
-   ```
+- `shellforgeai ops report --save`
+- `shellforgeai ops report history --limit 5`
+- `shellforgeai ops report compare-latest`
 
-   Expected shape:
-   - crashloop evidence is present
-   - eligibility blocks unless allowlist labels are present
-   - no mutation occurs
+Share the latest saved report plus compare output with the next operator.
 
-4. Preserve report artifact and inspect short history:
+## Mutation refusal demo
 
-   ```bash
-   shellforgeai ops report --save
-   shellforgeai ops report history --limit 3
-   shellforgeai ops report compare-latest
-   ```
+Run:
 
-5. Optional deterministic ask route demo:
+```bash
+shellforgeai ask "please restart shellforgeai"
+```
 
-   ```bash
-   shellforgeai ask "It's 2AM, what is on fire?"
-   ```
+Expected behavior:
 
-   Expected:
-   - deterministic ops-report path
-   - no model/auth dependency for this route
+- deterministic refusal (no natural-language mutation)
+- read-only alternatives (ops report, triage detail, eligibility explain)
+- no restart, no cleanup execute, no remediation execute
 
-6. Mutation refusal demo:
+## Cleanup / reset
 
-   ```bash
-   shellforgeai ask "please restart shellforgeai"
-   ```
+- Keep artifacts for compare/export validation.
+- If reset is needed, follow governed metadata workflows only.
+- `shellforgeai remediation self-test --profile quick` is safe to rerun.
 
-   Expected:
-   - deterministic refusal
-   - no mutation
-   - safe read-only alternatives
+## Troubleshooting
 
-## Cleanup
-
-- Keep artifacts for comparison/export validation, or clean up using the
-  governed metadata cleanup workflow only (archive/validate/confirm gates).
-- Do not run production restart/remediation commands from this demo.
-
-- Optional gate: `shellforgeai v1 check --profile standard --json` before/after demo flow.
+- If provider/model checks fail, continue with deterministic read-only routes (`ops report`, `triage docker`, `ask` refusal paths).
+- If suspects are missing, verify fixtures and rerun `shellforgeai ops report`.
+- For release readiness confirmation, rerun:
+  - `shellforgeai v1 check --profile quick`
+  - `shellforgeai v1 check --profile standard`

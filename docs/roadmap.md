@@ -753,3 +753,6 @@ PR100 (May 23, 2026): normalized canonical safe-next command suggestions across 
 - PR109 (May 24, 2026): added read-only `ops report history` and `ops report compare-latest` shortcuts for saved report handoffs, including strict JSON history listing, latest-two valid report resolution, and controlled `not_enough_reports` responses without mutation behavior.
 
 - PR111: add `shellforgeai v1 check` readiness contract command (quick/standard/full).
+
+
+- PR112 completed: V1 demo/docs command contract hardening. Canonical V1 demo commands are documented, dangerous casual demo steps are explicitly excluded, and tests enforce markdown command-surface safety/validity contracts.
