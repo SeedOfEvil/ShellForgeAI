@@ -1,3 +1,10 @@
+
+## V1 hardening lane (PR110)
+
+- Define and publish the V1 contract (scope, non-goals, safety boundary).
+- Normalize canonical operator flow around `doctor`, `ops report`, artifact lifecycle, and deterministic triage detail.
+- Keep behavior-preserving hardening first: docs/tests/regressions before broad feature expansion.
+
 # Roadmap
 
 > The roadmap captures direction, not commitments. Anything below the

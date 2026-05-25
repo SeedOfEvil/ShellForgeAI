@@ -1,5 +1,36 @@
 # Architecture
 
+## V1 architecture contract
+
+CLI → collectors → triage → ops reports → artifacts → governed remediation.
+
+- **CLI entrypoints** perform deterministic routing for explicit subcommands and
+  known safety prompts.
+- **Collectors** are typed read-only evidence collectors.
+- **Triage** ranks suspects deterministically for common Docker/operator scenes.
+- **Ops reports** summarize ranked incidents and safe next commands.
+- **Artifacts** preserve/save/validate/export/compare report outputs.
+- **Governed remediation** remains explicit, gated, and disposable-oriented; not
+  casual production automation.
+
+### Safety boundaries
+
+- Read-only default posture.
+- Deterministic natural-language mutation refusal.
+- No arbitrary shell execution.
+- Mutation paths require explicit gated CLI lanes.
+
+### Ask routing boundaries
+
+- Slash commands are deterministic and unknown slash commands do not call the model.
+- Recognized operator asks route to deterministic report/triage/refusal paths.
+- Deterministic safety routes do not depend on model availability.
+
+### Artifact lifecycle
+
+Ops reports support save, validate, history, compare, compare-latest, export,
+and export-validate to preserve and hand off evidence-backed state over time.
+
 ShellForgeAI is structured around a strict separation between **deterministic
 runtime** (typed read-only tools, evidence, plans, audit) and **advisory model
 synthesis** (LLM providers).
