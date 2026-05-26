@@ -93,7 +93,7 @@ def build_packet(app: Any) -> dict[str, Any]:
         "ok" if asks_refusal else "failed", deterministic_refusal=asks_refusal
     )
 
-    c, out = invoke(["remediation", "self-test", "--profile", "standard", "--json"])
+    c, out = invoke(["remediation", "self-test", "--profile", "quick", "--json"])
     rem_payload = (
         json.loads(out) if c == 0 and out.strip().startswith("{") else {"status": "failed"}
     )

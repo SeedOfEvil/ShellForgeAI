@@ -62,6 +62,8 @@ if args == ['v1','packet','--save','--json']:
     if os.environ.get('SFAI_PACKET_SAVE_STDERR_WARN') == '1':
         print('packet warning on stderr', file=sys.stderr)
     payload = {'packet_id': 'v1_packet_123', 'packet_path': '/d/p/v1_packet_123'}
+    if mode == 'missing_ref':
+        payload = {'status': 'ok', 'mode': 'v1_readiness_packet'}
     payload['status'] = 'ok'
     payload['mode'] = 'v1_readiness_packet'
     print(json.dumps(payload))
@@ -156,6 +158,11 @@ def test_packet_failure_modes_are_nonzero(tmp_path: Path) -> None:
     assert "SFAI v1 packet validate" not in (tmp_path / "c" / "calls.log").read_text(
         encoding="utf-8"
     )
+    missing_ref = _run(
+        tmp_path / "d", "--full", "--packet", extra_env={"SFAI_PACKET_SAVE_MODE": "missing_ref"}
+    )
+    assert missing_ref.returncode != 0
+    assert "Failed to parse packet JSON" in missing_ref.stderr
 
 
 def test_packet_mode_does_not_call_mutation_commands(tmp_path: Path) -> None:
@@ -195,6 +202,15 @@ def test_export_packet_flow_and_failure(tmp_path: Path) -> None:
     assert ok.returncode == 0
     assert "export_id: exp123" in ok.stdout
     assert fail.returncode != 0
+
+
+def test_export_packet_implies_packet_mode(tmp_path: Path) -> None:
+    ok = _run(tmp_path / "auto", "--quick", "--export-packet")
+    calls = (tmp_path / "auto" / "calls.log").read_text(encoding="utf-8")
+    assert ok.returncode == 0
+    assert "SFAI v1 packet --save --json" in calls
+    assert "SFAI v1 packet validate v1_packet_123 --json" in calls
+    assert "SFAI v1 packet export v1_packet_123 --json" in calls
 
 
 def test_missing_ruff_has_clear_validation_lane_message(tmp_path: Path) -> None:
