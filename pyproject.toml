@@ -2,6 +2,11 @@
 requires=["hatchling"]
 build-backend="hatchling.build"
 
+[tool.hatch.build]
+include=[
+  "src/shellforgeai/config/default.yaml",
+]
+
 [project]
 name="shellforgeai"
 version="0.1.0"

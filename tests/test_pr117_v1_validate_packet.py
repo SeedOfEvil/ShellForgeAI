@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from importlib.resources import files
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -269,3 +270,9 @@ def test_cli_v1_packet_save_json_is_strict_and_has_ids(tmp_path: Path) -> None:
     assert payload.get("packet_id")
     assert payload.get("packet_path")
     assert r.stdout.strip().startswith("{")
+
+
+def test_packaged_default_config_resource_exists() -> None:
+    cfg = files("shellforgeai").joinpath("config/default.yaml")
+    text = cfg.read_text(encoding="utf-8")
+    assert "app:" in text
