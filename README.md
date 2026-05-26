@@ -213,6 +213,7 @@ explicit CLI lane.
 - [`docs/V1_COMMAND_SURFACE.md`](docs/V1_COMMAND_SURFACE.md) — V1 command surface and safety classes.
 - [`docs/demo.md`](docs/demo.md) — 5-minute Linux/Docker operator demo with deterministic refusal path.
 - [`docs/V1_VALIDATION.md`](docs/V1_VALIDATION.md) — repeatable V1 validation workflow for local and disposable environments.
+- [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md) — V1 release-candidate gate, required checks, artifacts, and Docker01 handoff template.
 - [`docs/release-baseline.md`](docs/release-baseline.md) — PR78
   release/handoff baseline after the PR56–PR77 capability arc
   (capabilities, mutation boundary, safety invariants, operator

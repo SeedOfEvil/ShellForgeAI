@@ -258,6 +258,8 @@ Adds deterministic proposal creation for allowlisted lab/disposable Docker conta
 - PR61: added read-only `compose restart-preview` command and ask preview phrasing for Compose service restarts (preview only; no compose execution path).
 - PR62: added `compose propose-restart` to create pending `compose_service_restart` proposal artifacts from Compose metadata (proposal-only, non-executable, apply refusal retained).
 
+- PR119 planned/completed: V1 release-candidate checklist and handoff documentation (`docs/V1_RELEASE_CANDIDATE.md`) plus contract tests to prevent release-gate drift.
+
 - PR64: hardened compose-service restart mission preflight diagnostics and post-execution verification evidence so blocked-vs-executed outcomes are explicit without broadening mutation scope.
 
 - PR65: hardened `rollback preview`/`rollback validate` for `compose_service_restart` proposals with recovery-preview schema, command-shape validation, config hashing (hash-only), and explicit non-automatic rollback posture.
