@@ -1021,5 +1021,6 @@ Diagnose enrichment for known Docker/battle-lab targets is read-only: it does no
 
 - `shellforgeai v1 check` is read-only/non-mutating; full profile does not execute live remediation by default.
 shellforgeai v1 packet is read-only by default; --save/export only write ShellForgeAI-owned artifacts and never mutate Docker/system state.
+`scripts/v1_validate.sh --packet` keeps this in the validation lane: after validation passes it saves + validates a V1 packet (optional export validation), writes only ShellForgeAI-owned packet/export artifacts, and does not execute remediation/rollback/cleanup or Docker/Compose mutation.
 
 `shellforgeai v1 packet history`, `shellforgeai v1 packet compare`, and `shellforgeai v1 packet compare-latest` are read-only artifact lifecycle commands: they read saved packet artifacts, compare in memory, and never regenerate checks, save packets, export bundles, or mutate packet files.

@@ -1,4 +1,5 @@
 import os
+from importlib.resources import files
 from pathlib import Path
 
 import yaml
@@ -51,6 +52,8 @@ class Settings(BaseModel):
 
 def load_settings(config_path: Path | None = None) -> Settings:
     base = Path(__file__).resolve().parents[3] / "config/default.yaml"
+    if not base.exists():
+        base = Path(str(files("shellforgeai").joinpath("config/default.yaml")))
     data = yaml.safe_load(base.read_text())
     if config_path and config_path.exists():
         data.update(yaml.safe_load(config_path.read_text()))

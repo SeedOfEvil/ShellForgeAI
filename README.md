@@ -98,6 +98,9 @@ execute. Status, checklist, report, and export never execute.
 
 See [`docs/safety.md`](docs/safety.md) for the full mutation boundary.
 
+V1 release validation can produce a validated readiness packet artifact:
+`./scripts/v1_validate.sh --full --packet`.
+
 ## V1 hardening lane: Keep It a Knife, Not a Toolbox
 
 ShellForgeAI V1 is a **CLI-first Linux/Docker operator knife**. It safely

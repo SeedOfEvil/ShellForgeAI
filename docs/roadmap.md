@@ -762,3 +762,5 @@ PR100 (May 23, 2026): normalized canonical safe-next command suggestions across 
 PR115 (May 25, 2026): added `shellforgeai v1 packet` release-readiness packet generation/save/validate/export/export-validate workflow as auditable V1 handoff artifact.
 
 - PR116 (May 25, 2026): added read-only `shellforgeai v1 packet history`, `shellforgeai v1 packet compare`, and `shellforgeai v1 packet compare-latest` commands for saved readiness packet lifecycle drift tracking without packet regeneration/export/mutation.
+
+- PR117 (May 25, 2026): integrated `scripts/v1_validate.sh --packet` (`--export-packet` optional) so V1 quick/full validation can leave a validated readiness packet artifact in-lane, with artifact-only safety boundaries.

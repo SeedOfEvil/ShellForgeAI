@@ -138,6 +138,7 @@ No casual execution steps are part of this path.
 
 - `./scripts/v1_validate.sh --quick`
 - `./scripts/v1_validate.sh --full`
+- `./scripts/v1_validate.sh --full --packet` (validation helper ARTIFACT_WRITE; writes V1 packet artifacts only)
 - `shellforgeai v1 check --profile quick --json`
 - `shellforgeai v1 check --profile standard --json`
 - `shellforgeai v1 check --profile full --json`

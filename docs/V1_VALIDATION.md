@@ -19,6 +19,7 @@ Or use the helper script:
 
 ```bash
 ./scripts/v1_validate.sh --full
+./scripts/v1_validate.sh --full --packet
 ```
 
 Quick path (docs/readiness-focused checks):
@@ -26,6 +27,18 @@ Quick path (docs/readiness-focused checks):
 ```bash
 ./scripts/v1_validate.sh --quick
 ```
+
+Packet artifact path (opt-in):
+
+```bash
+./scripts/v1_validate.sh --quick --packet
+./scripts/v1_validate.sh --full --packet
+./scripts/v1_validate.sh --full --packet --export-packet
+```
+
+`--packet` writes only ShellForgeAI-owned V1 packet artifacts and runs packet validation.
+It does not run remediation execute, rollback execute, cleanup execute, Docker restart, or Docker Compose mutation.
+
 
 ## Disposable container recipe (python:3.12-slim / bookworm)
 
@@ -38,6 +51,7 @@ mkdir -p /work && rsync -a /src/ /work/ShellForgeAI/
 cd /work/ShellForgeAI
 python -m pip install -e .[dev]
 RUFF_CACHE_DIR=/tmp/ruff-cache PYTHONPYCACHEPREFIX=/tmp/pycache ./scripts/v1_validate.sh --full
+./scripts/v1_validate.sh --full --packet
 ```
 
 Notes:
@@ -68,3 +82,20 @@ Prefer validating against a writable copy of the source. If you use a read-only 
 - Never prune volumes in shared lab validation.
 - Never remove running containers during normal V1 validation.
 - Preserve battle-lab fixtures unless explicitly testing fixture reset behavior.
+
+## Example packet summary output
+
+```text
+ShellForgeAI V1 validation
+profile: full
+validation: passed
+
+V1 packet:
+- packet_id: v1_packet_...
+- packet_path: /data/v1_packets/...
+- validation: ok
+- read_only: True
+- mutation_performed: False
+
+Done.
+```
