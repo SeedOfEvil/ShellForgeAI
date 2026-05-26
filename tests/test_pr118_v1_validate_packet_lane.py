@@ -27,6 +27,11 @@ if len(sys.argv) >= 2 and sys.argv[1] == '-m':
         raise SystemExit(0)
     if mod in ('ruff', 'compileall', 'pytest'):
         raise SystemExit(0)
+if len(sys.argv) >= 3 and sys.argv[1] == '-c':
+    code = sys.argv[2]
+    sys.argv = [sys.argv[0]] + sys.argv[3:]
+    exec(compile(code, '<cmd>', 'exec'), {'__name__': '__main__'})
+    raise SystemExit(0)
 if len(sys.argv) >= 2 and sys.argv[1] == '-':
     data = sys.stdin.read()
     p = subprocess.run(["/usr/bin/python3", '-'] + sys.argv[2:], input=data, text=True)

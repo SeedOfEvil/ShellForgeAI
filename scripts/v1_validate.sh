@@ -130,13 +130,11 @@ if [[ "$packet_mode" -eq 1 ]]; then
   parse_ref_fields() {
     local json_path="$1"
     local kind="$2"
-    "$python_bin" - "$json_path" "$kind" <<'PY'
-import json
-import sys
-
-json_path, kind = sys.argv[1], sys.argv[2]
+    "$python_bin" -c 'import json, sys
+path = sys.argv[1]
+kind = sys.argv[2]
 try:
-    with open(json_path, encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
 except Exception:
     raise SystemExit(2)
@@ -158,24 +156,19 @@ if kind == "packet":
     nested = data.get("packet")
     artifact = data.get("artifact")
     ref_id = pick(data, "packet_id") or pick(nested, "id", "packet_id") or pick(artifact, "id")
-    ref_path = (
-        pick(data, "packet_path") or pick(nested, "path", "packet_path") or pick(artifact, "path")
-    )
+    ref_path = pick(data, "packet_path") or pick(nested, "path", "packet_path") or pick(artifact, "path")
 else:
     nested = data.get("export")
     artifact = data.get("artifact")
     ref_id = pick(data, "export_id") or pick(nested, "id", "export_id") or pick(artifact, "id")
-    ref_path = (
-        pick(data, "export_path") or pick(nested, "path", "export_path") or pick(artifact, "path")
-    )
+    ref_path = pick(data, "export_path") or pick(nested, "path", "export_path") or pick(artifact, "path")
 
 ref = ref_id or ref_path
 if not ref:
     raise SystemExit(3)
 print(ref)
 print(ref_id)
-print(ref_path)
-PY
+print(ref_path)' "$json_path" "$kind"
   }
 
   echo
