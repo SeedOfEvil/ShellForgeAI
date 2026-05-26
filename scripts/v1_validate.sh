@@ -123,14 +123,52 @@ if [[ "$packet_mode" -eq 1 ]]; then
     fi
   }
 
-  parse_packet_ref() {
+  # Parse stdout-only JSON for a strict ShellForgeAI ref pair.
+  # Args: <json_path> <kind:packet|export>
+  # Prints three lines on success: ref, id, path.
+  # Exit 2: invalid JSON. Exit 3: no id/path present.
+  parse_ref_fields() {
     local json_path="$1"
-    "$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1], encoding="utf-8"));print(p.get("packet_id") or (p.get("packet") or {}).get("packet_id") or (p.get("artifact") or {}).get("id") or p.get("packet_path") or (p.get("packet") or {}).get("packet_path") or (p.get("artifact") or {}).get("path") or "")' "$json_path"
-  }
+    local kind="$2"
+    "$python_bin" -c 'import json, sys
+path = sys.argv[1]
+kind = sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    raise SystemExit(2)
+if not isinstance(data, dict):
+    raise SystemExit(2)
 
-  parse_packet_path() {
-    local json_path="$1"
-    "$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1], encoding="utf-8"));print(p.get("packet_path") or (p.get("packet") or {}).get("packet_path") or (p.get("artifact") or {}).get("path") or "")' "$json_path"
+
+def pick(obj, *keys):
+    if not isinstance(obj, dict):
+        return ""
+    for key in keys:
+        value = obj.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+if kind == "packet":
+    nested = data.get("packet")
+    artifact = data.get("artifact")
+    ref_id = pick(data, "packet_id") or pick(nested, "id", "packet_id") or pick(artifact, "id")
+    ref_path = pick(data, "packet_path") or pick(nested, "path", "packet_path") or pick(artifact, "path")
+else:
+    nested = data.get("export")
+    artifact = data.get("artifact")
+    ref_id = pick(data, "export_id") or pick(nested, "id", "export_id") or pick(artifact, "id")
+    ref_path = pick(data, "export_path") or pick(nested, "path", "export_path") or pick(artifact, "path")
+
+ref = ref_id or ref_path
+if not ref:
+    raise SystemExit(3)
+print(ref)
+print(ref_id)
+print(ref_path)' "$json_path" "$kind"
   }
 
   echo
@@ -148,22 +186,37 @@ if [[ "$packet_mode" -eq 1 ]]; then
     exit 1
   fi
 
-  packet_ref="$(parse_packet_ref "$save_stdout" 2>/dev/null || true)"
-  if [[ -z "$packet_ref" ]]; then
+  packet_parse="$tmp_dir/packet-save-parse.out"
+  parse_rc=0
+  parse_ref_fields "$save_stdout" packet >"$packet_parse" 2>/dev/null || parse_rc=$?
+  if [[ "$parse_rc" -eq 2 ]]; then
+    echo "Failed to parse packet JSON from shellforgeai v1 packet --save --json" >&2
+    show_snippet "stdout" "$save_stdout"
+    show_snippet "stderr" "$save_stderr"
+    exit 1
+  fi
+  if [[ "$parse_rc" -eq 3 ]]; then
+    echo "Packet JSON did not include packet_id or packet_path" >&2
+    show_snippet "stdout" "$save_stdout"
+    show_snippet "stderr" "$save_stderr"
+    exit 1
+  fi
+  if [[ "$parse_rc" -ne 0 ]]; then
     echo "Failed to parse packet JSON from shellforgeai v1 packet --save --json" >&2
     show_snippet "stdout" "$save_stdout"
     show_snippet "stderr" "$save_stderr"
     exit 1
   fi
 
-  packet_id="$packet_ref"
-  packet_path="$(parse_packet_path "$save_stdout" 2>/dev/null || true)"
+  packet_ref="$(sed -n '1p' "$packet_parse")"
+  packet_id="$(sed -n '2p' "$packet_parse")"
+  packet_path="$(sed -n '3p' "$packet_parse")"
 
-  echo "==> shellforgeai v1 packet validate $packet_id --json"
+  echo "==> shellforgeai v1 packet validate $packet_ref --json"
   rc=0
-  run_packet_cmd shellforgeai v1 packet validate "$packet_id" --json >"$validate_stdout" 2>"$validate_stderr" || rc=$?
+  run_packet_cmd shellforgeai v1 packet validate "$packet_ref" --json >"$validate_stdout" 2>"$validate_stderr" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    echo "Packet validation failed: shellforgeai v1 packet validate $packet_id --json" >&2
+    echo "Packet validation failed: shellforgeai v1 packet validate $packet_ref --json" >&2
     echo "rc: $rc" >&2
     show_snippet "stdout" "$validate_stdout"
     show_snippet "stderr" "$validate_stderr"
@@ -199,11 +252,11 @@ if [[ "$packet_mode" -eq 1 ]]; then
 
   if [[ "$export_packet_mode" -eq 1 ]]; then
     echo
-    echo "==> shellforgeai v1 packet export $packet_id --json"
+    echo "==> shellforgeai v1 packet export $packet_ref --json"
     rc=0
-    run_packet_cmd shellforgeai v1 packet export "$packet_id" --json >"$export_stdout" 2>"$export_stderr" || rc=$?
+    run_packet_cmd shellforgeai v1 packet export "$packet_ref" --json >"$export_stdout" 2>"$export_stderr" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
-      echo "Packet export failed: shellforgeai v1 packet export $packet_id --json" >&2
+      echo "Packet export failed: shellforgeai v1 packet export $packet_ref --json" >&2
       echo "rc: $rc" >&2
       show_snippet "stdout" "$export_stdout"
       show_snippet "stderr" "$export_stderr"
@@ -211,22 +264,30 @@ if [[ "$packet_mode" -eq 1 ]]; then
     fi
 
     export_parse="$tmp_dir/packet-export-parse.out"
-    if ! "$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1],encoding="utf-8"));a=p.get("artifact") or p.get("export") or {};eid=a.get("id") or p.get("export_id") or "";ep=a.get("path") or p.get("export_path") or "";print(eid);print(ep);raise SystemExit(0 if eid and ep else 1)' "$export_stdout" >"$export_parse"
-    then
-      echo "Failed to parse packet export JSON from shellforgeai v1 packet export $packet_id --json" >&2
+    parse_rc=0
+    parse_ref_fields "$export_stdout" export >"$export_parse" 2>/dev/null || parse_rc=$?
+    if [[ "$parse_rc" -eq 3 ]]; then
+      echo "Packet export JSON did not include export_id or export_path" >&2
+      show_snippet "stdout" "$export_stdout"
+      show_snippet "stderr" "$export_stderr"
+      exit 1
+    fi
+    if [[ "$parse_rc" -ne 0 ]]; then
+      echo "Failed to parse packet export JSON from shellforgeai v1 packet export $packet_ref --json" >&2
       show_snippet "stdout" "$export_stdout"
       show_snippet "stderr" "$export_stderr"
       exit 1
     fi
 
-    export_id="$(sed -n '1p' "$export_parse")"
-    export_path="$(sed -n '2p' "$export_parse")"
+    export_ref="$(sed -n '1p' "$export_parse")"
+    export_id="$(sed -n '2p' "$export_parse")"
+    export_path="$(sed -n '3p' "$export_parse")"
 
-    echo "==> shellforgeai v1 packet export-validate $export_id --json"
+    echo "==> shellforgeai v1 packet export-validate $export_ref --json"
     rc=0
-    run_packet_cmd shellforgeai v1 packet export-validate "$export_id" --json >"$export_validate_stdout" 2>"$export_validate_stderr" || rc=$?
+    run_packet_cmd shellforgeai v1 packet export-validate "$export_ref" --json >"$export_validate_stdout" 2>"$export_validate_stderr" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
-      echo "Packet export validation failed: shellforgeai v1 packet export-validate $export_id --json" >&2
+      echo "Packet export validation failed: shellforgeai v1 packet export-validate $export_ref --json" >&2
       echo "rc: $rc" >&2
       show_snippet "stdout" "$export_validate_stdout"
       show_snippet "stderr" "$export_validate_stderr"
