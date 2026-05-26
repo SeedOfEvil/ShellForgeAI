@@ -49,9 +49,9 @@ def _write_fake_timeout(bin_dir: Path) -> None:
     p = bin_dir / "timeout"
     p.write_text(
         "#!/usr/bin/env bash\n"
-        "secs=\"$1\"; shift\n"
-        "if [[ -n \"${FAKE_LOG:-}\" ]]; then echo \"TIMEOUT ${secs} $*\" >>\"$FAKE_LOG\"; fi\n"
-        "\"$@\"\n",
+        'secs="$1"; shift\n'
+        'if [[ -n "${FAKE_LOG:-}" ]]; then echo "TIMEOUT ${secs} $*" >>"$FAKE_LOG"; fi\n'
+        '"$@"\n',
         encoding="utf-8",
     )
     p.chmod(0o755)
@@ -276,3 +276,9 @@ def test_packaged_default_config_resource_exists() -> None:
     cfg = files("shellforgeai").joinpath("config/default.yaml")
     text = cfg.read_text(encoding="utf-8")
     assert "app:" in text
+
+
+def test_pyproject_declares_hatch_wheel_package_target() -> None:
+    text = Path("pyproject.toml").read_text(encoding="utf-8")
+    assert "[tool.hatch.build.targets.wheel]" in text
+    assert 'packages = ["src/shellforgeai"]' in text

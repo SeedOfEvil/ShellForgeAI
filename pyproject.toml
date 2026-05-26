@@ -2,9 +2,15 @@
 requires=["hatchling"]
 build-backend="hatchling.build"
 
-[tool.hatch.build]
-include=[
-  "src/shellforgeai/config/default.yaml",
+[tool.hatch.build.targets.wheel]
+packages = ["src/shellforgeai"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/shellforgeai",
+  "config/default.yaml",
+  "pyproject.toml",
+  "README.md",
 ]
 
 [project]
