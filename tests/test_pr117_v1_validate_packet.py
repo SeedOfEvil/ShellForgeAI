@@ -44,6 +44,18 @@ def _write_fake_ps(bin_dir: Path) -> None:
     p.chmod(0o755)
 
 
+def _write_fake_timeout(bin_dir: Path) -> None:
+    p = bin_dir / "timeout"
+    p.write_text(
+        "#!/usr/bin/env bash\n"
+        "secs=\"$1\"; shift\n"
+        "if [[ -n \"${FAKE_LOG:-}\" ]]; then echo \"TIMEOUT ${secs} $*\" >>\"$FAKE_LOG\"; fi\n"
+        "\"$@\"\n",
+        encoding="utf-8",
+    )
+    p.chmod(0o755)
+
+
 def _write_fake_shellforgeai(bin_dir: Path) -> None:
     script = """#!/usr/bin/env python3
 import json, os, sys
@@ -56,6 +68,8 @@ if args == ['v1','packet','--save','--json']:
     mode = os.environ.get('SFAI_PACKET_SAVE_MODE', 'ok')
     if mode == 'fail':
         raise SystemExit(9)
+    if mode == 'timeout':
+        raise SystemExit(124)
     if mode == 'malformed':
         print('{not-json')
         raise SystemExit(0)
@@ -102,6 +116,7 @@ def _run(
     bindir.mkdir(parents=True)
     _write_fake_python(bindir)
     _write_fake_ps(bindir)
+    _write_fake_timeout(bindir)
     _write_fake_shellforgeai(bindir)
     log = tmp_path / "calls.log"
     env = os.environ.copy()
@@ -211,6 +226,7 @@ def test_export_packet_implies_packet_mode(tmp_path: Path) -> None:
     assert "SFAI v1 packet --save --json" in calls
     assert "SFAI v1 packet validate v1_packet_123 --json" in calls
     assert "SFAI v1 packet export v1_packet_123 --json" in calls
+    assert "TIMEOUT" in calls
 
 
 def test_missing_ruff_has_clear_validation_lane_message(tmp_path: Path) -> None:
@@ -223,6 +239,22 @@ def test_missing_ruff_has_clear_validation_lane_message(tmp_path: Path) -> None:
     r = subprocess.run(["bash", str(SCRIPT), "--quick"], text=True, capture_output=True, env=env)
     assert r.returncode != 0
     assert "requires dev validation dependencies" in r.stderr
+
+
+def test_packet_timeout_failure_is_controlled(tmp_path: Path) -> None:
+    r = _run(
+        tmp_path / "timeout",
+        "--quick",
+        "--packet",
+        extra_env={
+            "SFAI_PACKET_SAVE_MODE": "timeout",
+            "SFAI_VALIDATE_COMMAND_TIMEOUT_SECONDS": "7",
+        },
+    )
+    calls = (tmp_path / "timeout" / "calls.log").read_text(encoding="utf-8")
+    assert r.returncode != 0
+    assert "TIMEOUT 7 shellforgeai v1 packet --save --json" in calls
+    assert "command timed out after 7s" in r.stderr
 
 
 def test_cli_v1_packet_save_json_is_strict_and_has_ids(tmp_path: Path) -> None:

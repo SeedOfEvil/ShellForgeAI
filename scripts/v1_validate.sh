@@ -85,6 +85,22 @@ fi
 echo "validation: passed"
 
 if [[ "$packet_mode" -eq 1 ]]; then
+  packet_timeout_seconds="${SFAI_VALIDATE_COMMAND_TIMEOUT_SECONDS:-60}"
+  have_timeout=0
+  if command -v timeout >/dev/null 2>&1; then
+    have_timeout=1
+  else
+    echo "warning: timeout command not found; packet commands will run without timeout guard" >&2
+  fi
+
+  run_packet_cmd() {
+    if [[ "$have_timeout" -eq 1 ]]; then
+      timeout "$packet_timeout_seconds" "$@"
+    else
+      "$@"
+    fi
+  }
+
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
   save_stdout="$tmp_dir/packet-save.stdout.json"
@@ -110,10 +126,13 @@ if [[ "$packet_mode" -eq 1 ]]; then
   echo
   echo "==> shellforgeai v1 packet --save --json"
   rc=0
-  shellforgeai v1 packet --save --json >"$save_stdout" 2>"$save_stderr" || rc=$?
+  run_packet_cmd shellforgeai v1 packet --save --json >"$save_stdout" 2>"$save_stderr" || rc=$?
   if [[ "${rc:-0}" -ne 0 ]]; then
     echo "Packet save failed: shellforgeai v1 packet --save --json" >&2
     echo "rc: $rc" >&2
+    if [[ "$rc" -eq 124 ]]; then
+      echo "command timed out after ${packet_timeout_seconds}s" >&2
+    fi
     show_snippet "stdout" "$save_stdout"
     show_snippet "stderr" "$save_stderr"
     exit 1
@@ -133,7 +152,7 @@ if [[ "$packet_mode" -eq 1 ]]; then
 
   echo "==> shellforgeai v1 packet validate $packet_id --json"
   rc=0
-  shellforgeai v1 packet validate "$packet_id" --json >"$validate_stdout" 2>"$validate_stderr" || rc=$?
+  run_packet_cmd shellforgeai v1 packet validate "$packet_id" --json >"$validate_stdout" 2>"$validate_stderr" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     echo "Packet validation failed: shellforgeai v1 packet validate $packet_id --json" >&2
     echo "rc: $rc" >&2
@@ -173,7 +192,7 @@ if [[ "$packet_mode" -eq 1 ]]; then
     echo
     echo "==> shellforgeai v1 packet export $packet_id --json"
     rc=0
-    shellforgeai v1 packet export "$packet_id" --json >"$export_stdout" 2>"$export_stderr" || rc=$?
+    run_packet_cmd shellforgeai v1 packet export "$packet_id" --json >"$export_stdout" 2>"$export_stderr" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
       echo "Packet export failed: shellforgeai v1 packet export $packet_id --json" >&2
       echo "rc: $rc" >&2
@@ -196,7 +215,7 @@ if [[ "$packet_mode" -eq 1 ]]; then
 
     echo "==> shellforgeai v1 packet export-validate $export_id --json"
     rc=0
-    shellforgeai v1 packet export-validate "$export_id" --json >"$export_validate_stdout" 2>"$export_validate_stderr" || rc=$?
+    run_packet_cmd shellforgeai v1 packet export-validate "$export_id" --json >"$export_validate_stdout" 2>"$export_validate_stderr" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
       echo "Packet export validation failed: shellforgeai v1 packet export-validate $export_id --json" >&2
       echo "rc: $rc" >&2
