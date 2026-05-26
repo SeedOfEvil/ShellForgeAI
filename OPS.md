@@ -1475,3 +1475,19 @@ shellforgeai v1 packet export-validate <export>
 4. `shellforgeai v1 packet compare-latest`
 
 - When reviewing V1 release readiness, check `docs/V1_COMMAND_SURFACE.md` and keep packet mode in the validation lane.
+
+
+## V1 release handoff (PR120)
+
+ShellForgeAI V1 handoff packet is finalized for operator/admin sign-off.
+
+- Primary release notes: [`docs/V1_RELEASE_NOTES.md`](docs/V1_RELEASE_NOTES.md)
+- Release-candidate evidence checklist: [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md)
+- Changelog release entry: [`CHANGELOG.md`](CHANGELOG.md)
+
+Handoff emphasis:
+
+- Deterministic ask routing and deterministic mutation refusal are core V1 safety behavior.
+- Ops report artifact lifecycle (`save/validate/export/export-validate/history/compare-latest`) is core operator workflow.
+- `v1_validate` packet/export helpers are for the dev-validation lane, not minimal runtime image.
+- Normal V1 validation path remains read-only and non-mutating.

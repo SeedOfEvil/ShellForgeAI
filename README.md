@@ -108,6 +108,9 @@ inspects Linux/Docker scenes, ranks suspects, builds evidence-backed operator
 reports, preserves/exports/compares report artifacts, routes common operator
 asks deterministically, and refuses or gates mutation.
 
+- Final V1 release notes: [`docs/V1_RELEASE_NOTES.md`](docs/V1_RELEASE_NOTES.md)
+- Release-candidate checklist/evidence gate: [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md)
+
 ### What this is (V1)
 
 - Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
