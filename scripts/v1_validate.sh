@@ -123,6 +123,12 @@ if [[ "$packet_mode" -eq 1 ]]; then
     fi
   }
 
+  parse_json_value() {
+    local json_path="$1"
+    local expr="$2"
+    "$python_bin" -c "import json,sys; p=json.load(open(sys.argv[1], encoding='utf-8')); print(${expr})" "$json_path"
+  }
+
   echo
   echo "==> shellforgeai v1 packet --save --json"
   rc=0
@@ -138,7 +144,7 @@ if [[ "$packet_mode" -eq 1 ]]; then
     exit 1
   fi
 
-  packet_ref="$("$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1],encoding="utf-8"));print(p.get("packet_id") or (p.get("artifact") or {}).get("id") or p.get("packet_path") or (p.get("artifact") or {}).get("path") or "")' "$save_stdout" 2>/dev/null || true)"
+  packet_ref="$(parse_json_value "$save_stdout" "p.get('packet_id') or (p.get('artifact') or {}).get('id') or p.get('packet_path') or (p.get('artifact') or {}).get('path') or ''" 2>/dev/null || true)"
   if [[ -z "$packet_ref" ]]; then
     echo "Failed to parse packet JSON from shellforgeai v1 packet --save --json" >&2
     show_snippet "stdout" "$save_stdout"
@@ -147,7 +153,7 @@ if [[ "$packet_mode" -eq 1 ]]; then
   fi
 
   packet_id="$packet_ref"
-  packet_path="$("$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1],encoding="utf-8"));print(p.get("packet_path") or (p.get("artifact") or {}).get("path") or "")' "$save_stdout" 2>/dev/null || true)"
+  packet_path="$(parse_json_value "$save_stdout" "p.get('packet_path') or (p.get('artifact') or {}).get('path') or ''" 2>/dev/null || true)"
 
   echo "==> shellforgeai v1 packet validate $packet_id --json"
   rc=0
