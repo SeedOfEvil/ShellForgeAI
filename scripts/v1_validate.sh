@@ -138,17 +138,16 @@ if [[ "$packet_mode" -eq 1 ]]; then
     exit 1
   fi
 
-  parse_out="$tmp_dir/packet-parse.out"
-  if ! "$python_bin" -c $'import json,sys\np=json.load(open(sys.argv[1],encoding="utf-8"))\npacket_id=p.get("packet_id") or (p.get("artifact") or {}).get("id")\npacket_path=p.get("packet_path") or (p.get("artifact") or {}).get("path")\nif not packet_id or not packet_path:\n raise SystemExit("missing packet artifact id/path")\nprint(packet_id)\nprint(packet_path)' "$save_stdout" >"$parse_out"
-  then
+  packet_ref="$("$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1],encoding="utf-8"));print(p.get("packet_id") or (p.get("artifact") or {}).get("id") or p.get("packet_path") or (p.get("artifact") or {}).get("path") or "")' "$save_stdout" 2>/dev/null || true)"
+  if [[ -z "$packet_ref" ]]; then
     echo "Failed to parse packet JSON from shellforgeai v1 packet --save --json" >&2
     show_snippet "stdout" "$save_stdout"
     show_snippet "stderr" "$save_stderr"
     exit 1
   fi
 
-  packet_id="$(sed -n '1p' "$parse_out")"
-  packet_path="$(sed -n '2p' "$parse_out")"
+  packet_id="$packet_ref"
+  packet_path="$("$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1],encoding="utf-8"));print(p.get("packet_path") or (p.get("artifact") or {}).get("path") or "")' "$save_stdout" 2>/dev/null || true)"
 
   echo "==> shellforgeai v1 packet validate $packet_id --json"
   rc=0
@@ -162,7 +161,7 @@ if [[ "$packet_mode" -eq 1 ]]; then
   fi
 
   validate_out="$tmp_dir/packet-validate-summary.out"
-  if ! "$python_bin" -c $'import json,sys\np=json.load(open(sys.argv[1],encoding="utf-8"))\nstatus=p.get("status","unknown")\ns=p.get("safety") or {}\nc=p.get("checks") or {}\nprint(status)\nprint(s.get("read_only"))\nprint(s.get("mutation_performed"))\nprint((c.get("readiness") or {}).get("status","n/a"))\nprint((c.get("docs") or {}).get("status","n/a"))\nprint((c.get("command_surface") or {}).get("status","n/a"))' "$validate_stdout" >"$validate_out"
+  if ! "$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1],encoding="utf-8"));s=p.get("safety") or {};c=p.get("checks") or {};print(p.get("status","unknown"));print(s.get("read_only"));print(s.get("mutation_performed"));print((c.get("readiness") or {}).get("status","n/a"));print((c.get("docs") or {}).get("status","n/a"));print((c.get("command_surface") or {}).get("status","n/a"))' "$validate_stdout" >"$validate_out"
   then
     echo "Failed to parse packet validate JSON from shellforgeai v1 packet validate $packet_id --json" >&2
     show_snippet "stdout" "$validate_stdout"
@@ -202,7 +201,7 @@ if [[ "$packet_mode" -eq 1 ]]; then
     fi
 
     export_parse="$tmp_dir/packet-export-parse.out"
-    if ! "$python_bin" -c $'import json,sys\np=json.load(open(sys.argv[1],encoding="utf-8"))\na=p.get("artifact") or p.get("export") or {}\nexport_id=a.get("id") or p.get("export_id")\nexport_path=a.get("path") or p.get("export_path")\nif not export_id or not export_path:\n raise SystemExit("missing export artifact id/path")\nprint(export_id)\nprint(export_path)' "$export_stdout" >"$export_parse"
+    if ! "$python_bin" -c 'import json,sys;p=json.load(open(sys.argv[1],encoding="utf-8"));a=p.get("artifact") or p.get("export") or {};eid=a.get("id") or p.get("export_id") or "";ep=a.get("path") or p.get("export_path") or "";print(eid);print(ep);raise SystemExit(0 if eid and ep else 1)' "$export_stdout" >"$export_parse"
     then
       echo "Failed to parse packet export JSON from shellforgeai v1 packet export $packet_id --json" >&2
       show_snippet "stdout" "$export_stdout"
