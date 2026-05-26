@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
+
+from typer.testing import CliRunner
+
+from shellforgeai.cli import app
 
 SCRIPT = Path("scripts/v1_validate.sh")
 
@@ -54,7 +59,12 @@ if args == ['v1','packet','--save','--json']:
     if mode == 'malformed':
         print('{not-json')
         raise SystemExit(0)
-    print(json.dumps({'artifact': {'id': 'v1_packet_123', 'path': '/d/p/v1_packet_123'}}))
+    if os.environ.get('SFAI_PACKET_SAVE_STDERR_WARN') == '1':
+        print('packet warning on stderr', file=sys.stderr)
+    payload = {'packet_id': 'v1_packet_123', 'packet_path': '/d/p/v1_packet_123'}
+    payload['status'] = 'ok'
+    payload['mode'] = 'v1_readiness_packet'
+    print(json.dumps(payload))
     raise SystemExit(0)
 if len(args) >= 5 and args[:3] == ['v1','packet','validate'] and args[-1] == '--json':
     status = os.environ.get('SFAI_PACKET_VALIDATE_STATUS', 'ok')
@@ -69,7 +79,7 @@ if len(args) >= 5 and args[:3] == ['v1','packet','validate'] and args[-1] == '--
 if len(args) >= 5 and args[:3] == ['v1','packet','export'] and args[-1] == '--json':
     if os.environ.get('SFAI_PACKET_EXPORT_FAIL') == '1':
         raise SystemExit(7)
-    print(json.dumps({'artifact': {'id': 'exp123', 'path': '/d/e/exp123'}}))
+    print(json.dumps({'export': {'id': 'exp123', 'path': '/d/e/exp123'}}))
     raise SystemExit(0)
 if len(args) >= 5 and args[:3] == ['v1','packet','export-validate'] and args[-1] == '--json':
     if os.environ.get('SFAI_PACKET_EXPORT_VALIDATE_FAIL') == '1':
@@ -122,6 +132,13 @@ def test_packet_mode_calls_save_and_validate_and_prints_summary(tmp_path: Path) 
     assert "validation: ok" in r.stdout
 
 
+def test_packet_mode_parses_stdout_json_even_with_stderr_warning(tmp_path: Path) -> None:
+    r = _run(tmp_path, "--quick", "--packet", extra_env={"SFAI_PACKET_SAVE_STDERR_WARN": "1"})
+    calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
+    assert r.returncode == 0
+    assert "SFAI v1 packet validate v1_packet_123 --json" in calls
+
+
 def test_packet_failure_modes_are_nonzero(tmp_path: Path) -> None:
     bad_save = _run(
         tmp_path / "a", "--full", "--packet", extra_env={"SFAI_PACKET_SAVE_MODE": "fail"}
@@ -136,6 +153,9 @@ def test_packet_failure_modes_are_nonzero(tmp_path: Path) -> None:
     assert bad_validate.returncode != 0
     assert bad_json.returncode != 0
     assert "Failed to parse packet JSON" in bad_json.stderr
+    assert "SFAI v1 packet validate" not in (tmp_path / "c" / "calls.log").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_packet_mode_does_not_call_mutation_commands(tmp_path: Path) -> None:
@@ -175,3 +195,29 @@ def test_export_packet_flow_and_failure(tmp_path: Path) -> None:
     assert ok.returncode == 0
     assert "export_id: exp123" in ok.stdout
     assert fail.returncode != 0
+
+
+def test_missing_ruff_has_clear_validation_lane_message(tmp_path: Path) -> None:
+    bindir = tmp_path / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "python").write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    (bindir / "python").chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    r = subprocess.run(["bash", str(SCRIPT), "--quick"], text=True, capture_output=True, env=env)
+    assert r.returncode != 0
+    assert "requires dev validation dependencies" in r.stderr
+
+
+def test_cli_v1_packet_save_json_is_strict_and_has_ids(tmp_path: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["v1", "packet", "--save", "--json"],
+        env={"SHELLFORGEAI_DATA_DIR": str(tmp_path / "data")},
+    )
+    assert r.exit_code in {0, 1}
+    payload = json.loads(r.stdout)
+    assert payload.get("packet_id")
+    assert payload.get("packet_path")
+    assert r.stdout.strip().startswith("{")

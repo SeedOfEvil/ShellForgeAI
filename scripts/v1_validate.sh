@@ -54,7 +54,8 @@ else
 fi
 
 if ! "$python_bin" -m ruff --version >/dev/null 2>&1; then
-  echo "python -m ruff not available; install project dev dependencies before validation" >&2
+  echo "python -m ruff not available; v1_validate.sh requires dev validation dependencies." >&2
+  echo "Run this helper from the writable validation container/lane, not the minimal runtime image." >&2
   exit 1
 fi
 
@@ -88,28 +89,52 @@ echo "validation: passed"
 if [[ "$packet_mode" -eq 1 ]]; then
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
-  save_json="$tmp_dir/packet-save.json"
-  validate_json="$tmp_dir/packet-validate.json"
+  save_stdout="$tmp_dir/packet-save.stdout.json"
+  save_stderr="$tmp_dir/packet-save.stderr.log"
+  validate_stdout="$tmp_dir/packet-validate.stdout.json"
+  validate_stderr="$tmp_dir/packet-validate.stderr.log"
+  export_stdout="$tmp_dir/packet-export.stdout.json"
+  export_stderr="$tmp_dir/packet-export.stderr.log"
+  export_validate_stdout="$tmp_dir/packet-export-validate.stdout.json"
+  export_validate_stderr="$tmp_dir/packet-export-validate.stderr.log"
+
+  show_snippet() {
+    local label="$1"
+    local path="$2"
+    echo "$label (first 20 lines):" >&2
+    if [[ -s "$path" ]]; then
+      sed -n '1,20p' "$path" >&2
+    else
+      echo "<empty>" >&2
+    fi
+  }
 
   echo
   echo "==> shellforgeai v1 packet --save --json"
-  if ! shellforgeai v1 packet --save --json >"$save_json"; then
+  rc=0
+  shellforgeai v1 packet --save --json >"$save_stdout" 2>"$save_stderr" || rc=$?
+  if [[ "${rc:-0}" -ne 0 ]]; then
     echo "Packet save failed: shellforgeai v1 packet --save --json" >&2
-    echo "Raw output captured at: $save_json" >&2
+    echo "rc: $rc" >&2
+    show_snippet "stdout" "$save_stdout"
+    show_snippet "stderr" "$save_stderr"
     exit 1
   fi
 
   parse_out="$tmp_dir/packet-parse.out"
-  if ! "$python_bin" - "$save_json" >"$parse_out" <<'PY'
+  if ! "$python_bin" - "$save_stdout" >"$parse_out" <<'PY'
 import json
 import sys
 
 path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as fh:
     payload = json.load(fh)
-artifact = payload.get("artifact") or {}
-packet_id = artifact.get("id")
-packet_path = artifact.get("path")
+packet_id = payload.get("packet_id")
+packet_path = payload.get("packet_path")
+if not packet_id or not packet_path:
+    artifact = payload.get("artifact") or {}
+    packet_id = packet_id or artifact.get("id")
+    packet_path = packet_path or artifact.get("path")
 if not packet_id or not packet_path:
     raise SystemExit("missing packet artifact id/path")
 print(packet_id)
@@ -117,7 +142,8 @@ print(packet_path)
 PY
   then
     echo "Failed to parse packet JSON from shellforgeai v1 packet --save --json" >&2
-    echo "Raw output captured at: $save_json" >&2
+    show_snippet "stdout" "$save_stdout"
+    show_snippet "stderr" "$save_stderr"
     exit 1
   fi
 
@@ -125,14 +151,18 @@ PY
   packet_path="$(sed -n '2p' "$parse_out")"
 
   echo "==> shellforgeai v1 packet validate $packet_id --json"
-  if ! shellforgeai v1 packet validate "$packet_id" --json >"$validate_json"; then
+  rc=0
+  shellforgeai v1 packet validate "$packet_id" --json >"$validate_stdout" 2>"$validate_stderr" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
     echo "Packet validation failed: shellforgeai v1 packet validate $packet_id --json" >&2
-    echo "Raw output captured at: $validate_json" >&2
+    echo "rc: $rc" >&2
+    show_snippet "stdout" "$validate_stdout"
+    show_snippet "stderr" "$validate_stderr"
     exit 1
   fi
 
   validate_out="$tmp_dir/packet-validate-summary.out"
-  if ! "$python_bin" - "$validate_json" >"$validate_out" <<'PY'
+  if ! "$python_bin" - "$validate_stdout" >"$validate_out" <<'PY'
 import json
 import sys
 
@@ -156,7 +186,8 @@ print(surface.get("status", "n/a"))
 PY
   then
     echo "Failed to parse packet validate JSON from shellforgeai v1 packet validate $packet_id --json" >&2
-    echo "Raw output captured at: $validate_json" >&2
+    show_snippet "stdout" "$validate_stdout"
+    show_snippet "stderr" "$validate_stderr"
     exit 1
   fi
 
@@ -179,28 +210,29 @@ PY
   echo "- command_surface_status: $command_surface_status"
 
   if [[ "$export_packet_mode" -eq 1 ]]; then
-    export_json="$tmp_dir/packet-export.json"
-    export_validate_json="$tmp_dir/packet-export-validate.json"
-
     echo
     echo "==> shellforgeai v1 packet export $packet_id --json"
-    if ! shellforgeai v1 packet export "$packet_id" --json >"$export_json"; then
+    rc=0
+    shellforgeai v1 packet export "$packet_id" --json >"$export_stdout" 2>"$export_stderr" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
       echo "Packet export failed: shellforgeai v1 packet export $packet_id --json" >&2
-      echo "Raw output captured at: $export_json" >&2
+      echo "rc: $rc" >&2
+      show_snippet "stdout" "$export_stdout"
+      show_snippet "stderr" "$export_stderr"
       exit 1
     fi
 
     export_parse="$tmp_dir/packet-export-parse.out"
-    if ! "$python_bin" - "$export_json" >"$export_parse" <<'PY'
+    if ! "$python_bin" - "$export_stdout" >"$export_parse" <<'PY'
 import json
 import sys
 
 path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as fh:
     payload = json.load(fh)
-artifact = payload.get("artifact") or {}
-export_id = artifact.get("id")
-export_path = artifact.get("path")
+artifact = payload.get("artifact") or payload.get("export") or {}
+export_id = artifact.get("id") or payload.get("export_id")
+export_path = artifact.get("path") or payload.get("export_path")
 if not export_id or not export_path:
     raise SystemExit("missing export artifact id/path")
 print(export_id)
@@ -208,7 +240,8 @@ print(export_path)
 PY
     then
       echo "Failed to parse packet export JSON from shellforgeai v1 packet export $packet_id --json" >&2
-      echo "Raw output captured at: $export_json" >&2
+      show_snippet "stdout" "$export_stdout"
+      show_snippet "stderr" "$export_stderr"
       exit 1
     fi
 
@@ -216,9 +249,13 @@ PY
     export_path="$(sed -n '2p' "$export_parse")"
 
     echo "==> shellforgeai v1 packet export-validate $export_id --json"
-    if ! shellforgeai v1 packet export-validate "$export_id" --json >"$export_validate_json"; then
+    rc=0
+    shellforgeai v1 packet export-validate "$export_id" --json >"$export_validate_stdout" 2>"$export_validate_stderr" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
       echo "Packet export validation failed: shellforgeai v1 packet export-validate $export_id --json" >&2
-      echo "Raw output captured at: $export_validate_json" >&2
+      echo "rc: $rc" >&2
+      show_snippet "stdout" "$export_validate_stdout"
+      show_snippet "stderr" "$export_validate_stderr"
       exit 1
     fi
 
