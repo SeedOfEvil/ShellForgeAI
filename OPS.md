@@ -43,6 +43,9 @@ Safety reminder: read-only by default; no casual restart/remediation/cleanup exe
 
 Operator smoke tests and runbook tips.
 
+For V1 release promotion, run the release-candidate validation flow in
+[`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md).
+
 ## Current baseline / handoff
 
 The PR78 release/handoff baseline is the current operator reference

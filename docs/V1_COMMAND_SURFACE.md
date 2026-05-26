@@ -2,6 +2,8 @@
 
 ## Purpose
 
+Release-candidate gate and required validation commands: [`docs/V1_RELEASE_CANDIDATE.md`](V1_RELEASE_CANDIDATE.md).
+
 This document is the ShellForgeAI V1 command inventory and safety map. It
 makes the V1 command surface explicit and auditable: what each command does,
 which safety class it belongs to, whether it is read-only, whether it writes
