@@ -37,6 +37,8 @@ rollback previews, closure reports, exports, or cleanup plans.
 
 - **No arbitrary shell.** Tools are typed wrappers around specific binaries
   with bounded arguments. The interactive REPL is not a shell; pasted
+
+Automatic role/health handling for broad operator questions is read-only only: it reuses existing diagnosis context and built-in collectors, does not run arbitrary shell, and does not execute remediation/rollback/cleanup/restart actions.
   shell-looking input is blocked unless explicitly prefixed with
   `ask explain ...` or `ask review ...`. A short-lived quarantine blocks
   follow-on shell fragments after a multi-line paste; `/help` and `/exit`

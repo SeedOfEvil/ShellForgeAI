@@ -178,6 +178,10 @@ _INTENT_PHRASES: dict[str, tuple[str, ...]] = {
         "is the system running normally",
         "is it healthy",
         "is this running normally",
+        "is this system healthy",
+        "does this look normal",
+        "give me a quick health check",
+        "what should i check first",
     ),
     "system_role": (
         "what does this system do",
@@ -187,6 +191,8 @@ _INTENT_PHRASES: dict[str, tuple[str, ...]] = {
         "what's this system",
         "what is this machine",
         "what does this machine do",
+        "what is this machine for",
+        "what role is this server playing",
     ),
     "next_steps": (
         "what should i check next",
