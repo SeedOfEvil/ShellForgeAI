@@ -133,7 +133,7 @@ ask-reference disambiguation remains available for read-only follow-ups.
 In restricted containers, the Codex CLI may emit `bwrap`/namespace errors.
 Treat that as a provider sandbox limitation, not a host failure: ShellForgeAI
 still collects evidence via its typed read-only tools, and `model doctor`
-will report whether `codex` is reachable.
+will report whether `codex` is reachable. If model-assisted assessment is unavailable, run `codex login --device-auth`; deterministic diagnosis/reporting remains available.
 
 ## Safety reminders
 

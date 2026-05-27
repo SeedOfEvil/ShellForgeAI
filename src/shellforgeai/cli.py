@@ -9299,9 +9299,11 @@ def ask(
     if not resp.ok:
         err_text = (resp.error or "").lower()
         if "not found on path" in err_text or "install" in err_text:
-            console.print("Model unavailable. Install Codex CLI and login with: codex login")
+            console.print(
+                "Model unavailable. Install Codex CLI and login with: codex login --device-auth"
+            )
         elif "auth" in err_text or "login" in err_text:
-            console.print("Codex auth failed. Run: codex login")
+            console.print("Codex auth failed. Run: codex login --device-auth")
         elif "timed out" in err_text:
             console.print("Codex timed out before producing a response.")
         elif "argument" in err_text:
