@@ -1020,6 +1020,24 @@ Diagnose enrichment for known Docker/battle-lab targets is read-only: it does no
 - `ask` never executes remediation/rollback/cleanup/Docker/Compose mutation.
 
 
+## PR122 interactive latest-evidence follow-ups
+
+Interactive follow-up questions that reuse the latest in-session diagnosis
+context (for example `what did you find?`, `why is it slow?`, `is it
+running normally?`, `what does this system do?`) are strictly read-only.
+
+- They answer from a compact in-memory snapshot of the latest diagnosis
+  (target, evidence highlights, artifact paths, limitations, safe next
+  commands) plus already-written artifact summaries.
+- They never run new collectors, execute shell, or invoke
+  remediation/rollback/cleanup or Docker/Compose mutation.
+- The stored snapshot holds only summaries/metadata — no raw logs, no
+  secrets, and no raw Codex JSONL.
+- Mutation-style follow-ups (`fix it`, `restart it`) are never answered
+  from latest context; they are refused with no action taken.
+- `/pending` surfacing the latest diagnosis context is display-only and
+  does not call model providers or collectors.
+
 ### Ops report handoff artifacts
 `ops report --save` and `ops report export` only write ShellForgeAI-owned metadata bundles (JSON/Markdown/manifest/checksums) under the configured data directory. They do not create plans and do not execute remediation, rollback, cleanup, Docker, or Compose mutation. `ops report validate` and `ops report export-validate` are read-only verification commands. `ops report compare` and `ops report compare-export` are also read-only: they validate both inputs, compare drift (suspects/remediation-lane/safety), surface safety-flag false→true drift warnings, and never create plans or execute remediation/rollback/cleanup/restart.
 

@@ -109,6 +109,43 @@ pass), the REPL queues it. Confirm with `yes`, `proceed`, `dig deeper`,
 a confirmation phrase prints a helpful "no pending" message instead of
 calling the model. Follow-ups are read-only.
 
+## Latest-evidence follow-ups (PR122)
+
+After a diagnosis or evidence-producing command (for example `diagnose
+performance`, a "the system feels slow" performance pass, a firewall or
+machine-health check, or a service check), the REPL remembers a compact,
+read-only snapshot of the latest diagnosis: target, diagnosis kind,
+artifact/evidence/summary paths, evidence highlights, limitations, and
+safe read-only next commands.
+
+Interactive follow-up questions then reuse that latest context instead of
+answering from generic kernel/libc/workspace context. Examples:
+
+- `what did you find?` / `summarize the latest diagnosis` / `show the latest evidence`
+- `why is it slow?`
+- `is it running normally?`
+- `what does this system do?`
+- `what should I check next?`
+- `where are the artifacts?`
+- `what were the limitations?`
+
+Answers are concise and evidence-backed, state limitations (for example
+"container-limited view"), and list safe read-only next commands. They do
+not run new collectors and never invent a system role beyond what the
+evidence supports.
+
+If no evidence has been collected yet, the REPL says so plainly and
+suggests read-only commands (`diagnose performance`, `diagnose disk`,
+`shellforgeai ops report`) instead of hallucinating findings.
+
+`/pending` also surfaces this latest diagnosis context (timestamp, target,
+diagnosis kind, artifact/evidence/summary paths, suggested follow-up
+categories, and safe next commands) when there is no formal pending
+investigation. A formal pending follow-up still takes precedence.
+
+Mutation-style follow-ups (`fix it`, `restart it`) are never answered from
+latest context; they are refused as read-only, with no action taken.
+
 ## Paste guard
 
 The REPL is not a shell. Pasted shell-looking input is blocked unless

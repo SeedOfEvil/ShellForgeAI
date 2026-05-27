@@ -773,3 +773,5 @@ PR115 (May 25, 2026): added `shellforgeai v1 packet` release-readiness packet ge
 
 
 - PR121 (May 27, 2026): model-failure/auth UX hardening so model assessment suppresses raw Codex JSONL event output, classifies auth/token failures, and preserves deterministic diagnosis messaging with `codex login --device-auth` recovery guidance.
+
+- PR122 (May 27, 2026): interactive latest-evidence memory. After a diagnosis or evidence-producing command, the REPL stores a compact in-session latest diagnosis context (target, diagnosis kind, artifact/evidence/summary paths, evidence highlights, limitations, safe next commands, suggested follow-up categories) and reuses it for read-only follow-up questions (`what did you find?`, `why is it slow?`, `is it running normally?`, `what does this system do?`, `what should I check next?`). `/pending` surfaces this latest context when no formal pending investigation exists. No new collectors auto-run, no mutation/remediation/rollback/cleanup/Docker-Compose execution is added, and mutation-style follow-ups stay refused.
