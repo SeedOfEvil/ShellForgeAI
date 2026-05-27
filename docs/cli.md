@@ -14,7 +14,11 @@ shellforgeai [--config PATH] [--profile NAME] [--mode NAME]
 ```
 
 Running with no `<command>` enters interactive mode (see
-`docs/interactive-mode.md`).
+`docs/interactive-mode.md`). In interactive mode, follow-up questions
+(`what did you find?`, `why is it slow?`, `is it running normally?`) reuse
+the latest diagnosis evidence collected in the current session, and
+`/pending` can show that latest diagnosis context when no formal pending
+investigation exists. These follow-ups are read-only.
 
 ## Commands
 

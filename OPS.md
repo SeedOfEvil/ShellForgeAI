@@ -87,6 +87,14 @@ Expected outcomes:
   / Findings / Artifacts / Safety note) and only references artifact
   files that actually exist on disk.
 
+After a diagnosis, follow-up questions like `what did you find?`, `why is
+it slow?`, or `is it running normally?` use the latest evidence collected
+in the current interactive session (target, evidence highlights, artifact
+paths, limitations, and safe next commands) instead of generic context.
+With no formal pending investigation, `/pending` also surfaces that latest
+diagnosis context. These follow-ups are read-only and never run new
+collectors or execute mutation.
+
 ## Apply safety check
 
 ```bash

@@ -19,6 +19,15 @@ from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, classify_target
+from shellforgeai.core.latest_context import (
+    LatestDiagnosisContext,
+    answer_from_latest_context,
+    build_latest_diagnosis_context,
+    detect_latest_context_intent,
+    is_mutation_followup,
+    no_latest_context_reply,
+    render_latest_context_pending,
+)
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.interactive.banner import build_banner
 from shellforgeai.knowledge.search import search_local
@@ -831,6 +840,15 @@ def _deterministic_operator_summary(
     )
 
 
+def _findings_to_strings(findings: list) -> list[str]:
+    out: list[str] = []
+    for f in findings or []:
+        title = getattr(f, "title", None)
+        if title:
+            out.append(str(title))
+    return out
+
+
 def _checks_from_results(results: list) -> list[dict[str, str]]:
     items = [_evidence_item_from_result(r, EvidenceCategory.network, r.tool) for r in results]
     return [
@@ -1453,6 +1471,7 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
     pending_followup: dict[str, Any] | None = None
     completed_followups: list[str] = []
     evidence_mode = "compact"
+    latest_context: LatestDiagnosisContext | None = None
     while True:
         try:
             user_input = input("sfai> ").strip()
@@ -1639,7 +1658,10 @@ Commands:
             continue
         if routed.name == "/pending":
             if not pending_followup:
-                console.print("No pending investigation.")
+                if latest_context is not None:
+                    console.print(render_latest_context_pending(latest_context))
+                else:
+                    console.print("No pending investigation.")
             elif "label" not in pending_followup:
                 console.print(
                     "Pending investigation state is invalid. Please ask the service question again."
@@ -1820,6 +1842,14 @@ ask review this shell snippet: ...
 No command was executed.""")
             continue
 
+        # Grounded follow-ups reuse the latest session evidence instead of
+        # re-running collectors. Mutation phrases are never answered here.
+        if latest_context is not None and not is_mutation_followup(user_input):
+            _followup_intent = detect_latest_context_intent(user_input)
+            if _followup_intent is not None:
+                console.print(answer_from_latest_context(latest_context, _followup_intent))
+                continue
+
         if routed.name in {"diagnose"}:
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, routed.args, online=False, since="30m")
@@ -1905,6 +1935,20 @@ No command was executed.""")
                 f"Evidence: {evidence_count} item(s)\n"
                 f"{findings_summary_line(res.findings)}\n"
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
+            )
+            latest_context = build_latest_diagnosis_context(
+                session_id=res.session_id,
+                target=routed.args,
+                diagnosis_kind=routed.args,
+                checks=checks,
+                facts=_summarize_facts(checks),
+                evidence_highlights=_evidence_highlights(checks),
+                findings=_findings_to_strings(res.findings),
+                artifact_dir=str(runtime.session.artifact_dir),
+                evidence_path=str(ep),
+                summary_path=str(sp),
+                plan_path=str(pp),
+                source_command=user_input,
             )
             if natural_language_diagnose:
                 pending_followup = None
@@ -2133,6 +2177,16 @@ No command was executed.""")
                     "container context. Run ShellForgeAI from the host context to "
                     "inspect host firewall state."
                 )
+            latest_context = build_latest_diagnosis_context(
+                session_id=res.session_id,
+                target="firewall",
+                diagnosis_kind="firewall",
+                checks=checks,
+                facts=_summarize_facts(checks),
+                evidence_highlights=_evidence_highlights(checks),
+                findings=_findings_to_strings(res.findings),
+                source_command=user_input,
+            )
             continue
 
         is_explicit_ask = routed.name == "ask" and routed.args.lower().startswith(
@@ -2274,10 +2328,38 @@ No command was executed.""")
             console.print(
                 _operator_followup_text(pending_followup["label"], pending_followup["description"])
             )
+            latest_context = build_latest_diagnosis_context(
+                session_id=runtime.session.session_id,
+                target=service_action_target,
+                diagnosis_kind="service health",
+                checks=checks,
+                facts=_summarize_facts(checks),
+                evidence_highlights=_evidence_highlights(checks),
+                source_command=user_input,
+            )
             continue
         action_response = _detect_action_request(user_input)
         if action_response is not None:
             console.print(action_response)
+            continue
+        if is_mutation_followup(user_input):
+            console.print(
+                "I can't run fixes or mutations from interactive inspect mode. "
+                "Apply stays validation-only and changes need explicit operator approval. "
+                "No action was taken."
+            )
+            if latest_context is not None and latest_context.safe_next_commands:
+                console.print("Safe read-only next commands:")
+                for c in latest_context.safe_next_commands:
+                    console.print(f"- {c}")
+            continue
+        followup_intent = detect_latest_context_intent(user_input)
+        if (
+            followup_intent is not None
+            and latest_context is None
+            and followup_intent != "system_role"
+        ):
+            console.print(no_latest_context_reply())
             continue
         provider = build_provider(runtime.settings)
         kind = "ask"
@@ -2300,6 +2382,15 @@ No command was executed.""")
             context["machine_health"] = checks
             context["evidence_label"] = "general health evidence"
             kind = "diagnose"
+            latest_context = build_latest_diagnosis_context(
+                session_id=runtime.session.session_id,
+                target="machine health",
+                diagnosis_kind="machine health",
+                checks=checks,
+                facts=_summarize_facts(checks),
+                evidence_highlights=_evidence_highlights(checks),
+                source_command=user_input,
+            )
         with console.status("Preparing context..."):
             prompt = build_contextual_prompt(
                 user_input if routed.name != "ask" else routed.args, context, mode="standard"

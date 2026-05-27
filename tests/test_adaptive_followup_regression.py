@@ -137,7 +137,9 @@ def test_validated_storage_io_followup_flow(monkeypatch: Any, tmp_path: Any) -> 
     assert "Disk/inodes: still healthy" in out
     assert "Memory/swap: still healthy" in out
     assert "Storage errors: none" in out
-    assert "No pending investigation." in out
+    # PR122: once the formal follow-up is consumed, /pending surfaces the
+    # latest diagnosis context instead of the bare "No pending" message.
+    assert "latest diagnosis context" in out.lower()
     assert out.count("dig into the storage/I/O angle next") == 1
     for leaked in [
         '{"name":',
