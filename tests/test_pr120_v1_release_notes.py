@@ -1,4 +1,8 @@
+import importlib.metadata
+import tomllib
 from pathlib import Path
+
+import pytest
 
 CHANGELOG = Path("CHANGELOG.md")
 RELEASE_NOTES = Path("docs/V1_RELEASE_NOTES.md")
@@ -111,3 +115,33 @@ def test_docs_do_not_casually_recommend_dangerous_commands() -> None:
                     assert any(ctx in line for ctx in allowed_context), (
                         f"dangerous command appears casually in {path}: {raw_line!r}"
                     )
+
+
+def test_version_surfaces_match_v1_release() -> None:
+    from typer.testing import CliRunner
+
+    from shellforgeai.cli import app
+    from shellforgeai.version import __version__
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    assert "ShellForgeAI 1.0.0" in result.stdout
+
+    assert __version__ == "1.0.0"
+
+    try:
+        metadata_version = importlib.metadata.version("shellforgeai")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("installed package metadata unavailable in source-tree test env")
+    assert metadata_version == "1.0.0"
+
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["version"] == "1.0.0"
+
+    assert __version__ == metadata_version == pyproject["project"]["version"]
+
+
+def test_release_docs_call_out_v1_100() -> None:
+    assert "v1 baseline / 1.0.0" in _lower(RELEASE_NOTES)
+    assert "## [1.0.0]" in CHANGELOG.read_text(encoding="utf-8")

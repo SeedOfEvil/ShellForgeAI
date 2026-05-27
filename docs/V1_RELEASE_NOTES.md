@@ -71,6 +71,7 @@ ShellForgeAI V1 is intentionally narrow:
 - Some output remains dense for tired operators.
 - V1 is CLI-only by design.
 - Production remediation is not V1.
+- Full `pytest -q` in disposable validation lanes may require a longer timeout because packet-history compare coverage can run slower; treat timeout as incomplete, not success.
 
 ## 7) Recommended first commands
 
