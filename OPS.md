@@ -94,6 +94,9 @@ paths, limitations, and safe next commands) instead of generic context.
 With no formal pending investigation, `/pending` also surfaces that latest
 diagnosis context. These follow-ups are read-only and never run new
 collectors or execute mutation.
+After ShellForgeAI asks for read-only evidence, short continuations like
+`get that info`, `then get that info`, `do that`, `proceed`, or `dig deeper`
+continue only the safe read-only path.
 
 ## Apply safety check
 

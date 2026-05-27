@@ -1035,6 +1035,11 @@ running normally?`, `what does this system do?`) are strictly read-only.
   remediation/rollback/cleanup or Docker/Compose mutation.
 - The stored snapshot holds only summaries/metadata — no raw logs, no
   secrets, and no raw Codex JSONL.
+- Short natural-language continuations like `get that info` / `do that` / `proceed`
+  only auto-resolve when the pending action is explicit read-only evidence
+  collection. If the pending action is mutating/gated, ShellForgeAI refuses
+  and reports that no action was taken.
+
 - Mutation-style follow-ups (`fix it`, `restart it`) are never answered
   from latest context; they are refused with no action taken.
 - `/pending` surfacing the latest diagnosis context is display-only and

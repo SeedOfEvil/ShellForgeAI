@@ -20,7 +20,7 @@ Interactive broad role/health prompts such as `what does this system do?`, `is i
 (`what did you find?`, `why is it slow?`, `is it running normally?`) reuse
 the latest diagnosis evidence collected in the current session, and
 `/pending` can show that latest diagnosis context when no formal pending
-investigation exists. These follow-ups are read-only.
+investigation exists. These follow-ups are read-only. These short confirmations also work when a read-only follow-up is pending: `get that info`, `then get that info`, `do that`, `proceed`, `dig deeper`. They resolve only to safe read-only collectors/checks and never bypass mutation gates.
 
 ## Commands
 
