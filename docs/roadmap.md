@@ -12,6 +12,8 @@
 
 ## Shipped
 
+- PR120: V1 release cut packaging completed with changelog, release notes, and ops handoff packet updates. V1 remains a CLI-first Linux/Docker operator knife with deterministic ask routing, deterministic mutation refusal, and ops report artifact lifecycle as the primary operator path.
+
 - Deterministic core ops runtime: `diagnose` collects evidence, classifies
   the target, and emits a conservative plan + audit + artifacts.
 - Profile system (`inspect`, `assisted`, `lab-direct`, `prod-readonly`).
