@@ -2355,10 +2355,35 @@ No command was executed.""")
             continue
         followup_intent = detect_latest_context_intent(user_input)
         if (
-            followup_intent is not None
+            followup_intent in {"system_role", "health_status", "next_steps"}
             and latest_context is None
-            and followup_intent != "system_role"
         ):
+            with console.status("Collecting evidence..."):
+                res = diagnose_target(runtime, "health", online=False, since="30m")
+            checks = [
+                {
+                    "tool": i.source,
+                    "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+                    "summary": i.summary,
+                }
+                for i in res.evidence.items
+            ]
+            console.print(f"Collected {len(checks)} read-only evidence item(s).")
+            console.print(_deterministic_operator_summary("health", checks))
+            latest_context = build_latest_diagnosis_context(
+                session_id=runtime.session.session_id,
+                target="health",
+                diagnosis_kind="system role/health",
+                checks=checks,
+                facts=_summarize_facts(checks),
+                evidence_highlights=_evidence_highlights(checks),
+                findings=[f.title for f in res.findings],
+                source_command=user_input,
+            )
+            if followup_intent is not None:
+                console.print(answer_from_latest_context(latest_context, followup_intent))
+            continue
+        if followup_intent is not None and latest_context is None:
             console.print(no_latest_context_reply())
             continue
         provider = build_provider(runtime.settings)

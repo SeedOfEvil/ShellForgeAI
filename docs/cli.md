@@ -14,6 +14,8 @@ shellforgeai [--config PATH] [--profile NAME] [--mode NAME]
 ```
 
 Running with no `<command>` enters interactive mode (see
+
+Interactive broad role/health prompts such as `what does this system do?`, `is it running normally?`, and `what should I check first?` are deterministically handled with built-in read-only evidence collection/reuse (including latest diagnosis context when available). Output includes container-limited visibility caveats when host scope is not fully visible.
 `docs/interactive-mode.md`). In interactive mode, follow-up questions
 (`what did you find?`, `why is it slow?`, `is it running normally?`) reuse
 the latest diagnosis evidence collected in the current session, and

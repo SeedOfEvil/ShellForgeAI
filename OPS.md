@@ -169,6 +169,11 @@ JSON smoke:
 
 Additional service-action smoke: `can you restart shellforgeai?` should collect read-only service evidence immediately, queue pending service health, and refuse mutation execution.
 
+Role/health smoke examples (read-only):
+- `what does this system do?`
+- `is it running normally?`
+Expected next commands remain safe: `shellforgeai ops report`, `shellforgeai triage docker`, `shellforgeai triage docker detail <target>`, `shellforgeai remediation eligibility --target <target> --explain`.
+
 
 No-hang follow-up smoke: run `can you restart nginx`, `/pending`, `proceed`, `/pending`, `can you restart shellforgeai`, `/pending`, `dig deeper`, `/pending`, `/exit` and confirm prompt returns each time without session drop.
 
