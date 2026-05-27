@@ -770,3 +770,6 @@ PR115 (May 25, 2026): added `shellforgeai v1 packet` release-readiness packet ge
 - PR117 (May 25, 2026): integrated `scripts/v1_validate.sh --packet` (`--export-packet` optional) so V1 quick/full validation can leave a validated readiness packet artifact in-lane, with artifact-only safety boundaries.
 
 - PR118 (May 26, 2026): stabilized the `scripts/v1_validate.sh` packet lane parsing/control flow — packet and export refs are parsed from stdout JSON only (stderr warnings no longer fail valid stdout), accepting `packet_id`/`packet_path` (and nested `packet.*`/`artifact.*`) plus `export_id`/`export_path` (and nested `export.*`/`artifact.*`), with controlled distinct diagnostics on invalid/missing refs and no added mutation/execution.
+
+
+- PR121 (May 27, 2026): model-failure/auth UX hardening so model assessment suppresses raw Codex JSONL event output, classifies auth/token failures, and preserves deterministic diagnosis messaging with `codex login --device-auth` recovery guidance.

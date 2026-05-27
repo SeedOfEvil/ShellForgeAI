@@ -237,6 +237,8 @@ action compiler does not execute anything; `apply` remains validation-only.
 
 `<data_dir>/audit/events.jsonl` records ShellForgeAI timeline events only. Every event records `execution_allowed=false`, `execution_status=not_executed`, and `mutation_performed=false`. Audit events prove ShellForgeAI actions/refusals, not external operator execution.
 
+Model-provider auth failures are reported as clean operator messages, with raw JSONL/provider event streams suppressed from assessment prose. ShellForgeAI never auto-runs login and never prints auth tokens/secrets.
+
 ## Audit incident index / search safety (PR40)
 
 `shellforgeai audit index|search|index validate` is read-only metadata

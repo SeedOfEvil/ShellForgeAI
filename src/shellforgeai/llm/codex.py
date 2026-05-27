@@ -28,6 +28,8 @@ def _redact(text: str) -> str:
 
 class CodexProvider:
     name = "openai-codex"
+    _active_procs: set[subprocess.Popen[str]] = set()
+    _active_lock = threading.Lock()
 
     def __init__(
         self,
@@ -75,6 +77,9 @@ class CodexProvider:
                 version = (r.stdout or r.stderr).strip() or "unknown"
             except Exception:
                 version = "unknown"
+        auth_cache_present = auth_cache.exists()
+        auth_readiness = "unknown" if auth_cache_present else "failed"
+        auth_reason = "status_unknown" if auth_cache_present else "login_required"
         return {
             "provider": self.name,
             "model": self.default_model,
@@ -82,7 +87,10 @@ class CodexProvider:
             "codex_binary": found or self.binary,
             "codex_found": bool(found),
             "codex_version": version,
-            "auth_cache_present": auth_cache.exists(),
+            "auth_cache_present": auth_cache_present,
+            "auth_readiness": auth_readiness,
+            "auth_reason": auth_reason,
+            "auth_next_step": "codex login --device-auth",
             "sandbox": self.sandbox,
             "approval": self.approval,
             "timeout_seconds": str(self.timeout_seconds),
@@ -176,7 +184,15 @@ class CodexProvider:
             yield {"type": "text", "text": response.text}
         yield {"type": "final", "response": response}
 
-    def _classify_error(self, rc: int, err: str) -> str:
+    def _classify_error(self, rc: int, err: str, out: str = "") -> str:
+        failure = classify_model_failure(stdout=out, stderr=err, returncode=rc)
+        if failure["category"] == "auth":
+            return (
+                "codex auth failed; run: codex login --device-auth"
+                if failure["reason"]
+                in {"login_required", "auth_expired", "auth_invalid", "token_refresh_failed"}
+                else "codex auth failed"
+            )
         low = (err or "").lower()
         if "unexpected argument" in low or "error: " in low and "argument" in low:
             return "codex CLI argument error"
@@ -264,7 +280,7 @@ class CodexProvider:
             error: str | None = "codex returned no final response"
             ok = False
         else:
-            error = None if rc == 0 else self._classify_error(rc, err)
+            error = None if rc == 0 else self._classify_error(rc, err, out)
             ok = rc == 0
 
         return ModelResponse(
@@ -284,5 +300,55 @@ class CodexProvider:
             metadata=metadata,
         )
 
-    _active_procs: set[subprocess.Popen[str]] = set()
-    _active_lock = threading.Lock()
+
+def _auth_reason_blob(text: str) -> str:
+    low = (text or "").lower()
+    if "refresh token already used" in low or "token refresh" in low:
+        return "token_refresh_failed"
+    if "invalid_grant" in low or "invalid token" in low:
+        return "auth_invalid"
+    if "token expired" in low or "auth expired" in low or "expired" in low:
+        return "auth_expired"
+    if "please run codex login" in low or "login required" in low or "not authenticated" in low:
+        return "login_required"
+    if "unauthorized" in low:
+        return "auth_invalid"
+    return ""
+
+
+def classify_model_failure(
+    stdout: str, stderr: str, events: list[dict] | None = None, returncode: int | None = None
+) -> dict[str, str | bool]:
+    blob = "\n".join([stdout or "", stderr or ""])
+    reason = _auth_reason_blob(blob)
+    event_blob = ""
+    for ev in events or []:
+        event_blob += f"\n{ev.get('type', '')} {ev.get('message', '')}"
+    if not reason and event_blob:
+        reason = _auth_reason_blob(event_blob)
+    if returncode == 124 or "timed out" in blob.lower():
+        return {
+            "status": "unavailable",
+            "category": "timeout",
+            "reason": "timeout",
+            "user_message": "Model-assisted assessment unavailable: model command timed out.",
+            "next_step": "Retry model-assisted assessment later.",
+            "raw_suppressed": True,
+        }
+    if reason:
+        return {
+            "status": "unavailable",
+            "category": "auth",
+            "reason": reason,
+            "user_message": "Model-assisted assessment unavailable: Codex auth expired or invalid.",
+            "next_step": "codex login --device-auth",
+            "raw_suppressed": True,
+        }
+    return {
+        "status": "unavailable",
+        "category": "model",
+        "reason": "unknown_model_failure",
+        "user_message": "Model-assisted assessment unavailable: model command failed.",
+        "next_step": "Review model provider configuration and retry.",
+        "raw_suppressed": True,
+    }
