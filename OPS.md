@@ -96,7 +96,9 @@ diagnosis context. These follow-ups are read-only and never run new
 collectors or execute mutation.
 After ShellForgeAI asks for read-only evidence, short continuations like
 `get that info`, `then get that info`, `do that`, `proceed`, or `dig deeper`
-continue only the safe read-only path.
+continue only the safe read-only path. Without a pending safe follow-up, those
+phrases produce no-context guidance instead of inventing evidence. Paste-like
+or mutation-shaped input is still refused and no command is executed.
 
 ## Apply safety check
 
