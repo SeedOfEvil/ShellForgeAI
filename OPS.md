@@ -317,6 +317,8 @@ ShellForgeAI's Docker visibility is read-only by convention: only
 Mutation (start/stop/restart/rm/exec/cp/build/pull/prune, compose
 mutation, volume/network mutation) is never executed. `apply` remains
 validation-only.
+When ShellForgeAI runs in Docker, host-oriented checks are container-limited
+unless host mounts/namespaces expose more visibility.
 
 Compose ownership troubleshooting (PR57 ask polish):
 

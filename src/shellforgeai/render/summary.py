@@ -181,6 +181,7 @@ def write_diagnosis_summary_md(
     created_at: str,
     evidence_items: list,
     findings: list,
+    runtime_context: dict[str, object] | None = None,
     artifact_dir: Path,
     artifact_candidates: Iterable[str] = (
         "evidence.json",
@@ -222,7 +223,7 @@ def write_diagnosis_summary_md(
         "",
         f"- Session: {session_id}",
         f"- Target: {target}",
-        f"- Type: {target_type}",
+        f"- Target type: {target_type}",
         f"- Created: {created_at}",
         f"- Evidence count: {evidence_count}",
         f"- Findings count: {displayed_count}",
@@ -238,6 +239,18 @@ def write_diagnosis_summary_md(
         "",
         "## Key evidence",
     ]
+    if runtime_context:
+        inside_container = bool(runtime_context.get("inside_container"))
+        visibility = str(runtime_context.get("visibility", "runtime_scoped")).replace("_", "-")
+        view = str(runtime_context.get("view", "runtime-local diagnosis")).replace("_", " ")
+        lines.extend(
+            [
+                "- Runtime context:",
+                f"  - inside_container: {'true' if inside_container else 'false'}",
+                f"  - visibility: {visibility}",
+                f"  - view: {view}",
+            ]
+        )
     if key_lines:
         lines.extend(key_lines)
     else:
