@@ -1041,6 +1041,12 @@ Operator workflow:
 
 ## Operator workflow for reducing metadata hygiene critical state
 
+> Operator note (PR127): If `doctor` reports metadata hygiene `critical` (or
+> `warning`) on a long-lived lab, this is ShellForgeAI-owned historical
+> artifact accumulation — not an active runtime failure, and no cleanup has
+> run. Run `shellforgeai audit cleanup review` first. Do not jump to
+> `cleanup execute`.
+
 1. `shellforgeai doctor`
 2. `shellforgeai audit retention`
 3. `shellforgeai audit cleanup plan --category exports --max-age-days 7 --keep-latest 5`

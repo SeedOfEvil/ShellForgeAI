@@ -691,6 +691,16 @@ def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
                 defunct_codex += 1
     init_reaper = "yes" if pid1 in {"tini", "dumb-init", "systemd", "init"} else "no"
     hygiene: dict[str, Any] = scan_metadata_hygiene(Path(runtime.session.data_dir))
+    hygiene_attention = hygiene["severity"] in {"warning", "critical"}
+    hygiene["human_context"] = (
+        "ShellForgeAI-owned historical artifacts exceed advisory threshold."
+        if hygiene_attention
+        else "ShellForgeAI-owned artifacts are within advisory thresholds."
+    )
+    hygiene["active_runtime_failure"] = False
+    hygiene["cleanup_performed"] = False
+    hygiene["first_safe_command"] = "shellforgeai audit cleanup review"
+    hygiene["cleanup_execution_gated"] = True
     payload: dict[str, Any] = {
         "shellforgeai": {
             "version": build.display_version,
@@ -709,6 +719,13 @@ def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
             "defunct_codex": defunct_codex,
         },
         "metadata_hygiene": hygiene,
+        "safety": {
+            "cleanup_executed": False,
+            "mutation_performed": False,
+            "docker_compose_executed": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+        },
     }
     if json_output:
         console.print_json(data=payload)
@@ -741,12 +758,17 @@ def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
     )
     console.print("Metadata hygiene")
     runtime_ok = "OK" if defunct_codex == 0 else "needs attention"
-    metadata_attention = "needs attention" if hygiene["severity"] in {"warn", "critical"} else "OK"
+    metadata_attention = "attention needed" if hygiene_attention else "OK"
     console.print(f"- Runtime: {runtime_ok}")
     console.print(f"- Metadata hygiene: {metadata_attention}")
-    if metadata_attention == "needs attention":
-        console.print("- Note: accumulated historical artifacts exceed the advisory threshold.")
+    if hygiene_attention:
+        console.print("- Note:")
+        console.print("  - ShellForgeAI-owned historical artifacts exceed the advisory threshold.")
+        console.print("  - This is not an active Docker/system failure by itself.")
+        console.print("  - No cleanup was performed.")
         console.print("- First safe command: shellforgeai audit cleanup review")
+        console.print("- Cleanup remains gated:")
+        console.print("  review -> plan -> archive -> validate -> execute --confirm")
     console.print(
         "- severity: "
         f"{hygiene['severity']} | ShellForgeAI metadata: "
