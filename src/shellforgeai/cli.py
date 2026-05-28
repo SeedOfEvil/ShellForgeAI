@@ -740,6 +740,13 @@ def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
         f"runtime_hygiene pid1={pid1} init_reaper={init_reaper} defunct_codex={defunct_codex}"
     )
     console.print("Metadata hygiene")
+    runtime_ok = "OK" if defunct_codex == 0 else "needs attention"
+    metadata_attention = "needs attention" if hygiene["severity"] in {"warn", "critical"} else "OK"
+    console.print(f"- Runtime: {runtime_ok}")
+    console.print(f"- Metadata hygiene: {metadata_attention}")
+    if metadata_attention == "needs attention":
+        console.print("- Note: accumulated historical artifacts exceed the advisory threshold.")
+        console.print("- First safe command: shellforgeai audit cleanup review")
     console.print(
         "- severity: "
         f"{hygiene['severity']} | ShellForgeAI metadata: "
@@ -3235,8 +3242,10 @@ def diagnose(
             f"Target: {target}\n"
             f"Target type: {result.target_type.value}\n"
             f"Visibility: {visibility}\n"
+            f"Container-limited view: {'yes' if visibility == 'container-limited' else 'no'}\n"
             f"Evidence: {len(result.evidence.items)} item(s)\n"
             f"{findings_summary_line(result.findings)}\n"
+            f"First safe command: {triage_detail_command(target)}\n"
             "Artifacts:\n"
             f"- evidence: {ev_path}\n"
             f"- plan: {plan_path if save_plan else 'not-saved'}\n"
@@ -8810,6 +8819,8 @@ def _handle_mutation_refusal_ask(question: str) -> bool:
             console.print(f"- shellforgeai remediation eligibility --target {target} --explain")
         console.print("- shellforgeai remediation self-test --profile standard")
     console.print("")
+    console.print("First safe command: shellforgeai ops report")
+    console.print("")
     console.print("To perform governed disposable remediation, use the explicit CLI workflow:")
     console.print("plan → validate → preflight → execute with explicit confirmation.")
     console.print("Production targets remain blocked.")
@@ -10140,7 +10151,23 @@ def ops_report(
     if json_out:
         typer.echo(json.dumps(payload))
         return
-    lines = ["ShellForgeAI 2AM Operator Report", "", "Safety:"]
+    top_suspect = payload["suspects"][0] if payload["suspects"] else None
+    lines = ["ShellForgeAI 2AM Operator Report", ""]
+    lines.append(
+        "Status: "
+        f"{payload.get('status')} — "
+        f"{payload['summary'].get('critical', 0)} critical and "
+        f"{payload['summary'].get('high', 0)} high Docker suspects found."
+    )
+    lines.append(
+        "Summary: "
+        f"{payload['summary'].get('critical', 0)} critical, "
+        f"{payload['summary'].get('high', 0)} high suspects"
+    )
+    if top_suspect:
+        lines.append(f"Top suspect: {top_suspect['name']} — {top_suspect['severity']} severity")
+        lines.append(f"First safe command: {triage_detail_command(top_suspect['name'])}")
+    lines.extend(["", "Safety:"])
     for k, v in payload["safety"].items():
         lines.append(f"- {k}: {str(v).lower()}")
     lines.extend(["", "Current scene:"])
@@ -11227,7 +11254,18 @@ def remediation_eligibility(
         if json_out:
             typer.echo(json.dumps(payload))
             raise typer.Exit(0 if payload["status"] == "ok" else 1)
+        state = payload["eligibility"]["state"]
         console.print(f"Remediation eligibility explanation: {payload['target']['name']}")
+        console.print(
+            f"Eligibility: {'eligible for plan' if state == 'eligible_for_plan' else 'blocked'}"
+        )
+        if state == "eligible_for_plan":
+            console.print(f"- First safe command (plan-only): {payload['suggested_plan_command']}")
+        else:
+            console.print(
+                "- First safe command: shellforgeai triage docker detail "
+                f"{payload['target']['name']}"
+            )
         console.print("\nSummary:")
         console.print(f"- eligibility: {payload['eligibility']['state']}")
         console.print(f"- production_target: {str(payload['target']['production_target']).lower()}")

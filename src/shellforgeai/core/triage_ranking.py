@@ -825,7 +825,17 @@ def render_detail_human(payload: dict[str, Any]) -> str:
 
     s = payload["suspect"]
     tgt = payload["target"]
-    lines = [f"Docker triage detail: {s['name']}", "", "Rank:"]
+    lines = [f"Docker triage detail: {s['name']}", ""]
+    lines.append(
+        "Status: "
+        f"{s['severity']} severity with {s['confidence']} confidence "
+        f"(rank {tgt['rank']} of {tgt['rank_total']})."
+    )
+    lines.append(
+        f"First safe command: shellforgeai remediation eligibility --target {s['name']} --explain"
+    )
+    lines.append("")
+    lines.append("Rank:")
     lines.append(f"- rank: {tgt['rank']} of {tgt['rank_total']}")
     lines.append(f"- severity: {s['severity']}")
     lines.append(f"- confidence: {s['confidence']}")
@@ -856,12 +866,25 @@ def render_human(payload: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.append("Docker triage suspects")
     lines.append("")
+    summary = payload.get("summary", {})
+    suspects = payload.get("suspects") or []
+    lines.append(
+        "Status: "
+        f"{'degraded' if suspects else 'ok'} — "
+        f"{summary.get('critical', 0)} critical, {summary.get('high', 0)} high suspects."
+    )
+    if suspects:
+        top = suspects[0]
+        lines.append(
+            f"Top suspect: {top['name']} — {top['severity']} / {top['confidence']} confidence."
+        )
+        lines.append(f"First safe command: shellforgeai triage docker detail {top['name']}")
+    lines.append("")
     lines.append("Safety:")
     lines.append("- read_only: true")
     lines.append("- mutation_performed: false")
     lines.append("- no restart/stop/delete/prune was executed")
     lines.append("")
-    summary = payload.get("summary", {})
     lines.append(
         "Scene: "
         f"containers_seen={summary.get('containers_seen', 0)} "
@@ -872,7 +895,6 @@ def render_human(payload: dict[str, Any]) -> str:
         f"watch={summary.get('watch', 0)}"
     )
     lines.append("")
-    suspects = payload.get("suspects") or []
     if not suspects:
         lines.append("No ranked suspects from current scene.")
     for s in suspects:
