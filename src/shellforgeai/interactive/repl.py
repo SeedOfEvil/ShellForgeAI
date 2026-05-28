@@ -1010,6 +1010,7 @@ _FOLLOWUP_PHRASES = {
     "get the info",
     "then get that info",
     "collect that info",
+    "get those checks",
     "collect those checks",
     "do that",
     "do those checks",
@@ -1029,6 +1030,26 @@ _FOLLOWUP_PHRASES = {
 def _is_followup_phrase(text: str) -> bool:
     normalized = " ".join((text or "").strip().lower().replace(",", "").split())
     return normalized in _FOLLOWUP_PHRASES
+
+
+def is_pending_followup_confirmation(text: str) -> bool:
+    normalized = " ".join(
+        (text or "").strip().lower().strip(" .!?;,").replace(",", " ").replace("  ", " ").split()
+    )
+    if not normalized:
+        return False
+    soft_prefixes = ("then ", "ok ", "okay ", "please ", "yes ", "yeah ", "yep ")
+    collapsed = normalized
+    for pfx in soft_prefixes:
+        if collapsed.startswith(pfx):
+            collapsed = collapsed[len(pfx) :].strip()
+            break
+    return (
+        normalized in _FOLLOWUP_CONFIRM
+        or collapsed in _FOLLOWUP_CONFIRM
+        or _is_followup_phrase(normalized)
+        or _is_followup_phrase(collapsed)
+    )
 
 
 def _operator_followup_text(label: str, description: str) -> str:
@@ -1512,12 +1533,21 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
         if routed.name == "noop":
             continue
         is_followup_phrase = _is_followup_phrase(user_input)
-        if user_input.strip().lower() in _FOLLOWUP_CONFIRM:
+        if is_pending_followup_confirmation(user_input):
             if not pending_followup:
-                console.print(
-                    "I don’t have a pending investigation. Tell me what symptom to check, "
-                    "such as slow system, disk issue, network issue, or service issue."
-                )
+                if _is_followup_phrase(user_input):
+                    console.print(
+                        "There is no prior requested read-only info to continue.\n"
+                        "Try one of:\n"
+                        "- shellforgeai ops report\n"
+                        "- shellforgeai triage docker\n"
+                        "- shellforgeai v1 check --profile quick"
+                    )
+                else:
+                    console.print(
+                        "I don’t have a pending investigation. Tell me what symptom to check, "
+                        "such as slow system, disk issue, network issue, or service issue."
+                    )
                 continue
             console.print(
                 f'I’ll treat "{user_input}" as a read-only follow-up to the pending checks. '

@@ -2,7 +2,7 @@ from typer.testing import CliRunner
 
 from shellforgeai.cli import app
 from shellforgeai.interactive.guards import looks_like_shell_command
-from shellforgeai.interactive.repl import _is_followup_phrase
+from shellforgeai.interactive.repl import _is_followup_phrase, is_pending_followup_confirmation
 
 runner = CliRunner()
 
@@ -13,6 +13,27 @@ def test_followup_phrase_detection_supported_examples() -> None:
     assert _is_followup_phrase("do that")
     assert _is_followup_phrase("proceed")
     assert _is_followup_phrase("check those")
+
+
+def test_pending_followup_confirmation_normalizes_soft_prefixes_and_punctuation() -> None:
+    cases = (
+        "get that info",
+        "then get that info",
+        "do that",
+        "do it",
+        "get those checks",
+        "run those checks",
+        "collect that info",
+        "check that",
+        "continue",
+        "dig deeper",
+        "proceed",
+        "okay do that.",
+        "yes, do that",
+        "please continue!",
+    )
+    for case in cases:
+        assert is_pending_followup_confirmation(case), case
 
 
 def test_short_followups_not_classified_as_shell() -> None:
@@ -46,3 +67,14 @@ def test_mutating_shell_commands_remain_blocked(monkeypatch, tmp_path) -> None:
     )
     assert res.exit_code == 0
     assert "No command was executed." in res.stdout
+
+
+def test_interactive_phrase_continues_pending_followup(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    res = runner.invoke(
+        app,
+        ["interactive", "--no-trust-cache"],
+        input="y\nwhat does this system do?\nget that info\n/exit\n",
+    )
+    assert res.exit_code == 0
+    assert 'I’ll treat "get that info" as a read-only follow-up' in res.stdout
