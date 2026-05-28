@@ -273,6 +273,8 @@ The status safety block is invariant: `apply_mode=validation-only`, `execution_a
 
 ## Metadata hygiene safety
 - Doctor/status metadata hygiene is report-and-guidance only.
+- A metadata hygiene `warning`/`critical` is ShellForgeAI-owned artifact hygiene (accumulated reports/exports/bundles under `data_dir`). It is **not** an automatic Docker/system runtime failure, and it does **not** mean any cleanup was performed.
+- The safe first response to a metadata hygiene warning is the read-only `shellforgeai audit cleanup review`. Cleanup execution stays gated: `review -> plan -> archive -> validate -> execute --confirm`.
 - Doctor/ops metadata hygiene output is read-only and may suggest commands, but never performs cleanup.
 - No automatic cleanup is performed.
 - Cleanup is limited to ShellForgeAI-owned metadata under `data_dir`; paths resolving outside `data_dir` are refused/skipped.

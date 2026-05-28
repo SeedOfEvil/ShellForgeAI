@@ -376,6 +376,12 @@ shellforgeai ask "check drift before apply"
 - Use `shellforgeai audit retention --top N` to list the largest ShellForgeAI-owned metadata items.
 - Safe cleanup sequence remains explicit and gated: `audit retention` -> `audit cleanup plan` -> `audit cleanup archive` -> `audit cleanup validate` -> `audit cleanup execute <plan> --confirm`.
 
+### PR127 — doctor metadata hygiene clarity
+- A metadata hygiene `warning`/`critical` on `doctor` means **ShellForgeAI-owned historical artifacts** (reports, exports, audit-exports, bundles) have accumulated past an advisory threshold. It is **not** by itself an active Docker/system runtime failure, and **no cleanup is ever performed** by `doctor`.
+- The human output now separates `Runtime:` health from `Metadata hygiene:` posture, and when attention is needed it states explicitly that no cleanup was performed and that cleanup remains gated (`review -> plan -> archive -> validate -> execute --confirm`).
+- The first safe command for a metadata hygiene warning is the read-only review: `shellforgeai audit cleanup review` (optionally `shellforgeai audit retention`). Do not jump to `cleanup execute`.
+- `shellforgeai doctor --json` adds additive, backwards-compatible context under `metadata_hygiene`: `human_context`, `active_runtime_failure` (false), `cleanup_performed` (false), `first_safe_command` (`shellforgeai audit cleanup review`), and `cleanup_execution_gated` (true). A top-level `safety` block reports `cleanup_executed`, `mutation_performed`, `docker_compose_executed`, `remediation_executed`, and `rollback_executed` all `false`.
+
 
 ### PR50 — evidence-to-approved-action restart proposal builder
 
