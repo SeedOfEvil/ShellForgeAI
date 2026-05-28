@@ -1005,6 +1005,52 @@ _FOLLOWUP_CONFIRM = {
     "sure",
 }
 
+_FOLLOWUP_PHRASES = {
+    "get that info",
+    "get the info",
+    "then get that info",
+    "collect that info",
+    "get those checks",
+    "collect those checks",
+    "do that",
+    "do those checks",
+    "run those checks",
+    "proceed",
+    "continue",
+    "go ahead",
+    "dig deeper",
+    "check those",
+    "check that",
+    "yes do that",
+    "ok do that",
+    "yeah run the read-only checks",
+}
+
+
+def _is_followup_phrase(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().replace(",", "").split())
+    return normalized in _FOLLOWUP_PHRASES
+
+
+def is_pending_followup_confirmation(text: str) -> bool:
+    normalized = " ".join(
+        (text or "").strip().lower().strip(" .!?;,").replace(",", " ").replace("  ", " ").split()
+    )
+    if not normalized:
+        return False
+    soft_prefixes = ("then ", "ok ", "okay ", "please ", "yes ", "yeah ", "yep ")
+    collapsed = normalized
+    for pfx in soft_prefixes:
+        if collapsed.startswith(pfx):
+            collapsed = collapsed[len(pfx) :].strip()
+            break
+    return (
+        normalized in _FOLLOWUP_CONFIRM
+        or collapsed in _FOLLOWUP_CONFIRM
+        or _is_followup_phrase(normalized)
+        or _is_followup_phrase(collapsed)
+    )
+
 
 def _operator_followup_text(label: str, description: str) -> str:
     label = label.replace("broader read-only ", "").replace(" pass pass", " pass")
@@ -1486,13 +1532,27 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
         routed = route_input(user_input)
         if routed.name == "noop":
             continue
-        if user_input.strip().lower() in _FOLLOWUP_CONFIRM:
+        is_followup_phrase = _is_followup_phrase(user_input)
+        if is_pending_followup_confirmation(user_input):
             if not pending_followup:
-                console.print(
-                    "I don’t have a pending investigation. Tell me what symptom to check, "
-                    "such as slow system, disk issue, network issue, or service issue."
-                )
+                if _is_followup_phrase(user_input):
+                    console.print(
+                        "There is no prior requested read-only info to continue.\n"
+                        "Try one of:\n"
+                        "- shellforgeai ops report\n"
+                        "- shellforgeai triage docker\n"
+                        "- shellforgeai v1 check --profile quick"
+                    )
+                else:
+                    console.print(
+                        "I don’t have a pending investigation. Tell me what symptom to check, "
+                        "such as slow system, disk issue, network issue, or service issue."
+                    )
                 continue
+            console.print(
+                f'I’ll treat "{user_input}" as a read-only follow-up to the pending checks. '
+                "No mutation will be performed."
+            )
             pending_snapshot = dict(pending_followup)
             followup_target = pending_snapshot.get("target") or pending_snapshot.get("bundle")
             if pending_snapshot.get("intent") == "service_health_deep_dive" and not followup_target:
@@ -1827,11 +1887,14 @@ Commands:
                 paste_guard_active = False
             continue
         if not is_explicit_ask and shell_like:
-            paste_guard_active = True
-            paste_guard_remaining_lines = 20
-            paste_guard_non_shell_lines = 0
-            paste_guard_first_notice = True
-            console.print("""Multiline shell paste detected.
+            if is_followup_phrase:
+                shell_like = False
+            else:
+                paste_guard_active = True
+                paste_guard_remaining_lines = 20
+                paste_guard_non_shell_lines = 0
+                paste_guard_first_notice = True
+                console.print("""Multiline shell paste detected.
 
 ShellForgeAI interactive mode does not execute shell snippets.
 
@@ -1840,7 +1903,7 @@ Run it in your shell, or ask me to review it with:
 ask review this shell snippet: ...
 
 No command was executed.""")
-            continue
+                continue
 
         # Grounded follow-ups reuse the latest session evidence instead of
         # re-running collectors. Mutation phrases are never answered here.
@@ -1849,6 +1912,15 @@ No command was executed.""")
             if _followup_intent is not None:
                 console.print(answer_from_latest_context(latest_context, _followup_intent))
                 continue
+        if is_followup_phrase and not pending_followup and latest_context is None:
+            console.print(
+                "There is no prior requested read-only info to continue.\n"
+                "Try one of:\n"
+                "- what does this system do?\n"
+                "- is it running normally?\n"
+                "- shellforgeai ops report"
+            )
+            continue
 
         if routed.name in {"diagnose"}:
             with console.status("Collecting evidence..."):

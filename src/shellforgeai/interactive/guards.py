@@ -52,7 +52,7 @@ def is_multiline_shell_fragment(text: str) -> bool:
         return True
     if _has_unmatched_quote(raw, "'") or _has_unmatched_quote(raw, '"'):
         return True
-    if re.match(r"^(for|if|while|do|done|then|fi)\b", lowered):
+    if lowered in {"for", "if", "while", "do", "done", "then", "fi"}:
         return True
     return ("$(" in raw or "`" in raw) and any(
         x in lowered for x in ("for ", "do", "done", "ls", "find", "echo")
@@ -84,7 +84,7 @@ def is_shell_fragment_line(text: str) -> bool:
         return True
     if raw.startswith("[") and "]" in raw:
         return True
-    if lowered in {"continue", "break", "then", "else", "fi", "do", "done", "esac"}:
+    if lowered in {"break", "then", "else", "fi", "do", "done", "esac"}:
         return True
     if lowered.startswith(("echo ", "printf ", "read ")):
         return True
