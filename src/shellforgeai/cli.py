@@ -607,6 +607,7 @@ def _write_summary_md(
     created_at: str,
     evidence_items: list,
     findings: list,
+    runtime_context: dict[str, object] | None,
     artifact_dir: Path,
     include_model_response: bool,
 ) -> None:
@@ -621,6 +622,7 @@ def _write_summary_md(
         created_at=created_at,
         evidence_items=evidence_items,
         findings=findings,
+        runtime_context=runtime_context,
         artifact_dir=artifact_dir,
         artifact_candidates=candidates,
     )
@@ -3137,6 +3139,7 @@ def diagnose(
         created_at=result.created_at.isoformat(),
         evidence_items=list(result.evidence.items),
         findings=list(result.findings),
+        runtime_context=getattr(result, "runtime_context", {}),
         artifact_dir=runtime.session.artifact_dir,
         artifact_candidates=summary_candidates,
     )
@@ -3206,6 +3209,7 @@ def diagnose(
             result.created_at.isoformat(),
             list(result.evidence.items),
             list(result.findings),
+            getattr(result, "runtime_context", {}),
             runtime.session.artifact_dir,
             include_model_response=True,
         )
@@ -3224,10 +3228,13 @@ def diagnose(
             model_response_display: Path | str = model_response_artifact
         else:
             model_response_display = "n/a"
+        runtime_context = getattr(result, "runtime_context", {})
+        visibility = str(runtime_context.get("visibility", "runtime_scoped")).replace("_", "-")
         summary = (
             f"Session: {result.session_id}\n"
             f"Target: {target}\n"
-            f"Type: {result.target_type.value}\n"
+            f"Target type: {result.target_type.value}\n"
+            f"Visibility: {visibility}\n"
             f"Evidence: {len(result.evidence.items)} item(s)\n"
             f"{findings_summary_line(result.findings)}\n"
             "Artifacts:\n"

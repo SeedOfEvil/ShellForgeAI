@@ -82,6 +82,7 @@ synthesis is affected.
 - `disk.top_dirs` is bounded read-only (`du -x -d 1`) and never deletes or modifies files.
 
 When ShellForgeAI is running inside a container, unavailable host-only tools/checks are treated as visibility limitations rather than failures.
+ShellForgeAI does not escape container namespaces to bypass these gaps; it reports visibility limits explicitly and keeps diagnosis/readouts truthful to container-visible scope.
 
 
 Restart/reload command examples are only appropriate when service presence and a valid manager/tooling path are confirmed; otherwise ShellForgeAI should advise confirming service ownership/location first.

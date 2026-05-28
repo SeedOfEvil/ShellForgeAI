@@ -1990,6 +1990,7 @@ No command was executed.""")
                 created_at_str = (
                     created_at_obj.isoformat() if hasattr(created_at_obj, "isoformat") else ""
                 )
+                runtime_context = getattr(res, "runtime_context", {})
                 write_diagnosis_summary_md(
                     path=sp,
                     session_id=res.session_id,
@@ -1998,12 +1999,15 @@ No command was executed.""")
                     created_at=created_at_str,
                     evidence_items=list(res.evidence.items),
                     findings=list(res.findings),
+                    runtime_context=runtime_context,
                     artifact_dir=runtime.session.artifact_dir,
                 )
+            visibility = str(runtime_context.get("visibility", "runtime_scoped")).replace("_", "-")
             console.print(
                 f"Diagnose {routed.args}\n"
                 f"Session: {res.session_id}\nTarget: {routed.args}\n"
-                f"Type: {res.target_type.value}\n"
+                f"Target type: {res.target_type.value}\n"
+                f"Visibility: {visibility}\n"
                 f"Evidence: {evidence_count} item(s)\n"
                 f"{findings_summary_line(res.findings)}\n"
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
@@ -2090,6 +2094,7 @@ No command was executed.""")
                         created_at=created_at_str,
                         evidence_items=list(res.evidence.items),
                         findings=list(res.findings),
+                        runtime_context=runtime_context,
                         artifact_dir=runtime.session.artifact_dir,
                     )
                     console.print("\n## Assessment")

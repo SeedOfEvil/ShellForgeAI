@@ -68,7 +68,7 @@ def test_summary_md_required_sections(tmp_path: Path) -> None:
         "# ShellForgeAI Diagnosis Summary",
         "Session: s1",
         "Target: performance",
-        "Type: host",
+        "Target type: host",
         "Created: 2026-05-06",
         "Evidence count: 5",
         "Findings count: 0",

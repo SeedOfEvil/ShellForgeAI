@@ -56,6 +56,7 @@ class DiagnosisResult(BaseModel):
     audit_path: str | None = None
     triage_context: dict[str, object] = Field(default_factory=dict)
     container_scope: dict[str, object] = Field(default_factory=dict)
+    runtime_context: dict[str, object] = Field(default_factory=dict)
     safe_next_commands: list[str] = Field(default_factory=list)
     safety: dict[str, bool] = Field(default_factory=dict)
 
@@ -200,6 +201,27 @@ def _is_container(items) -> bool:
             if "docker" in text or "container" in text:
                 return True
     return False
+
+
+def _runtime_context(items) -> dict[str, object]:
+    inside_container = _is_container(items)
+    if not inside_container:
+        return {
+            "inside_container": False,
+            "visibility": "runtime_scoped",
+            "view": "runtime-local diagnosis",
+            "limitations": [],
+        }
+    return {
+        "inside_container": True,
+        "visibility": "container_limited",
+        "view": "host_oriented_from_container_namespace",
+        "limitations": [
+            "systemd/journal may not be visible",
+            "host firewall state may not be visible",
+            "host process/listener view may be incomplete",
+        ],
+    }
 
 
 def _is_benign_storage_error_summary(item) -> bool:
@@ -869,6 +891,7 @@ def diagnose_target(
     )
     findings.extend(_findings_from_docker(items))
     triage_context, container_scope, safe_next_commands = _docker_triage_context(items, target)
+    runtime_context = _runtime_context(items)
     if triage_context.get("detected"):
         demoted_refs: list[str] = []
         kept: list[Finding] = []
@@ -903,6 +926,7 @@ def diagnose_target(
         warnings=warnings,
         triage_context=triage_context,
         container_scope=container_scope,
+        runtime_context=runtime_context,
         safe_next_commands=safe_next_commands,
         safety={
             "read_only": True,
