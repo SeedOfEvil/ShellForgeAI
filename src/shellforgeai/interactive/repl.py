@@ -31,7 +31,7 @@ from shellforgeai.core.latest_context import (
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.interactive.banner import build_banner
 from shellforgeai.knowledge.search import search_local
-from shellforgeai.llm.codex import CodexProvider
+from shellforgeai.llm.codex import CodexProvider, classify_model_failure
 from shellforgeai.llm.manager import build_provider
 from shellforgeai.llm.prompts import build_contextual_prompt
 from shellforgeai.llm.schemas import ModelRequest
@@ -403,6 +403,17 @@ def _run_model_synthesis(
         return final_text, True
     with console.status("Asking model..."):
         resp = provider.complete(request)
+    if not getattr(resp, "ok", True):
+        raw = getattr(resp, "raw", None) or {}
+        failure = classify_model_failure(
+            stdout=str(raw.get("stdout_jsonl") or raw.get("stdout") or getattr(resp, "text", "")),
+            stderr=str(raw.get("stderr") or getattr(resp, "error", "") or ""),
+        )
+        clean = str(failure["user_message"])
+        next_step = str(failure.get("next_step") or "")
+        if next_step:
+            clean = f"{clean} Next step: {next_step}."
+        return clean, False
     return resp.text, False
 
 
@@ -2026,6 +2037,9 @@ No command was executed.""")
                 plan_path=str(pp),
                 source_command=user_input,
             )
+            immediate_followup_intent = detect_latest_context_intent(user_input)
+            if immediate_followup_intent in {"system_role", "health_status", "next_steps"}:
+                console.print(answer_from_latest_context(latest_context, immediate_followup_intent))
             if natural_language_diagnose:
                 pending_followup = None
                 pending_followup = select_followup_investigation(routed.args, checks, user_input)
