@@ -36,8 +36,9 @@ Use this concise, safe path for the V1 demo and handoff contract:
 10. `shellforgeai remediation eligibility --target <target> --explain`
 11. `shellforgeai ask "It's 2AM; what is on fire?"`
 12. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
+13. `shellforgeai ask "show me the command to inspect sfai-crashloop"` (command-help: returns the read-only `shellforgeai triage docker detail sfai-crashloop` with `No action was taken.`; nothing is executed)
 
-Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path.
+Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path. Command-help ("show me the command ...", "how would I propose ...") explains safe commands without running them; "do it" / "run that" mutation phrasings are refused.
 
 # OPS
 
