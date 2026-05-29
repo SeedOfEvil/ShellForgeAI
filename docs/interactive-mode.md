@@ -76,6 +76,27 @@ Debug
   `docker.container_logs`, and `docker.problem_summary`. No mutating
   Docker commands are ever issued.
 
+
+## Safe command-style dispatch
+
+Interactive mode accepts a focused allowlist of ShellForgeAI CLI-style inputs
+without requiring a leading slash. These are dispatched only to ShellForgeAI-owned
+read-only or safety/readiness handlers:
+
+- `version`, `doctor`, `model doctor`
+- `v1 check quick|standard|full`
+- `ops report`, `ops report --json`, `ops report history`, `ops report compare-latest`
+- `triage docker`, `triage docker detail <target>`
+- `diagnose <target>` through the existing read-only diagnose route
+- `remediation self-test quick|standard|full`
+- `remediation eligibility --target <target> --explain`
+- `pending`/`/pending`, `help`/`/help`, `exit`/`/exit`
+
+Unknown text still falls back to the existing safe ask/routing path. Shell-like
+or mutation-shaped inputs such as Docker/Compose restart, `rm`, `sudo`, `apply`,
+cleanup execute, remediation execute, rollback execute, or mission execute are
+refused with no command execution and no action taken.
+
 ## Streaming synthesis
 
 After collection, the REPL shows a synthesis status and streams the model

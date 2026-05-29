@@ -22,6 +22,8 @@ the latest diagnosis evidence collected in the current session, and
 `/pending` can show that latest diagnosis context when no formal pending
 investigation exists. These follow-ups are read-only. These short confirmations also work when a read-only follow-up is pending: `get that info`, `then get that info`, `do that`, `proceed`, `dig deeper`. They resolve only to safe read-only collectors/checks and never bypass mutation gates.
 
+Interactive mode also accepts a small allowlist of safe ShellForgeAI command-style inputs directly, such as `doctor`, `model doctor`, `ops report`, `triage docker detail <target>`, `v1 check quick`, and `remediation eligibility --target <target> --explain`. These dispatch only to ShellForgeAI-owned read-only/safety commands; shell, Docker/Compose mutation, cleanup execute, remediation execute, rollback execute, and apply-style inputs are refused with no action taken.
+
 ## Commands
 
 | Command | Purpose |
