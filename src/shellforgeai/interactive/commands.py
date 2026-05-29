@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
 
 
@@ -8,6 +9,108 @@ from dataclasses import dataclass
 class RoutedCommand:
     name: str
     args: str = ""
+    argv: tuple[str, ...] = ()
+
+
+_ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
+    ("version",): ("version",),
+    ("doctor",): ("doctor",),
+    ("model", "doctor"): ("model", "doctor"),
+    ("ops", "report"): ("ops", "report"),
+    ("ops", "report", "--json"): ("ops", "report", "--json"),
+    ("ops", "report", "history"): ("ops", "report", "history"),
+    ("ops", "report", "compare-latest"): ("ops", "report", "compare-latest"),
+    ("triage", "docker"): ("triage", "docker"),
+    ("v1", "check", "quick"): ("v1", "check", "--profile", "quick"),
+    ("v1", "check", "standard"): ("v1", "check", "--profile", "standard"),
+    ("v1", "check", "full"): ("v1", "check", "--profile", "full"),
+    ("remediation", "self-test", "quick"): (
+        "remediation",
+        "self-test",
+        "--profile",
+        "quick",
+    ),
+    ("remediation", "self-test", "standard"): (
+        "remediation",
+        "self-test",
+        "--profile",
+        "standard",
+    ),
+    ("remediation", "self-test", "full"): (
+        "remediation",
+        "self-test",
+        "--profile",
+        "full",
+    ),
+    ("status",): ("ops", "report"),
+}
+
+_DANGEROUS_COMMAND_PREFIXES = (
+    ("docker",),
+    ("sudo",),
+    ("sh",),
+    ("bash",),
+    ("rm",),
+    ("systemctl",),
+    ("apply",),
+)
+
+_DANGEROUS_COMMAND_PATTERNS = (
+    ("cleanup", "execute"),
+    ("audit", "cleanup", "execute"),
+    ("remediation", "execute"),
+    ("rollback", "execute"),
+    ("mission", "execute"),
+    ("service", "restart"),
+)
+
+
+def _tokenize_command_style(raw: str) -> tuple[str, ...] | None:
+    try:
+        parts = shlex.split(raw)
+    except ValueError:
+        return None
+    if not parts:
+        return ()
+    return tuple(part.lower() for part in parts)
+
+
+def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
+    tokens = _tokenize_command_style(raw)
+    if tokens is None:
+        return None
+    if tokens in _ALLOWED_CLI_DISPATCH:
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=_ALLOWED_CLI_DISPATCH[tokens])
+    if len(tokens) == 4 and tokens[:3] == ("triage", "docker", "detail") and tokens[3]:
+        return RoutedCommand(
+            name="cli_dispatch",
+            args=raw,
+            argv=("triage", "docker", "detail", tokens[3]),
+        )
+    if (
+        len(tokens) == 5
+        and tokens[:2] == ("remediation", "eligibility")
+        and tokens[2] == "--target"
+        and tokens[3]
+        and tokens[4] == "--explain"
+    ):
+        return RoutedCommand(
+            name="cli_dispatch",
+            args=raw,
+            argv=("remediation", "eligibility", "--target", tokens[3], "--explain"),
+        )
+    return None
+
+
+def _dispatch_dangerous_command(raw: str) -> RoutedCommand | None:
+    tokens = _tokenize_command_style(raw)
+    if not tokens:
+        return None
+    if any(tokens[: len(prefix)] == prefix for prefix in _DANGEROUS_COMMAND_PREFIXES):
+        return RoutedCommand(name="mutation_refused", args=raw)
+    if any(tokens[: len(pattern)] == pattern for pattern in _DANGEROUS_COMMAND_PATTERNS):
+        return RoutedCommand(name="mutation_refused", args=raw)
+    return None
 
 
 def _normalize_intent_text(text: str) -> str:
@@ -43,6 +146,21 @@ def route_input(text: str) -> RoutedCommand:
     if raw.startswith("/"):
         head, _, tail = raw.partition(" ")
         return RoutedCommand(name=head.lower(), args=tail.strip())
+
+    exact_session = raw.lower()
+    if exact_session in {"exit", "quit"}:
+        return RoutedCommand(name="/exit")
+    if exact_session == "help":
+        return RoutedCommand(name="/help")
+    if exact_session == "pending":
+        return RoutedCommand(name="/pending")
+
+    safe_dispatch = _dispatch_safe_cli_command(raw)
+    if safe_dispatch is not None:
+        return safe_dispatch
+    dangerous_dispatch = _dispatch_dangerous_command(raw)
+    if dangerous_dispatch is not None:
+        return dangerous_dispatch
 
     lowered = _normalize_intent_text(raw)
     storage_perf_intents = [

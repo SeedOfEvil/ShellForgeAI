@@ -1487,6 +1487,74 @@ def _extract_service_action_target(text: str) -> str | None:
     return target or None
 
 
+_INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
+    ("version",): "Running version...",
+    ("doctor",): "Running doctor...",
+    ("model", "doctor"): "Running model doctor...",
+    ("ops", "report"): "Running read-only ops report...",
+    ("ops", "report", "history"): "Running read-only ops report history...",
+    ("ops", "report", "compare-latest"): "Running read-only ops report compare-latest...",
+    ("triage", "docker"): "Running read-only Docker triage...",
+    ("triage", "docker", "detail"): "Running read-only Docker triage detail...",
+    ("diagnose",): "Running read-only diagnose...",
+    ("v1", "check"): "Running V1 readiness check...",
+    ("remediation", "self-test"): "Running read-only remediation self-test...",
+    ("remediation", "eligibility"): "Running read-only remediation eligibility explain...",
+}
+
+
+def _dispatch_label(argv: tuple[str, ...]) -> str:
+    for prefix, label in sorted(
+        _INTERACTIVE_DISPATCH_LABELS.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if argv[: len(prefix)] == prefix:
+            return label
+    return "Running read-only ShellForgeAI command..."
+
+
+def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> None:
+    if not argv:
+        console.print("No command was dispatched.")
+        return
+    json_output = "--json" in argv
+    if not json_output:
+        console.print(_dispatch_label(argv))
+    try:
+        from typer.testing import CliRunner
+
+        from shellforgeai.cli import app
+
+        result = CliRunner().invoke(app, list(argv))
+    except Exception as exc:
+        console.print(
+            f"ShellForgeAI command dispatch failed safely. No action was taken. Error: {exc}"
+        )
+        return
+    if result.output:
+        console.print(result.output.rstrip())
+    if result.exit_code != 0 and not json_output:
+        console.print(
+            f"ShellForgeAI command exited with status {result.exit_code}. "
+            "No action was taken by the interactive dispatcher."
+        )
+
+
+def _interactive_mutation_refusal(text: str) -> str:
+    return (
+        "No command was executed.\n"
+        "No action was taken.\n"
+        "I can't run that command from ShellForgeAI interactive mode.\n"
+        "ShellForgeAI interactive mode does not execute shell snippets. "
+        "ShellForgeAI interactive mode does not execute Docker/Compose, cleanup, "
+        "remediation, rollback, apply, or restart commands.\n"
+        "Safe read-only alternatives:\n"
+        "- ops report\n"
+        "- triage docker\n"
+        "- triage docker detail <target>\n"
+        "- remediation eligibility --target <target> --explain"
+    )
+
+
 def _contains_internal_collector_language(text: str) -> bool:
     low = text.lower()
     blocked = [
@@ -1656,7 +1724,7 @@ def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> 
             console.print("Goodbye.")
             return
         if routed.name == "/clear":
-            os.system("clear")
+            console.clear()
             paste_guard_active = False
             continue
         if routed.name == "/help":
@@ -1820,6 +1888,12 @@ Commands:
                 f"Mode/Profile: {runtime.session.mode}/{runtime.profile.name}\n"
                 "Safety: workspace trust allows bounded read context only."
             )
+            continue
+        if routed.name == "cli_dispatch":
+            _run_interactive_cli_dispatch(console, routed.argv)
+            continue
+        if routed.name == "mutation_refused":
+            console.print(_interactive_mutation_refusal(routed.args or user_input))
             continue
         if routed.name == "logs_mutation_refused":
             console.print(

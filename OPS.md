@@ -75,6 +75,17 @@ dig deeper
 /exit
 ```
 
+Selected safe CLI-style commands also work directly inside the REPL:
+
+```text
+shellforgeai interactive
+doctor
+ops report
+triage docker detail sfai-crashloop
+remediation eligibility --target sfai-crashloop --explain
+```
+
+
 Expected outcomes:
 - Sluggish phrasing routes to performance diagnostics before synthesis.
 - Evidence highlights stay compact in normal UX while `/tools` and debug
