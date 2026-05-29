@@ -129,6 +129,14 @@ from shellforgeai.core.guards import (
     max_age_from_hours,
     write_guard_report,
 )
+from shellforgeai.core.intent_nuance import (
+    AMBIGUOUS_EXECUTE,
+    CLEANUP_REVIEW_HELP,
+    COMMAND_HELP,
+    PLAN_HELP,
+    classify_intent_nuance,
+    render_intent_nuance,
+)
 from shellforgeai.core.metadata_hygiene import human_bytes, scan_metadata_hygiene
 from shellforgeai.core.mission import (
     apply_delegation_command as mission_apply_delegation_command,
@@ -8804,6 +8812,22 @@ _ASK_MUTATION_TERMS: tuple[str, ...] = (
 )
 
 
+def _handle_command_help_ask(question: str) -> bool:
+    """PR131: answer command-help / plan-help questions with safe guidance.
+
+    Distinguishes "what command would I run / how would I propose this?"
+    (read-only or plan-only guidance) from mutation requests. Nothing is
+    executed and no plan is created here; the response only renders safe
+    read-only or clearly-labelled plan-only commands. Ambiguous "run that /
+    do it now" phrasings are refused deterministically.
+    """
+    nuance = classify_intent_nuance(question)
+    if nuance.category in (COMMAND_HELP, PLAN_HELP, CLEANUP_REVIEW_HELP, AMBIGUOUS_EXECUTE):
+        console.print(render_intent_nuance(nuance, text=question))
+        return True
+    return False
+
+
 def _handle_mutation_refusal_ask(question: str) -> bool:
     raw = (question or "").strip()
     if not raw:
@@ -9174,6 +9198,8 @@ def ask(
         if _handle_incident_search_ask(runtime, question):
             return
         if _handle_guard_ask(runtime, question):
+            return
+        if _handle_command_help_ask(question):
             return
         if is_ops_report_ask(question):
             payload = _build_ops_report_payload()

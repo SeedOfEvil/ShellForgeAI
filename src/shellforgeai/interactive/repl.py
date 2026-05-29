@@ -18,6 +18,14 @@ from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, classify_target
+from shellforgeai.core.intent_nuance import (
+    AMBIGUOUS_EXECUTE,
+    CLEANUP_REVIEW_HELP,
+    COMMAND_HELP,
+    PLAN_HELP,
+    classify_intent_nuance,
+    render_intent_nuance,
+)
 from shellforgeai.core.latest_context import (
     LatestDiagnosisContext,
     answer_from_latest_context,
@@ -1655,6 +1663,21 @@ def start_interactive(
         routed = route_input(user_input)
         if routed.name == "noop":
             continue
+        # PR131: command-help / plan-help guidance and ambiguous-execute refusal.
+        # Command-help frames ("what command would I run?", "how would I propose?")
+        # are answered with safe read-only / plan-only guidance and never execute.
+        # Mutation requests still fall through to the existing deterministic
+        # refusal paths (route_input mutation_refused, _detect_action_request, ...).
+        if routed.name not in {"cli_dispatch", "mutation_refused", "logs_mutation_refused"}:
+            nuance = classify_intent_nuance(user_input)
+            if nuance.category in (COMMAND_HELP, PLAN_HELP, CLEANUP_REVIEW_HELP):
+                console.print(render_intent_nuance(nuance, text=user_input))
+                continue
+            if nuance.category == AMBIGUOUS_EXECUTE and not is_pending_followup_confirmation(
+                user_input
+            ):
+                console.print(render_intent_nuance(nuance, text=user_input))
+                continue
         is_followup_phrase = _is_followup_phrase(user_input)
         if is_pending_followup_confirmation(user_input):
             if not pending_followup:

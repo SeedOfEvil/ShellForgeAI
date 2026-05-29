@@ -265,6 +265,12 @@ export/guard/refusal trail — it does not prove external operator execution.
 - Ask cleanup/prune phrasing defaults to retention report or prune dry-run; deletion requires explicit CLI `--execute`.
 - Ambiguous wording is disambiguated: ShellForgeAI metadata phrases route to ShellForgeAI audit/retention/export commands, while host-audit wording (`auditd`, `ausearch`, `/var/log/audit`, `journalctl`) stays in host diagnostics.
 
+### Command-help vs mutation (PR131)
+- Command-help is explanation only: ShellForgeAI can show the safe command without running it. Requests like "what command would restart this?", "show me the command to inspect sfai-crashloop", "how would I propose remediation?", and "how do I review cleanup safely?" are answered with `No action was taken.` plus safe read-only or clearly-labelled plan-only commands. No command is executed and no plan/proposal is created from a command-help answer.
+- Command-help answers never suggest `--execute --confirm`, `remediation execute`, `rollback execute`, `audit cleanup execute`, `docker restart`, or `docker compose restart` as next commands. Plan-only guidance is always labelled `Plan-only; does not execute remediation.` and notes that execution remains gated by validate, preflight, and explicit confirmation.
+- A mutation verb embedded inside a command-help frame is guidance, not execution: "what command would restart this?" is command-help; "restart this" is a refused mutation. Ambiguous "run that" / "do it now" phrasings are refused deterministically with no action taken, and remain distinct from PR124's safe read-only follow-up phrases (`get that info`, `do that`) which only resolve pending read-only checks.
+- Mutation still requires the explicit governed CLI gates; natural language never executes restart/remediation/cleanup/rollback or Docker/Compose changes.
+
 ## Status dashboard safety
 
 `shellforgeai status` is strictly read-only. It summarizes ShellForgeAI-owned metadata (audit events, approvals, bundles, exports, indexes, and optional retention counts) and does **not** execute operator commands, run apply, approve/reject proposals, prune/delete/archive metadata, or rebuild indexes.
