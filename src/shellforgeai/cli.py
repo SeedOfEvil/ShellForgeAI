@@ -637,6 +637,15 @@ def main(
     mode: str = "inspect",
     verbose: bool = False,
     no_trust_cache: bool = typer.Option(False, "--no-trust-cache"),
+    yes_trust: bool = typer.Option(
+        False,
+        "--yes-trust",
+        help=(
+            "Trust the current workspace for this interactive session and skip the "
+            "trust prompt. Only gates the workspace prompt; does not grant mutation, "
+            "shell execution, or bypass safety refusals."
+        ),
+    ),
 ) -> None:
     if version:
         build = get_build_info()
@@ -653,17 +662,27 @@ def main(
     if ctx.invoked_subcommand is None and not version:
         from shellforgeai.interactive import start_interactive
 
-        start_interactive(ctx.obj["runtime"], no_trust_cache=no_trust_cache)
+        start_interactive(ctx.obj["runtime"], no_trust_cache=no_trust_cache, yes_trust=yes_trust)
         raise typer.Exit()
 
 
 @app.command("interactive")
 def interactive(
-    ctx: typer.Context, no_trust_cache: bool = typer.Option(False, "--no-trust-cache")
+    ctx: typer.Context,
+    no_trust_cache: bool = typer.Option(False, "--no-trust-cache"),
+    yes_trust: bool = typer.Option(
+        False,
+        "--yes-trust",
+        help=(
+            "Trust the current workspace for this interactive session and skip the "
+            "trust prompt. Only gates the workspace prompt; does not grant mutation, "
+            "shell execution, or bypass safety refusals."
+        ),
+    ),
 ) -> None:
     from shellforgeai.interactive import start_interactive
 
-    start_interactive(_ctx(ctx), no_trust_cache=no_trust_cache)
+    start_interactive(_ctx(ctx), no_trust_cache=no_trust_cache, yes_trust=yes_trust)
 
 
 @app.command("version")

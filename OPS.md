@@ -85,6 +85,30 @@ triage docker detail sfai-crashloop
 remediation eligibility --target sfai-crashloop --explain
 ```
 
+### Scripted / non-interactive sessions
+
+Already-trusted workspaces are not re-prompted, so the first piped line is
+treated as a command (not as a trust answer). For a fresh/untrusted
+workspace in a scripted session, pass `--yes-trust` to skip the trust
+prompt without weakening safety:
+
+```text
+shellforgeai interactive --yes-trust
+doctor
+ops report
+/exit
+```
+
+`--yes-trust` only trusts the current workspace for this session and skips
+the trust prompt. It does **not** grant mutation, shell execution,
+Docker/Compose mutation, remediation/cleanup/rollback execution, or bypass
+the paste guard or natural-language mutation refusals — those stay refused
+with no action taken (e.g. `docker compose restart shellforgeai`, `rm -rf /`,
+`remediation execute --confirm`). When untrusted and no flag is passed,
+only `y`/`yes` grant trust; `n`/`no`/empty decline and exit safely; any
+other input is an invalid trust response that reprompts with clear
+guidance rather than running as a command.
+
 
 Expected outcomes:
 - Sluggish phrasing routes to performance diagnostics before synthesis.

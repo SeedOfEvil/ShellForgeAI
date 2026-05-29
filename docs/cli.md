@@ -8,7 +8,7 @@ ShellForgeAI is exposed as `shellforgeai` and `sfai`.
 
 ```
 shellforgeai [--config PATH] [--profile NAME] [--mode NAME]
-             [--verbose] [--no-trust-cache]
+             [--verbose] [--no-trust-cache] [--yes-trust]
              [--version]
              <command> [args]
 ```
@@ -28,7 +28,7 @@ Interactive mode also accepts a small allowlist of safe ShellForgeAI command-sty
 
 | Command | Purpose |
 | --- | --- |
-| `interactive` | Same as launching with no subcommand. `--no-trust-cache` forces re-prompt of workspace trust. |
+| `interactive` | Same as launching with no subcommand. `--no-trust-cache` forces re-prompt of workspace trust. `--yes-trust` trusts the current workspace for this session and skips the trust prompt (script-friendly); it only gates the workspace prompt and does **not** grant mutation, shell execution, or bypass any safety refusal. Already-trusted workspaces are never re-prompted, so the first real command (e.g. `doctor`) is no longer consumed as a trust answer. When untrusted and no flag is passed, only `y`/`yes` grant trust and `n`/`no`/empty decline; any other input is treated as an invalid trust response (never executed as a command, never silently discarded) and reprompts with `Please answer y or n. Commands are accepted after trust is set.` |
 | `version` | Print version + build line if available. |
 | `doctor` | Show ShellForgeAI runtime health (version, profile, data dir, tool count, model provider). |
 | `diagnose <target>` | Collect evidence and propose a conservative plan. Options: `--online`, `--since 30m`, `--save-plan`, `--json`, `--model`, `--raw`, `--full-context`. Writes `evidence.json`, `summary.md` (a friendly mini-report whose evidence count matches `evidence.json`), and `plan.json` when `--save-plan`. The CLI footer only references `model-response.md` when `--model` actually wrote it. Aliases for target include `performance\|slow\|slowness\|host`, `storage\|disk-performance\|io\|iowait`, `services\|service-discovery\|ports`. |
@@ -73,7 +73,11 @@ Interactive mode also accepts a small allowlist of safe ShellForgeAI command-sty
 
 ## Safety
 
-`apply` does not execute. Workspace trust does not lift policy.
+`apply` does not execute. Workspace trust does not lift policy. The
+`--yes-trust` flag only skips the interactive workspace trust prompt; it
+does not grant mutation, shell execution, Docker/Compose mutation,
+remediation/cleanup/rollback execution, or bypass the paste guard or
+natural-language mutation refusals.
 Service-impacting commands are described as approval-required and
 operator-run; ShellForgeAI does not run them.
 
