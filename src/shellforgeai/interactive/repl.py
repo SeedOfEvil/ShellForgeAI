@@ -10,7 +10,6 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from typing import Any
 
-import typer
 from rich.console import Console
 from rich.table import Table
 
@@ -435,19 +434,62 @@ def _has_substantive_response(text: str) -> bool:
     return lowered not in {"## assessment", "# assessment"}
 
 
-def _confirm_workspace(console: Console, runtime: RuntimeContext, no_trust_cache: bool) -> bool:
+def _confirm_workspace(
+    console: Console,
+    runtime: RuntimeContext,
+    no_trust_cache: bool,
+    yes_trust: bool = False,
+) -> bool:
+    """Establish interactive workspace trust without eating the first command.
+
+    Trust here only gates the interactive workspace confirmation; it never grants
+    shell execution, mutation, remediation, cleanup, rollback, or Docker/Compose
+    mutation powers. Those remain refused regardless of trust state.
+
+    Resolution order:
+      1. Already-trusted workspaces proceed straight to the command loop (no prompt),
+         so a scripted first command such as ``doctor`` is never consumed as a trust
+         response.
+      2. ``--yes-trust`` trusts the current workspace for this session and proceeds
+         directly to command input.
+      3. Otherwise prompt once. Only ``y``/``yes`` grant trust; ``n``/``no``/empty
+         decline safely. Any other input is treated as an invalid trust response: it
+         is never executed as a command and never silently discarded -- the user gets
+         clear guidance and is reprompted.
+    """
     store = WorkspaceTrustStore(runtime.session.data_dir)
     workspace = Path.cwd()
     already_trusted = (not no_trust_cache) and store.is_trusted(workspace)
+
+    if already_trusted:
+        console.print(f"Workspace already trusted: {workspace}\nCommands accepted.")
+        return True
+
+    if yes_trust:
+        if not no_trust_cache:
+            store.trust(workspace, get_build_info().version)
+        console.print(
+            f"Workspace trusted for this session: {workspace}\n"
+            "Trust only gates the workspace prompt; mutation and shell execution stay refused."
+        )
+        return True
+
     console.print("Trust this workspace?\n")
     console.print(f"Path:\n  {workspace}\n")
-    trust = typer.confirm(f"Trust {workspace}?", default=already_trusted)
-    if not trust:
-        console.print("Workspace not trusted. Exiting interactive mode.")
-        return False
-    if not no_trust_cache and not already_trusted:
-        store.trust(workspace, get_build_info().version)
-    return True
+    while True:
+        try:
+            answer = input("Trust this workspace for this session? [y/N] ").strip().lower()
+        except EOFError:
+            console.print("Workspace not trusted. Exiting interactive mode.")
+            return False
+        if answer in {"y", "yes"}:
+            if not no_trust_cache:
+                store.trust(workspace, get_build_info().version)
+            return True
+        if answer in {"", "n", "no"}:
+            console.print("Workspace not trusted. Exiting interactive mode.")
+            return False
+        console.print("Please answer y or n. Commands are accepted after trust is set.")
 
 
 def _summary_for_check(c) -> str:
@@ -1582,11 +1624,13 @@ def _contains_internal_collector_language(text: str) -> bool:
     return any(b in low for b in blocked)
 
 
-def start_interactive(runtime: RuntimeContext, no_trust_cache: bool = False) -> None:
+def start_interactive(
+    runtime: RuntimeContext, no_trust_cache: bool = False, yes_trust: bool = False
+) -> None:
     console = Console()
     trusted = WorkspaceTrustStore(runtime.session.data_dir).is_trusted(Path.cwd())
-    console.print(build_banner(runtime, trusted))
-    if not _confirm_workspace(console, runtime, no_trust_cache=no_trust_cache):
+    console.print(build_banner(runtime, trusted or yes_trust))
+    if not _confirm_workspace(console, runtime, no_trust_cache=no_trust_cache, yes_trust=yes_trust):
         return
     renderer = StreamRenderer(console)
     paste_guard_active = False
