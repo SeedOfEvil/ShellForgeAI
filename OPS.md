@@ -137,6 +137,8 @@ continue only the safe read-only path. Without a pending safe follow-up, those
 phrases produce no-context guidance instead of inventing evidence. Paste-like
 or mutation-shaped input is still refused and no command is executed.
 
+The human-feel regression suite (`tests/test_pr134_human_feel_regression.py`) keeps messy pressure prompts, command-help phrasing, follow-up pronouns, paste-like snippets, and natural-language mutation refusals covered as a UX/safety guardrail.
+
 ## Apply safety check
 
 ```bash

@@ -368,6 +368,17 @@ def resolve_followup_reference(text: str, state: FollowupGroundingState) -> Grou
                 phrase=raw,
                 safe_command=state.last_safe_next_command or _safe_detail_command(target),
             )
+    if _contains_any(norm, _EVIDENCE_REFERENCE_PHRASES):
+        if state.last_evidence_summary or state.last_artifact_paths or state.last_read_only_action:
+            return GroundingResolution(
+                kind="evidence",
+                target=state.last_target,
+                target_kind=state.last_target_kind,
+                intent="latest_evidence",
+                phrase=raw,
+                safe_command=state.last_safe_next_command,
+            )
+        return GroundingResolution(kind="no_context", phrase=raw)
     if _contains_any(norm, _PRONOUN_REFERENCE_PHRASES):
         target = state.last_target or state.last_top_suspect
         if target:
@@ -389,17 +400,6 @@ def resolve_followup_reference(text: str, state: FollowupGroundingState) -> Grou
             phrase=raw,
             candidates=tuple(state.last_candidates),
         )
-    if _contains_any(norm, _EVIDENCE_REFERENCE_PHRASES):
-        if state.last_evidence_summary or state.last_artifact_paths or state.last_read_only_action:
-            return GroundingResolution(
-                kind="evidence",
-                target=state.last_target,
-                target_kind=state.last_target_kind,
-                intent="latest_evidence",
-                phrase=raw,
-                safe_command=state.last_safe_next_command,
-            )
-        return GroundingResolution(kind="no_context", phrase=raw)
     return GroundingResolution(kind="none")
 
 
