@@ -17,6 +17,7 @@
 - PR126: concise operator output and first-safe-command polish for 2AM readability across ops report/triage/diagnose/eligibility human views.
 - PR132: session-local follow-up grounding for interactive references (`the first one`, `top suspect`, `that container`, `what about it?`) with deterministic mutation refusal preserved.
 - PR133: concise/no-novel operator mode added `ops report --brief` plus deterministic ask/interactive pressure phrases (`no novel`, `quick status`, `what is on fire, keep it short`) for bounded read-only status without changing evidence collection, JSON schema, or safety gates.
+- PR135: generic report/status command-help prompts now route deterministically to canonical `shellforgeai ops report` save/export/history/compare guidance in ask and interactive mode, with mutation-plus-report prompts still refused and no model fallback.
 
 - Deterministic core ops runtime: `diagnose` collects evidence, classifies
   the target, and emits a conservative plan + audit + artifacts.
