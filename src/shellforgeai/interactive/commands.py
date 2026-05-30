@@ -12,6 +12,8 @@ class RoutedCommand:
     argv: tuple[str, ...] = ()
 
 
+_SAFE_PROFILES = ("quick", "standard", "full")
+
 _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("version",): ("version",),
     ("doctor",): ("doctor",),
@@ -19,33 +21,66 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("ops", "report"): ("ops", "report"),
     ("ops", "report", "--brief"): ("ops", "report", "--brief"),
     ("ops", "report", "--json"): ("ops", "report", "--json"),
-    ("ops", "report", "--brief", "--json"): ("ops", "report", "--brief", "--json"),
+    ("ops", "report", "--save"): ("ops", "report", "--save"),
     ("ops", "report", "history"): ("ops", "report", "history"),
+    ("ops", "report", "history", "--limit", "5"): (
+        "ops",
+        "report",
+        "history",
+        "--limit",
+        "5",
+    ),
     ("ops", "report", "compare-latest"): ("ops", "report", "compare-latest"),
+    ("ops", "report", "compare-latest", "--json"): (
+        "ops",
+        "report",
+        "compare-latest",
+        "--json",
+    ),
     ("triage", "docker"): ("triage", "docker"),
-    ("v1", "check", "quick"): ("v1", "check", "--profile", "quick"),
-    ("v1", "check", "standard"): ("v1", "check", "--profile", "standard"),
-    ("v1", "check", "full"): ("v1", "check", "--profile", "full"),
-    ("remediation", "self-test", "quick"): (
-        "remediation",
-        "self-test",
-        "--profile",
-        "quick",
-    ),
-    ("remediation", "self-test", "standard"): (
-        "remediation",
-        "self-test",
-        "--profile",
-        "standard",
-    ),
-    ("remediation", "self-test", "full"): (
-        "remediation",
-        "self-test",
-        "--profile",
-        "full",
-    ),
+    ("triage", "docker", "--json"): ("triage", "docker", "--json"),
     ("status",): ("ops", "report"),
 }
+
+for _profile in _SAFE_PROFILES:
+    _ALLOWED_CLI_DISPATCH[("v1", "check", _profile)] = (
+        "v1",
+        "check",
+        "--profile",
+        _profile,
+    )
+    _ALLOWED_CLI_DISPATCH[("v1", "check", "--profile", _profile)] = (
+        "v1",
+        "check",
+        "--profile",
+        _profile,
+    )
+    _ALLOWED_CLI_DISPATCH[("v1", "check", "--profile", _profile, "--json")] = (
+        "v1",
+        "check",
+        "--profile",
+        _profile,
+        "--json",
+    )
+    _ALLOWED_CLI_DISPATCH[("remediation", "self-test", _profile)] = (
+        "remediation",
+        "self-test",
+        "--profile",
+        _profile,
+    )
+    _ALLOWED_CLI_DISPATCH[("remediation", "self-test", "--profile", _profile)] = (
+        "remediation",
+        "self-test",
+        "--profile",
+        _profile,
+    )
+    _ALLOWED_CLI_DISPATCH[("remediation", "self-test", "--profile", _profile, "--json")] = (
+        "remediation",
+        "self-test",
+        "--profile",
+        _profile,
+        "--json",
+    )
 
 _BRIEF_OPS_REPORT_PHRASES = (
     "no novel",
@@ -79,54 +114,73 @@ _DANGEROUS_COMMAND_PREFIXES = (
     ("sh",),
     ("bash",),
     ("rm",),
+    ("reboot",),
     ("systemctl",),
     ("apply",),
+    ("chmod",),
+    ("chown",),
+    ("curl",),
 )
 
 _DANGEROUS_COMMAND_PATTERNS = (
     ("cleanup", "execute"),
     ("audit", "cleanup", "execute"),
     ("remediation", "execute"),
+    ("remediation", "rollback-execute"),
     ("rollback", "execute"),
+    ("rollback-execute",),
     ("mission", "execute"),
-    ("service", "restart"),
 )
 
 
-def _tokenize_command_style(raw: str) -> tuple[str, ...] | None:
+def _split_command_style(raw: str) -> tuple[str, ...] | None:
     try:
         parts = shlex.split(raw)
     except ValueError:
         return None
-    if not parts:
-        return ()
+    return tuple(parts)
+
+
+def _tokenize_command_style(raw: str) -> tuple[str, ...] | None:
+    parts = _split_command_style(raw)
+    if parts is None:
+        return None
     return tuple(part.lower() for part in parts)
 
 
 def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
-    tokens = _tokenize_command_style(raw)
-    if tokens is None:
+    original_tokens = _split_command_style(raw)
+    if original_tokens is None:
         return None
+    tokens = tuple(part.lower() for part in original_tokens)
     if tokens in _ALLOWED_CLI_DISPATCH:
         return RoutedCommand(name="cli_dispatch", args=raw, argv=_ALLOWED_CLI_DISPATCH[tokens])
-    if len(tokens) == 4 and tokens[:3] == ("triage", "docker", "detail") and tokens[3]:
-        return RoutedCommand(
-            name="cli_dispatch",
-            args=raw,
-            argv=("triage", "docker", "detail", tokens[3]),
-        )
+    if len(tokens) in {4, 5} and tokens[:3] == ("triage", "docker", "detail") and tokens[3]:
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("triage", "docker", "detail", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     if (
-        len(tokens) == 5
+        len(tokens) in {5, 6}
         and tokens[:2] == ("remediation", "eligibility")
         and tokens[2] == "--target"
         and tokens[3]
         and tokens[4] == "--explain"
     ):
-        return RoutedCommand(
-            name="cli_dispatch",
-            args=raw,
-            argv=("remediation", "eligibility", "--target", tokens[3], "--explain"),
-        )
+        json_flag = len(tokens) == 6 and tokens[5] == "--json"
+        if len(tokens) == 5 or json_flag:
+            argv = (
+                "remediation",
+                "eligibility",
+                "--target",
+                original_tokens[3],
+                "--explain",
+            )
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     return None
 
 
@@ -134,6 +188,12 @@ def _dispatch_dangerous_command(raw: str) -> RoutedCommand | None:
     tokens = _tokenize_command_style(raw)
     if not tokens:
         return None
+    if "|" in tokens and tokens[0] in {"curl", "wget"}:
+        return RoutedCommand(name="mutation_refused", args=raw)
+    if tokens[0] == "service" and any(
+        token in {"restart", "start", "stop", "reload", "enable", "disable"} for token in tokens[1:]
+    ):
+        return RoutedCommand(name="mutation_refused", args=raw)
     if any(tokens[: len(prefix)] == prefix for prefix in _DANGEROUS_COMMAND_PREFIXES):
         return RoutedCommand(name="mutation_refused", args=raw)
     if any(tokens[: len(pattern)] == pattern for pattern in _DANGEROUS_COMMAND_PATTERNS):
