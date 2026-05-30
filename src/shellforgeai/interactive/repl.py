@@ -30,6 +30,7 @@ from shellforgeai.core.intent_nuance import (
     AMBIGUOUS_EXECUTE,
     CLEANUP_REVIEW_HELP,
     COMMAND_HELP,
+    MUTATION_REQUEST,
     PLAN_HELP,
     classify_intent_nuance,
     render_intent_nuance,
@@ -1708,6 +1709,11 @@ def start_interactive(
                 user_input
             ):
                 console.print(render_intent_nuance(nuance, text=user_input))
+                continue
+            if nuance.category == MUTATION_REQUEST and any(
+                term in user_input.lower() for term in ("report", "status")
+            ):
+                console.print(_interactive_mutation_refusal(user_input))
                 continue
         is_followup_phrase = _is_followup_phrase(user_input)
         early_grounded = resolve_followup_reference(user_input, grounding)

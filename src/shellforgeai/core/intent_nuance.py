@@ -51,6 +51,10 @@ _HELP_FRAMES: tuple[str, ...] = (
     "what do i run",
     "what should i run",
     "show me the command",
+    "show me the report command",
+    "show me report command",
+    "show me the status command",
+    "show me status command",
     "show me a command",
     "show the command",
     "show me which command",
@@ -80,9 +84,19 @@ _PLAN_OBJECTS: tuple[str, ...] = (
 _REPORT_OBJECTS: tuple[str, ...] = (
     "ops report",
     "operator report",
+    "status report",
+    "report history",
+    "history",
+    "compare reports",
+    "compare report",
+    "compare",
+    "export the report",
+    "export report",
     "export",
     "save the report",
     "save report",
+    "report",
+    "status",
 )
 _INSPECT_OBJECTS: tuple[str, ...] = (
     "inspect",
@@ -198,6 +212,43 @@ def _has_help_frame(low: str) -> str:
     return ""
 
 
+def _mutation_signal(low: str) -> str:
+    for sig in _MUTATION_SIGNALS:
+        if sig in low:
+            return sig.strip()
+    return ""
+
+
+def _report_command_signal(low: str, frame: str = "") -> str:
+    has_report_context = "report" in low or "ops" in low or "operator" in low
+    has_status_report_context = "status report" in low
+    helpish = bool(
+        frame
+        or "command" in low
+        or "show me" in low
+        or low.startswith(("show ", "give me "))
+        or "how do i see" in low
+        or "how do i view" in low
+        or "how can i see" in low
+        or "how can i view" in low
+    )
+
+    if "history" in low and (has_report_context or has_status_report_context):
+        return "report_history"
+    if "export" in low and has_report_context and helpish:
+        return "report_export"
+    if "save" in low and has_report_context and helpish:
+        return "report_save"
+    if "compare" in low and (has_report_context or "reports" in low) and helpish:
+        return "report_compare"
+    general_helpish = bool(frame or "command" in low or "what do i run" in low)
+    if (
+        has_report_context or has_status_report_context or ("status" in low and general_helpish)
+    ) and general_helpish:
+        return "report"
+    return ""
+
+
 def classify_intent_nuance(text: str) -> IntentNuance:
     """Classify a natural-language line into a PR131 intent category.
 
@@ -212,17 +263,24 @@ def classify_intent_nuance(text: str) -> IntentNuance:
 
     target = _extract_target(low)
     frame = _has_help_frame(low)
+    report_signal = _report_command_signal(low, frame)
+    mutation_signal = _mutation_signal(low)
+    if not report_signal and mutation_signal and ("report" in low or "status" in low):
+        report_signal = "report"
+
+    if report_signal and mutation_signal:
+        return IntentNuance(category=COMMAND_HELP, target=target, signal=f"{report_signal}_mixed")
 
     if frame:
-        # Precedence: cleanup → eligibility → plan → report → inspect.
+        # Precedence: cleanup → eligibility → report → plan → inspect.
         if any(obj in low for obj in _CLEANUP_OBJECTS):
             return IntentNuance(category=CLEANUP_REVIEW_HELP, target=target, signal=frame)
         if any(obj in low for obj in _ELIGIBILITY_OBJECTS):
             return IntentNuance(category=COMMAND_HELP, target=target, signal="eligibility")
+        if report_signal:
+            return IntentNuance(category=COMMAND_HELP, target=target, signal=report_signal)
         if any(obj in low for obj in _PLAN_OBJECTS):
             return IntentNuance(category=PLAN_HELP, target=target, signal=frame)
-        if any(obj in low for obj in _REPORT_OBJECTS):
-            return IntentNuance(category=COMMAND_HELP, target=target, signal="report")
         if any(obj in low for obj in _INSPECT_OBJECTS) and (
             target or any(anchor in low for anchor in _INSPECT_DOMAIN_ANCHORS)
         ):
@@ -230,12 +288,14 @@ def classify_intent_nuance(text: str) -> IntentNuance:
         # Help frame but no recognized ShellForgeAI-domain object: route normally.
         return IntentNuance(category=NONE)
 
+    if report_signal:
+        return IntentNuance(category=COMMAND_HELP, target=target, signal=report_signal)
+
     if low in _AMBIGUOUS_EXACT:
         return IntentNuance(category=AMBIGUOUS_EXECUTE, signal=low)
 
-    for sig in _MUTATION_SIGNALS:
-        if sig in low:
-            return IntentNuance(category=MUTATION_REQUEST, target=target, signal=sig.strip())
+    if mutation_signal:
+        return IntentNuance(category=MUTATION_REQUEST, target=target, signal=mutation_signal)
 
     return IntentNuance(category=NONE)
 
@@ -266,17 +326,91 @@ def render_command_help(nuance: IntentNuance) -> str:
             "- Read-only eligibility explanation.\n"
             "- Does not restart, remediate, or change Docker state."
         )
+
+    if nuance.signal.endswith("_mixed"):
+        base_signal = nuance.signal.removesuffix("_mixed")
+        command = "shellforgeai ops report"
+        if base_signal == "report_history":
+            heading = "Report history command:"
+            command = "shellforgeai ops report history --limit 5"
+        elif base_signal == "report_save":
+            heading = "Report save command:"
+            command = "shellforgeai ops report --save"
+        elif base_signal == "report_export":
+            heading = "Report export command:"
+            command = "shellforgeai ops report --save"
+        elif base_signal == "report_compare":
+            heading = "Report compare command:"
+            command = "shellforgeai ops report compare-latest"
+        else:
+            heading = "Report command:"
+        return (
+            f"{heading}\n"
+            f"  {command}\n\n"
+            "Mutation refused:\n"
+            "- I will not restart Compose, restart services, or clean up Docker "
+            "from natural language.\n"
+            f"- {_NO_ACTION}\n\n"
+            "Safe next command:\n"
+            "  shellforgeai ops report --brief"
+        )
+    if nuance.signal == "report_export":
+        return (
+            f"{_NO_ACTION}\n\n"
+            "Save a report first if you need a report ID:\n"
+            "  shellforgeai ops report --save\n\n"
+            "Then export and validate the handoff artifact:\n"
+            "  shellforgeai ops report export <report_id>\n"
+            "  shellforgeai ops report export-validate <export_id>\n\n"
+            "Note:\n"
+            "- Save/export writes ShellForgeAI-owned artifact files only.\n"
+            "- Use a real report ID from history; do not invent IDs.\n"
+            "- No Docker/system mutation is performed.\n\n"
+            "First safe command:\n"
+            "  shellforgeai ops report --save"
+        )
+    if nuance.signal == "report_save":
+        return (
+            f"{_NO_ACTION}\n\n"
+            "To save a ShellForgeAI-owned artifact:\n"
+            "  shellforgeai ops report --save\n\n"
+            "To validate it later:\n"
+            "  shellforgeai ops report validate <report_id_or_path>\n\n"
+            "Note:\n"
+            "- This writes ShellForgeAI-owned artifact files only.\n"
+            "- No Docker/system mutation is performed.\n\n"
+            "First safe command:\n"
+            "  shellforgeai ops report --save"
+        )
+    if nuance.signal == "report_compare":
+        return (
+            f"{_NO_ACTION}\n\n"
+            "Use:\n"
+            "  shellforgeai ops report history --limit 5\n"
+            "  shellforgeai ops report compare-latest\n"
+            "  shellforgeai ops report compare <before_report> <after_report>\n\n"
+            "First safe command:\n"
+            "  shellforgeai ops report history --limit 5"
+        )
+    if nuance.signal == "report_history":
+        return (
+            f"{_NO_ACTION}\n\n"
+            "Use:\n"
+            "  shellforgeai ops report history --limit 5\n\n"
+            "First safe command:\n"
+            "  shellforgeai ops report history --limit 5"
+        )
     if nuance.signal == "report":
         return (
             f"{_NO_ACTION}\n\n"
-            "Safe commands:\n"
-            "  shellforgeai ops report\n"
-            "  shellforgeai ops report --save\n"
-            "  shellforgeai ops report export <report_id>\n\n"
-            "Note:\n"
-            "- Read-only report generation/export.\n"
-            "- Use a real <report_id> from `shellforgeai ops report history`; "
-            "do not invent IDs."
+            "Use:\n"
+            "  shellforgeai ops report\n\n"
+            "For machine-readable output:\n"
+            "  shellforgeai ops report --json\n\n"
+            "To save a handoff artifact:\n"
+            "  shellforgeai ops report --save\n\n"
+            "First safe command:\n"
+            "  shellforgeai ops report"
         )
     # inspect (default command-help)
     if nuance.target:

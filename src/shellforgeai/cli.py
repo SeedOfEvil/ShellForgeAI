@@ -8954,7 +8954,7 @@ def _handle_mutation_refusal_ask(question: str) -> bool:
     normalized = " ".join(raw.lower().split())
     if normalized.startswith("can you "):
         return False
-    if any(phrase in normalized for phrase in ("what would happen if", "how would i", "show me")):
+    if any(phrase in normalized for phrase in ("what would happen if", "how would i")):
         return False
     matched = [term for term in _ASK_MUTATION_TERMS if term in normalized]
     if not matched:
@@ -8970,7 +8970,7 @@ def _handle_mutation_refusal_ask(question: str) -> bool:
     )
     console.print("Refused: natural-language mutation is not allowed.")
     console.print("")
-    console.print("No action was performed.")
+    console.print("No action was taken. No action was performed.")
     console.print(
         "I did not restart, stop, delete, prune, apply, clean up, remediate, or roll back anything."
     )
