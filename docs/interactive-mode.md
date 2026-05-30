@@ -85,7 +85,8 @@ read-only or safety/readiness handlers:
 
 - `version`, `doctor`, `model doctor`
 - `v1 check quick|standard|full`
-- `ops report`, `ops report --json`, `ops report history`, `ops report compare-latest`
+- `ops report`, `ops report --brief`, `ops report --json`, `ops report history`, `ops report compare-latest`
+  - Pressure phrases such as `no novel`, `quick status`, and `what is on fire, keep it short` dispatch to the same read-only brief ops report shape.
 - `triage docker`, `triage docker detail <target>`
 - `diagnose <target>` through the existing read-only diagnose route
 - `remediation self-test quick|standard|full`

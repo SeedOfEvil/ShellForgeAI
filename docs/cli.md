@@ -1125,6 +1125,7 @@ at least one warning, and `2` for an unknown profile.
 
 ## PR104 2AM operator report
 - `shellforgeai ops report`
+- `shellforgeai ops report --brief` renders a compact, read-only, human-only pressure-mode view: status, risk, top issue/evidence, exactly one first safe command, and a safety line. Combine with `--json` to keep the existing strict JSON output; `--brief` does not add human prose in JSON mode.
 - `shellforgeai ops report --json`
 - `shellforgeai ops report --top 3 --include-details`
 - `shellforgeai ops report --save` / `--save --json`

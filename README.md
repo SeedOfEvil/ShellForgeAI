@@ -116,8 +116,9 @@ asks deterministically, and refuses or gates mutation.
 - Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
 - Deterministic Docker triage and deep detail (`triage docker`,
   `triage docker detail <target>`).
-- Deterministic operator report lifecycle (`ops report`, `--save`, `history`,
-  `compare`, `compare-latest`, `export`, `export-validate`, `validate`).
+- Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
+  `--save`, `history`, `compare`, `compare-latest`, `export`,
+  `export-validate`, `validate`).
 - Deterministic ask routing for common 2AM/operator prompts, including
   mutation refusal.
 - Governed remediation **preview/testing** lanes with explicit gates,
@@ -137,6 +138,7 @@ asks deterministically, and refuses or gates mutation.
 shellforgeai doctor
 shellforgeai remediation self-test --profile quick
 shellforgeai ops report
+shellforgeai ops report --brief
 shellforgeai ops report --save
 shellforgeai ops report history --limit 5
 shellforgeai ops report compare-latest
