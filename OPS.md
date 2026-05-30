@@ -77,7 +77,7 @@ dig deeper
 /exit
 ```
 
-Selected safe CLI-style commands also work directly inside the REPL:
+Selected safe CLI-style commands also work directly inside the REPL, including common read-only flags such as `--profile`, `--brief`, `--json`, and `--limit` for the allowlisted commands:
 
 ```text
 shellforgeai interactive
@@ -85,6 +85,15 @@ doctor
 ops report
 triage docker detail sfai-crashloop
 remediation eligibility --target sfai-crashloop --explain
+```
+
+Canonical flagged examples for scripted demos or operator handoff:
+
+```text
+shellforgeai interactive --yes-trust
+v1 check --profile quick --json
+ops report --brief
+triage docker detail sfai-crashloop --json
 ```
 
 ### Scripted / non-interactive sessions

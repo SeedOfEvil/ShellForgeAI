@@ -1111,6 +1111,8 @@ at least one warning, and `2` for an unknown profile.
 - `shellforgeai triage docker detail <suspect> [--json]` (PR83) drills into one ranked suspect from deterministic Docker triage. Read-only: emits rank context, severity/confidence/score/classes, why-ranked-here, per-suspect evidence bullets, safe read-only next commands, and explicit no-mutation safety flags.
 - `shellforgeai triage docker detail --rank <n> [--json]` selects by rank using the same deterministic ranking snapshot; supports clean `not_found`/`error` JSON statuses without traceback.
 
+Interactive mode accepts a small deterministic allowlist of safe ShellForgeAI-owned CLI commands directly at the `sfai>` prompt, including common flags for runtime checks, V1 readiness, ops reports, Docker triage, and remediation self-tests/eligibility. Examples: `v1 check --profile quick --json`, `ops report --brief`, `ops report history --limit 5`, `triage docker detail sfai-crashloop --json`, and `remediation self-test --profile quick --json`. This is not a shell: Docker/Compose, cleanup/remediation/rollback execution, restarts, `sudo`, `rm`, `chmod`, `chown`, `curl | sh`, and other mutation-like inputs are refused with no action taken.
+
 - `shellforgeai triage docker snapshot`
 - `shellforgeai triage docker snapshot --include-details --json`
 - `shellforgeai triage docker snapshot --top 3`

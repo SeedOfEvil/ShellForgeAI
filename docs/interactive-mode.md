@@ -84,19 +84,19 @@ without requiring a leading slash. These are dispatched only to ShellForgeAI-own
 read-only or safety/readiness handlers:
 
 - `version`, `doctor`, `model doctor`
-- `v1 check quick|standard|full`
-- `ops report`, `ops report --brief`, `ops report --json`, `ops report history`, `ops report compare-latest`
+- `v1 check quick|standard|full` and `v1 check --profile quick|standard|full [--json]`
+- `ops report`, `ops report --brief`, `ops report --json`, `ops report --save`, `ops report history`, `ops report history --limit 5`, `ops report compare-latest`, and `ops report compare-latest --json`
   - Pressure phrases such as `no novel`, `quick status`, and `what is on fire, keep it short` dispatch to the same read-only brief ops report shape.
-- `triage docker`, `triage docker detail <target>`
+- `triage docker [--json]`, `triage docker detail <target>`, and `triage docker detail <target> --json`
 - `diagnose <target>` through the existing read-only diagnose route
-- `remediation self-test quick|standard|full`
-- `remediation eligibility --target <target> --explain`
+- `remediation self-test quick|standard|full` and `remediation self-test --profile quick|standard|full [--json]`
+- `remediation eligibility --target <target> --explain [--json]`
 - `pending`/`/pending`, `help`/`/help`, `exit`/`/exit`
 
 Unknown text still falls back to the existing safe ask/routing path. Shell-like
 or mutation-shaped inputs such as Docker/Compose restart, `rm`, `sudo`, `apply`,
-cleanup execute, remediation execute, rollback execute, or mission execute are
-refused with no command execution and no action taken.
+cleanup execute, remediation execute, rollback execute / rollback-execute, production restart, `chmod`, `chown`, or mission execute are
+refused with no command execution and no action taken. JSON flags on supported safe forms print the underlying command JSON without an extra human wrapper.
 
 ## Streaming synthesis
 

@@ -121,6 +121,9 @@ asks deterministically, and refuses or gates mutation.
   `export-validate`, `validate`).
 - Deterministic ask routing for common 2AM/operator prompts, including
   mutation refusal.
+- Interactive mode accepts selected safe ShellForgeAI command flag forms (for example
+  `v1 check --profile quick --json`, `ops report --brief`, and
+  `triage docker detail <target> --json`) while refusing shell/mutation input.
 - Governed remediation **preview/testing** lanes with explicit gates,
   disposable-only proofs, and no casual production mutation.
 

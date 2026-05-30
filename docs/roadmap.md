@@ -18,6 +18,7 @@
 - PR132: session-local follow-up grounding for interactive references (`the first one`, `top suspect`, `that container`, `what about it?`) with deterministic mutation refusal preserved.
 - PR133: concise/no-novel operator mode added `ops report --brief` plus deterministic ask/interactive pressure phrases (`no novel`, `quick status`, `what is on fire, keep it short`) for bounded read-only status without changing evidence collection, JSON schema, or safety gates.
 - PR135: generic report/status command-help prompts now route deterministically to canonical `shellforgeai ops report` save/export/history/compare guidance in ask and interactive mode, with mutation-plus-report prompts still refused and no model fallback.
+- PR136: interactive safe-command flag parity. The REPL now accepts a focused allowlist of canonical safe ShellForgeAI CLI flag forms (`v1 check --profile ... --json`, `ops report --brief/--json/history --limit 5/compare-latest --json`, `triage docker ... --json`, and remediation self-test/eligibility read-only forms) while mutation-like commands still refuse before fallback with no shell execution.
 
 - Deterministic core ops runtime: `diagnose` collects evidence, classifies
   the target, and emits a conservative plan + audit + artifacts.
