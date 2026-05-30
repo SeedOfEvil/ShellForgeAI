@@ -98,8 +98,8 @@ def test_export_report_help_suggests_save_export_validate_flow(monkeypatch, tmp_
     assert "No action was taken." in out
     assert "Save a report first" in out
     assert "shellforgeai ops report --save" in out
-    assert "shellforgeai ops report export <report_id_or_path>" in out
-    assert "shellforgeai ops report export-validate <export_id_or_path>" in out
+    assert "shellforgeai ops report export <report_id>" in out
+    assert "shellforgeai ops report export-validate <export_id>" in out
     assert "ShellForgeAI-owned artifact" in out
     assert "No Docker/system mutation" in out
     _assert_no_forbidden_suggestions(out)
@@ -123,6 +123,28 @@ def test_report_history_help_suggests_history_limit(monkeypatch, tmp_path) -> No
     _assert_no_forbidden_suggestions(out)
 
 
+def test_show_me_report_history_does_not_use_model_or_shell_history(monkeypatch, tmp_path) -> None:
+    out = _ask("show me report history", monkeypatch, tmp_path)
+    assert "No action was taken." in out
+    assert "shellforgeai ops report history --limit 5" in out
+    assert "Provider:" not in out
+    assert "Model:" not in out
+    assert "history | tail" not in out
+    assert "  history\n" not in out
+    _assert_no_forbidden_suggestions(out)
+
+
+def test_report_history_command_does_not_suggest_shell_history(monkeypatch, tmp_path) -> None:
+    out = _ask("report history command", monkeypatch, tmp_path)
+    assert "No action was taken." in out
+    assert "shellforgeai ops report history --limit 5" in out
+    assert "Provider:" not in out
+    assert "Model:" not in out
+    assert "history | tail" not in out
+    assert "  history\n" not in out
+    _assert_no_forbidden_suggestions(out)
+
+
 def test_report_help_outputs_never_suggest_stale_or_mutating_commands(
     monkeypatch, tmp_path
 ) -> None:
@@ -143,13 +165,39 @@ def test_mutation_plus_report_restart_refuses(monkeypatch, tmp_path) -> None:
     out = _ask("restart and show me the report", monkeypatch, tmp_path).lower()
     assert "refus" in out
     assert "no action was taken" in out or "no restart" in out
+    assert "shellforgeai ops report" in out
     assert "docker restart" not in out
+
+
+def test_status_report_and_restart_compose_splits_report_and_refusal(monkeypatch, tmp_path) -> None:
+    out = _ask("status report and restart compose", monkeypatch, tmp_path)
+    low = out.lower()
+    assert "shellforgeai ops report" in out
+    assert "No action was taken." in out
+    assert "refus" in low
+    assert "Provider:" not in out
+    assert "Model:" not in out
+    assert "docker compose restart" not in low
+
+
+def test_command_help_report_and_restart_compose_is_not_plan_guidance(
+    monkeypatch, tmp_path
+) -> None:
+    out = _ask("what command would show report and restart compose?", monkeypatch, tmp_path)
+    low = out.lower()
+    assert "shellforgeai ops report" in out
+    assert "No action was taken." in out
+    assert "refus" in low
+    assert "remediation plan" not in low
+    assert "--execute --confirm" not in low
+    assert "docker compose restart" not in low
 
 
 def test_mutation_plus_report_cleanup_refuses(monkeypatch, tmp_path) -> None:
     out = _ask("clean up docker and generate a report", monkeypatch, tmp_path).lower()
     assert "refus" in out
     assert "no action was taken" in out or "no restart" in out or "will not execute" in out
+    assert "shellforgeai ops report" in out
     assert "cleanup execute" not in out
 
 
@@ -233,7 +281,35 @@ def test_interactive_status_command_help_is_deterministic(monkeypatch, tmp_path)
     _assert_no_forbidden_suggestions(out)
 
 
+def test_interactive_show_me_report_history_is_deterministic(monkeypatch, tmp_path) -> None:
+    out = _drive_repl(monkeypatch, tmp_path, ["show me report history", "/exit"])
+    assert "No action was taken." in out
+    assert "shellforgeai ops report history --limit 5" in out
+    _assert_no_forbidden_suggestions(out)
+
+
+def test_interactive_report_history_command_is_deterministic(monkeypatch, tmp_path) -> None:
+    out = _drive_repl(monkeypatch, tmp_path, ["report history command", "/exit"])
+    assert "No action was taken." in out
+    assert "shellforgeai ops report history --limit 5" in out
+    assert "history | tail" not in out
+    _assert_no_forbidden_suggestions(out)
+
+
 def test_interactive_mutation_plus_report_refuses(monkeypatch, tmp_path) -> None:
     out = _drive_repl(monkeypatch, tmp_path, ["restart and show me the report", "/exit"]).lower()
     assert "refus" in out or "no command was executed" in out
     assert "no action was taken" in out or "no command was executed" in out
+
+
+def test_interactive_report_command_and_restart_compose_splits_intent(
+    monkeypatch, tmp_path
+) -> None:
+    out = _drive_repl(
+        monkeypatch, tmp_path, ["what command would show report and restart compose?", "/exit"]
+    ).lower()
+    assert "shellforgeai ops report" in out
+    assert "refus" in out
+    assert "no action was taken" in out
+    assert "remediation plan" not in out
+    assert "docker compose restart" not in out
