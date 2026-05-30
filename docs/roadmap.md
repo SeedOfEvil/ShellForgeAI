@@ -15,6 +15,7 @@
 - PR127: Doctor metadata hygiene clarity. `doctor` now separates runtime health from ShellForgeAI-owned historical artifact hygiene, states that no cleanup was performed, and points operators to the read-only `audit cleanup review` as the first safe command (cleanup execution stays gated). JSON adds additive, backwards-compatible `metadata_hygiene` context (`human_context`, `active_runtime_failure`, `cleanup_performed`, `first_safe_command`, `cleanup_execution_gated`) plus a top-level `safety` block. Warning/UX clarity only — no mutation, cleanup, remediation, or rollback behavior added.
 - PR120: V1 release cut packaging completed with changelog, release notes, and ops handoff packet updates. V1 remains a CLI-first Linux/Docker operator knife with deterministic ask routing, deterministic mutation refusal, and ops report artifact lifecycle as the primary operator path.
 - PR126: concise operator output and first-safe-command polish for 2AM readability across ops report/triage/diagnose/eligibility human views.
+- PR132: session-local follow-up grounding for interactive references (`the first one`, `top suspect`, `that container`, `what about it?`) with deterministic mutation refusal preserved.
 
 - Deterministic core ops runtime: `diagnose` collects evidence, classifies
   the target, and emits a conservative plan + audit + artifacts.

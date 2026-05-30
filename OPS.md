@@ -1523,6 +1523,21 @@ Use this 2AM sequence first:
 Mutation remains gated/disposable only; do not treat this guide as production
 remediation automation.
 
+Interactive follow-up grounding example (session-local, read-only):
+
+```text
+ops report
+the first one
+is that scary?
+restart it
+```
+
+`the first one` and `is that scary?` resolve to the latest top suspect when
+unambiguous and suggest/read from safe triage detail. `restart it` is still
+refused from natural language; no restart is performed, and ShellForgeAI
+suggests read-only triage detail / remediation eligibility explanation instead.
+
+
 - V1 post-deploy check: `shellforgeai v1 check --profile standard --json`
 scripts/v1_validate.sh --full --packet
 shellforgeai v1 packet history

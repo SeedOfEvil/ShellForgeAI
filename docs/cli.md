@@ -20,7 +20,11 @@ Interactive broad role/health prompts such as `what does this system do?`, `is i
 (`what did you find?`, `why is it slow?`, `is it running normally?`) reuse
 the latest diagnosis evidence collected in the current session, and
 `/pending` can show that latest diagnosis context when no formal pending
-investigation exists. These follow-ups are read-only. These short confirmations also work when a read-only follow-up is pending: `get that info`, `then get that info`, `do that`, `proceed`, `dig deeper`. They resolve only to safe read-only collectors/checks and never bypass mutation gates.
+investigation exists. Interactive mode also keeps a small session-local
+grounding snapshot for unambiguous references such as `the first one`,
+`top suspect`, `that container`, and `what about it?`; these resolve only to
+the latest known target/evidence and never persist as private memory beyond
+the session. These follow-ups are read-only. These short confirmations also work when a read-only follow-up is pending: `get that info`, `then get that info`, `do that`, `proceed`, `dig deeper`. They resolve only to safe read-only collectors/checks and never bypass mutation gates.
 
 Interactive mode also accepts a small allowlist of safe ShellForgeAI command-style inputs directly, such as `doctor`, `model doctor`, `ops report`, `triage docker detail <target>`, `v1 check quick`, and `remediation eligibility --target <target> --explain`. These dispatch only to ShellForgeAI-owned read-only/safety commands; shell, Docker/Compose mutation, cleanup execute, remediation execute, rollback execute, and apply-style inputs are refused with no action taken.
 

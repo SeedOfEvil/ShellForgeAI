@@ -164,8 +164,20 @@ diagnosis kind, artifact/evidence/summary paths, suggested follow-up
 categories, and safe next commands) when there is no formal pending
 investigation. A formal pending follow-up still takes precedence.
 
-Mutation-style follow-ups (`fix it`, `restart it`) are never answered from
-latest context; they are refused as read-only, with no action taken.
+The REPL also keeps a small session-local grounding snapshot for the latest
+known target/top suspect, target kind, intent, evidence/artifact paths, safe
+next command, and safe read-only action. Rank/pronoun references such as
+`the first one`, `top suspect`, `that one`, `that container`, `what about it?`,
+and `show me details` resolve only when there is one clear latest target (for
+example the top suspect from `ops report` or a target from `triage docker
+detail <target>`). Ambiguous references ask for clarification or show safe
+choices instead of picking a target.
+
+Mutation-style follow-ups (`fix it`, `restart it`, `run that`) are never
+executed from latest context. If a target is unambiguous, the refusal names it
+(for example, "I’m not restarting sfai-crashloop from natural language"),
+states that no action was taken, and suggests read-only triage detail /
+remediation eligibility explanation.
 
 ## Paste guard
 

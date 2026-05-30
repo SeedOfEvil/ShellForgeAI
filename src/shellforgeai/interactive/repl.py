@@ -18,6 +18,14 @@ from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, classify_target
+from shellforgeai.core.followup_grounding import (
+    FollowupGroundingState,
+    render_grounded_resolution,
+    resolve_followup_reference,
+    update_grounding_from_latest_context,
+    update_grounding_from_ops_report_text,
+    update_grounding_from_triage_detail_text,
+)
 from shellforgeai.core.intent_nuance import (
     AMBIGUOUS_EXECUTE,
     CLEANUP_REVIEW_HELP,
@@ -1562,10 +1570,10 @@ def _dispatch_label(argv: tuple[str, ...]) -> str:
     return "Running read-only ShellForgeAI command..."
 
 
-def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> None:
+def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> str:
     if not argv:
         console.print("No command was dispatched.")
-        return
+        return ""
     json_output = "--json" in argv
     if not json_output:
         console.print(_dispatch_label(argv))
@@ -1579,14 +1587,16 @@ def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> No
         console.print(
             f"ShellForgeAI command dispatch failed safely. No action was taken. Error: {exc}"
         )
-        return
-    if result.output:
-        console.print(result.output.rstrip())
+        return ""
+    output = result.output or ""
+    if output:
+        console.print(output.rstrip())
     if result.exit_code != 0 and not json_output:
         console.print(
             f"ShellForgeAI command exited with status {result.exit_code}. "
             "No action was taken by the interactive dispatcher."
         )
+    return output
 
 
 def _interactive_mutation_refusal(text: str) -> str:
@@ -1632,6 +1642,19 @@ def _contains_internal_collector_language(text: str) -> bool:
     return any(b in low for b in blocked)
 
 
+def _grounded_mutation_has_concrete_ops_target(res) -> bool:  # noqa: ANN001
+    return bool(
+        res.target
+        and (
+            res.target.startswith("sfai-")
+            or res.target_kind in {"container", "docker_container", "suspect"}
+            or res.intent == "mutation_refusal"
+            and res.safe_command.endswith(res.target)
+            and res.target != "performance"
+        )
+    )
+
+
 def start_interactive(
     runtime: RuntimeContext, no_trust_cache: bool = False, yes_trust: bool = False
 ) -> None:
@@ -1649,6 +1672,7 @@ def start_interactive(
     completed_followups: list[str] = []
     evidence_mode = "compact"
     latest_context: LatestDiagnosisContext | None = None
+    grounding = FollowupGroundingState()
     while True:
         try:
             user_input = input("sfai> ").strip()
@@ -1662,6 +1686,13 @@ def start_interactive(
             continue
         routed = route_input(user_input)
         if routed.name == "noop":
+            continue
+        pre_nuance_grounded = resolve_followup_reference(user_input, grounding)
+        if (
+            pre_nuance_grounded.kind == "mutation_refusal"
+            and _grounded_mutation_has_concrete_ops_target(pre_nuance_grounded)
+        ):
+            console.print(render_grounded_resolution(grounding, pre_nuance_grounded))
             continue
         # PR131: command-help / plan-help guidance and ambiguous-execute refusal.
         # Command-help frames ("what command would I run?", "how would I propose?")
@@ -1679,6 +1710,12 @@ def start_interactive(
                 console.print(render_intent_nuance(nuance, text=user_input))
                 continue
         is_followup_phrase = _is_followup_phrase(user_input)
+        early_grounded = resolve_followup_reference(user_input, grounding)
+        if early_grounded.kind == "mutation_refusal" and _grounded_mutation_has_concrete_ops_target(
+            early_grounded
+        ):
+            console.print(render_grounded_resolution(grounding, early_grounded))
+            continue
         if is_pending_followup_confirmation(user_input):
             if not pending_followup:
                 if _is_followup_phrase(user_input):
@@ -1957,10 +1994,18 @@ Commands:
             )
             continue
         if routed.name == "cli_dispatch":
-            _run_interactive_cli_dispatch(console, routed.argv)
+            dispatch_output = _run_interactive_cli_dispatch(console, routed.argv)
+            if routed.argv[:2] == ("ops", "report"):
+                update_grounding_from_ops_report_text(grounding, dispatch_output)
+            elif routed.argv[:3] == ("triage", "docker", "detail") and len(routed.argv) >= 4:
+                update_grounding_from_triage_detail_text(grounding, routed.argv[3], dispatch_output)
             continue
         if routed.name == "mutation_refused":
-            console.print(_interactive_mutation_refusal(routed.args or user_input))
+            resolved_mutation = resolve_followup_reference(routed.args or user_input, grounding)
+            if resolved_mutation.kind == "mutation_refusal" and resolved_mutation.target:
+                console.print(render_grounded_resolution(grounding, resolved_mutation))
+            else:
+                console.print(_interactive_mutation_refusal(routed.args or user_input))
             continue
         if routed.name == "logs_mutation_refused":
             console.print(
@@ -2056,6 +2101,18 @@ ask review this shell snippet: ...
 
 No command was executed.""")
                 continue
+
+        grounded = resolve_followup_reference(user_input, grounding)
+        if grounded.kind == "mutation_refusal" and _grounded_mutation_has_concrete_ops_target(
+            grounded
+        ):
+            console.print(render_grounded_resolution(grounding, grounded))
+            continue
+        if grounded.kind in {"target", "evidence", "ambiguous"} and (
+            grounded.kind != "target" or _grounded_mutation_has_concrete_ops_target(grounded)
+        ):
+            console.print(render_grounded_resolution(grounding, grounded))
+            continue
 
         # Grounded follow-ups reuse the latest session evidence instead of
         # re-running collectors. Mutation phrases are never answered here.
@@ -2178,6 +2235,7 @@ No command was executed.""")
                 plan_path=str(pp),
                 source_command=user_input,
             )
+            update_grounding_from_latest_context(grounding, latest_context)
             immediate_followup_intent = detect_latest_context_intent(user_input)
             if immediate_followup_intent in {"system_role", "health_status", "next_steps"}:
                 console.print(answer_from_latest_context(latest_context, immediate_followup_intent))
@@ -2419,6 +2477,7 @@ No command was executed.""")
                 findings=_findings_to_strings(res.findings),
                 source_command=user_input,
             )
+            update_grounding_from_latest_context(grounding, latest_context)
             continue
 
         is_explicit_ask = routed.name == "ask" and routed.args.lower().startswith(
@@ -2569,6 +2628,7 @@ No command was executed.""")
                 evidence_highlights=_evidence_highlights(checks),
                 source_command=user_input,
             )
+            update_grounding_from_latest_context(grounding, latest_context)
             continue
         action_response = _detect_action_request(user_input)
         if action_response is not None:
@@ -2612,6 +2672,7 @@ No command was executed.""")
                 findings=[f.title for f in res.findings],
                 source_command=user_input,
             )
+            update_grounding_from_latest_context(grounding, latest_context)
             if followup_intent is not None:
                 console.print(answer_from_latest_context(latest_context, followup_intent))
             continue
@@ -2648,6 +2709,7 @@ No command was executed.""")
                 evidence_highlights=_evidence_highlights(checks),
                 source_command=user_input,
             )
+            update_grounding_from_latest_context(grounding, latest_context)
         with console.status("Preparing context..."):
             prompt = build_contextual_prompt(
                 user_input if routed.name != "ask" else routed.args, context, mode="standard"
