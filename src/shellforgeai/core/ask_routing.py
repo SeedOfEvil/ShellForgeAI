@@ -241,6 +241,19 @@ _BROAD_TRIAGE_TOKEN_HINTS: tuple[tuple[str, ...], ...] = (
     ("triage", "docker", "scene"),
 )
 
+_BRIEF_OPS_REPORT_ASK_PHRASES: tuple[str, ...] = (
+    "no novel",
+    "give me the short version",
+    "short version",
+    "i have five minutes",
+    "quick status",
+    "2am quick status",
+    "2 am quick status",
+    "what is on fire keep it short",
+    "what is on fire, keep it short",
+    "keep it short",
+)
+
 _OPS_REPORT_ASK_PHRASES: tuple[str, ...] = (
     "operator report",
     "ops report",
@@ -257,6 +270,7 @@ _OPS_REPORT_ASK_PHRASES: tuple[str, ...] = (
     "2 am what is on fire",
     "2am, what is on fire",
     "2 am, what is on fire",
+    *_BRIEF_OPS_REPORT_ASK_PHRASES,
 )
 
 
@@ -283,6 +297,18 @@ def is_broad_docker_triage_intent(text: str) -> bool:
     if any(phrase in lowered or phrase in raw_lower for phrase in _BROAD_DOCKER_TRIAGE_PHRASES):
         return True
     return any(all(tok in lowered for tok in tokens) for tokens in _BROAD_TRIAGE_TOKEN_HINTS)
+
+
+def is_brief_ops_report_ask(text: str) -> bool:
+    """Detect pressure-mode ask prompts that should render brief ops report output."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if is_mutation_request(raw) or is_triage_mutation_intent(raw):
+        return False
+    lowered = _normalize_intent_text(raw)
+    raw_lower = raw.lower()
+    return any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_ASK_PHRASES)
 
 
 def is_ops_report_ask(text: str) -> bool:

@@ -66,6 +66,7 @@ from shellforgeai.core.ask_routing import (
     extract_container_target,
     has_compose_artifact_reference_phrase,
     is_apply_approved_intent,
+    is_brief_ops_report_ask,
     is_broad_docker_triage_intent,
     is_compose_mutation_request,
     is_compose_service_mutation_proposal_request,
@@ -8570,12 +8571,90 @@ def _handle_broad_triage_ask(runtime: RuntimeContext, question: str) -> bool:
     return True
 
 
+def _brief_status(summary: dict[str, Any], suspects: list[dict[str, Any]]) -> str:
+    if not suspects:
+        return "OK / no current suspects"
+    critical = int(summary.get("critical", 0) or 0)
+    high = int(summary.get("high", 0) or 0)
+    if critical:
+        return "degraded"
+    if high:
+        return "watch"
+    return "review"
+
+
+def _brief_risk(summary: dict[str, Any], suspects: list[dict[str, Any]]) -> str:
+    if not suspects:
+        return "no ranked Docker suspects"
+    critical = int(summary.get("critical", 0) or 0)
+    high = int(summary.get("high", 0) or 0)
+    parts: list[str] = []
+    if critical:
+        parts.append(f"{critical} critical")
+    if high:
+        parts.append(f"{high} high")
+    if not parts:
+        parts.append(f"{len(suspects)} ranked")
+    suffix = "Docker suspect" if len(suspects) == 1 else "Docker suspects"
+    return f"{', '.join(parts)} {suffix}"
+
+
+def _brief_first_safe_command(payload: dict[str, Any]) -> str:
+    suspects = payload.get("suspects") or []
+    if not suspects:
+        return "shellforgeai ops report --json"
+    top = suspects[0]
+    target = str(top.get("name") or "").strip()
+    remediation = top.get("remediation") if isinstance(top.get("remediation"), dict) else {}
+    eligibility = str(remediation.get("eligibility") or "").lower()
+    proof_ready = bool(remediation.get("proof_ready") or remediation.get("docker_disposable_ready"))
+    if target and (eligibility in {"eligible", "ready", "allowed"} or proof_ready):
+        return remediation_eligibility_explain_command(target)
+    if target:
+        return triage_detail_command(target)
+    return "shellforgeai ops report --json"
+
+
+def _render_ops_report_brief(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") or {}
+    suspects = payload.get("suspects") or []
+    lines: list[str] = [
+        f"Status: {_brief_status(summary, suspects)}",
+        f"Risk: {_brief_risk(summary, suspects)}",
+    ]
+    visibility = str(payload.get("visibility") or "").replace("_", "-")
+    if visibility == "container-limited":
+        lines.append("Visibility: container-limited")
+    if suspects:
+        top = suspects[0]
+        name = str(top.get("name") or "unknown")
+        severity = str(top.get("severity") or "unknown")
+        classes = [str(c).replace("_", " ") for c in (top.get("classes") or []) if c]
+        label = classes[0] if classes else "ranked Docker suspect"
+        lines.extend(["", "Top issue:", f"- {name} — {severity} {label}"])
+        evidence = [str(e) for e in (top.get("evidence_summary") or []) if e]
+        if len(suspects) > 1:
+            evidence.append("related Docker suspects also present")
+        if evidence:
+            lines.extend(["", "Evidence:"])
+            for item in list(dict.fromkeys(evidence))[:3]:
+                lines.append(f"- {item}")
+    lines.extend(["", "First safe command:", f"  {_brief_first_safe_command(payload)}"])
+    if suspects:
+        safety = "Read-only. No restart, cleanup, remediation, or Compose command executed."
+    else:
+        safety = "Read-only. No mutation executed."
+    lines.extend(["", "Safety:", f"- {safety}"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _build_ops_report_payload(
     *,
     top: int = 5,
     include_details: bool = False,
     include_remediation: bool = False,
     include_timeline: bool = False,
+    include_visibility: bool = False,
 ) -> dict[str, Any]:
     from shellforgeai.core import triage_ranking
     from shellforgeai.core.disposable_remediation import (
@@ -8707,7 +8786,7 @@ def _build_ops_report_payload(
         if timeline.get("status") != "ok":
             warnings.extend(timeline.get("warnings") or [])
     summary = ranked.get("summary") or {}
-    return {
+    payload = {
         "schema_version": "1",
         "mode": "ops_report",
         "status": ("warn" if warnings else ("ok" if suspects else "empty")),
@@ -8743,6 +8822,11 @@ def _build_ops_report_payload(
             "arbitrary_command_execution": False,
         },
     }
+    if include_visibility:
+        visibility = str(scene.get("visibility") or scene.get("runtime_visibility") or "")
+        if visibility:
+            payload["visibility"] = visibility
+    return payload
 
 
 def _handle_actions_ask(runtime: RuntimeContext, question: str) -> bool:
@@ -8810,6 +8894,41 @@ _ASK_MUTATION_TERMS: tuple[str, ...] = (
     "repair",
     "resolve automatically",
 )
+
+
+def _is_pressure_mutation_request(question: str) -> bool:
+    q = re.sub(r"[^a-z0-9\s]", " ", (question or "").lower())
+    q = re.sub(r"\s+", " ", q).strip()
+    phrases = (
+        "quickly restart",
+        "quick restart",
+        "restart it now",
+        "restart now",
+        "no novel clean up",
+        "no novel cleanup",
+        "clean up docker",
+        "cleanup docker",
+        "fast fix it",
+        "fix it now",
+        "just fix it",
+    )
+    return any(phrase in q for phrase in phrases)
+
+
+def _handle_pressure_mutation_refusal(question: str) -> bool:
+    if not _is_pressure_mutation_request(question):
+        return False
+    console.print(
+        "Refusing to execute: I can provide a quick read-only status, but I will not "
+        "execute mutations."
+    )
+    console.print(
+        "No restart, cleanup, remediation, rollback, Docker, or Compose command was executed."
+    )
+    console.print("")
+    console.print("Safe read-only next command:")
+    console.print("- shellforgeai ops report --brief")
+    return True
 
 
 def _handle_command_help_ask(question: str) -> bool:
@@ -9201,11 +9320,19 @@ def ask(
             return
         if _handle_command_help_ask(question):
             return
+        if _handle_pressure_mutation_refusal(question):
+            return
         if is_ops_report_ask(question):
-            payload = _build_ops_report_payload()
-            console.print("Read-only ops report (deterministic ask routing):")
-            console.print("")
-            typer.echo(_render_broad_triage_answer(payload))
+            brief_ask = is_brief_ops_report_ask(question)
+            payload = _build_ops_report_payload(include_visibility=brief_ask)
+            if brief_ask:
+                console.print("Read-only brief ops report (deterministic ask routing):")
+                console.print("")
+                typer.echo(_render_ops_report_brief(payload), nl=False)
+            else:
+                console.print("Read-only ops report (deterministic ask routing):")
+                console.print("")
+                typer.echo(_render_broad_triage_answer(payload))
             return
         if _handle_broad_triage_ask(runtime, question):
             return
@@ -10191,6 +10318,9 @@ def ops_report(
     include_remediation: Annotated[bool, typer.Option("--include-remediation")] = False,
     include_timeline: Annotated[bool, typer.Option("--include-timeline")] = False,
     save: Annotated[bool, typer.Option("--save")] = False,
+    brief: Annotated[
+        bool, typer.Option("--brief", help="Render compact human pressure-mode output.")
+    ] = False,
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -10199,6 +10329,7 @@ def ops_report(
         include_details=include_details,
         include_remediation=include_remediation,
         include_timeline=include_timeline,
+        include_visibility=brief and not json_out and not save,
     )
     if save:
         from shellforgeai.core.ops_report_artifact import save_ops_report
@@ -10217,6 +10348,9 @@ def ops_report(
         return
     if json_out:
         typer.echo(json.dumps(payload))
+        return
+    if brief:
+        typer.echo(_render_ops_report_brief(payload), nl=False)
         return
     top_suspect = payload["suspects"][0] if payload["suspects"] else None
     lines = ["ShellForgeAI 2AM Operator Report", ""]

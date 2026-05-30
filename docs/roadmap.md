@@ -16,6 +16,7 @@
 - PR120: V1 release cut packaging completed with changelog, release notes, and ops handoff packet updates. V1 remains a CLI-first Linux/Docker operator knife with deterministic ask routing, deterministic mutation refusal, and ops report artifact lifecycle as the primary operator path.
 - PR126: concise operator output and first-safe-command polish for 2AM readability across ops report/triage/diagnose/eligibility human views.
 - PR132: session-local follow-up grounding for interactive references (`the first one`, `top suspect`, `that container`, `what about it?`) with deterministic mutation refusal preserved.
+- PR133: concise/no-novel operator mode added `ops report --brief` plus deterministic ask/interactive pressure phrases (`no novel`, `quick status`, `what is on fire, keep it short`) for bounded read-only status without changing evidence collection, JSON schema, or safety gates.
 
 - Deterministic core ops runtime: `diagnose` collects evidence, classifies
   the target, and emits a conservative plan + audit + artifacts.

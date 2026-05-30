@@ -17,7 +17,9 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("doctor",): ("doctor",),
     ("model", "doctor"): ("model", "doctor"),
     ("ops", "report"): ("ops", "report"),
+    ("ops", "report", "--brief"): ("ops", "report", "--brief"),
     ("ops", "report", "--json"): ("ops", "report", "--json"),
+    ("ops", "report", "--brief", "--json"): ("ops", "report", "--brief", "--json"),
     ("ops", "report", "history"): ("ops", "report", "history"),
     ("ops", "report", "compare-latest"): ("ops", "report", "compare-latest"),
     ("triage", "docker"): ("triage", "docker"),
@@ -44,6 +46,32 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ),
     ("status",): ("ops", "report"),
 }
+
+_BRIEF_OPS_REPORT_PHRASES = (
+    "no novel",
+    "give me the short version",
+    "short version",
+    "i have five minutes",
+    "quick status",
+    "2am quick status",
+    "2 am quick status",
+    "what is on fire keep it short",
+    "what is on fire, keep it short",
+)
+
+_QUICK_MUTATION_PHRASES = (
+    "quickly restart",
+    "quick restart",
+    "restart it now",
+    "restart now",
+    "no novel clean up",
+    "no novel cleanup",
+    "clean up docker",
+    "cleanup docker",
+    "fast fix it",
+    "fix it now",
+    "just fix it",
+)
 
 _DANGEROUS_COMMAND_PREFIXES = (
     ("docker",),
@@ -163,6 +191,11 @@ def route_input(text: str) -> RoutedCommand:
         return dangerous_dispatch
 
     lowered = _normalize_intent_text(raw)
+    raw_lower = raw.lower()
+    if any(phrase in lowered or phrase in raw_lower for phrase in _QUICK_MUTATION_PHRASES):
+        return RoutedCommand(name="mutation_refused", args=raw)
+    if any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_PHRASES):
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("ops", "report", "--brief"))
     storage_perf_intents = [
         "i think my disk is slow",
         "disk is slow",
