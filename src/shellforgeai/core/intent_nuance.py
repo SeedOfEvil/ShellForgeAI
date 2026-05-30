@@ -97,7 +97,15 @@ _INSPECT_OBJECTS: tuple[str, ...] = (
 )
 # Domain anchors that make a bare "inspect"/"check" question ShellForgeAI-shaped
 # even when no explicit target is named.
-_INSPECT_DOMAIN_ANCHORS: tuple[str, ...] = ("container", "docker", "triage", "compose")
+_INSPECT_DOMAIN_ANCHORS: tuple[str, ...] = (
+    "container",
+    "docker",
+    "triage",
+    "compose",
+    "suspect",
+    "this",
+    "that",
+)
 
 # Ambiguous "just do it" phrasings. Matched against the *whole* normalized
 # input (exact), never as substrings, so they do not swallow phrasings like
@@ -110,6 +118,7 @@ _AMBIGUOUS_EXACT: frozenset[str] = frozenset(
         "run this now",
         "do it now",
         "do that now",
+        "do the thing",
         "execute it",
         "execute that",
         "execute it now",
