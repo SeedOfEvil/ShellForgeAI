@@ -160,12 +160,19 @@ Validate/export saved summaries outside the REPL with:
 shellforgeai session summary validate <summary_id_or_path> [--json]
 shellforgeai session summary export <summary_id_or_path> [--json]
 shellforgeai session summary export-validate <export_id_or_path> [--json]
+shellforgeai session summary compare-export <before_export_id_or_path> <after_export_id_or_path> [--json]
+shellforgeai session summary compare-export <before_export> <after_export> --include-stable
+shellforgeai session summary compare-export <before_export> <after_export> --only-changed
 ```
 
 Validation checks required files, JSON/schema, checksums, non-mutating safety
 flags, and obvious secret-shaped artifact fields. Export copies the saved
 summary into `<data_dir>/exports/export_interactive_summary_<summary_id>/` with
 an `export-manifest.json`; repeated exports reuse an already-valid export.
+`compare-export` validates two exported handoff bundles, compares their embedded
+summary payloads, and reports changed or stable checks, findings, refusals, safe
+next commands, artifact references, metadata, and safety flags. It is read-only
+and does not write a comparison artifact.
 
 Saved summaries also support read-only history and comparison commands for
 follow-up handoffs over time:
