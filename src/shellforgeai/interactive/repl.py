@@ -2036,13 +2036,38 @@ def start_interactive(
             )
             continue
         if routed.name == "/summary":
-            arg = routed.args.strip().lower()
-            if arg and arg != "--json":
-                console.print("Usage: /summary [--json]")
+            raw_args = routed.argv or tuple(routed.args.strip().lower().split())
+            args = set(raw_args)
+            allowed_args = {"--json", "--save"}
+            if len(raw_args) != len(args) or args - allowed_args:
+                console.print("Usage: /summary [--save] [--json]")
+            elif "--save" in args:
+                from shellforgeai.core.interactive_summary_artifact import (
+                    save_interactive_summary,
+                )
+
+                saved = save_interactive_summary(
+                    _session_summary_payload(session_summary),
+                    Path(runtime.session.data_dir),
+                    source="interactive /summary --save",
+                )
+                if "--json" in args:
+                    console.print(json.dumps(saved, sort_keys=True))
+                else:
+                    console.print("Session summary saved:")
+                    console.print(f"  id: {saved.get('summary_id')}")
+                    console.print(f"  path: {saved.get('summary_path')}")
+                    console.print("\nNext safe commands:")
+                    console.print(
+                        f"  shellforgeai session summary validate {saved.get('summary_id')}"
+                    )
+                    console.print(
+                        f"  shellforgeai session summary export {saved.get('summary_id')}"
+                    )
             else:
                 console.print(
                     render_interactive_session_summary(
-                        session_summary, json_output=(arg == "--json")
+                        session_summary, json_output=("--json" in args)
                     )
                 )
             continue

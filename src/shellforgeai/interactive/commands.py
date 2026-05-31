@@ -348,8 +348,13 @@ def route_input(text: str) -> RoutedCommand:
         "what should i hand off",
     }:
         return RoutedCommand(name="/summary")
+    summary_tokens = _split_command_style(raw)
+    if summary_tokens and summary_tokens[0].lower() == "summary":
+        flags = tuple(token.lower() for token in summary_tokens[1:])
+        if flags and all(flag in {"--json", "--save"} for flag in flags):
+            return RoutedCommand(name="/summary", args=" ".join(flags), argv=flags)
     if normalized_session_summary == "summary json" or raw.lower().strip() == "summary --json":
-        return RoutedCommand(name="/summary", args="--json")
+        return RoutedCommand(name="/summary", args="--json", argv=("--json",))
 
     exact_session = raw.lower()
     if exact_session in {"exit", "quit"}:

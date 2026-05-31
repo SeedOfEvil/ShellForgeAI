@@ -41,7 +41,7 @@ Evidence
   /audit             Latest audit entries
   /evidence          Latest evidence bundle
   /pending           Inspect queued read-only follow-up
-  /summary           Local session handoff summary (use --json for strict JSON)
+  /summary           Local session handoff summary (use --json or --save)
 
 Ops
   diagnose <target>  Collect evidence and diagnose
@@ -130,8 +130,42 @@ Safety:
 
 For automation or copy/paste into another tool, use `summary --json` or
 `/summary --json`. It emits strict JSON only and uses the same local in-memory
-session state. Saving session summaries to artifacts is intentionally not part
-of this interactive hardening step.
+session state.
+
+To create a portable handoff artifact, use `/summary --save` or
+`/summary --save --json`. Saving writes only ShellForgeAI-owned files under
+`<data_dir>/interactive_summaries/<summary_id>/`:
+
+- `interactive-summary.json`
+- `interactive-summary.md`
+- `manifest.json`
+
+The human save output prints the summary id/path and only suggests read-only
+handoff commands:
+
+```text
+sfai> /summary --save
+Session summary saved:
+  id: interactive_summary_<timestamp>_<suffix>
+  path: <data_dir>/interactive_summaries/interactive_summary_<timestamp>_<suffix>
+
+Next safe commands:
+  shellforgeai session summary validate <id>
+  shellforgeai session summary export <id>
+```
+
+Validate/export saved summaries outside the REPL with:
+
+```text
+shellforgeai session summary validate <summary_id_or_path> [--json]
+shellforgeai session summary export <summary_id_or_path> [--json]
+shellforgeai session summary export-validate <export_id_or_path> [--json]
+```
+
+Validation checks required files, JSON/schema, checksums, non-mutating safety
+flags, and obvious secret-shaped artifact fields. Export copies the saved
+summary into `<data_dir>/exports/export_interactive_summary_<summary_id>/` with
+an `export-manifest.json`; repeated exports reuse an already-valid export.
 
 ## Safe command-style dispatch
 

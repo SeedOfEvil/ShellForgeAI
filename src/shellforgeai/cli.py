@@ -250,6 +250,8 @@ mission_app.add_typer(mission_restart_app, name="restart")
 mission_app.add_typer(mission_compose_restart_app, name="compose-restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 ops_app = typer.Typer(help="Read-only operator status board.")
+session_app = typer.Typer(help="Session handoff artifact utilities (read-only metadata).")
+session_summary_app = typer.Typer(help="Interactive session summary artifact workflow.")
 ops_report_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 self_test_app = typer.Typer(
     help="Safe read-only command coverage harness (PR79). No mutation, no execute.",
@@ -278,7 +280,9 @@ app.add_typer(guard_app, name="guard")
 app.add_typer(mission_app, name="mission")
 app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
+app.add_typer(session_app, name="session")
 ops_app.add_typer(ops_report_app, name="report")
+session_app.add_typer(session_summary_app, name="summary")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(v1_app, name="v1")
 v1_app.add_typer(v1_packet_app, name="packet")
@@ -10307,6 +10311,78 @@ def ops_status(json_out: Annotated[bool, typer.Option("--json")] = False) -> Non
     console.print("- compose_mutation: false")
     console.print("- arbitrary_command_execution: false")
     console.print("- apply gate: required")
+
+
+@session_summary_app.command("validate")
+def session_summary_validate(
+    summary_ref: Annotated[str, typer.Argument(help="Summary id or summary directory path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.interactive_summary_artifact import validate_interactive_summary
+
+    payload = validate_interactive_summary(summary_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    console.print(
+        "Interactive summary validation passed"
+        if payload.get("status") == "ok"
+        else "Interactive summary validation failed"
+    )
+    for k, v in (payload.get("checks") or {}).items():
+        console.print(f"- {k}: {'ok' if v else 'failed'}")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@session_summary_app.command("export")
+def session_summary_export(
+    summary_ref: Annotated[str, typer.Argument(help="Summary id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.interactive_summary_artifact import export_interactive_summary
+
+    payload = export_interactive_summary(summary_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "exported" else 1)
+    if payload.get("status") != "exported":
+        console.print("Interactive summary export failed")
+        for warning in payload.get("warnings") or []:
+            console.print(f"- {warning}")
+        raise typer.Exit(1)
+    export = payload.get("export") or {}
+    source = payload.get("source_summary") or {}
+    console.print(
+        "Interactive summary export created"
+        if not payload.get("existing")
+        else "Interactive summary export already exists (reused)"
+    )
+    console.print(f"- summary_id: {source.get('id')}")
+    console.print(f"- export_id: {export.get('id')}")
+    console.print(f"- path: {export.get('path')}")
+
+
+@session_summary_app.command("export-validate")
+def session_summary_export_validate(
+    export_ref: Annotated[str, typer.Argument(help="Export id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from shellforgeai.core.interactive_summary_artifact import validate_interactive_summary_export
+
+    payload = validate_interactive_summary_export(export_ref, Path(load_settings().app.data_dir))
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    console.print(
+        "Interactive summary export validation passed"
+        if payload.get("status") == "ok"
+        else "Interactive summary export validation failed"
+    )
+    for k, v in (payload.get("checks") or {}).items():
+        console.print(f"- {k}: {'ok' if v else 'failed'}")
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
 
 
 @ops_report_app.callback()
