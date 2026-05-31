@@ -77,7 +77,13 @@ dig deeper
 /exit
 ```
 
-2AM handoff tip: before exiting interactive mode, run `/summary` to capture a concise local session handoff without collecting new evidence or executing commands.
+2AM handoff tip: before exiting interactive mode, run `/summary` to capture a concise local session handoff without collecting new evidence or executing commands. For a portable handoff artifact, save, validate, and export the summary without suggesting mutation:
+
+```text
+sfai> /summary --save
+shellforgeai session summary validate <id>
+shellforgeai session summary export <id>
+```
 
 For REPL discoverability, type `help`, `/help`, `?`, `commands`, or `what can I do?`. The help screen lists exact safe interactive forms for fast status, triage/detail, reports/artifacts, readiness checks, follow-ups, pressure-mode brief status, and refused mutation examples. Mistyped ShellForgeAI-like commands get deterministic safe suggestions that are never auto-run. It also repeats the safety boundary: interactive mode is not a shell and does not run Docker/Compose/remediation/cleanup commands from natural language.
 
