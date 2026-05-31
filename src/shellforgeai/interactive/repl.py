@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
@@ -7,6 +8,7 @@ import time
 from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +72,7 @@ INTERACTIVE_HELP_TEXT = f"""ShellForgeAI interactive help
 
 Session:
   help / /help / ? / commands
-  pending / /pending
+  pending / /pending / summary / /summary / summary --json
   exit / /exit
 
 Fast status:
@@ -102,6 +104,8 @@ V1/readiness:
   remediation eligibility --target <target> --explain --json
 
 Follow-ups/session:
+  /summary
+  what happened in this session?
   what did you find?
   get that info
   dig deeper
@@ -1697,6 +1701,262 @@ def _interactive_mutation_refusal(text: str) -> str:
     )
 
 
+@dataclass
+class InteractiveSessionSummaryState:
+    """Compact read-only metadata for deterministic REPL handoff summaries."""
+
+    session_id: str
+    started_at: float = field(default_factory=time.time)
+    events_seen: int = 0
+    checks: list[str] = field(default_factory=list)
+    findings: list[str] = field(default_factory=list)
+    refusals: list[str] = field(default_factory=list)
+    latest_artifacts: list[str] = field(default_factory=list)
+    latest_target: str = ""
+    latest_session_id: str = ""
+    top_suspect: str = ""
+    visibility_notes: list[str] = field(default_factory=list)
+    safe_next_commands: list[str] = field(default_factory=list)
+
+    def _append_unique(self, field_name: str, value: str, *, limit: int = 8) -> None:
+        clean = _sanitize_session_summary_text(value)
+        if not clean:
+            return
+        values = getattr(self, field_name)
+        if clean not in values:
+            values.append(clean)
+        del values[limit:]
+
+    def note_check(self, check: str) -> None:
+        self.events_seen += 1
+        self._append_unique("checks", check)
+
+    def note_finding(self, finding: str) -> None:
+        self._append_unique("findings", finding, limit=6)
+
+    def note_refusal(self, category: str) -> None:
+        self.events_seen += 1
+        self._append_unique("refusals", category, limit=6)
+
+    def note_artifact(self, path: str) -> None:
+        self._append_unique("latest_artifacts", path, limit=8)
+
+    def note_visibility(self, note: str) -> None:
+        self._append_unique("visibility_notes", note, limit=4)
+
+    def note_safe_command(self, command: str) -> None:
+        self._append_unique("safe_next_commands", command, limit=6)
+
+
+def _sanitize_session_summary_text(value: str) -> str:
+    text = " ".join(str(value or "").split())[:240]
+    low = text.lower()
+    dangerous_markers = (
+        "rm -rf",
+        "mkfs",
+        "dd if=",
+        "docker compose" + " restart",
+        "docker" + " restart",
+        "sudo reboot",
+        "shutdown",
+    )
+    if any(marker in low for marker in dangerous_markers):
+        return "destructive shell-like input refused"
+    return text
+
+
+def _session_summary_from_grounding(
+    state: InteractiveSessionSummaryState, grounding: FollowupGroundingState
+) -> None:
+    if grounding.last_target:
+        state.latest_target = grounding.last_target
+    if grounding.last_top_suspect:
+        state.top_suspect = grounding.last_top_suspect
+    if grounding.last_evidence_summary:
+        state.note_finding(grounding.last_evidence_summary)
+    for artifact in grounding.last_artifact_paths:
+        state.note_artifact(artifact)
+    if grounding.last_safe_next_command:
+        state.note_safe_command(grounding.last_safe_next_command)
+
+
+def _parse_artifact_lines_for_summary(state: InteractiveSessionSummaryState, text: str) -> None:
+    for line in (text or "").splitlines():
+        if any(label in line.lower() for label in ("artifact", "evidence:", "summary:", "packet")):
+            path_match = re.search(r"(/[^\s]+|[A-Za-z0-9_.-]+/[^\s]+)", line)
+            if path_match:
+                state.note_artifact(path_match.group(1).rstrip(",."))
+        if "metadata hygiene" in line.lower():
+            state.note_finding("metadata hygiene advisory observed")
+
+
+def _record_cli_dispatch_in_session_summary(
+    state: InteractiveSessionSummaryState,
+    argv: tuple[str, ...],
+    output: str,
+    grounding: FollowupGroundingState,
+) -> None:
+    if argv[:2] == ("ops", "report"):
+        state.note_check("ops report")
+        if "--brief" in argv:
+            state.note_finding("brief ops report reviewed")
+    elif argv[:3] == ("triage", "docker", "detail") and len(argv) >= 4:
+        state.latest_target = argv[3]
+        state.note_check(f"triage docker detail {argv[3]}")
+        state.note_safe_command(
+            f"shellforgeai remediation eligibility --target {argv[3]} --explain"
+        )
+    elif argv[:2] == ("triage", "docker"):
+        state.note_check("triage docker")
+    elif argv[:2] == ("remediation", "eligibility"):
+        target = argv[3] if len(argv) >= 4 and argv[2] == "--target" else ""
+        if target:
+            state.latest_target = target
+            state.note_check(f"remediation eligibility {target}")
+        else:
+            state.note_check("remediation eligibility")
+        low_output = (output or "").lower()
+        if "blocked" in low_output:
+            state.note_finding("remediation eligibility: blocked")
+        elif "eligible" in low_output:
+            state.note_finding("remediation eligibility: eligible")
+        elif output:
+            state.note_finding("remediation eligibility reviewed")
+    elif argv[:2] == ("v1", "check"):
+        state.note_check("v1 check")
+    elif argv[:2] == ("remediation", "self-test"):
+        state.note_check("remediation self-test")
+    elif argv[:1] == ("diagnose",):
+        target = argv[1] if len(argv) > 1 else "target"
+        state.latest_target = target
+        state.note_check(f"diagnose {target}")
+    _parse_artifact_lines_for_summary(state, output)
+    _session_summary_from_grounding(state, grounding)
+
+
+def _record_latest_context_in_session_summary(
+    state: InteractiveSessionSummaryState, ctx: LatestDiagnosisContext | None
+) -> None:
+    if ctx is None:
+        return
+    state.latest_session_id = ctx.session_id or state.latest_session_id
+    state.latest_target = ctx.target or state.latest_target
+    state.note_check(ctx.diagnosis_kind or ctx.target or "diagnosis")
+    if ctx.diagnosis_kind in {"system role/health", "machine health", "health"}:
+        state.note_visibility("container-limited/runtime-scoped visibility may apply")
+    for path in (ctx.evidence_path, ctx.summary_path, ctx.plan_path, ctx.artifact_dir):
+        if path:
+            state.note_artifact(path)
+    for highlight in ctx.evidence_highlights[:3]:
+        state.note_finding(highlight)
+    for finding in ctx.findings[:3]:
+        state.note_finding(finding)
+    for limitation in ctx.limitations[:2]:
+        state.note_visibility(limitation)
+    for command in ctx.safe_next_commands[:3]:
+        state.note_safe_command(command)
+
+
+def _first_safe_summary_command(state: InteractiveSessionSummaryState) -> str:
+    if any("metadata hygiene" in finding.lower() for finding in state.findings):
+        return "shellforgeai audit cleanup review"
+    if state.top_suspect:
+        return f"shellforgeai triage docker detail {state.top_suspect}"
+    if state.latest_target and state.latest_target not in {
+        "health",
+        "machine health",
+        "firewall",
+        "performance",
+        "storage_performance",
+    }:
+        return f"shellforgeai remediation eligibility --target {state.latest_target} --explain"
+    if any(check == "ops report" for check in state.checks):
+        return "shellforgeai ops report --json"
+    return "shellforgeai ops report --brief"
+
+
+def _session_summary_payload(state: InteractiveSessionSummaryState) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "mode": "interactive_session_summary",
+        "status": "ok",
+        "read_only": True,
+        "mutation_performed": False,
+        "session": {
+            "events_seen": state.events_seen,
+            "latest_target": state.latest_target or None,
+            "latest_session_id": state.latest_session_id or state.session_id,
+            "latest_artifacts": list(state.latest_artifacts),
+        },
+        "checks": list(state.checks),
+        "findings": list(state.findings + state.visibility_notes),
+        "refusals": list(state.refusals),
+        "first_safe_command": _first_safe_summary_command(state),
+        "safety": {
+            "cleanup_executed": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "production_restart_executed": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+            "natural_language_execution": False,
+        },
+    }
+
+
+def render_interactive_session_summary(
+    state: InteractiveSessionSummaryState, *, json_output: bool = False
+) -> str:
+    payload = _session_summary_payload(state)
+    if json_output:
+        return json.dumps(payload, indent=2, sort_keys=True)
+
+    if state.events_seen == 0 and not state.checks and not state.findings and not state.refusals:
+        return (
+            "Session summary: read-only inspection session.\n"
+            "No diagnostic evidence has been collected in this interactive session yet. "
+            "I don't have any collected evidence to summarize.\n\n"
+            "First safe next command:\n"
+            "  shellforgeai ops report --brief\n\n"
+            "Safety:\n"
+            "- No cleanup/remediation/rollback/Compose mutation executed.\n"
+            "- No arbitrary shell executed.\n"
+            "- Natural-language mutation remained blocked."
+        )
+
+    lines = ["Session summary: read-only inspection session."]
+    if state.latest_target and state.checks:
+        lines.append(f"\nUsing latest {state.checks[-1]} diagnosis context.")
+    if state.checks:
+        lines.append("\nWhat was checked:")
+        lines.extend(f"- {check}" for check in state.checks[:8])
+    if state.latest_session_id or state.latest_artifacts:
+        lines.append("\nLatest evidence / artifacts:")
+        lines.append(f"- latest session id: {state.latest_session_id or state.session_id}")
+        for artifact in state.latest_artifacts[:6]:
+            lines.append(f"- {artifact}")
+    findings = list(state.findings)
+    if state.top_suspect:
+        findings.insert(0, f"top Docker suspect: {state.top_suspect}")
+    findings.extend(state.visibility_notes)
+    if findings:
+        lines.append("\nFindings:")
+        lines.extend(f"- {finding}" for finding in findings[:8])
+    if state.refusals:
+        lines.append("\nRefusals / blocked actions:")
+        lines.extend(f"- {refusal}" for refusal in state.refusals[:6])
+        lines.append("- No action was taken.")
+    lines.append("\nFirst safe next command:")
+    lines.append(f"  {payload['first_safe_command']}")
+    lines.append("\nSafety:")
+    lines.append("- No cleanup/remediation/rollback/Compose mutation executed.")
+    lines.append("- No arbitrary shell executed.")
+    lines.append("- Natural-language mutation remained blocked.")
+    return "\n".join(lines)
+
+
 def _contains_internal_collector_language(text: str) -> bool:
     low = text.lower()
     blocked = [
@@ -1755,6 +2015,7 @@ def start_interactive(
     evidence_mode = "compact"
     latest_context: LatestDiagnosisContext | None = None
     grounding = FollowupGroundingState()
+    session_summary = InteractiveSessionSummaryState(session_id=runtime.session.session_id)
     while True:
         try:
             user_input = input("sfai> ").strip()
@@ -1774,11 +2035,24 @@ def start_interactive(
                 _interactive_unknown_command_guidance(routed.args or user_input, routed.argv)
             )
             continue
+        if routed.name == "/summary":
+            arg = routed.args.strip().lower()
+            if arg and arg != "--json":
+                console.print("Usage: /summary [--json]")
+            else:
+                console.print(
+                    render_interactive_session_summary(
+                        session_summary, json_output=(arg == "--json")
+                    )
+                )
+            continue
         pre_nuance_grounded = resolve_followup_reference(user_input, grounding)
         if (
-            pre_nuance_grounded.kind == "mutation_refusal"
+            routed.name != "mutation_refused"
+            and pre_nuance_grounded.kind == "mutation_refusal"
             and _grounded_mutation_has_concrete_ops_target(pre_nuance_grounded)
         ):
+            session_summary.note_refusal("mutation follow-up refused")
             console.print(render_grounded_resolution(grounding, pre_nuance_grounded))
             continue
         # PR131: command-help / plan-help guidance and ambiguous-execute refusal.
@@ -1799,13 +2073,17 @@ def start_interactive(
             if nuance.category == MUTATION_REQUEST and any(
                 term in user_input.lower() for term in ("report", "status")
             ):
+                session_summary.note_refusal("mutation request refused")
                 console.print(_interactive_mutation_refusal(user_input))
                 continue
         is_followup_phrase = _is_followup_phrase(user_input)
         early_grounded = resolve_followup_reference(user_input, grounding)
-        if early_grounded.kind == "mutation_refusal" and _grounded_mutation_has_concrete_ops_target(
-            early_grounded
+        if (
+            routed.name != "mutation_refused"
+            and early_grounded.kind == "mutation_refusal"
+            and _grounded_mutation_has_concrete_ops_target(early_grounded)
         ):
+            session_summary.note_refusal("mutation follow-up refused")
             console.print(render_grounded_resolution(grounding, early_grounded))
             continue
         if is_pending_followup_confirmation(user_input):
@@ -2058,8 +2336,12 @@ Commands:
                 update_grounding_from_ops_report_text(grounding, dispatch_output)
             elif routed.argv[:3] == ("triage", "docker", "detail") and len(routed.argv) >= 4:
                 update_grounding_from_triage_detail_text(grounding, routed.argv[3], dispatch_output)
+            _record_cli_dispatch_in_session_summary(
+                session_summary, routed.argv, dispatch_output, grounding
+            )
             continue
         if routed.name == "mutation_refused":
+            session_summary.note_refusal("mutation request refused")
             resolved_mutation = resolve_followup_reference(routed.args or user_input, grounding)
             if resolved_mutation.kind == "mutation_refusal" and resolved_mutation.target:
                 console.print(render_grounded_resolution(grounding, resolved_mutation))
@@ -2067,6 +2349,7 @@ Commands:
                 console.print(_interactive_mutation_refusal(routed.args or user_input))
             continue
         if routed.name == "logs_mutation_refused":
+            session_summary.note_refusal("log deletion/truncation request refused")
             console.print(
                 "Log deletion, truncation, or rotation is not performed by ShellForgeAI. "
                 "Collecting read-only log evidence instead so you can decide safely."
@@ -2135,6 +2418,7 @@ Commands:
             and not is_explicit_ask
             and (shell_like or is_shell_fragment_line(raw_for_guard))
         ):
+            session_summary.note_refusal("shell/paste fragment blocked")
             console.print("Blocked shell paste fragment. No command was executed.")
             paste_guard_remaining_lines -= 1
             if raw_for_guard.strip().lower() in {"done", "fi", "esac", "'"}:
@@ -2150,6 +2434,7 @@ Commands:
                 paste_guard_remaining_lines = 20
                 paste_guard_non_shell_lines = 0
                 paste_guard_first_notice = True
+                session_summary.note_refusal("shell/paste fragment blocked")
                 console.print("""Multiline shell paste detected.
 
 ShellForgeAI interactive mode does not execute shell snippets.
@@ -2165,6 +2450,7 @@ No command was executed.""")
         if grounded.kind == "mutation_refusal" and _grounded_mutation_has_concrete_ops_target(
             grounded
         ):
+            session_summary.note_refusal("mutation follow-up refused")
             console.print(render_grounded_resolution(grounding, grounded))
             continue
         if grounded.kind in {"target", "evidence", "ambiguous"} and (
@@ -2280,10 +2566,16 @@ No command was executed.""")
                 f"{findings_summary_line(res.findings)}\n"
                 f"Artifacts:\n- evidence: {ep}\n- plan: {pp}\n- summary: {sp}"
             )
+            summary_diagnosis_kind = (
+                "system role/health"
+                if routed.args == "health"
+                and detect_latest_context_intent(user_input) == "system_role"
+                else routed.args
+            )
             latest_context = build_latest_diagnosis_context(
                 session_id=res.session_id,
                 target=routed.args,
-                diagnosis_kind=routed.args,
+                diagnosis_kind=summary_diagnosis_kind,
                 checks=checks,
                 facts=_summarize_facts(checks),
                 evidence_highlights=_evidence_highlights(checks),
@@ -2295,6 +2587,7 @@ No command was executed.""")
                 source_command=user_input,
             )
             update_grounding_from_latest_context(grounding, latest_context)
+            _record_latest_context_in_session_summary(session_summary, latest_context)
             immediate_followup_intent = detect_latest_context_intent(user_input)
             if immediate_followup_intent in {"system_role", "health_status", "next_steps"}:
                 console.print(answer_from_latest_context(latest_context, immediate_followup_intent))
@@ -2471,6 +2764,7 @@ No command was executed.""")
             and not is_explicit_ask
             and (shell_like or is_shell_fragment_line(raw_for_guard))
         ):
+            session_summary.note_refusal("shell/paste fragment blocked")
             console.print("Blocked shell paste fragment. No command was executed.")
             paste_guard_remaining_lines -= 1
             if raw_for_guard.strip().lower() in {"done", "fi", "esac", "'"}:
@@ -2479,6 +2773,7 @@ No command was executed.""")
                 paste_guard_active = False
             continue
         if not is_explicit_ask and shell_like:
+            session_summary.note_refusal("shell/paste fragment blocked")
             paste_guard_active = True
             paste_guard_remaining_lines = 20
             paste_guard_non_shell_lines = 0
@@ -2537,6 +2832,7 @@ No command was executed.""")
                 source_command=user_input,
             )
             update_grounding_from_latest_context(grounding, latest_context)
+            _record_latest_context_in_session_summary(session_summary, latest_context)
             continue
 
         is_explicit_ask = routed.name == "ask" and routed.args.lower().startswith(
@@ -2560,6 +2856,7 @@ ask review this shell snippet: ...
 No command was executed.""")
                     paste_guard_first_notice = True
                 else:
+                    session_summary.note_refusal("shell/paste fragment blocked")
                     console.print("Blocked shell paste fragment. No command was executed.")
                 paste_guard_remaining_lines -= 1
                 if raw_for_guard.strip().lower() in {"done", "fi", "esac", "'"}:
@@ -2575,6 +2872,7 @@ No command was executed.""")
                 if paste_guard_remaining_lines <= 0:
                     paste_guard_active = False
         if not is_explicit_ask and shell_like:
+            session_summary.note_refusal("shell/paste fragment blocked")
             paste_guard_active = True
             paste_guard_remaining_lines = 20
             paste_guard_non_shell_lines = 0
@@ -2591,6 +2889,7 @@ No command was executed.""")
             paste_guard_first_notice = True
             continue
         if not is_explicit_ask and is_shell_fragment_line(raw_for_guard):
+            session_summary.note_refusal("shell/paste fragment blocked")
             console.print(
                 "This looks like a shell command pasted into ShellForgeAI interactive mode.\n\n"
                 "ShellForgeAI is not a shell and will not execute it.\n\n"
@@ -2688,12 +2987,16 @@ No command was executed.""")
                 source_command=user_input,
             )
             update_grounding_from_latest_context(grounding, latest_context)
+            _record_latest_context_in_session_summary(session_summary, latest_context)
+            session_summary.note_refusal("service restart/start/stop request refused")
             continue
         action_response = _detect_action_request(user_input)
         if action_response is not None:
+            session_summary.note_refusal("mutation request refused")
             console.print(action_response)
             continue
         if is_mutation_followup(user_input):
+            session_summary.note_refusal("natural-language mutation refused")
             console.print(
                 "I can't run fixes or mutations from interactive inspect mode. "
                 "Apply stays validation-only and changes need explicit operator approval. "
@@ -2732,6 +3035,7 @@ No command was executed.""")
                 source_command=user_input,
             )
             update_grounding_from_latest_context(grounding, latest_context)
+            _record_latest_context_in_session_summary(session_summary, latest_context)
             if followup_intent is not None:
                 console.print(answer_from_latest_context(latest_context, followup_intent))
             continue
@@ -2769,6 +3073,7 @@ No command was executed.""")
                 source_command=user_input,
             )
             update_grounding_from_latest_context(grounding, latest_context)
+            _record_latest_context_in_session_summary(session_summary, latest_context)
         with console.status("Preparing context..."):
             prompt = build_contextual_prompt(
                 user_input if routed.name != "ask" else routed.args, context, mode="standard"

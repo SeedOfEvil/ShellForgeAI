@@ -36,6 +36,8 @@ _SAFE_SUGGESTION_COMMANDS = (
     "remediation eligibility --target <target> --explain",
     "help",
     "pending",
+    "summary",
+    "/summary",
     "exit",
 )
 
@@ -334,6 +336,21 @@ def route_input(text: str) -> RoutedCommand:
         head, _, tail = raw.partition(" ")
         return RoutedCommand(name=head.lower(), args=tail.strip())
 
+    normalized_session_summary = _normalize_intent_text(raw)
+    if normalized_session_summary in {
+        "summary",
+        "session summary",
+        "summarize this session",
+        "what happened in this session",
+        "what did you check",
+        "what did you find",
+        "what did you refuse",
+        "what should i hand off",
+    }:
+        return RoutedCommand(name="/summary")
+    if normalized_session_summary == "summary json" or raw.lower().strip() == "summary --json":
+        return RoutedCommand(name="/summary", args="--json")
+
     exact_session = raw.lower()
     if exact_session in {"exit", "quit"}:
         return RoutedCommand(name="/exit")
@@ -341,6 +358,8 @@ def route_input(text: str) -> RoutedCommand:
         return RoutedCommand(name="/help")
     if exact_session == "pending":
         return RoutedCommand(name="/pending")
+    if exact_session in {"restart compose", "compose restart"}:
+        return RoutedCommand(name="mutation_refused", args=raw)
 
     safe_dispatch = _dispatch_safe_cli_command(raw)
     if safe_dispatch is not None:
