@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import re
 import shlex
 from dataclasses import dataclass
@@ -13,6 +14,46 @@ class RoutedCommand:
 
 
 _SAFE_PROFILES = ("quick", "standard", "full")
+
+_SAFE_SUGGESTION_COMMANDS = (
+    "version",
+    "doctor",
+    "model doctor",
+    "ops report",
+    "ops report --brief",
+    "ops report --json",
+    "ops report history --limit 5",
+    "ops report compare-latest",
+    "v1 check quick",
+    "v1 check standard",
+    "v1 check --profile quick --json",
+    "v1 check --profile standard --json",
+    "triage docker",
+    "triage docker --json",
+    "triage docker detail <target>",
+    "remediation self-test quick",
+    "remediation self-test --profile quick --json",
+    "remediation eligibility --target <target> --explain",
+    "help",
+    "pending",
+    "exit",
+)
+
+_COMMAND_LIKE_STARTS = (
+    "ops",
+    "op",
+    "report",
+    "triage",
+    "trage",
+    "v1",
+    "doctor",
+    "model",
+    "remediation",
+    "remediaton",
+    "audit",
+)
+
+_COMMAND_LIKE_FLAGS = ("--json", "--profile", "--target", "--brief", "--limit")
 
 _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("version",): ("version",),
@@ -184,6 +225,64 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
     return None
 
 
+def _normalize_suggestion_text(text: str) -> str:
+    lowered = " ".join(text.lower().strip().split())
+    return lowered.replace("selftest", "self test").replace("self-test", "self test")
+
+
+def suggest_safe_commands(raw: str, *, limit: int = 3) -> tuple[str, ...]:
+    """Return conservative suggestions from the safe interactive allowlist only."""
+    normalized_raw = _normalize_suggestion_text(raw)
+    if not normalized_raw:
+        return ()
+
+    scored: list[tuple[float, int, str]] = []
+    for index, command in enumerate(_SAFE_SUGGESTION_COMMANDS):
+        candidate = _normalize_suggestion_text(command)
+        ratio = difflib.SequenceMatcher(None, normalized_raw, candidate).ratio()
+        raw_words = normalized_raw.split()
+        candidate_words = candidate.split()
+        raw_tokens = set(raw_words)
+        candidate_tokens = set(candidate_words)
+        overlap = len(raw_tokens & candidate_tokens) / max(len(raw_tokens | candidate_tokens), 1)
+        token_ratio = sum(
+            max(
+                difflib.SequenceMatcher(None, raw_word, candidate_word).ratio()
+                for candidate_word in candidate_words
+            )
+            for raw_word in raw_words
+        ) / max(len(raw_words), 1)
+        score = max(ratio, (ratio * 0.75) + (overlap * 0.25), (ratio * 0.6) + (token_ratio * 0.4))
+        if "--json" in candidate_words and "--json" not in raw_words:
+            score -= 0.06
+        if "compare-latest" in candidate_words and "compare-latest" not in raw_words:
+            score -= 0.08
+        if score >= 0.62:
+            scored.append((score, index, command))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    suggestions: list[str] = []
+    for _score, _index, command in scored:
+        if command not in suggestions:
+            suggestions.append(command)
+        if len(suggestions) >= limit:
+            break
+    return tuple(suggestions)
+
+
+def _is_command_like_unknown(raw: str) -> bool:
+    tokens = _tokenize_command_style(raw)
+    if not tokens:
+        return False
+    if tokens[0] in {"show", "what", "how", "is", "why"}:
+        return False
+    if "command" in tokens or "commands" in tokens:
+        return False
+    return tokens[0] in _COMMAND_LIKE_STARTS or any(
+        token.startswith(_COMMAND_LIKE_FLAGS) for token in tokens
+    )
+
+
 def _dispatch_dangerous_command(raw: str) -> RoutedCommand | None:
     tokens = _tokenize_command_style(raw)
     if not tokens:
@@ -249,6 +348,8 @@ def route_input(text: str) -> RoutedCommand:
     dangerous_dispatch = _dispatch_dangerous_command(raw)
     if dangerous_dispatch is not None:
         return dangerous_dispatch
+    if _is_command_like_unknown(raw):
+        return RoutedCommand(name="unknown_command", args=raw, argv=suggest_safe_commands(raw))
 
     lowered = _normalize_intent_text(raw)
     raw_lower = raw.lower()

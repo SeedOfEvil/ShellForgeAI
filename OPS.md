@@ -77,7 +77,7 @@ dig deeper
 /exit
 ```
 
-For REPL discoverability, type `help`, `/help`, `?`, `commands`, or `what can I do?`. The help screen lists exact safe interactive forms for fast status, triage/detail, reports/artifacts, readiness checks, follow-ups, pressure-mode brief status, and refused mutation examples. It also repeats the safety boundary: interactive mode is not a shell and does not run Docker/Compose/remediation/cleanup commands from natural language.
+For REPL discoverability, type `help`, `/help`, `?`, `commands`, or `what can I do?`. The help screen lists exact safe interactive forms for fast status, triage/detail, reports/artifacts, readiness checks, follow-ups, pressure-mode brief status, and refused mutation examples. Mistyped ShellForgeAI-like commands get deterministic safe suggestions that are never auto-run. It also repeats the safety boundary: interactive mode is not a shell and does not run Docker/Compose/remediation/cleanup commands from natural language.
 
 Selected safe CLI-style commands also work directly inside the REPL, including common read-only flags such as `--profile`, `--brief`, `--json`, and `--limit` for the allowlisted commands:
 

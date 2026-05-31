@@ -109,10 +109,31 @@ read-only or safety/readiness handlers:
 - `remediation eligibility --target <target> --explain [--json]`
 - `pending`/`/pending`, `help`/`/help`, `exit`/`/exit`
 
-Unknown text still falls back to the existing safe ask/routing path. Shell-like
-or mutation-shaped inputs such as Docker/Compose restart, `rm`, `sudo`, `apply`,
-cleanup execute, remediation execute, rollback execute / rollback-execute, production restart, `chmod`, `chown`, or mission execute are
-refused with no command execution and no action taken. JSON flags on supported safe forms print the underlying command JSON without an extra human wrapper.
+Mistyped ShellForgeAI command-like input does not execute and does not call the
+model. If a close safe allowlisted command exists, interactive mode prints
+`Unknown command`, `No action was taken.`, a short `Did you mean:` list, and
+`Type help for supported commands.` Suggestions are never auto-run; copy and run
+one only if it is the read-only ShellForgeAI command you intended.
+
+Unknown conversational text still falls back to the existing safe ask/routing
+path. Shell-like or mutation-shaped inputs such as Docker/Compose restart, `rm`,
+`sudo`, `apply`, cleanup execute, remediation execute, rollback execute /
+rollback-execute, production restart, `chmod`, `chown`, or mission execute are
+refused with no command execution and no action taken. JSON flags on supported
+safe forms print the underlying command JSON without an extra human wrapper.
+
+## Mistyped commands
+
+Interactive mode gives deterministic guidance for near-miss ShellForgeAI
+commands such as `ops reprot`, `triage dockre`, or `v1 chek quick`. The REPL
+prints that the command is unknown, confirms that no action was taken, and lists
+only safe allowlisted ShellForgeAI suggestions. Suggestions are advisory only;
+ShellForgeAI never autocorrects and runs a typo.
+
+Dangerous or shell-shaped input still refuses instead of suggesting a raw shell
+command. Interactive mode is not a shell, and it does not run Docker/Compose,
+cleanup, remediation, rollback, restart, or arbitrary host commands from typed
+input or natural language.
 
 ## Streaming synthesis
 
