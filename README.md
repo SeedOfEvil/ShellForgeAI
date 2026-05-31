@@ -280,9 +280,13 @@ concise list of supported safe commands, follow-ups, report/history helpers,
 session handoff summaries, and refused mutation examples. Run `/summary` before
 exiting to get a local read-only summary of checks, findings, refusals, artifact
 pointers, and the first safe next command; it does not rerun collectors or call
-the model. Use `/summary --save` for a portable handoff artifact, then validate
-or export it with `shellforgeai session summary validate <id>` and
-`shellforgeai session summary export <id>`. Interactive mode is *not* a shell:
+the model. Use `/summary --save` for a portable handoff artifact, then validate,
+export, list, or compare it with `shellforgeai session summary validate <id>`,
+`shellforgeai session summary export <id>`, `shellforgeai session summary history --limit 5`,
+and `shellforgeai session summary compare-latest`. These summary history/compare
+commands read existing artifacts only; they do not rerun collectors, call the
+model, execute shell, or mutate Docker/Compose state.
+Interactive mode is *not* a shell:
 pasted shell-looking input is blocked unless explicitly prefixed with
 `ask explain ...` or `ask review ...`.
 See [`docs/interactive-mode.md`](docs/interactive-mode.md).

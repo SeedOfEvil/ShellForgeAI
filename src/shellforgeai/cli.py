@@ -10385,6 +10385,181 @@ def session_summary_export_validate(
         raise typer.Exit(1)
 
 
+def _render_interactive_summary_history_human(payload: dict[str, Any]) -> str:
+    lines = ["Interactive summary history", ""]
+    if payload.get("status") == "empty":
+        lines.append("No saved interactive summaries found.")
+        lines.append("Try: shellforgeai interactive, then /summary --save")
+    else:
+        latest = (payload.get("summaries") or [None])[0]
+        if latest:
+            lines.extend(["Latest:", ""])
+            lines.append(f"- {latest.get('summary_id')}")
+            lines.append(f"- created: {latest.get('created_at') or '-'}")
+            lines.append(f"- events: {latest.get('events_seen', 0)}")
+            latest_checks = latest.get("checks_count", 0)
+            latest_findings = latest.get("findings_count", 0)
+            lines.append(f"- checks/findings: {latest_checks}/{latest_findings}")
+            lines.append(f"- refusals: {latest.get('refusals_count', 0)}")
+            lines.append(f"- first safe command: {latest.get('first_safe_command') or '-'}")
+            lines.append(f"- path: {latest.get('path')}")
+        lines.extend(["", "Recent summaries:"])
+        for idx, summary in enumerate(payload.get("summaries") or [], start=1):
+            lines.append(f"{idx}. {summary.get('summary_id')}")
+            lines.append(f"   created: {summary.get('created_at') or '-'}")
+            lines.append(f"   events: {summary.get('events_seen', 0)}")
+            checks_count = summary.get("checks_count", 0)
+            findings_count = summary.get("findings_count", 0)
+            lines.append(f"   checks/findings: {checks_count}/{findings_count}")
+            lines.append(f"   refusals: {summary.get('refusals_count', 0)}")
+            lines.append(f"   first safe command: {summary.get('first_safe_command') or '-'}")
+            lines.append(f"   path: {summary.get('path')}")
+    if payload.get("warnings"):
+        lines.extend(["", "Warnings:"])
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+    lines.extend(
+        [
+            "",
+            (
+                "Safety: read-only. No collection, mutation, cleanup, remediation, "
+                "rollback, or Compose command executed."
+            ),
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_interactive_summary_compare_human(
+    payload: dict[str, Any], *, include_stable: bool = False
+) -> str:
+    title = (
+        "Interactive summary compare-latest"
+        if payload.get("compare_latest")
+        else "Interactive summary compare"
+    )
+    lines = [title]
+    if payload.get("compare_latest"):
+        lines.append("Comparing latest two summaries...")
+    lines.extend(["", f"Status: {payload.get('status')}"])
+    if payload.get("status") != "ok":
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+        lines.append(
+            "Safety: read-only. No collection, mutation, cleanup, remediation, "
+            "rollback, or Compose command executed."
+        )
+        return "\n".join(lines).rstrip() + "\n"
+    lines.append(f"Before: {payload.get('before_summary_id')}")
+    lines.append(f"After: {payload.get('after_summary_id')}")
+    summary = payload.get("summary") or {}
+    lines.extend(
+        [
+            "",
+            "Changes:",
+            f"- events: {summary.get('events_before')} -> {summary.get('events_after')}",
+            f"- checks: {summary.get('checks_before')} -> {summary.get('checks_after')}",
+            f"- findings: {summary.get('findings_before')} -> {summary.get('findings_after')}",
+            f"- new findings: {summary.get('new_findings')}",
+            f"- resolved/missing findings: {summary.get('resolved_or_missing_findings')}",
+            f"- new refusals: {summary.get('new_refusals')}",
+            f"- safety drift: {summary.get('safety_drift')}",
+        ]
+    )
+    for label, key in (
+        ("New checks", "new_checks"),
+        ("New findings", "new_findings"),
+        ("Resolved/missing checks", "resolved_or_missing_checks"),
+        ("Resolved/missing findings", "resolved_or_missing_findings"),
+        ("New refusals", "new_refusals"),
+    ):
+        values = payload.get(key) or []
+        if values:
+            lines.extend(["", f"{label}:"])
+            for value in values[:8]:
+                lines.append(f"- {value}")
+    if payload.get("safety_drift"):
+        lines.extend(["", "Safety drift:"])
+        for item in payload.get("safety_drift") or []:
+            lines.append(f"- {item.get('flag')}: {item.get('before')} -> {item.get('after')}")
+    if include_stable and payload.get("stable"):
+        lines.extend(["", "Stable items:"])
+        for key, value in (payload.get("stable") or {}).items():
+            lines.append(f"- {key}: {value}")
+    lines.extend(["", f"First safe command: {payload.get('first_safe_command') or '-'}"])
+    lines.append(
+        "Safety: read-only. No collection, mutation, cleanup, remediation, "
+        "rollback, or Compose command executed."
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@session_summary_app.command("history")
+def session_summary_history(
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 10,
+) -> None:
+    from shellforgeai.core.interactive_summary_artifact import interactive_summary_history
+
+    payload = interactive_summary_history(Path(load_settings().app.data_dir), limit=limit)
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0)
+    console.print(_render_interactive_summary_history_human(payload), end="")
+
+
+@session_summary_app.command("compare")
+def session_summary_compare(
+    before_ref: Annotated[str, typer.Argument(help="Before summary id or path")],
+    after_ref: Annotated[str, typer.Argument(help="After summary id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+) -> None:
+    from shellforgeai.core.interactive_summary_artifact import compare_interactive_summaries
+
+    payload = compare_interactive_summaries(
+        before_ref,
+        after_ref,
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    if payload.get("status") != "ok":
+        console.print(_render_interactive_summary_compare_human(payload), end="")
+        raise typer.Exit(1)
+    console.print(
+        _render_interactive_summary_compare_human(payload, include_stable=include_stable), end=""
+    )
+
+
+@session_summary_app.command("compare-latest")
+def session_summary_compare_latest(
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+) -> None:
+    from shellforgeai.core.interactive_summary_artifact import compare_latest_interactive_summaries
+
+    payload = compare_latest_interactive_summaries(
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    if payload.get("status") != "ok":
+        console.print(_render_interactive_summary_compare_human(payload), end="")
+        raise typer.Exit(1)
+    console.print(
+        _render_interactive_summary_compare_human(payload, include_stable=include_stable), end=""
+    )
+
+
 @ops_report_app.callback()
 def ops_report(
     ctx: typer.Context,
