@@ -1639,6 +1639,18 @@ def _dispatch_label(argv: tuple[str, ...]) -> str:
     return "Running read-only ShellForgeAI command..."
 
 
+def _interactive_unknown_command_guidance(text: str, suggestions: tuple[str, ...]) -> str:
+    lines = [
+        f"Unknown command: {text}",
+        "No action was taken.",
+    ]
+    if suggestions:
+        lines.extend(["", "Did you mean:"])
+        lines.extend(f"  {suggestion}" for suggestion in suggestions)
+    lines.extend(["", "Type help for supported commands."])
+    return "\n".join(lines)
+
+
 def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> str:
     if not argv:
         console.print("No command was dispatched.")
@@ -1670,6 +1682,7 @@ def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> st
 
 def _interactive_mutation_refusal(text: str) -> str:
     return (
+        "Refused: interactive mode is not a shell.\n"
         "No command was executed.\n"
         "No action was taken.\n"
         "I can't run that command from ShellForgeAI interactive mode.\n"
@@ -1755,6 +1768,11 @@ def start_interactive(
             continue
         routed = route_input(user_input)
         if routed.name == "noop":
+            continue
+        if routed.name == "unknown_command":
+            console.print(
+                _interactive_unknown_command_guidance(routed.args or user_input, routed.argv)
+            )
             continue
         pre_nuance_grounded = resolve_followup_reference(user_input, grounding)
         if (
