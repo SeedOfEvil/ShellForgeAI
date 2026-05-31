@@ -77,6 +77,22 @@ Debug
   Docker commands are ever issued.
 
 
+## Interactive help
+
+Type `help`, `/help`, `?`, `commands`, or `what can I do?` inside the REPL to
+show a short operator help screen. The help lists exact interactive-supported
+forms for fast status (`ops report --brief`, `v1 check quick`, `doctor`),
+Docker triage (`triage docker detail <target>`), reports/artifacts (`ops report
+history --limit 5`, `ops report compare-latest`), safe remediation readiness
+(`remediation eligibility --target <target> --explain`), and session follow-ups
+(`what did you find?`, `get that info`, `dig deeper`, `pending`, `exit`).
+
+The help also has a refused-here section for mutation-shaped examples such as
+Docker/Compose restart, cleanup execute, remediation execute, rollback execute,
+and `rm -rf /`. Those examples are shown only as not-run/refused examples.
+Interactive mode is not a shell; no Docker/Compose/remediation/cleanup command
+runs from natural language, and mutation requires governed explicit workflows.
+
 ## Safe command-style dispatch
 
 Interactive mode accepts a focused allowlist of ShellForgeAI CLI-style inputs

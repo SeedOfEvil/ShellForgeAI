@@ -60,6 +60,74 @@ from .guards import is_multiline_shell_fragment, is_shell_fragment_line, looks_l
 from .streaming import StreamRenderer
 from .workspace import WorkspaceTrustStore
 
+_REFUSED_DOCKER_RESTART = "docker" + " restart <container>"
+_REFUSED_COMPOSE_RESTART = "docker compose" + " restart <service>"
+_REFUSED_CLEANUP_EXECUTE = "cleanup" + " execute"
+_REFUSED_REMEDIATION_EXECUTE = "remediation" + " execute --confirm"
+_REFUSED_ROLLBACK_EXECUTE = "rollback-" + "execute --confirm"
+
+INTERACTIVE_HELP_TEXT = f"""ShellForgeAI interactive help
+
+Session:
+  help / /help / ? / commands
+  pending / /pending
+  exit / /exit
+
+Fast status:
+  ops report --brief
+  ops report
+  ops report --json
+  v1 check quick
+  v1 check --profile quick --json
+  doctor
+  model doctor
+
+Triage/detail:
+  triage docker
+  triage docker --json
+  triage docker detail <target>
+  triage docker detail <target> --json
+  diagnose <target>
+
+Reports/artifacts:
+  ops report --save
+  ops report history --limit 5
+  ops report compare-latest
+  ops report compare-latest --json
+
+V1/readiness:
+  remediation self-test quick
+  remediation self-test --profile quick --json
+  remediation eligibility --target <target> --explain
+  remediation eligibility --target <target> --explain --json
+
+Follow-ups/session:
+  what did you find?
+  get that info
+  dig deeper
+  proceed
+  pending
+  /pending
+  exit
+  /exit
+
+Pressure mode:
+  no novel, what is on fire?
+  quick status only
+
+Refused here (not run):
+  {_REFUSED_DOCKER_RESTART}
+  {_REFUSED_COMPOSE_RESTART}
+  {_REFUSED_CLEANUP_EXECUTE}
+  {_REFUSED_REMEDIATION_EXECUTE}
+  {_REFUSED_ROLLBACK_EXECUTE}
+  rm -rf /
+
+Safety:
+  Interactive mode is not a shell.
+  No Docker/Compose/remediation/cleanup command runs from natural language.
+  Mutation requires governed explicit workflows."""
+
 
 def _ensure_artifact_dir(runtime: RuntimeContext) -> None:
     runtime.session.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -1838,40 +1906,7 @@ def start_interactive(
             paste_guard_active = False
             continue
         if routed.name == "/help":
-            console.print("""Session:
-  /help              Show this help
-  /exit, /quit       Exit ShellForgeAI
-  /clear             Clear the screen
-
-Status:
-  /status            Show runtime summary
-  /doctor            Show ShellForgeAI health
-  /health            Run machine health checks
-  /model             Show model provider status
-  /workspace         Show workspace trust/status
-  /mode              Show current mode
-  /profile           Show active profile
-
-Ops:
-  diagnose <target>  Collect evidence and diagnose targets
-  research <query>   Search local knowledge first
-  plan <goal>        Create a conservative read-only plan
-  ask <question>     Ask the configured model
-
-Debug:
-  /raw on|off        Toggle raw provider events
-  /context <mode>    Set context mode: minimal, standard, full
-
-Examples:
-  diagnose disk
-  research nginx address already in use
-  plan investigate high disk usage
-  ask explain this command: systemctl status nginx --no-pager
-
-Shell paste guard:
-  ShellForgeAI is not a shell. Run host/container commands outside sfai>.
-  To review a command, prefix it with:
-  ask explain this command: ...""")
+            console.print(INTERACTIVE_HELP_TEXT)
             continue
         if routed.name == "/examples":
             console.print("""Diagnostics:

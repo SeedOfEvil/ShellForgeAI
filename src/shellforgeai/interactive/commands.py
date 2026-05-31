@@ -238,7 +238,7 @@ def route_input(text: str) -> RoutedCommand:
     exact_session = raw.lower()
     if exact_session in {"exit", "quit"}:
         return RoutedCommand(name="/exit")
-    if exact_session == "help":
+    if exact_session in {"help", "?", "commands", "what can i do?"}:
         return RoutedCommand(name="/help")
     if exact_session == "pending":
         return RoutedCommand(name="/pending")
