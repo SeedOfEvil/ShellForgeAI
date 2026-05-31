@@ -41,6 +41,7 @@ Evidence
   /audit             Latest audit entries
   /evidence          Latest evidence bundle
   /pending           Inspect queued read-only follow-up
+  /summary           Local session handoff summary (use --json for strict JSON)
 
 Ops
   diagnose <target>  Collect evidence and diagnose
@@ -85,13 +86,52 @@ forms for fast status (`ops report --brief`, `v1 check quick`, `doctor`),
 Docker triage (`triage docker detail <target>`), reports/artifacts (`ops report
 history --limit 5`, `ops report compare-latest`), safe remediation readiness
 (`remediation eligibility --target <target> --explain`), and session follow-ups
-(`what did you find?`, `get that info`, `dig deeper`, `pending`, `exit`).
+(`what happened in this session?`, `what did you find?`, `get that info`, `dig deeper`, `pending`, `summary`, `exit`).
 
 The help also has a refused-here section for mutation-shaped examples such as
 Docker/Compose restart, cleanup execute, remediation execute, rollback execute,
 and `rm -rf /`. Those examples are shown only as not-run/refused examples.
 Interactive mode is not a shell; no Docker/Compose/remediation/cleanup command
 runs from natural language, and mutation requires governed explicit workflows.
+
+
+## Session handoff summary
+
+Run `summary` or `/summary` before exiting interactive mode to get a concise
+local handoff for the current REPL session. Natural-language aliases such as
+`session summary`, `what happened in this session?`, `what did you check?`,
+`what did you find?`, `what did you refuse?`, and `what should I hand off?`
+route to the same deterministic summary.
+
+The summary is generated from session-local metadata only: safe commands handled,
+latest diagnosis/ops-report context, known artifact paths, top Docker suspects,
+refusals, visibility caveats, and the first safe next command. It does **not**
+call the model, does **not** run collectors again, and does **not** execute shell,
+Docker/Compose, cleanup, remediation, rollback, or restart commands.
+
+Example:
+
+```text
+sfai> ops report --brief
+sfai> /summary
+Session summary: read-only inspection session.
+
+What was checked:
+- ops report
+
+First safe next command:
+  shellforgeai ops report --json
+
+Safety:
+- No cleanup/remediation/rollback/Compose mutation executed.
+- No arbitrary shell executed.
+- Natural-language mutation remained blocked.
+```
+
+For automation or copy/paste into another tool, use `summary --json` or
+`/summary --json`. It emits strict JSON only and uses the same local in-memory
+session state. Saving session summaries to artifacts is intentionally not part
+of this interactive hardening step.
 
 ## Safe command-style dispatch
 

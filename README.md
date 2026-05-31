@@ -271,14 +271,18 @@ sfai> /help
 sfai> diagnose disk
 sfai> ask what services are listening on this host?
 sfai> /pending
+sfai> /summary
 sfai> /exit
 ```
 
 Type `help`, `/help`, `?`, `commands`, or `what can I do?` in the REPL for a
 concise list of supported safe commands, follow-ups, report/history helpers,
-and refused mutation examples. Interactive mode is *not* a shell: pasted
-shell-looking input is blocked unless explicitly prefixed with `ask explain ...`
-or `ask review ...`. See [`docs/interactive-mode.md`](docs/interactive-mode.md).
+session handoff summaries, and refused mutation examples. Run `/summary` before
+exiting to get a local read-only summary of checks, findings, refusals, artifact
+pointers, and the first safe next command; it does not rerun collectors or call
+the model. Interactive mode is *not* a shell: pasted shell-looking input is
+blocked unless explicitly prefixed with `ask explain ...` or `ask review ...`.
+See [`docs/interactive-mode.md`](docs/interactive-mode.md).
 
 ## Project layout
 
