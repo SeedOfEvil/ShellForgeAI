@@ -274,9 +274,11 @@ sfai> /pending
 sfai> /exit
 ```
 
-Interactive mode is *not* a shell: pasted shell-looking input is blocked
-unless explicitly prefixed with `ask explain ...` or `ask review ...`. See
-[`docs/interactive-mode.md`](docs/interactive-mode.md).
+Type `help`, `/help`, `?`, `commands`, or `what can I do?` in the REPL for a
+concise list of supported safe commands, follow-ups, report/history helpers,
+and refused mutation examples. Interactive mode is *not* a shell: pasted
+shell-looking input is blocked unless explicitly prefixed with `ask explain ...`
+or `ask review ...`. See [`docs/interactive-mode.md`](docs/interactive-mode.md).
 
 ## Project layout
 
