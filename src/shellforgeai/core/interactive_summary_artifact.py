@@ -297,6 +297,379 @@ def validate_interactive_summary(summary_ref: str, data_dir: Path) -> dict[str, 
     }
 
 
+def _read_only_workflow_safety() -> dict[str, bool]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "summary_saved": False,
+        "artifact_export_only": False,
+        "cleanup_executed": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "production_restart_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+    }
+
+
+def _summary_root(data_dir: Path) -> Path:
+    return data_dir / "interactive_summaries"
+
+
+def _load_summary_artifact(summary_ref: str, data_dir: Path) -> tuple[dict[str, Any], Path | None]:
+    root = _summary_root(data_dir)
+    d = _resolve_ref(summary_ref, root)
+    safety = _read_only_workflow_safety()
+    if d is None:
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_load",
+                "status": "failed",
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": ["unsafe summary reference"],
+                "safety": safety,
+            },
+            None,
+        )
+    validation = validate_interactive_summary(str(d), data_dir)
+    if validation.get("status") != "ok":
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_load",
+                "status": validation.get("status") or "failed",
+                "summary": validation.get("summary") or {"id": d.name, "path": str(d)},
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": validation.get("warnings") or ["summary validation failed"],
+                "safety": safety,
+            },
+            None,
+        )
+    try:
+        payload = json.loads((d / "interactive-summary.json").read_text(encoding="utf-8"))
+    except Exception:
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_load",
+                "status": "failed",
+                "summary": {"id": d.name, "path": str(d)},
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": ["malformed summary json"],
+                "safety": safety,
+            },
+            None,
+        )
+    return payload, d
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def _stable_repr(value: Any) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True, default=str)
+    return str(value)
+
+
+def _list_diff(before: Any, after: Any) -> tuple[list[Any], list[Any], list[Any]]:
+    before_items = _as_list(before)
+    after_items = _as_list(after)
+    before_keys = {_stable_repr(item): item for item in before_items}
+    after_keys = {_stable_repr(item): item for item in after_items}
+    new = [after_keys[k] for k in sorted(after_keys.keys() - before_keys.keys())]
+    missing = [before_keys[k] for k in sorted(before_keys.keys() - after_keys.keys())]
+    stable = [after_keys[k] for k in sorted(after_keys.keys() & before_keys.keys())]
+    return new, missing, stable
+
+
+def _created_at(payload: dict[str, Any], artifact_dir: Path) -> str | None:
+    for key in ("created_at", "generated_at", "timestamp"):
+        if payload.get(key):
+            return str(payload[key])
+    manifest_path = artifact_dir / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return manifest.get("created_at")
+
+
+def _summary_entry(payload: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
+    checks = _as_list(payload.get("checks"))
+    findings = _as_list(payload.get("findings"))
+    refusals = _as_list(payload.get("refusals"))
+    first_safe = payload.get("first_safe_command")
+    safe_commands = _as_list(payload.get("safe_next_commands") or payload.get("next_safe_commands"))
+    if not first_safe and safe_commands:
+        first_safe = str(safe_commands[0])
+    return {
+        "summary_id": payload.get("summary_id") or artifact_dir.name,
+        "session_id": payload.get("session_id"),
+        "created_at": _created_at(payload, artifact_dir),
+        "events_seen": payload.get("events_seen", 0),
+        "checks_count": len(checks),
+        "findings_count": len(findings),
+        "refusals_count": len(refusals),
+        "first_safe_command": first_safe,
+        "path": str(artifact_dir),
+        "artifact_references": _as_list(payload.get("latest_artifacts")),
+        "safety": payload.get("safety") or {},
+        "valid": True,
+    }
+
+
+def interactive_summary_history(data_dir: Path, *, limit: int = 10) -> dict[str, Any]:
+    root = _summary_root(data_dir)
+    warnings: list[str] = []
+    entries: list[dict[str, Any]] = []
+    if root.exists():
+        for child in root.iterdir():
+            if not child.is_dir() or not child.name.startswith("interactive_summary_"):
+                continue
+            payload, path = _load_summary_artifact(child.name, data_dir)
+            if path is None:
+                warning = "; ".join(payload.get("warnings") or ["validation failed"])
+                warnings.append(f"invalid summary artifact ignored: {child.name} ({warning})")
+                continue
+            entries.append(_summary_entry(payload, path))
+    entries.sort(
+        key=lambda item: str(item.get("created_at") or item.get("summary_id") or ""), reverse=True
+    )
+    effective_limit = max(1, limit)
+    limited = entries[:effective_limit]
+    return {
+        "schema_version": "1",
+        "mode": "interactive_summary_history",
+        "status": "ok" if entries else "empty",
+        "read_only": True,
+        "mutation_performed": False,
+        "summaries": limited,
+        "latest_summary_id": entries[0]["summary_id"] if entries else None,
+        "count": len(entries),
+        "limit": effective_limit,
+        "warnings": warnings,
+        "safe_next_commands": [
+            "shellforgeai interactive",
+            "/summary --save",
+            "shellforgeai session summary history --limit 5",
+            "shellforgeai session summary compare-latest",
+        ],
+        "safety": _read_only_workflow_safety(),
+    }
+
+
+def compare_latest_interactive_summaries(
+    data_dir: Path, *, only_changed: bool = False, include_stable: bool = False
+) -> dict[str, Any]:
+    hist = interactive_summary_history(data_dir, limit=50)
+    summaries = hist.get("summaries") or []
+    if len(summaries) < 2:
+        return {
+            "schema_version": "1",
+            "mode": "interactive_summary_compare",
+            "compare_latest": True,
+            "status": "empty" if not summaries else "not_enough_data",
+            "read_only": True,
+            "mutation_performed": False,
+            "summary": {"summaries_found": len(summaries), "required_summaries": 2},
+            "changes": [],
+            "warnings": ["at least two saved interactive summaries are required"],
+            "safe_next_commands": ["shellforgeai interactive", "/summary --save"],
+            "safety": _read_only_workflow_safety(),
+        }
+    before = summaries[1]["summary_id"]
+    after = summaries[0]["summary_id"]
+    payload = compare_interactive_summaries(
+        before, after, data_dir, only_changed=only_changed, include_stable=include_stable
+    )
+    payload["compare_latest"] = True
+    return payload
+
+
+def compare_interactive_summaries(
+    before_ref: str,
+    after_ref: str,
+    data_dir: Path,
+    *,
+    only_changed: bool = False,
+    include_stable: bool = False,
+) -> dict[str, Any]:
+    before, before_path = _load_summary_artifact(before_ref, data_dir)
+    if before_path is None:
+        return {
+            "schema_version": "1",
+            "mode": "interactive_summary_compare",
+            "status": before.get("status") or "failed",
+            "read_only": True,
+            "mutation_performed": False,
+            "before_summary_id": before_ref,
+            "after_summary_id": after_ref,
+            "changes": [],
+            "warnings": ["before summary validation failed", *(before.get("warnings") or [])],
+            "safety": _read_only_workflow_safety(),
+        }
+    after, after_path = _load_summary_artifact(after_ref, data_dir)
+    if after_path is None:
+        return {
+            "schema_version": "1",
+            "mode": "interactive_summary_compare",
+            "status": after.get("status") or "failed",
+            "read_only": True,
+            "mutation_performed": False,
+            "before_summary_id": before.get("summary_id") or before_path.name,
+            "after_summary_id": after_ref,
+            "changes": [],
+            "warnings": ["after summary validation failed", *(after.get("warnings") or [])],
+            "safety": _read_only_workflow_safety(),
+        }
+    return _compare_interactive_summary_payload(
+        before,
+        after,
+        before_path,
+        after_path,
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+
+
+def _safe_commands(payload: dict[str, Any]) -> list[Any]:
+    commands = []
+    if payload.get("first_safe_command"):
+        commands.append(payload.get("first_safe_command"))
+    commands.extend(
+        _as_list(payload.get("safe_next_commands") or payload.get("next_safe_commands"))
+    )
+    seen: set[str] = set()
+    out = []
+    for command in commands:
+        key = _stable_repr(command)
+        if key not in seen:
+            seen.add(key)
+            out.append(command)
+    return out
+
+
+def _safety_drift(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    b = before.get("safety") or {}
+    a = after.get("safety") or {}
+    drift = []
+    for key in sorted(set(b) | set(a) | set(_read_only_workflow_safety())):
+        if b.get(key) != a.get(key):
+            drift.append({"flag": key, "before": b.get(key), "after": a.get(key)})
+    return drift
+
+
+def _compare_interactive_summary_payload(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    before_path: Path,
+    after_path: Path,
+    *,
+    only_changed: bool,
+    include_stable: bool,
+) -> dict[str, Any]:
+    changes: list[dict[str, Any]] = []
+    stable: dict[str, Any] = {}
+    fields = {
+        "checks": (before.get("checks"), after.get("checks")),
+        "findings": (before.get("findings"), after.get("findings")),
+        "refusals": (before.get("refusals"), after.get("refusals")),
+        "safe_next_commands": (_safe_commands(before), _safe_commands(after)),
+        "artifact_references": (before.get("latest_artifacts"), after.get("latest_artifacts")),
+    }
+    diff: dict[str, dict[str, list[Any]]] = {}
+    for field, (bval, aval) in fields.items():
+        new, missing, same = _list_diff(bval, aval)
+        diff[field] = {"new": new, "resolved_or_missing": missing, "stable": same}
+        if new or missing:
+            changes.append({"field": field, "new": new, "resolved_or_missing": missing})
+        if same and include_stable and not only_changed:
+            stable[field] = same
+    scalar_fields = ("events_seen", "session_id", "summary_id")
+    for field in scalar_fields:
+        if before.get(field) != after.get(field):
+            changes.append({"field": field, "before": before.get(field), "after": after.get(field)})
+        elif include_stable and not only_changed:
+            stable[field] = after.get(field)
+    b_visibility = (before.get("runtime_context") or before.get("runtime") or {}).get("visibility")
+    a_visibility = (after.get("runtime_context") or after.get("runtime") or {}).get("visibility")
+    if b_visibility != a_visibility:
+        changes.append(
+            {"field": "runtime_context.visibility", "before": b_visibility, "after": a_visibility}
+        )
+    elif include_stable and not only_changed:
+        stable["runtime_context.visibility"] = a_visibility
+    drift = _safety_drift(before, after)
+    if drift:
+        changes.append({"field": "safety", "drift": drift})
+    elif include_stable and not only_changed:
+        stable["safety"] = "unchanged"
+    first_safe = after.get("first_safe_command") or (
+        _safe_commands(after)[0] if _safe_commands(after) else None
+    )
+    return {
+        "schema_version": "1",
+        "mode": "interactive_summary_compare",
+        "status": "ok",
+        "read_only": True,
+        "mutation_performed": False,
+        "before_summary_id": before.get("summary_id") or before_path.name,
+        "after_summary_id": after.get("summary_id") or after_path.name,
+        "summaries": {
+            "before": {
+                "id": before.get("summary_id") or before_path.name,
+                "path": str(before_path),
+            },
+            "after": {"id": after.get("summary_id") or after_path.name, "path": str(after_path)},
+        },
+        "summary": {
+            "events_before": before.get("events_seen", 0),
+            "events_after": after.get("events_seen", 0),
+            "checks_before": len(_as_list(before.get("checks"))),
+            "checks_after": len(_as_list(after.get("checks"))),
+            "findings_before": len(_as_list(before.get("findings"))),
+            "findings_after": len(_as_list(after.get("findings"))),
+            "new_findings": len(diff["findings"]["new"]),
+            "resolved_or_missing_findings": len(diff["findings"]["resolved_or_missing"]),
+            "new_refusals": len(diff["refusals"]["new"]),
+            "safety_drift": len(drift),
+            "stable": sum(len(v) if isinstance(v, list) else 1 for v in stable.values()),
+        },
+        "changes": changes,
+        "new_checks": diff["checks"]["new"],
+        "resolved_or_missing_checks": diff["checks"]["resolved_or_missing"],
+        "new_findings": diff["findings"]["new"],
+        "resolved_or_missing_findings": diff["findings"]["resolved_or_missing"],
+        "new_refusals": diff["refusals"]["new"],
+        "new_safe_next_commands": diff["safe_next_commands"]["new"],
+        "artifact_reference_changes": {
+            "new": diff["artifact_references"]["new"],
+            "resolved_or_missing": diff["artifact_references"]["resolved_or_missing"],
+        },
+        "safety_drift": drift,
+        "stable": {} if only_changed else stable,
+        "first_safe_command": first_safe,
+        "safe_next_commands": [first_safe or "shellforgeai session summary history --limit 5"],
+        "warnings": [],
+        "safety": _read_only_workflow_safety(),
+    }
+
+
 def export_interactive_summary(summary_ref: str, data_dir: Path) -> dict[str, Any]:
     validation = validate_interactive_summary(summary_ref, data_dir)
     safety = _export_safety()

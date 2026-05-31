@@ -83,7 +83,14 @@ dig deeper
 sfai> /summary --save
 shellforgeai session summary validate <id>
 shellforgeai session summary export <id>
+shellforgeai session summary history --limit 5
+shellforgeai session summary compare-latest
 ```
+
+For a follow-up handoff, use `shellforgeai session summary history --limit 5`
+to find recent saved REPL summaries and `shellforgeai session summary
+compare-latest` to compare the newest two without collecting new evidence,
+calling the model, executing shell, or mutating Docker/Compose/system state.
 
 For REPL discoverability, type `help`, `/help`, `?`, `commands`, or `what can I do?`. The help screen lists exact safe interactive forms for fast status, triage/detail, reports/artifacts, readiness checks, follow-ups, pressure-mode brief status, and refused mutation examples. Mistyped ShellForgeAI-like commands get deterministic safe suggestions that are never auto-run. It also repeats the safety boundary: interactive mode is not a shell and does not run Docker/Compose/remediation/cleanup commands from natural language.
 

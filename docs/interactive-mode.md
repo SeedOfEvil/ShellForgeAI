@@ -167,6 +167,31 @@ flags, and obvious secret-shaped artifact fields. Export copies the saved
 summary into `<data_dir>/exports/export_interactive_summary_<summary_id>/` with
 an `export-manifest.json`; repeated exports reuse an already-valid export.
 
+Saved summaries also support read-only history and comparison commands for
+follow-up handoffs over time:
+
+```text
+shellforgeai interactive
+sfai> /summary --save
+shellforgeai session summary history --limit 5
+shellforgeai session summary history --json
+shellforgeai session summary compare <before_summary_id_or_path> <after_summary_id_or_path>
+shellforgeai session summary compare <before> <after> --only-changed --json
+shellforgeai session summary compare <before> <after> --include-stable
+shellforgeai session summary compare-latest
+shellforgeai session summary compare-latest --json
+```
+
+History lists saved summary ids, timestamps, event/check/finding/refusal counts,
+the first safe next command, and artifact paths. Compare reads two already-saved
+summary artifacts, validates them, and reports changes in events, checks,
+findings, refusals, safe next commands, artifact references, runtime visibility,
+and safety flags. `compare-latest` compares the newest two saved summaries and
+returns controlled `empty` / `not_enough_data` output when there are fewer than
+two. These commands are artifact-read-only: they do not collect new evidence,
+call the model, execute shell commands, run cleanup/remediation/rollback, or
+mutate Docker/Compose state.
+
 ## Safe command-style dispatch
 
 Interactive mode accepts a focused allowlist of ShellForgeAI CLI-style inputs
