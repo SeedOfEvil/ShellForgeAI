@@ -259,7 +259,9 @@ self_test_app = typer.Typer(
 v1_app = typer.Typer(help="V1 readiness checks (read-only).")
 v1_packet_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
 triage_app = typer.Typer(
-    help="PR81 read-only triage ranking. Scans the scene and ranks suspects. No mutation.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help="Read-only V2 triage ranking. Scans the scene and ranks suspects. No mutation.",
 )
 triage_docker_app = typer.Typer(help="Read-only Docker triage ranking/detail views.")
 triage_docker_snapshot_app = typer.Typer(
@@ -8677,6 +8679,197 @@ def _build_status_payload(*, top: int = 5) -> dict[str, Any]:
     return payload
 
 
+def _v2_triage_safety(base: dict[str, Any] | None = None) -> dict[str, Any]:
+    safety = dict(base or {})
+    safety.update(
+        {
+            "read_only": True,
+            "mutation_performed": False,
+            "cleanup_executed": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+            "natural_language_execution": False,
+            "model_called": False,
+        }
+    )
+    return safety
+
+
+def _v2_triage_target_command(target: str) -> str:
+    return f"shellforgeai triage --target {target}"
+
+
+def _build_v2_triage_payload(*, top: int = 5) -> dict[str, Any]:
+    from shellforgeai.core import triage_ranking
+
+    scene = triage_ranking.collect_scene()
+    ranked = triage_ranking.rank_scene(scene)
+    suspects = list(ranked.get("suspects") or [])[:top]
+    summary = dict(ranked.get("summary") or {})
+    top_name = str((suspects[0] or {}).get("name") or "") if suspects else None
+    summary.update(
+        {
+            "suspects_ranked": len(suspects),
+            "top_suspect": top_name,
+            "critical": int(summary.get("critical", 0) or 0),
+            "high": int(summary.get("high", 0) or 0),
+        }
+    )
+    first_safe = _v2_triage_target_command(top_name) if top_name else "shellforgeai status --json"
+    return {
+        "schema_version": 1,
+        "mode": "v2_triage",
+        "status": "degraded" if suspects else "ok",
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": summary,
+        "suspects": suspects,
+        "first_safe_command": first_safe,
+        "safety": _v2_triage_safety(
+            ranked.get("safety") if isinstance(ranked.get("safety"), dict) else {}
+        ),
+        "warnings": list(ranked.get("warnings") or []),
+    }
+
+
+def _v2_evidence_summary(suspect: dict[str, Any]) -> str:
+    evidence = suspect.get("evidence") or []
+    parts: list[str] = []
+    for ev in evidence:
+        if not isinstance(ev, dict):
+            continue
+        kind = str(ev.get("type") or "evidence")
+        value = str(ev.get("value") or "").strip()
+        parts.append(f"{kind}: {value}" if value else kind)
+        if len(parts) >= 2:
+            break
+    if not parts:
+        parts = [str(w) for w in (suspect.get("why") or [])[:2] if w]
+    return "; ".join(parts) if parts else "ranked by deterministic read-only triage"
+
+
+def _render_v2_triage_human(payload: dict[str, Any]) -> str:
+    suspects = payload.get("suspects") if isinstance(payload.get("suspects"), list) else []
+    lines: list[str] = []
+    if not suspects:
+        lines.extend(
+            [
+                "Triage: OK",
+                "Suspects: none found",
+                "First safe command:",
+                f"  {payload.get('first_safe_command')}",
+                "Safety: Read-only. No mutation executed.",
+            ]
+        )
+        return "\n".join(lines).rstrip() + "\n"
+    top = suspects[0]
+    lines.extend(
+        [
+            "Triage: degraded",
+            f"Suspects: {len(suspects)}",
+            f"Top suspect: {top.get('name')} — {top.get('severity')}/{top.get('confidence')}",
+            f"Evidence: {_v2_evidence_summary(top)}",
+            "First safe command:",
+            f"  {payload.get('first_safe_command')}",
+            "Safety: Read-only. No mutation executed.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_triage_brief(payload: dict[str, Any]) -> str:
+    suspects = payload.get("suspects") if isinstance(payload.get("suspects"), list) else []
+    if not suspects:
+        return (
+            "Triage: OK — no suspects found\n"
+            f"First safe command: {payload.get('first_safe_command')}\n"
+            "Safety: read-only\n"
+        )
+    top = suspects[0]
+    return (
+        f"Triage: degraded — top suspect {top.get('name')}\n"
+        f"First safe command: {payload.get('first_safe_command')}\n"
+        "Safety: read-only\n"
+    )
+
+
+def _build_v2_triage_detail_payload(target: str) -> dict[str, Any]:
+    from shellforgeai.core import triage_ranking
+
+    scene = triage_ranking.collect_scene()
+    ranked = triage_ranking.rank_scene(scene)
+    detail = triage_ranking.build_detail_payload(scene, ranked, suspect_name=target)
+    payload = dict(detail)
+    payload["schema_version"] = 1
+    payload["mode"] = "v2_triage_detail"
+    payload["target"] = target
+    payload["read_only"] = True
+    payload["mutation_performed"] = False
+    payload["first_safe_command"] = remediation_eligibility_explain_command(target)
+    payload["safety"] = _v2_triage_safety(
+        detail.get("safety") if isinstance(detail.get("safety"), dict) else {}
+    )
+    if detail.get("status") == "ok":
+        suspect = detail.get("suspect") if isinstance(detail.get("suspect"), dict) else {}
+        payload["evidence"] = list(suspect.get("evidence") or [])
+        payload["limitations"] = [
+            "Read-only deterministic triage only; no remediation was executed.",
+            "Evidence is limited to the current read-only Docker scene.",
+        ]
+    else:
+        payload.setdefault("evidence", [])
+        payload.setdefault(
+            "limitations", ["No matching ranked suspect was found in the current scene."]
+        )
+    return payload
+
+
+def _render_v2_triage_detail_human(payload: dict[str, Any]) -> str:
+    target = str(payload.get("target") or "")
+    if payload.get("status") != "ok":
+        lines = ["Triage detail", "", f"Target: {target}", f"Status: {payload.get('status')}"]
+        for w in payload.get("warnings") or []:
+            lines.append(f"- {w}")
+        if payload.get("available_suspects"):
+            lines.append("Available suspects:")
+            for name in payload.get("available_suspects") or []:
+                lines.append(f"- {name}")
+        lines.extend(
+            [
+                "Evidence: no matching ranked suspect found in current read-only scene.",
+                "First safe command:",
+                "  shellforgeai triage",
+                "Safety: Read-only. No mutation executed.",
+            ]
+        )
+        return "\n".join(lines).rstrip() + "\n"
+
+    suspect = payload.get("suspect") if isinstance(payload.get("suspect"), dict) else {}
+    lines = ["Triage detail", "", f"Target: {target}"]
+    lines.append(f"Severity: {suspect.get('severity')} / {suspect.get('confidence')} confidence")
+    lines.append("")
+    lines.append("Evidence:")
+    evidence = suspect.get("evidence") or []
+    if evidence:
+        for ev in evidence:
+            if isinstance(ev, dict):
+                lines.append(f"- {ev.get('type')}: {ev.get('value')}")
+    else:
+        lines.append("- no evidence bullets available")
+    lines.append("")
+    lines.append("Limitations:")
+    for item in payload.get("limitations") or []:
+        lines.append(f"- {item}")
+    lines.append("First safe command:")
+    lines.append(f"  {payload.get('first_safe_command')}")
+    lines.append("Safety: Read-only. No mutation executed.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_ops_report_brief(payload: dict[str, Any]) -> str:
     summary = payload.get("summary") or {}
     suspects = payload.get("suspects") or []
@@ -9191,6 +9384,34 @@ def _is_status_ask(question: str) -> bool:
     )
 
 
+def _is_v2_triage_ask(question: str) -> bool:
+    q = " ".join((question or "").strip().lower().rstrip("?.!").split())
+    if not q:
+        return False
+    exact = {
+        "triage",
+        "triage this",
+        "what is the likely suspect",
+        "what is broken",
+        "what should i inspect first",
+    }
+    if q in exact:
+        return True
+    return "likely suspect" in q
+
+
+def _handle_v2_triage_ask(question: str) -> bool:
+    if is_triage_mutation_intent(question):
+        return False
+    if not _is_v2_triage_ask(question):
+        return False
+    payload = _build_v2_triage_payload()
+    console.print("Read-only triage (deterministic ask routing):")
+    console.print("")
+    console.print(_render_v2_triage_human(payload), end="")
+    return True
+
+
 def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool = False) -> dict:
     data_dir = Path(runtime.session.data_dir)
     audit = AuditStorage(data_dir)
@@ -9384,6 +9605,8 @@ def ask(
         if _handle_command_help_ask(question):
             return
         if _handle_pressure_mutation_refusal(question):
+            return
+        if _handle_v2_triage_ask(question):
             return
         if is_ops_report_ask(question):
             brief_ask = is_brief_ops_report_ask(question)
@@ -11419,6 +11642,39 @@ def self_test_commands(
         raise typer.Exit(1)
     if status == "failed":
         raise typer.Exit(1)
+
+
+@triage_app.callback(invoke_without_command=True)
+def triage(
+    ctx: typer.Context,
+    brief: Annotated[
+        bool, typer.Option("--brief", help="Emit bounded brief triage output.")
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    target: Annotated[
+        str | None,
+        typer.Option("--target", help="Show V2 detail for one ranked suspect."),
+    ] = None,
+    top: Annotated[int, typer.Option("--top", min=1, help="Maximum ranked suspects.")] = 5,
+) -> None:
+    """Read-only V2 triage entrypoint: ranked suspects and first safe command."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if target:
+        detail = _build_v2_triage_detail_payload(target)
+        if json_out:
+            typer.echo(json.dumps(detail))
+            return
+        typer.echo(_render_v2_triage_detail_human(detail), nl=False)
+        return
+    payload = _build_v2_triage_payload(top=top)
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+    if brief:
+        typer.echo(_render_v2_triage_brief(payload), nl=False)
+        return
+    typer.echo(_render_v2_triage_human(payload), nl=False)
 
 
 @triage_docker_app.callback(invoke_without_command=True)

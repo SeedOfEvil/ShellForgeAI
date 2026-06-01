@@ -76,6 +76,12 @@ Debug
   Docker investigation: `docker.containers`, `docker.inspect`, bounded
   `docker.container_logs`, and `docker.problem_summary`. No mutating
   Docker commands are ever issued.
+- Triage prompts and safe command-style entries (`triage`, `triage --brief`,
+  `triage --json`, `triage --target <target>`, `triage --target <target>
+  --json`, "what is the likely suspect?", "what is broken?", "what should I
+  inspect first?") route to the V2 read-only triage entrypoint. The response
+  ranks suspects, shows the first safe inspection command, and does not call
+  the model or run mutation.
 
 
 ## Interactive help

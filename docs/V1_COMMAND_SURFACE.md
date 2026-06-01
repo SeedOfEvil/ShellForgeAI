@@ -47,7 +47,9 @@ ShellForgeAI-owned artifacts, and whether it can mutate Docker/system state.
 | `shellforgeai v1 packet history [--limit N]` | List saved packets | READ_ONLY | No | No | Lists saved V1 packets newest-first without creating/validating/exporting artifacts. |
 | `shellforgeai v1 packet compare <before> <after>` | Compare two packets | READ_ONLY | No | No | Compares saved packet artifacts by id/path for readiness/safety/check drift only. |
 | `shellforgeai v1 packet compare-latest` | Compare latest two packets | READ_ONLY | No | No | Resolves latest two saved packets and compares read-only; returns controlled not_enough_history when fewer than two. |
-| `shellforgeai triage docker` | Deterministic suspect ranking | READ_ONLY | No | No | No remediation execution. |
+| `shellforgeai triage` | V2 deterministic suspect ranking entrypoint | READ_ONLY | No | No | Shows top suspect, evidence summary, and first safe command; no remediation execution. |
+| `shellforgeai triage --target <target>` | V2 deterministic suspect detail | READ_ONLY | No | No | Wraps Docker triage detail with first safe eligibility command. |
+| `shellforgeai triage docker` | Deterministic suspect ranking compatibility path | READ_ONLY | No | No | No remediation execution. |
 | `shellforgeai triage docker detail <target>` | Deterministic deep detail | READ_ONLY | No | No | Container-focused evidence detail. |
 | `shellforgeai ops report` | Operator report synthesis | READ_ONLY | No | No | Evidence-backed report view. |
 | `shellforgeai ops report history` | Report history view | READ_ONLY | No | No | Reads saved artifacts only. |
@@ -129,10 +131,11 @@ Safe demo commands (read-only + artifact-preserving only):
 4. `shellforgeai ops report --save`
 5. `shellforgeai ops report history --limit 5`
 6. `shellforgeai ops report compare-latest`
-7. `shellforgeai triage docker detail <target>`
-8. `shellforgeai remediation eligibility --target <target> --explain`
-9. `shellforgeai ask "It's 2AM; what is on fire?"`
-10. `shellforgeai ask "please restart shellforgeai"` (expected deterministic mutation refusal)
+7. `shellforgeai triage`
+8. `shellforgeai triage --target <target>` (compatibility: `shellforgeai triage docker detail <target>`)
+9. `shellforgeai remediation eligibility --target <target> --explain`
+10. `shellforgeai ask "It's 2AM; what is on fire?"`
+11. `shellforgeai ask "please restart shellforgeai"` (expected deterministic mutation refusal)
 
 No casual execution steps are part of this path.
 

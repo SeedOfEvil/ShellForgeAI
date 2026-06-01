@@ -39,11 +39,30 @@ safe read-only collectors/checks and never bypass mutation gates.
 
 Interactive mode also accepts a small allowlist of safe ShellForgeAI
 command-style inputs directly, such as `doctor`, `model doctor`, `ops report`,
-`triage docker detail <target>`, `v1 check quick`, and `remediation eligibility
---target <target> --explain`. These dispatch only to ShellForgeAI-owned
+`status`, `triage`, `triage --brief`, `triage --json`,
+`triage --target <target>`, `triage docker detail <target>`, `v1 check quick`,
+and `remediation eligibility --target <target> --explain`. These dispatch only to ShellForgeAI-owned
 read-only/safety commands; shell, Docker/Compose mutation, cleanup execute,
 remediation execute, rollback execute, and apply-style inputs are refused with
 no action taken.
+
+## V2 golden path
+
+The pressure-friendly V2 path is:
+
+1. `shellforgeai status` — concise read-only posture with a safe next command.
+2. `shellforgeai triage` — read-only ranked suspect view with top suspect,
+   evidence summary, and `shellforgeai triage --target <target>` as the first
+   safe drilldown.
+3. `shellforgeai triage --target <target>` — read-only evidence detail for one
+   suspect and the safe eligibility explanation command.
+4. `shellforgeai remediation eligibility --target <target> --explain` — gated
+   readiness explanation only; no remediation is executed.
+
+`triage --brief` keeps the output to the top suspect and first safe command.
+`triage --json` and `triage --target <target> --json` emit strict JSON with
+read-only safety flags. The compatibility commands `triage docker` and
+`triage docker detail <target>` continue to work.
 
 ## Commands
 

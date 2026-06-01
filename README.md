@@ -116,16 +116,17 @@ asks deterministically, and refuses or gates mutation.
 ### What this is (V1)
 
 - Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
-- Deterministic Docker triage and deep detail (`triage docker`,
-  `triage docker detail <target>`).
+- V2 read-only status and triage entrypoints (`status`, `triage`,
+  `triage --target <target>`) backed by deterministic Docker triage
+  compatibility commands (`triage docker`, `triage docker detail <target>`).
 - Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
   `--save`, `history`, `compare`, `compare-latest`, `export`,
   `export-validate`, `validate`).
 - Deterministic ask routing for common 2AM/operator prompts, including
   mutation refusal.
 - Interactive mode accepts selected safe ShellForgeAI command flag forms (for example
-  `v1 check --profile quick --json`, `ops report --brief`, and
-  `triage docker detail <target> --json`) while refusing shell/mutation input.
+  `v1 check --profile quick --json`, `ops report --brief`, `triage --json`,
+  and `triage --target <target> --json`) while refusing shell/mutation input.
 - Governed remediation **preview/testing** lanes with explicit gates,
   disposable-only proofs, and no casual production mutation.
 
@@ -147,7 +148,9 @@ shellforgeai ops report --brief
 shellforgeai ops report --save
 shellforgeai ops report history --limit 5
 shellforgeai ops report compare-latest
-shellforgeai triage docker detail <target>
+shellforgeai triage
+shellforgeai triage --target <target>
+shellforgeai triage docker detail <target>  # compatibility detail path
 shellforgeai remediation eligibility --target <target> --explain
 ```
 
@@ -165,9 +168,10 @@ shellforgeai remediation self-test --profile full
 4. `shellforgeai ops report --save`
 5. `shellforgeai ops report history --limit 5`
 6. `shellforgeai ops report compare-latest`
-7. `shellforgeai triage docker detail <target>`
-8. `shellforgeai remediation eligibility --target <target> --explain`
-9. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
+7. `shellforgeai triage`
+8. `shellforgeai triage --target <target>` (compatibility: `shellforgeai triage docker detail <target>`)
+9. `shellforgeai remediation eligibility --target <target> --explain`
+10. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
 
 Safety promise: V1 is read-only by default, deterministic ask routes do not
 require model availability for safety/refusal paths, and production mutation is
@@ -191,6 +195,8 @@ The CLI is exposed as both `shellforgeai` and `sfai`.
 
 ```bash
 shellforgeai status
+shellforgeai triage
+shellforgeai triage --target <target>
 shellforgeai status --json
 shellforgeai doctor
 shellforgeai model doctor
