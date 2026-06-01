@@ -137,7 +137,7 @@ def test_interactive_additional_safe_commands_and_aliases_dispatch(monkeypatch, 
     _, dispatched = _drive_repl(monkeypatch, tmp_path, commands)
     assert dispatched == [
         ("version",),
-        ("ops", "report"),
+        ("status",),
         ("ops", "report", "--json"),
         ("ops", "report", "history"),
         ("ops", "report", "compare-latest"),

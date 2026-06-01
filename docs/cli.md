@@ -1149,6 +1149,16 @@ Interactive summary handoff exports can also be compared directly:
 - `shellforgeai triage docker timeline [--window N] [--top N] [--only-regressions] [--include-stable] [--json]` analyzes the latest saved triage snapshots under `<data_dir>/artifacts`, validates each snapshot, sorts chronologically, and reports rolling incident trends (escalating/recovering/flapping/recurring/stable/new/resolved) with explicit read-only safety flags.
 
 ## PR104 2AM operator report
+
+### `shellforgeai status`
+
+V2 golden-path first command. `shellforgeai status` is a concise, deterministic, read-only wrapper around the existing ops-report ranking path. It does not call the model/Codex, does not write artifacts by default, and does not execute cleanup, remediation, rollback, Docker/Compose, restart, or arbitrary shell commands.
+
+- `shellforgeai status` renders compact human output with `Status:`, `Risk:`, one `First safe command:`, and a read-only safety note.
+- `shellforgeai status --brief` mirrors `shellforgeai ops report --brief` for pressure-mode compatibility.
+- `shellforgeai status --json` emits strict JSON only, including `mode: "status"`, `read_only: true`, `mutation_performed: false`, a `safety` block, and `first_safe_command`.
+- Status never saves reports; use `shellforgeai ops report --save` when an artifact is needed.
+
 - `shellforgeai ops report`
 - `shellforgeai ops report --brief` renders a compact, read-only, human-only pressure-mode view: status, risk, top issue/evidence, exactly one first safe command, and a safety line. Combine with `--json` to keep the existing strict JSON output; `--brief` does not add human prose in JSON mode.
 - `shellforgeai ops report --json`

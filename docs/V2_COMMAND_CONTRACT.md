@@ -39,8 +39,9 @@ anything.
 ## V2 golden path sketch
 
 1. **status**
-   - Current command: `shellforgeai ops report --brief`.
-   - Expanded view: `shellforgeai ops report`.
+   - First command: `shellforgeai status`.
+   - Brief/JSON forms: `shellforgeai status --brief` and `shellforgeai status --json`.
+   - Underlying compatibility path: `shellforgeai ops report --brief` / `shellforgeai ops report`.
 2. **triage**
    - Current commands: `shellforgeai triage docker`,
      `shellforgeai triage docker detail <target>`, and
@@ -67,7 +68,7 @@ receipts, and validation reports.
 
 | V2 job | Current command family | Contract |
 |---|---|---|
-| Status | `ops report --brief`, `ops report` | Read-only operator posture first. |
+| Status | `status`, `status --brief`, `status --json`; compatibility: `ops report --brief`, `ops report` | CORE / READ_ONLY first operator posture. |
 | Triage | `triage docker`, `triage docker detail <target>`, `diagnose <target>` | Read-only deterministic collectors before synthesis. |
 | Propose | Future V2 proposal command | Deterministic proposal artifact; no execution. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
@@ -126,6 +127,8 @@ non-goal, or refused context. They are not V2 golden-path commands. Dangerous go
 - `cleanup execute --confirm` — dangerous; governed/non-goal/refused context only
 - `remediation execute --confirm` — dangerous; governed/non-goal/refused context only
 - `rollback-execute --confirm` — dangerous; governed/non-goal/refused context only
+
+`shellforgeai status` is the first V2 golden-path command and is CORE / READ_ONLY: it renders concise human status by default, strict JSON with `--json`, and writes no artifacts unless the operator uses the separate `ops report --save` compatibility path.
 
 The V2 casual command path is status, triage, propose, approve/gate,
 apply-preview, verify, and handoff/receipt — not execution expansion.

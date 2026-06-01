@@ -273,9 +273,9 @@ export/guard/refusal trail — it does not prove external operator execution.
 
 ## Status dashboard safety
 
-`shellforgeai status` is strictly read-only. It summarizes ShellForgeAI-owned metadata (audit events, approvals, bundles, exports, indexes, and optional retention counts) and does **not** execute operator commands, run apply, approve/reject proposals, prune/delete/archive metadata, or rebuild indexes.
+`shellforgeai status` is strictly read-only. It is the V2 golden-path entrypoint and wraps the concise ops-report ranking path: no model/Codex call, no artifact write by default, no proposal/mission/apply creation, and no cleanup/remediation/rollback/Docker/Compose/restart execution. Use `shellforgeai ops report --save` when a persisted report artifact is needed.
 
-The status safety block is invariant: `apply_mode=validation-only`, `execution_allowed=false`, `execution_status=not_executed`, and `mutation_performed=false`. The message “No ShellForgeAI remediation execution recorded” means no ShellForgeAI execution markers appear in ShellForgeAI audit metadata; it is not proof of external operator behavior outside ShellForgeAI.
+The status safety block is invariant: `read_only=true`, `mutation_performed=false`, `artifact_written=false`, `model_called=false`, `shell_true=false`, and `arbitrary_command_execution=false`. It reports ShellForgeAI's current read-only inspection result; it is not proof of external operator behavior outside ShellForgeAI.
 
 ## Metadata hygiene safety
 - Doctor/status metadata hygiene is report-and-guidance only.

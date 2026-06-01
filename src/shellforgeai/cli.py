@@ -8619,6 +8619,64 @@ def _brief_first_safe_command(payload: dict[str, Any]) -> str:
     return "shellforgeai ops report --json"
 
 
+def _status_first_safe_command(payload: dict[str, Any]) -> str:
+    suspects = payload.get("suspects") or []
+    if not suspects:
+        return "shellforgeai ops report --json"
+    top = suspects[0]
+    target = str(top.get("name") or "").strip()
+    if target:
+        return triage_detail_command(target)
+    return "shellforgeai ops report --json"
+
+
+def _render_status_human(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    suspects = payload.get("suspects") if isinstance(payload.get("suspects"), list) else []
+    lines = [
+        f"Status: {_brief_status(summary, suspects)}",
+        f"Risk: {_brief_risk(summary, suspects)}",
+    ]
+    if suspects:
+        top = suspects[0]
+        name = str(top.get("name") or "unknown")
+        severity = str(top.get("severity") or "unknown")
+        classes = [str(c).replace("_", " ") for c in (top.get("classes") or []) if c]
+        label = classes[0] if classes else "ranked Docker suspect"
+        lines.append(f"Top suspect: {name} — {severity} {label}")
+    lines.append(f"First safe command: {_status_first_safe_command(payload)}")
+    lines.append("Safety: Read-only. No mutation executed.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _build_status_payload(*, top: int = 5) -> dict[str, Any]:
+    payload = _build_ops_report_payload(top=top, include_visibility=True)
+    payload = dict(payload)
+    payload["mode"] = "status"
+    payload["first_safe_command"] = _status_first_safe_command(payload)
+    safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}
+    payload["safety"] = {
+        **safety,
+        "read_only": True,
+        "mutation_performed": False,
+        "cleanup_executed": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "natural_language_execution": False,
+        "artifact_written": False,
+        "model_called": False,
+    }
+    payload["read_only"] = True
+    payload["mutation_performed"] = False
+    payload["artifact_written"] = False
+    payload["model_called"] = False
+    return payload
+
+
 def _render_ops_report_brief(payload: dict[str, Any]) -> str:
     summary = payload.get("summary") or {}
     suspects = payload.get("suspects") or []
@@ -9107,11 +9165,21 @@ def _handle_incident_search_ask(runtime: RuntimeContext, question: str) -> bool:
 
 
 def _is_status_ask(question: str) -> bool:
-    q = (question or "").strip().lower()
+    q = " ".join((question or "").strip().lower().rstrip("?.!").split())
+    if not q:
+        return False
+    exact = {
+        "status",
+        "quick status",
+        "give me status",
+        "what is my status",
+        "shellforgeai status",
+    }
+    if q in exact:
+        return True
     return any(
         p in q
         for p in (
-            "shellforgeai status",
             "operator status",
             "show me the dashboard",
             "is shellforgeai healthy",
@@ -9251,46 +9319,40 @@ def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool 
 def status(
     ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json"),
-    verbose: bool = typer.Option(False, "--verbose"),
-    since: str | None = typer.Option(None, "--since"),
-    include_retention: bool = typer.Option(False, "--include-retention"),
-    include_index: bool = typer.Option(False, "--include-index"),
-    include_audit: bool = typer.Option(False, "--include-audit"),
-    include_approvals: bool = typer.Option(False, "--include-approvals"),
+    brief: bool = typer.Option(False, "--brief", help="Mirror ops report --brief output."),
+    top: int = typer.Option(5, "--top", min=1, help="Maximum ranked Docker suspects to inspect."),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Accepted for compatibility; status stays concise."
+    ),
+    since: str | None = typer.Option(None, "--since", help="Accepted for compatibility."),
+    include_retention: bool = typer.Option(
+        False, "--include-retention", help="Accepted for compatibility; no artifacts are written."
+    ),
+    include_index: bool = typer.Option(
+        False, "--include-index", help="Accepted for compatibility."
+    ),
+    include_audit: bool = typer.Option(
+        False, "--include-audit", help="Accepted for compatibility."
+    ),
+    include_approvals: bool = typer.Option(
+        False, "--include-approvals", help="Accepted for compatibility."
+    ),
 ) -> None:
-    _ = (verbose, since, include_index, include_audit, include_approvals)
-    runtime = _ctx(ctx)
-    payload = _collect_status_payload(runtime, include_retention=include_retention)
+    """Read-only V2 golden-path status entrypoint.
+
+    This is a small deterministic wrapper around the concise ops-report path.
+    It does not call the model, write artifacts, create proposals/missions, or
+    execute cleanup/remediation/rollback/Docker/Compose actions.
+    """
+    _ = (ctx, verbose, since, include_retention, include_index, include_audit, include_approvals)
+    payload = _build_status_payload(top=top)
     if json_output:
-        console.print_json(data=payload)
+        typer.echo(json.dumps(payload))
         return
-    console.print("ShellForgeAI")
-    for k, v in payload["shellforgeai"].items():
-        console.print(f"- {k}: {v}")
-    console.print("Model")
-    for k, v in payload["model"].items():
-        console.print(f"- {k}: {v}")
-    console.print("Safety")
-    for k, v in payload["safety"].items():
-        console.print(f"- {k}: {v}")
-    console.print("Latest activity")
-    for k, v in payload["latest"].items():
-        console.print(f"- {k}: {v}")
-    console.print("Approvals")
-    for k, v in payload["approvals"].items():
-        console.print(f"- {k}: {v}")
-    console.print("Guards / drift")
-    for k, v in payload["guards"].items():
-        console.print(f"- {k}: {v}")
-    console.print("Audit / index")
-    for k, v in payload["audit"].items():
-        console.print(f"- {k}: {v}")
-    if include_retention:
-        console.print("Retention")
-        console.print(f"- total_bytes: {payload['retention']['total_bytes']}")
-    console.print("Next suggested read-only actions")
-    for r in payload["recommendations"][:6]:
-        console.print(f"- {r}")
+    if brief:
+        typer.echo(_render_ops_report_brief(payload), nl=False)
+        return
+    typer.echo(_render_status_human(payload), nl=False)
 
 
 @app.command()
@@ -9308,13 +9370,10 @@ def ask(
     runtime = _ctx(ctx)
     if not no_evidence:
         if _is_status_ask(question):
-            p = _collect_status_payload(runtime, include_retention=True)
-            console.print("ShellForgeAI status dashboard (read-only):")
-            console.print(f"- health_level: {p.get('health_level')}")
-            console.print(f"- execution: {p['safety']['message']}")
-            console.print(f"- pending approvals: {p['approvals'].get('pending', 0)}")
-            console.print(f"- recent guard refusals: {p['guards'].get('recent_refusals', 0)}")
-            console.print("- next: shellforgeai status --json")
+            payload = _build_status_payload()
+            console.print("Read-only status (deterministic ask routing):")
+            console.print("")
+            typer.echo(_render_status_human(payload), nl=False)
             return
         if _handle_retention_ask(runtime, question):
             return

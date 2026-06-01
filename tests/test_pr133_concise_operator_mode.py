@@ -259,8 +259,8 @@ def _drive_repl(
 
 def test_interactive_pressure_phrases_dispatch_brief_report(monkeypatch, tmp_path) -> None:
     out, dispatched = _drive_repl(monkeypatch, tmp_path, ["no novel", "quick status", "/exit"])
-    assert dispatched == [("ops", "report", "--brief"), ("ops", "report", "--brief")]
-    assert "DISPATCH ops report --brief" in out
+    assert dispatched == [("status", "--brief"), ("status", "--brief")]
+    assert "DISPATCH status --brief" in out
 
 
 def test_interactive_quick_mutation_refuses(monkeypatch, tmp_path) -> None:
@@ -273,7 +273,7 @@ def test_interactive_quick_mutation_refuses(monkeypatch, tmp_path) -> None:
 
 def test_route_input_supports_brief_flag_and_refuses_quick_mutation() -> None:
     assert route_input("ops report --brief").argv == ("ops", "report", "--brief")
-    assert route_input("no novel").argv == ("ops", "report", "--brief")
+    assert route_input("no novel").argv == ("status", "--brief")
     assert route_input("restart it now").name == "mutation_refused"
 
 
