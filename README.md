@@ -110,6 +110,8 @@ asks deterministically, and refuses or gates mutation.
 
 - Final V1 release notes: [`docs/V1_RELEASE_NOTES.md`](docs/V1_RELEASE_NOTES.md)
 - Release-candidate checklist/evidence gate: [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md)
+- Command surface audit: [`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md)
+- V2 command contract: [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md)
 
 ### What this is (V1)
 

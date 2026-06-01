@@ -47,6 +47,9 @@ Operator smoke tests and runbook tips.
 
 For V1 release promotion, run the release-candidate validation flow in
 [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md).
+For V2 command-surface planning and anti-bloat guardrails, use
+[`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md) and
+[`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md).
 
 ## Current baseline / handoff
 
