@@ -10433,11 +10433,14 @@ def _render_interactive_summary_history_human(payload: dict[str, Any]) -> str:
 def _render_interactive_summary_compare_human(
     payload: dict[str, Any], *, include_stable: bool = False
 ) -> str:
-    title = (
-        "Interactive summary compare-latest"
-        if payload.get("compare_latest")
-        else "Interactive summary compare"
-    )
+    if payload.get("mode") == "interactive_summary_compare_export":
+        title = "Interactive summary export compare"
+    else:
+        title = (
+            "Interactive summary compare-latest"
+            if payload.get("compare_latest")
+            else "Interactive summary compare"
+        )
     lines = [title]
     if payload.get("compare_latest"):
         lines.append("Comparing latest two summaries...")
@@ -10446,12 +10449,22 @@ def _render_interactive_summary_compare_human(
         for warning in payload.get("warnings") or []:
             lines.append(f"- {warning}")
         lines.append(
-            "Safety: read-only. No collection, mutation, cleanup, remediation, "
+            "Safety: read-only. No collectors/model/shell/mutation, cleanup, remediation, "
             "rollback, or Compose command executed."
         )
         return "\n".join(lines).rstrip() + "\n"
-    lines.append(f"Before: {payload.get('before_summary_id')}")
-    lines.append(f"After: {payload.get('after_summary_id')}")
+    if payload.get("mode") == "interactive_summary_compare_export":
+        before = payload.get("before") or {}
+        after = payload.get("after") or {}
+        lines.append(
+            f"Before export: {before.get('export_ref') or payload.get('before_export_id')}"
+        )
+        lines.append(f"After export: {after.get('export_ref') or payload.get('after_export_id')}")
+        lines.append(f"Before summary: {payload.get('before_summary_id')}")
+        lines.append(f"After summary: {payload.get('after_summary_id')}")
+    else:
+        lines.append(f"Before: {payload.get('before_summary_id')}")
+        lines.append(f"After: {payload.get('after_summary_id')}")
     summary = payload.get("summary") or {}
     lines.extend(
         [
@@ -10488,7 +10501,7 @@ def _render_interactive_summary_compare_human(
             lines.append(f"- {key}: {value}")
     lines.extend(["", f"First safe command: {payload.get('first_safe_command') or '-'}"])
     lines.append(
-        "Safety: read-only. No collection, mutation, cleanup, remediation, "
+        "Safety: read-only. No collectors/model/shell/mutation, cleanup, remediation, "
         "rollback, or Compose command executed."
     )
     return "\n".join(lines).rstrip() + "\n"
@@ -10519,6 +10532,34 @@ def session_summary_compare(
     from shellforgeai.core.interactive_summary_artifact import compare_interactive_summaries
 
     payload = compare_interactive_summaries(
+        before_ref,
+        after_ref,
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    if payload.get("status") != "ok":
+        console.print(_render_interactive_summary_compare_human(payload), end="")
+        raise typer.Exit(1)
+    console.print(
+        _render_interactive_summary_compare_human(payload, include_stable=include_stable), end=""
+    )
+
+
+@session_summary_app.command("compare-export")
+def session_summary_compare_export(
+    before_ref: Annotated[str, typer.Argument(help="Before interactive summary export id or path")],
+    after_ref: Annotated[str, typer.Argument(help="After interactive summary export id or path")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+    only_changed: Annotated[bool, typer.Option("--only-changed")] = False,
+    include_stable: Annotated[bool, typer.Option("--include-stable")] = False,
+) -> None:
+    from shellforgeai.core.interactive_summary_artifact import compare_interactive_summary_exports
+
+    payload = compare_interactive_summary_exports(
         before_ref,
         after_ref,
         Path(load_settings().app.data_dir),

@@ -370,6 +370,142 @@ def _load_summary_artifact(summary_ref: str, data_dir: Path) -> tuple[dict[str, 
     return payload, d
 
 
+def _export_root(data_dir: Path) -> Path:
+    return data_dir / "exports"
+
+
+def _load_summary_export_artifact(
+    export_ref: str, data_dir: Path
+) -> tuple[dict[str, Any], Path | None, dict[str, Any]]:
+    root = _export_root(data_dir)
+    d = _resolve_ref(export_ref, root)
+    safety = _read_only_workflow_safety()
+    checks = {
+        "required_files": False,
+        "json_parse": False,
+        "checksums": False,
+        "export_safety": False,
+        "schema": False,
+    }
+    if d is None:
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_export_load",
+                "status": "failed",
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": ["unsafe export reference"],
+                "safety": safety,
+            },
+            None,
+            {"checks": checks, "export_ref": export_ref},
+        )
+    if not d.exists():
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_export_load",
+                "status": "not_found",
+                "export": {"id": d.name, "path": str(d)},
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": ["export not found"],
+                "safety": safety,
+            },
+            None,
+            {"checks": checks, "export_ref": export_ref},
+        )
+    if any(not (d / rel).exists() for rel in REQUIRED_EXPORT_FILES):
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_export_load",
+                "status": "failed",
+                "export": {"id": d.name, "path": str(d)},
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": ["missing required files"],
+                "safety": safety,
+            },
+            None,
+            {"checks": checks, "export_ref": export_ref},
+        )
+    checks["required_files"] = True
+    try:
+        summary = json.loads((d / "interactive-summary.json").read_text(encoding="utf-8"))
+        manifest = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+        export_manifest = json.loads((d / "export-manifest.json").read_text(encoding="utf-8"))
+    except Exception:
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_export_load",
+                "status": "failed",
+                "export": {"id": d.name, "path": str(d)},
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": ["malformed json"],
+                "safety": safety,
+            },
+            None,
+            {"checks": checks, "export_ref": export_ref},
+        )
+    checks["json_parse"] = True
+    checks["schema"] = (
+        summary.get("mode") == "interactive_session_summary"
+        and manifest.get("kind") == "interactive_session_summary"
+        and export_manifest.get("mode") == "interactive_summary_export"
+    )
+    checks["checksums"] = True
+    for rel, expected in (export_manifest.get("checksums") or {}).items():
+        if not (d / rel).exists() or _sha256_file(d / rel) != expected:
+            checks["checksums"] = False
+            break
+    checks["export_safety"] = _safety_non_mutating(export_manifest.get("safety") or {})
+    if not checks["schema"]:
+        warnings = ["export schema validation failed"]
+    elif not checks["checksums"]:
+        warnings = ["export checksum validation failed"]
+    elif not checks["export_safety"]:
+        warnings = ["export safety validation failed"]
+    else:
+        warnings = []
+    if warnings:
+        return (
+            {
+                "schema_version": "1",
+                "mode": "interactive_summary_export_load",
+                "status": "failed",
+                "export": {"id": d.name, "path": str(d)},
+                "read_only": True,
+                "mutation_performed": False,
+                "warnings": warnings,
+                "safety": safety,
+            },
+            None,
+            {"checks": checks, "export_ref": export_ref},
+        )
+    compare_warnings: list[str] = []
+    if not _safety_non_mutating(summary.get("safety") or {}) or not _safety_non_mutating(
+        manifest.get("safety") or {}
+    ):
+        compare_warnings.append("source summary safety drift present in export payload")
+    return (
+        summary,
+        d,
+        {
+            "checks": checks,
+            "export_ref": export_ref,
+            "export_id": export_manifest.get("export_id") or d.name,
+            "export_path": str(d),
+            "source_summary": export_manifest.get("source_summary") or {},
+            "created_at": export_manifest.get("created_at"),
+            "warnings": compare_warnings,
+        },
+    )
+
+
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -600,7 +736,14 @@ def _compare_interactive_summary_payload(
             changes.append({"field": field, "new": new, "resolved_or_missing": missing})
         if same and include_stable and not only_changed:
             stable[field] = same
-    scalar_fields = ("events_seen", "session_id", "summary_id")
+    scalar_fields = (
+        "events_seen",
+        "session_id",
+        "summary_id",
+        "created_at",
+        "generated_at",
+        "timestamp",
+    )
     for field in scalar_fields:
         if before.get(field) != after.get(field):
             changes.append({"field": field, "before": before.get(field), "after": after.get(field)})
@@ -668,6 +811,151 @@ def _compare_interactive_summary_payload(
         "warnings": [],
         "safety": _read_only_workflow_safety(),
     }
+
+
+def compare_interactive_summary_exports(
+    before_ref: str,
+    after_ref: str,
+    data_dir: Path,
+    *,
+    only_changed: bool = False,
+    include_stable: bool = False,
+) -> dict[str, Any]:
+    before, before_path, before_meta = _load_summary_export_artifact(before_ref, data_dir)
+    if before_path is None:
+        return {
+            "schema_version": 1,
+            "mode": "interactive_summary_compare_export",
+            "status": before.get("status") or "failed",
+            "read_only": True,
+            "mutation_performed": False,
+            "before": {"export_ref": before_ref},
+            "after": {"export_ref": after_ref},
+            "before_export_id": before_ref,
+            "after_export_id": after_ref,
+            "before_export_path": None,
+            "after_export_path": None,
+            "before_summary_id": None,
+            "after_summary_id": None,
+            "summary": {
+                "new": 0,
+                "resolved_or_missing": 0,
+                "changed": 0,
+                "stable": 0,
+                "safety_drift": 0,
+            },
+            "changes": [],
+            "stable": [] if only_changed else {},
+            "warnings": ["before export validation failed", *(before.get("warnings") or [])],
+            "safety": _read_only_workflow_safety(),
+        }
+    after, after_path, after_meta = _load_summary_export_artifact(after_ref, data_dir)
+    if after_path is None:
+        return {
+            "schema_version": 1,
+            "mode": "interactive_summary_compare_export",
+            "status": after.get("status") or "failed",
+            "read_only": True,
+            "mutation_performed": False,
+            "before": {
+                "export_ref": before_ref,
+                "export_id": before_meta.get("export_id") or before_path.name,
+                "export_path": str(before_path),
+                "summary_id": before.get("summary_id") or before_path.name,
+            },
+            "after": {"export_ref": after_ref},
+            "before_export_id": before_meta.get("export_id") or before_path.name,
+            "after_export_id": after_ref,
+            "before_export_path": str(before_path),
+            "after_export_path": None,
+            "before_summary_id": before.get("summary_id") or before_path.name,
+            "after_summary_id": None,
+            "summary": {
+                "new": 0,
+                "resolved_or_missing": 0,
+                "changed": 0,
+                "stable": 0,
+                "safety_drift": 0,
+            },
+            "changes": [],
+            "stable": [] if only_changed else {},
+            "warnings": [
+                *(before_meta.get("warnings") or []),
+                "after export validation failed",
+                *(after.get("warnings") or []),
+            ],
+            "safety": _read_only_workflow_safety(),
+        }
+    payload = _compare_interactive_summary_payload(
+        before,
+        after,
+        before_path,
+        after_path,
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    payload["schema_version"] = 1
+    payload["mode"] = "interactive_summary_compare_export"
+    payload["before"] = {
+        "export_ref": before_ref,
+        "export_id": before_meta.get("export_id") or before_path.name,
+        "export_path": str(before_path),
+        "summary_id": before.get("summary_id") or before_path.name,
+    }
+    payload["after"] = {
+        "export_ref": after_ref,
+        "export_id": after_meta.get("export_id") or after_path.name,
+        "export_path": str(after_path),
+        "summary_id": after.get("summary_id") or after_path.name,
+    }
+    payload["before_export_id"] = before_meta.get("export_id") or before_path.name
+    payload["after_export_id"] = after_meta.get("export_id") or after_path.name
+    payload["before_export_path"] = str(before_path)
+    payload["after_export_path"] = str(after_path)
+    payload["warnings"] = [
+        *(before_meta.get("warnings") or []),
+        *(after_meta.get("warnings") or []),
+        *(payload.get("warnings") or []),
+    ]
+    list_fields = ("checks", "findings", "refusals", "safe_next_commands", "artifact_references")
+    new_count = 0
+    missing_count = 0
+    stable_count = 0
+    for field in list_fields:
+        new, missing, same = _list_diff(
+            _safe_commands(before)
+            if field == "safe_next_commands"
+            else before.get("latest_artifacts")
+            if field == "artifact_references"
+            else before.get(field),
+            _safe_commands(after)
+            if field == "safe_next_commands"
+            else after.get("latest_artifacts")
+            if field == "artifact_references"
+            else after.get(field),
+        )
+        new_count += len(new)
+        missing_count += len(missing)
+        stable_count += len(same)
+    drift = payload.get("safety_drift") or []
+    changed_count = sum(
+        1
+        for change in payload.get("changes") or []
+        if change.get("field") not in list_fields and change.get("field") != "safety"
+    )
+    if include_stable and not only_changed:
+        stable_payload = payload.get("stable") or {}
+        scalar_stable = sum(1 for key in stable_payload if key not in list_fields)
+        stable_count += scalar_stable
+    payload["summary"] = {
+        **(payload.get("summary") or {}),
+        "new": new_count,
+        "resolved_or_missing": missing_count,
+        "changed": changed_count,
+        "stable": stable_count if include_stable and not only_changed else stable_count,
+        "safety_drift": len(drift),
+    }
+    return payload
 
 
 def export_interactive_summary(summary_ref: str, data_dir: Path) -> dict[str, Any]:
