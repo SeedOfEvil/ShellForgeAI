@@ -43,9 +43,13 @@ anything.
    - Brief/JSON forms: `shellforgeai status --brief` and `shellforgeai status --json`.
    - Underlying compatibility path: `shellforgeai ops report --brief` / `shellforgeai ops report`.
 2. **triage**
-   - Current commands: `shellforgeai triage docker`,
-     `shellforgeai triage docker detail <target>`, and
-     `shellforgeai diagnose <target>`.
+   - Second command: `shellforgeai triage`.
+   - Brief/JSON/detail forms: `shellforgeai triage --brief`,
+     `shellforgeai triage --json`, and `shellforgeai triage --target <target>`.
+   - Underlying compatibility path: `shellforgeai triage docker` and
+     `shellforgeai triage docker detail <target>`. The V2 entrypoint remains
+     read-only, ranks suspects deterministically, and prints the first safe
+     inspection command.
 3. **propose**
    - Future V2 command family, not implemented here.
    - Planned artifact fields: issue, evidence, proposed fix, risk, blast radius,
@@ -69,7 +73,7 @@ receipts, and validation reports.
 | V2 job | Current command family | Contract |
 |---|---|---|
 | Status | `status`, `status --brief`, `status --json`; compatibility: `ops report --brief`, `ops report` | CORE / READ_ONLY first operator posture. |
-| Triage | `triage docker`, `triage docker detail <target>`, `diagnose <target>` | Read-only deterministic collectors before synthesis. |
+| Triage | `triage`, `triage --brief`, `triage --json`, `triage --target <target>`; compatibility: `triage docker`, `triage docker detail <target>` | Read-only deterministic suspect ranking and first-safe-command flow before any proposal/remediation lane. |
 | Propose | Future V2 proposal command | Deterministic proposal artifact; no execution. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
 | Apply preview | Future V2 apply-preview command | Non-executing bundle only. |

@@ -31,6 +31,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "v1 check standard",
     "v1 check --profile quick --json",
     "v1 check --profile standard --json",
+    "triage",
+    "triage --brief",
+    "triage --json",
+    "triage --target <target>",
     "triage docker",
     "triage docker --json",
     "triage docker detail <target>",
@@ -84,6 +88,9 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
         "compare-latest",
         "--json",
     ),
+    ("triage",): ("triage",),
+    ("triage", "--brief"): ("triage", "--brief"),
+    ("triage", "--json"): ("triage", "--json"),
     ("triage", "docker"): ("triage", "docker"),
     ("triage", "docker", "--json"): ("triage", "docker", "--json"),
     ("status",): ("status",),
@@ -204,6 +211,13 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
     tokens = tuple(part.lower() for part in original_tokens)
     if tokens in _ALLOWED_CLI_DISPATCH:
         return RoutedCommand(name="cli_dispatch", args=raw, argv=_ALLOWED_CLI_DISPATCH[tokens])
+    if len(tokens) in {3, 4} and tokens[:2] == ("triage", "--target") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("triage", "--target", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     if len(tokens) in {4, 5} and tokens[:3] == ("triage", "docker", "detail") and tokens[3]:
         json_flag = len(tokens) == 5 and tokens[4] == "--json"
         if len(tokens) == 4 or json_flag:

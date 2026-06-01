@@ -3,8 +3,10 @@
 ## V2 2AM golden path
 
 1. `shellforgeai status` — read-only concise status; no model call and no mutation.
-2. `shellforgeai triage docker detail <top-suspect>` — inspect the top suspect from status.
-3. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
+2. `shellforgeai triage` — read-only ranked suspect view with first safe command.
+3. `shellforgeai triage --target <target>` — inspect one suspect without mutation.
+4. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
+5. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
 
 
 ## V1 canonical operator path (knife, not toolbox)
@@ -38,15 +40,16 @@ Use this concise, safe path for the V1 demo and handoff contract:
 4. `shellforgeai v1 check --profile quick`
 5. `shellforgeai remediation self-test --profile quick`
 6. `shellforgeai status`
-7. `shellforgeai triage docker detail <top-suspect>`
-8. `shellforgeai ops report --save`
-9. `shellforgeai ops report history --limit 5`
-10. `shellforgeai ops report compare-latest`
-11. `shellforgeai remediation eligibility --target <target> --explain`
-12. `shellforgeai ask "It's 2AM; what is on fire?"`
-13. Pressure-mode quick status: `shellforgeai status` / `shellforgeai status --brief` or `shellforgeai ask "quick status"`
-14. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
-15. `shellforgeai ask "show me the command to inspect sfai-crashloop"` (command-help: returns the read-only `shellforgeai triage docker detail sfai-crashloop` with `No action was taken.`; nothing is executed)
+7. `shellforgeai triage`
+8. `shellforgeai triage --target <target>`
+9. `shellforgeai remediation eligibility --target <target> --explain`
+10. `shellforgeai ops report --save`
+11. `shellforgeai ops report history --limit 5`
+12. `shellforgeai ops report compare-latest`
+13. `shellforgeai ask "It's 2AM; what is on fire?"`
+14. Pressure-mode quick status: `shellforgeai status` / `shellforgeai status --brief` or `shellforgeai ask "quick status"`
+15. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
+16. `shellforgeai ask "show me the command to inspect sfai-crashloop"` (command-help: returns the read-only `shellforgeai triage docker detail sfai-crashloop` with `No action was taken.`; nothing is executed)
 
 Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path. Command-help ("show me the command ...", "how would I propose ...") explains safe commands without running them; "do it" / "run that" mutation phrasings are refused.
 
