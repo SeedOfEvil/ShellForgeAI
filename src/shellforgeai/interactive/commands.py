@@ -19,6 +19,9 @@ _SAFE_SUGGESTION_COMMANDS = (
     "version",
     "doctor",
     "model doctor",
+    "status",
+    "status --brief",
+    "status --json",
     "ops report",
     "ops report --brief",
     "ops report --json",
@@ -44,6 +47,7 @@ _SAFE_SUGGESTION_COMMANDS = (
 _COMMAND_LIKE_STARTS = (
     "ops",
     "op",
+    "status",
     "report",
     "triage",
     "trage",
@@ -82,7 +86,9 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ),
     ("triage", "docker"): ("triage", "docker"),
     ("triage", "docker", "--json"): ("triage", "docker", "--json"),
-    ("status",): ("ops", "report"),
+    ("status",): ("status",),
+    ("status", "--brief"): ("status", "--brief"),
+    ("status", "--json"): ("status", "--json"),
 }
 
 for _profile in _SAFE_PROFILES:
@@ -380,7 +386,7 @@ def route_input(text: str) -> RoutedCommand:
     if any(phrase in lowered or phrase in raw_lower for phrase in _QUICK_MUTATION_PHRASES):
         return RoutedCommand(name="mutation_refused", args=raw)
     if any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_PHRASES):
-        return RoutedCommand(name="cli_dispatch", args=raw, argv=("ops", "report", "--brief"))
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("status", "--brief"))
     storage_perf_intents = [
         "i think my disk is slow",
         "disk is slow",

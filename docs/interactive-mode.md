@@ -82,7 +82,7 @@ Debug
 
 Type `help`, `/help`, `?`, `commands`, or `what can I do?` inside the REPL to
 show a short operator help screen. The help lists exact interactive-supported
-forms for fast status (`ops report --brief`, `v1 check quick`, `doctor`),
+forms for fast status (`status`, `status --brief`, `status --json`, `ops report --brief`, `v1 check quick`, `doctor`),
 Docker triage (`triage docker detail <target>`), reports/artifacts (`ops report
 history --limit 5`, `ops report compare-latest`), safe remediation readiness
 (`remediation eligibility --target <target> --explain`), and session follow-ups
@@ -112,6 +112,8 @@ Docker/Compose, cleanup, remediation, rollback, or restart commands.
 Example:
 
 ```text
+sfai> status
+sfai> status --json
 sfai> ops report --brief
 sfai> /summary
 Session summary: read-only inspection session.
@@ -207,8 +209,9 @@ read-only or safety/readiness handlers:
 
 - `version`, `doctor`, `model doctor`
 - `v1 check quick|standard|full` and `v1 check --profile quick|standard|full [--json]`
+- `status`, `status --brief`, and `status --json` for the V2 read-only golden-path entrypoint.
 - `ops report`, `ops report --brief`, `ops report --json`, `ops report --save`, `ops report history`, `ops report history --limit 5`, `ops report compare-latest`, and `ops report compare-latest --json`
-  - Pressure phrases such as `no novel`, `quick status`, and `what is on fire, keep it short` dispatch to the same read-only brief ops report shape.
+  - Pressure phrases such as `no novel`, `quick status`, and `what is on fire, keep it short` dispatch to the same read-only brief status / ops report shape.
 - `triage docker [--json]`, `triage docker detail <target>`, and `triage docker detail <target> --json`
 - `diagnose <target>` through the existing read-only diagnose route
 - `remediation self-test quick|standard|full` and `remediation self-test --profile quick|standard|full [--json]`

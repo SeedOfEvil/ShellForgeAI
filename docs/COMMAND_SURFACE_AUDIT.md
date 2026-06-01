@@ -47,7 +47,7 @@ and rerouted to safe inspection.
 
 ## V2 golden path summary
 
-1. **Status** — `shellforgeai ops report --brief`, then `shellforgeai ops report`.
+1. **Status** — `shellforgeai status`, then `shellforgeai status --brief` or the underlying `shellforgeai ops report` compatibility path.
 2. **Triage** — `shellforgeai triage docker`, `shellforgeai triage docker detail <target>`, and `shellforgeai diagnose <target>`.
 3. **Proposal** — future deterministic proposal artifact, not implemented here:
 issue, evidence, proposed fix, risk, blast radius, rollback, validation.
@@ -65,7 +65,8 @@ and validation commands.
 | `shellforgeai doctor` | CORE | Active | READ_ONLY | Status | Runtime health baseline and quick sanity check. |
 | `shellforgeai model doctor` | CORE | Active | READ_ONLY | Status | Provider diagnostics; synthesis-only model posture. |
 | `shellforgeai v1 check` | CORE | Active | READ_ONLY / ARTIFACT_WRITE for full validation artifacts | Status/readiness | V1 readiness remains a compatibility confidence gate during V2. |
-| `shellforgeai ops report --brief` | CORE | Active | READ_ONLY | Status | First pressure-mode command. |
+| `shellforgeai status` | CORE | Active | READ_ONLY | Status | First V2 golden-path entrypoint; concise wrapper around the ops report ranking path, with `--brief` and strict `--json`. |
+| `shellforgeai ops report --brief` | CORE / ALIAS / COMPATIBILITY | Active | READ_ONLY | Status | Underlying pressure-mode command kept for compatibility; `status --brief` mirrors it. |
 | `shellforgeai ops report` | CORE | Active | READ_ONLY | Status | Evidence-backed operator report view. |
 | `shellforgeai ops report save/validate/history/compare/export` | CORE | Active | READ_ONLY / ARTIFACT_WRITE | Verify/handoff | Preserves, validates, compares, and exports operator reports. Current spellings include `--save`, `validate`, `history`, `compare`, `compare-latest`, `export`, `export-validate`, and `compare-export`. |
 | `shellforgeai triage docker` | CORE | Active | READ_ONLY | Triage | Deterministic Docker suspect ranking. |

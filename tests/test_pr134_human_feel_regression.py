@@ -447,8 +447,8 @@ def test_human_feel_classifier_table_covers_command_help_and_mutation_nuance() -
 
 
 def test_route_input_pressure_and_paste_guard_table() -> None:
-    assert route_input("no novel, give me status").argv == ("ops", "report", "--brief")
-    assert route_input("quick status only").argv == ("ops", "report", "--brief")
+    assert route_input("no novel, give me status").argv == ("status", "--brief")
+    assert route_input("quick status only").argv == ("status", "--brief")
     assert route_input("restart it now").name == "mutation_refused"
     assert route_input("rm -rf /").name == "mutation_refused"
     assert route_input("sudo reboot").name == "mutation_refused"

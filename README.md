@@ -190,6 +190,8 @@ The CLI is exposed as both `shellforgeai` and `sfai`.
 ## Quick start
 
 ```bash
+shellforgeai status
+shellforgeai status --json
 shellforgeai doctor
 shellforgeai model doctor
 shellforgeai ops status

@@ -76,9 +76,9 @@ Session:
   exit / /exit
 
 Fast status:
+  status [--brief|--json]
   ops report --brief
-  ops report
-  ops report --json
+  ops report / ops report --json
   v1 check quick
   v1 check --profile quick --json
   doctor
@@ -1622,6 +1622,7 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("version",): "Running version...",
     ("doctor",): "Running doctor...",
     ("model", "doctor"): "Running model doctor...",
+    ("status",): "Running read-only status...",
     ("ops", "report"): "Running read-only ops report...",
     ("ops", "report", "history"): "Running read-only ops report history...",
     ("ops", "report", "compare-latest"): "Running read-only ops report compare-latest...",
@@ -1694,6 +1695,7 @@ def _interactive_mutation_refusal(text: str) -> str:
         "ShellForgeAI interactive mode does not execute Docker/Compose, cleanup, "
         "remediation, rollback, apply, or restart commands.\n"
         "Safe read-only alternatives:\n"
+        "- status\n"
         "- ops report\n"
         "- triage docker\n"
         "- triage docker detail <target>\n"
@@ -1796,7 +1798,11 @@ def _record_cli_dispatch_in_session_summary(
     output: str,
     grounding: FollowupGroundingState,
 ) -> None:
-    if argv[:2] == ("ops", "report"):
+    if argv[:1] == ("status",):
+        state.note_check("status")
+        if "--brief" in argv:
+            state.note_finding("brief status reviewed")
+    elif argv[:2] == ("ops", "report"):
         state.note_check("ops report")
         if "--brief" in argv:
             state.note_finding("brief ops report reviewed")
@@ -1870,6 +1876,8 @@ def _first_safe_summary_command(state: InteractiveSessionSummaryState) -> str:
         "storage_performance",
     }:
         return f"shellforgeai remediation eligibility --target {state.latest_target} --explain"
+    if any(check == "status" for check in state.checks):
+        return "shellforgeai status --json"
     if any(check == "ops report" for check in state.checks):
         return "shellforgeai ops report --json"
     return "shellforgeai ops report --brief"
