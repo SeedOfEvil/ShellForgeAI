@@ -1,4 +1,13 @@
 
+## PR143 command surface audit
+
+PR143 adds the command-surface audit and V2 anti-bloat map for the planning
+lane. It documents command classifications, the V2 golden path, support and
+governed lanes, compatibility/deprecation candidates, and explicit non-goals
+without changing runtime behavior. See [`COMMAND_SURFACE_AUDIT.md`](COMMAND_SURFACE_AUDIT.md)
+and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
+
+
 ## V1 hardening lane (PR110)
 
 - Define and publish the V1 contract (scope, non-goals, safety boundary).
