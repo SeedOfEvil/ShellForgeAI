@@ -50,6 +50,7 @@ ShellForgeAI-owned artifacts, and whether it can mutate Docker/system state.
 | `shellforgeai triage` | V2 deterministic suspect ranking entrypoint | READ_ONLY | No | No | Shows top suspect, evidence summary, and first safe command; no remediation execution. |
 | `shellforgeai triage --target <target>` | V2 deterministic suspect detail | READ_ONLY | No | No | Wraps Docker triage detail with first safe eligibility command. |
 | `shellforgeai triage docker` | Deterministic suspect ranking compatibility path | READ_ONLY | No | No | No remediation execution. |
+| `shellforgeai triage docker --brief` | Safe alias mirroring `triage --brief` | READ_ONLY | No | No | Bounded brief triage view; no mutation. |
 | `shellforgeai triage docker detail <target>` | Deterministic deep detail | READ_ONLY | No | No | Container-focused evidence detail. |
 | `shellforgeai ops report` | Operator report synthesis | READ_ONLY | No | No | Evidence-backed report view. |
 | `shellforgeai ops report history` | Report history view | READ_ONLY | No | No | Reads saved artifacts only. |

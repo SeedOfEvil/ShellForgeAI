@@ -3,10 +3,16 @@
 ## V2 2AM golden path
 
 1. `shellforgeai status` — read-only concise status; no model call and no mutation.
-2. `shellforgeai triage` — read-only ranked suspect view with first safe command.
-3. `shellforgeai triage --target <target>` — inspect one suspect without mutation.
+2. `shellforgeai triage --brief` — bounded read-only ranked suspect view with the first safe command.
+3. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
 4. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
 5. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
+
+`shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
+`shellforgeai triage docker` / `triage docker --brief` views all share the same
+read-only safety wording. When there are no suspects, the first safe command is a
+read-only status/report command (`shellforgeai status --json`), never a detail
+command for a missing suspect.
 
 
 ## V1 canonical operator path (knife, not toolbox)

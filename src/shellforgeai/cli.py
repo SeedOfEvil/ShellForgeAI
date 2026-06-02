@@ -3310,7 +3310,9 @@ def diagnose(
             f"- runbook: {runbook_path if runbook_path.exists() else 'not-saved'}\n"
             f"- runbook json: {runbook_json_path if runbook_json_path.exists() else 'not-saved'}"
         )
-        console.print(summary)
+        # soft_wrap keeps long artifact paths on one line instead of letting Rich
+        # hard-wrap them mid-token at narrow terminal widths.
+        console.print(summary, soft_wrap=True)
 
 
 @app.command()
@@ -8428,8 +8430,8 @@ def _render_broad_triage_answer(payload: dict[str, Any]) -> str:
     if not suspects:
         lines.append("No suspects ranked from current scene.")
         lines.append("Try a fresh read-only check:")
-        lines.append("- shellforgeai triage docker --json")
-        lines.append("- shellforgeai triage docker --json")
+        lines.append("- shellforgeai status --json")
+        lines.append("- shellforgeai triage --json")
         lines.append("")
     for s in suspects:
         rank = s.get("rank", "?")
@@ -8752,9 +8754,23 @@ def _v2_evidence_summary(suspect: dict[str, Any]) -> str:
     return "; ".join(parts) if parts else "ranked by deterministic read-only triage"
 
 
+def _v2_triage_risk_label(payload: dict[str, Any]) -> str:
+    """Render the consistent V2 risk line shared across triage views."""
+    suspects = payload.get("suspects") if isinstance(payload.get("suspects"), list) else []
+    if not suspects:
+        return "no current Docker suspects"
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    critical = int(summary.get("critical", 0) or 0)
+    high = int(summary.get("high", 0) or 0)
+    return f"{critical} critical, {high} high suspects"
+
+
 def _render_v2_triage_human(payload: dict[str, Any]) -> str:
     suspects = payload.get("suspects") if isinstance(payload.get("suspects"), list) else []
-    lines: list[str] = []
+    lines: list[str] = [
+        f"Status: {'degraded' if suspects else 'OK'}",
+        f"Risk: {_v2_triage_risk_label(payload)}",
+    ]
     if not suspects:
         lines.extend(
             [
@@ -9384,31 +9400,50 @@ def _is_status_ask(question: str) -> bool:
     )
 
 
-def _is_v2_triage_ask(question: str) -> bool:
-    q = " ".join((question or "").strip().lower().rstrip("?.!").split())
+_V2_TRIAGE_ASK_EXACT = {
+    "triage",
+    "triage this",
+    "show triage",
+    "what is the likely suspect",
+    "what is broken",
+    "what should i inspect first",
+}
+
+# Brief cues let pressure phrasing ("quick triage", "no novel, triage") render
+# the bounded brief view instead of the full deterministic triage answer.
+_V2_TRIAGE_BRIEF_CUES = ("quick", "no novel", "brief", "fast")
+
+
+def _v2_triage_ask_kind(question: str) -> str | None:
+    """Classify a deterministic V2 triage ask as ``"brief"``, ``"full"``, or None."""
+    q = " ".join(re.sub(r"[^a-z0-9 ]+", " ", (question or "").lower()).split())
     if not q:
-        return False
-    exact = {
-        "triage",
-        "triage this",
-        "what is the likely suspect",
-        "what is broken",
-        "what should i inspect first",
-    }
-    if q in exact:
-        return True
-    return "likely suspect" in q
+        return None
+    brief = any(cue in q for cue in _V2_TRIAGE_BRIEF_CUES)
+    if q in _V2_TRIAGE_ASK_EXACT or "likely suspect" in q:
+        return "brief" if brief else "full"
+    if "triage" in q.split() and brief:
+        return "brief"
+    return None
+
+
+def _is_v2_triage_ask(question: str) -> bool:
+    return _v2_triage_ask_kind(question) is not None
 
 
 def _handle_v2_triage_ask(question: str) -> bool:
     if is_triage_mutation_intent(question):
         return False
-    if not _is_v2_triage_ask(question):
+    kind = _v2_triage_ask_kind(question)
+    if kind is None:
         return False
     payload = _build_v2_triage_payload()
     console.print("Read-only triage (deterministic ask routing):")
     console.print("")
-    console.print(_render_v2_triage_human(payload), end="")
+    if kind == "brief":
+        console.print(_render_v2_triage_brief(payload), end="")
+    else:
+        console.print(_render_v2_triage_human(payload), end="")
     return True
 
 
@@ -11681,6 +11716,10 @@ def triage(
 def triage_docker(
     ctx: typer.Context,
     json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    brief: Annotated[
+        bool,
+        typer.Option("--brief", help="Mirror the V2 brief triage view (read-only)."),
+    ] = False,
 ) -> None:
     """PR81 read-only Docker triage ranking ("scene awareness").
 
@@ -11689,6 +11728,10 @@ def triage_docker(
     noisy errors, bad HTTP, disk pressure, permission denied, high-CPU watch),
     and prints evidence/why/safe-next-command per suspect. Never restarts,
     stops, removes, prunes, or otherwise mutates anything.
+
+    ``--brief`` is a PR146 compatibility alias that mirrors the bounded
+    ``shellforgeai triage --brief`` view so operators get one consistent
+    brief shape regardless of which entrypoint they reach for.
     """
     from shellforgeai.core.triage_ranking import (
         collect_scene,
@@ -11698,6 +11741,13 @@ def triage_docker(
 
     if ctx.invoked_subcommand is not None:
         return
+
+    if brief:
+        # Compatibility alias: mirror the V2 top-level brief triage view so
+        # `triage docker --brief` never feels staler than `triage --brief`.
+        typer.echo(_render_v2_triage_brief(_build_v2_triage_payload()), nl=False)
+        return
+
     scene = collect_scene()
     payload = rank_scene(scene)
 
