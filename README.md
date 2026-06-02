@@ -116,13 +116,18 @@ asks deterministically, and refuses or gates mutation.
 ### What this is (V1)
 
 - Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
-- V2 read-only status, triage, propose, and apply-preview entrypoints (`status`,
-  `triage`, `triage --target <target>`, `propose`, `propose --target <target>`,
-  `apply-preview`, `apply-preview --target <target>`) backed by deterministic
-  Docker triage compatibility commands (`triage docker`, `triage docker detail
-  <target>`). `propose` is preview-only: no plan artifact and no action
-  executed. `apply-preview` is an execution-boundary preview only: no apply,
-  mission, remediation, rollback, cleanup, Docker, or Compose action executes.
+- V2 read-only status, triage, propose, apply-preview, and verify entrypoints
+  (`status`, `triage`, `triage --target <target>`, `propose`, `propose --target
+  <target>`, `apply-preview`, `apply-preview --target <target>`, `verify`,
+  `verify --target <target>`) backed by deterministic Docker triage
+  compatibility commands (`triage docker`, `triage docker detail <target>`).
+  `propose` is preview-only: no plan artifact and no action executed.
+  `apply-preview` is an execution-boundary preview only: no apply, mission,
+  remediation, rollback, cleanup, Docker, or Compose action executes. `verify`
+  is a read-only current-state verification: it does not assume an
+  apply/remediation happened, creates no receipt, and proves no completed
+  remediation without a future receipt/artifact. Golden path:
+  `status -> triage -> propose -> apply-preview -> verify`.
 - Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
   `--save`, `history`, `compare`, `compare-latest`, `export`,
   `export-validate`, `validate`).
@@ -157,6 +162,8 @@ shellforgeai propose
 shellforgeai propose --target <target>
 shellforgeai apply-preview
 shellforgeai apply-preview --target <target>
+shellforgeai verify
+shellforgeai verify --target <target>
 shellforgeai triage --target <target>
 shellforgeai triage docker detail <target>  # compatibility detail path
 shellforgeai remediation eligibility --target <target> --explain
@@ -179,9 +186,10 @@ shellforgeai remediation self-test --profile full
 7. `shellforgeai triage`
 8. `shellforgeai propose`
 9. `shellforgeai apply-preview`
-10. `shellforgeai triage --target <target>` (compatibility: `shellforgeai triage docker detail <target>`)
-11. `shellforgeai remediation eligibility --target <target> --explain`
-12. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
+10. `shellforgeai verify`
+11. `shellforgeai triage --target <target>` (compatibility: `shellforgeai triage docker detail <target>`)
+12. `shellforgeai remediation eligibility --target <target> --explain`
+13. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
 
 Safety promise: V1 is read-only by default, deterministic ask routes do not
 require model availability for safety/refusal paths, and production mutation is

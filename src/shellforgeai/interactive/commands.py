@@ -43,6 +43,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "apply-preview --brief",
     "apply-preview --json",
     "apply-preview --target <target>",
+    "verify",
+    "verify --brief",
+    "verify --json",
+    "verify --target <target>",
     "triage docker",
     "triage docker --brief",
     "triage docker --json",
@@ -66,6 +70,7 @@ _COMMAND_LIKE_STARTS = (
     "trage",
     "propose",
     "apply-preview",
+    "verify",
     "v1",
     "doctor",
     "model",
@@ -120,6 +125,21 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("apply-preview", "--from-triage", "--json"): (
         "apply-preview",
         "--from-triage",
+        "--json",
+    ),
+    ("verify",): ("verify",),
+    ("verify", "--brief"): ("verify", "--brief"),
+    ("verify", "--json"): ("verify", "--json"),
+    ("verify", "--from-status"): ("verify", "--from-status"),
+    ("verify", "--from-status", "--json"): ("verify", "--from-status", "--json"),
+    ("verify", "--from-triage"): ("verify", "--from-triage"),
+    ("verify", "--from-triage", "--json"): ("verify", "--from-triage", "--json"),
+    ("verify", "--from-propose"): ("verify", "--from-propose"),
+    ("verify", "--from-propose", "--json"): ("verify", "--from-propose", "--json"),
+    ("verify", "--from-apply-preview"): ("verify", "--from-apply-preview"),
+    ("verify", "--from-apply-preview", "--json"): (
+        "verify",
+        "--from-apply-preview",
         "--json",
     ),
     ("triage", "docker"): ("triage", "docker"),
@@ -262,6 +282,13 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("verify", "--target") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("verify", "--target", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     if len(tokens) in {3, 4} and tokens[:2] == ("triage", "--target") and tokens[2]:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
@@ -373,6 +400,78 @@ def _dispatch_dangerous_command(raw: str) -> RoutedCommand | None:
     return None
 
 
+_INTERACTIVE_VERIFY_CUES = (
+    "verify status",
+    "verify the system",
+    "verify system",
+    "verify docker",
+    "verify current state",
+    "verify the current state",
+    "did anything improve",
+    "did the issue clear",
+    "did it clear",
+    "is it fixed",
+    "is the issue fixed",
+    "is it resolved",
+)
+_INTERACTIVE_VERIFY_MUTATION_TOKENS = (
+    "restart",
+    "fix it",
+    "fix the",
+    "apply",
+    "execute",
+    "clean up",
+    "cleanup",
+    "compose",
+    "remediate",
+    "rollback",
+    "recreate",
+    "bounce",
+    "kick",
+)
+_INTERACTIVE_VERIFY_TARGET_RE = re.compile(
+    r"\bverify\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+    flags=re.IGNORECASE,
+)
+_INTERACTIVE_VERIFY_STOPWORDS = {
+    "status",
+    "system",
+    "docker",
+    "current",
+    "state",
+    "the",
+    "top",
+    "suspect",
+    "and",
+    "then",
+    "this",
+    "everything",
+    "it",
+}
+
+
+def _is_interactive_verify_intent(lowered: str) -> bool:
+    if not lowered:
+        return False
+    if "verify" in lowered.split():
+        return True
+    return any(cue in lowered for cue in _INTERACTIVE_VERIFY_CUES)
+
+
+def _interactive_verify_has_mutation(lowered: str) -> bool:
+    return any(token in lowered for token in _INTERACTIVE_VERIFY_MUTATION_TOKENS)
+
+
+def _interactive_verify_target(raw: str) -> str | None:
+    m = _INTERACTIVE_VERIFY_TARGET_RE.search(raw or "")
+    if not m:
+        return None
+    candidate = m.group(1)
+    if candidate.lower() in _INTERACTIVE_VERIFY_STOPWORDS:
+        return None
+    return candidate
+
+
 def _normalize_intent_text(text: str) -> str:
     lowered = re.sub(r"[^a-z0-9/\s]", " ", text.lower())
     lowered = re.sub(r"\s+", " ", lowered).strip()
@@ -443,6 +542,14 @@ def route_input(text: str) -> RoutedCommand:
     dangerous_dispatch = _dispatch_dangerous_command(raw)
     if dangerous_dispatch is not None:
         return dangerous_dispatch
+    verify_lowered = _normalize_intent_text(raw)
+    if _is_interactive_verify_intent(verify_lowered):
+        if _interactive_verify_has_mutation(verify_lowered):
+            return RoutedCommand(name="mutation_refused", args=raw)
+        target = _interactive_verify_target(raw)
+        if target:
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=("verify", "--target", target))
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("verify",))
     if _is_command_like_unknown(raw):
         return RoutedCommand(name="unknown_command", args=raw, argv=suggest_safe_commands(raw))
 

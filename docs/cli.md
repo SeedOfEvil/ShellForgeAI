@@ -1234,6 +1234,26 @@ shellforgeai apply-preview --from-propose
 shellforgeai apply-preview --target sfai-crashloop
 ```
 
+### `shellforgeai verify`
+
+V2 golden-path fifth command. `shellforgeai verify` is a deterministic, read-only current-state verification after `apply-preview`. It inspects current deterministic status/triage evidence and reports whether the observed state looks ok/degraded/blocked/unknown. It does **not** confirm that an action was executed, create an execution/apply receipt, perform remediation, restart a container, call Docker/Compose, write artifacts, call the model/Codex, or use shell execution. It proves no completed remediation unless a future receipt/artifact is supplied.
+
+- `shellforgeai verify` reports `ok` when there are no current Docker suspects and `degraded` when deterministic triage ranks suspects, pointing first at a read-only status/triage JSON command.
+- `shellforgeai verify --brief` emits a bounded operator view: verify state, status, first safe command, and safety.
+- `shellforgeai verify --json` emits strict JSON only with `mode: "v2_verify"`, `verification_type: "current_state"`, `read_only: true`, `mutation_performed: false`, `applied_action_assumed: false`, `apply_receipt_present: false`, and execution safety fields for apply, mission, plan, remediation, rollback, cleanup, Docker/Compose, container restart, `shell_true`, arbitrary command execution, natural-language execution, and model calls.
+- `shellforgeai verify --target <target>` verifies one exact target's current state. Unknown/not-visible targets return `unknown` (target not found in the current deterministic triage scene); production-like targets such as `shellforgeai` are verified read-only with no restart/remediation suggested.
+- `shellforgeai verify --from-status`, `--from-triage`, `--from-propose`, and `--from-apply-preview` use current deterministic evidence. None of them assume an apply/proposal happened; `--from-apply-preview` explicitly states that no apply receipt was provided and verifies current observed state only.
+
+Examples:
+
+```bash
+shellforgeai verify
+shellforgeai verify --brief
+shellforgeai verify --json
+shellforgeai verify --target sfai-crashloop
+shellforgeai verify --from-apply-preview
+```
+
 - `shellforgeai ops report`
 - `shellforgeai ops report --brief` renders a compact, read-only, human-only pressure-mode view: status, risk, top issue/evidence, exactly one first safe command, and a safety line. Combine with `--json` to keep the existing strict JSON output; `--brief` does not add human prose in JSON mode.
 - `shellforgeai ops report --json`

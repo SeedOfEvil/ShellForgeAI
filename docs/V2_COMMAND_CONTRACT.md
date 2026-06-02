@@ -58,7 +58,7 @@ anything.
      <top>` from the compatibility path). With no suspects, the first safe
      command is a read-only status/report command (`shellforgeai status
      --json`) — never a detail command for a suspect that does not exist.
-   - Golden path: `status -> triage -> propose -> apply-preview`, with
+   - Golden path: `status -> triage -> propose -> apply-preview -> verify`, with
      `triage --target <target>` / `triage docker detail <target>` and gated
      `remediation eligibility --target <target> --explain` available as review
      drilldowns.
@@ -88,12 +88,27 @@ anything.
      create a mission, create an apply record, create a remediation receipt, run
      Docker/Compose, restart containers, write a plan artifact, call the model,
      or cross the execution boundary.
-5. **approve/gate**
+5. **verify**
+   - Fifth command: `shellforgeai verify`.
+   - Brief/JSON/target forms: `shellforgeai verify --brief`,
+     `shellforgeai verify --json`, `shellforgeai verify --target <target>`,
+     `shellforgeai verify --from-status`, `shellforgeai verify --from-triage`,
+     `shellforgeai verify --from-propose`, and `shellforgeai verify
+     --from-apply-preview`.
+   - Contract: read-only current-state verification only. It collects or reuses
+     deterministic read-only status/triage evidence, reports whether the
+     observed state looks ok/degraded/blocked/unknown, lists evidence and
+     limitations, and suggests the next safe read-only command. It does **not**
+     confirm that any action was executed, create an execution/apply receipt,
+     perform remediation, restart anything, run Docker/Compose, run shell
+     commands, call the model, or cross the execution boundary.
+   - Verify **does not prove an action was executed** unless given a future
+     receipt/artifact. When invoked with `--from-apply-preview` (or
+     `--from-propose`), it explicitly states that no apply receipt was provided
+     and verifies current observed state only.
+6. **approve/gate**
    - Future or existing governed policy gate flow, not expanded here.
    - Gate decisions must be explicit and auditable.
-6. **verify**
-   - Current commands include `shellforgeai ops report compare-latest`,
-`compare`, export validation commands, and artifact validation commands.
 7. **handoff/receipt**
    - Current support includes ops report exports, session summary artifacts,
 receipts, and validation reports.
@@ -106,8 +121,8 @@ receipts, and validation reports.
 | Triage | `triage`, `triage --brief`, `triage --json`, `triage --target <target>`; compatibility: `triage docker`, `triage docker --brief`, `triage docker detail <target>` | Read-only deterministic suspect ranking with consistent `Status:`/`Risk:`/`Safety:` wording and a first-safe-command flow before any proposal/remediation lane. |
 | Propose | `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --from-triage` | Read-only deterministic next-action proposal preview; no plan artifact and no execution. |
 | Apply preview | `apply-preview`, `apply-preview --brief`, `apply-preview --json`, `apply-preview --target <target>`, `apply-preview --from-propose`, `apply-preview --from-triage` | Read-only execution-boundary preview; no apply, mission, plan artifact, remediation receipt, Docker/Compose action, restart, shell, model call, or mutation. |
+| Verify | `verify`, `verify --brief`, `verify --json`, `verify --target <target>`, `verify --from-status`, `verify --from-triage`, `verify --from-propose`, `verify --from-apply-preview`; compatibility: `ops report compare/latest`, validation commands | Read-only current-state verification; assumes no apply/remediation, creates no receipt, and proves no completed remediation without a future receipt/artifact. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
-| Verify | `ops report compare/latest`, validation commands | Operator verifies with evidence and artifact deltas. |
 | Handoff | report export, session summary, receipts | Portable evidence and receipts without mutation. |
 
 ## Support commands

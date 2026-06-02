@@ -83,6 +83,7 @@ Fast status:
 
 V2 golden path:
   status / triage / propose [--brief|--json] / apply-preview [--brief|--json]
+  verify [--brief|--json] / verify --target <target> / verify --from-apply-preview
   triage --target <target>
   propose --target <target> [--json] / propose --from-triage
   apply-preview --target <target> [--json] / apply-preview --from-propose
@@ -110,10 +111,8 @@ Follow-ups/session:
   what happened in this session?
   what did you find? / get that info
   dig deeper / proceed
-  pending
-  /pending
-  exit
-  /exit
+  pending / /pending
+  exit / /exit
 
 Pressure mode:
   no novel, what is on fire?
@@ -1623,6 +1622,7 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("doctor",): "Running doctor...",
     ("model", "doctor"): "Running model doctor...",
     ("status",): "Running read-only status...",
+    ("verify",): "Running read-only current-state verification...",
     ("ops", "report"): "Running read-only ops report...",
     ("ops", "report", "history"): "Running read-only ops report history...",
     ("ops", "report", "compare-latest"): "Running read-only ops report compare-latest...",

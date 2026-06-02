@@ -6,9 +6,14 @@
 2. `shellforgeai triage --brief` — bounded read-only ranked suspect view with the first safe command.
 3. `shellforgeai propose` — read-only next-action proposal preview; no plan created and no action executed.
 4. `shellforgeai apply-preview` — read-only execution-boundary preview; no apply, mission, remediation, rollback, cleanup, Docker, Compose, or restart action executed.
-5. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
-6. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
-7. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
+5. `shellforgeai verify` — read-only current-state verification; does not assume an apply/remediation happened and creates no receipt.
+6. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
+7. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
+8. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
+
+Safe V2 path: `status -> triage -> propose -> apply-preview -> verify`. Every step
+is read-only; `verify` confirms current observed state only and never proves a
+completed remediation unless a future receipt/artifact is supplied.
 
 `shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
 `shellforgeai triage docker` / `triage docker --brief` views all share the same
@@ -51,17 +56,18 @@ Use this concise, safe path for the V1 demo and handoff contract:
 7. `shellforgeai triage`
 8. `shellforgeai propose`
 9. `shellforgeai apply-preview`
-10. `shellforgeai triage --target <target>`
-11. `shellforgeai remediation eligibility --target <target> --explain`
-12. `shellforgeai ops report --save`
-13. `shellforgeai ops report history --limit 5`
-14. `shellforgeai ops report compare-latest`
-15. `shellforgeai ask "It's 2AM; what is on fire?"`
-16. Pressure-mode quick status: `shellforgeai status` / `shellforgeai status --brief` or `shellforgeai ask "quick status"`
-17. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
-18. `shellforgeai ask "show me the command to inspect sfai-crashloop"` (command-help: returns the read-only `shellforgeai triage docker detail sfai-crashloop` with `No action was taken.`; nothing is executed)
+10. `shellforgeai verify`
+11. `shellforgeai triage --target <target>`
+12. `shellforgeai remediation eligibility --target <target> --explain`
+13. `shellforgeai ops report --save`
+14. `shellforgeai ops report history --limit 5`
+15. `shellforgeai ops report compare-latest`
+16. `shellforgeai ask "It's 2AM; what is on fire?"`
+17. Pressure-mode quick status: `shellforgeai status` / `shellforgeai status --brief` or `shellforgeai ask "quick status"`
+18. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
+19. `shellforgeai ask "show me the command to inspect sfai-crashloop"` (command-help: returns the read-only `shellforgeai triage docker detail sfai-crashloop` with `No action was taken.`; nothing is executed)
 
-Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path. Command-help ("show me the command ...", "how would I propose ...") and apply-preview prompts ("apply preview", "show apply gates") explain safe commands/gates without running them; "do it" / "run that" mutation phrasings are refused.
+Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path. Command-help ("show me the command ...", "how would I propose ...") and apply-preview prompts ("apply preview", "show apply gates") explain safe commands/gates without running them; verify prompts ("verify status", "did anything improve?") confirm current state only; "do it" / "run that" / "verify and restart" mutation phrasings are refused.
 
 Operator smoke tests and runbook tips.
 

@@ -236,6 +236,7 @@ read-only or safety/readiness handlers:
 - `triage`, `triage --brief`, `triage --json`, and `triage --target <target>` for the V2 read-only triage entrypoint.
 - `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --target <target> --json`, and `propose --from-triage` for the V2 read-only next-action proposal preview.
 - `apply-preview`, `apply-preview --brief`, `apply-preview --json`, `apply-preview --target <target>`, `apply-preview --target <target> --json`, and `apply-preview --from-propose` for the V2 read-only execution-boundary preview.
+- `verify`, `verify --brief`, `verify --json`, `verify --target <target>`, `verify --target <target> --json`, `verify --from-status`, `verify --from-triage`, `verify --from-propose`, and `verify --from-apply-preview` for the V2 read-only current-state verification. Verify never assumes an apply/remediation happened; natural-language verify prompts (`verify status`, `did anything improve?`) route to the same read-only verification, while mutation phrasing (`verify and restart`, `apply and verify`) is refused with `No action was taken.`
 - `triage docker`, `triage docker --brief` (safe alias for `triage --brief`), `triage docker --json`, `triage docker detail <target>`, and `triage docker detail <target> --json`
 - `diagnose <target>` through the existing read-only diagnose route
 - `remediation self-test quick|standard|full` and `remediation self-test --profile quick|standard|full [--json]`
