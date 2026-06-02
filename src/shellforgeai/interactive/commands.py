@@ -35,6 +35,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "triage --brief",
     "triage --json",
     "triage --target <target>",
+    "propose",
+    "propose --brief",
+    "propose --json",
+    "propose --target <target>",
     "triage docker",
     "triage docker --brief",
     "triage docker --json",
@@ -56,6 +60,7 @@ _COMMAND_LIKE_STARTS = (
     "report",
     "triage",
     "trage",
+    "propose",
     "v1",
     "doctor",
     "model",
@@ -92,6 +97,11 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("triage",): ("triage",),
     ("triage", "--brief"): ("triage", "--brief"),
     ("triage", "--json"): ("triage", "--json"),
+    ("propose",): ("propose",),
+    ("propose", "--brief"): ("propose", "--brief"),
+    ("propose", "--json"): ("propose", "--json"),
+    ("propose", "--from-triage"): ("propose", "--from-triage"),
+    ("propose", "--from-triage", "--json"): ("propose", "--from-triage", "--json"),
     ("triage", "docker"): ("triage", "docker"),
     ("triage", "docker", "--brief"): ("triage", "docker", "--brief"),
     ("triage", "docker", "--json"): ("triage", "docker", "--json"),
@@ -164,6 +174,11 @@ _QUICK_MUTATION_PHRASES = (
     "fast fix it",
     "fix it now",
     "just fix it",
+    "execute proposal",
+    "execute the proposal",
+    "apply proposal",
+    "apply the proposal",
+    "run the plan",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -213,6 +228,13 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
     tokens = tuple(part.lower() for part in original_tokens)
     if tokens in _ALLOWED_CLI_DISPATCH:
         return RoutedCommand(name="cli_dispatch", args=raw, argv=_ALLOWED_CLI_DISPATCH[tokens])
+    if len(tokens) in {3, 4} and tokens[:2] == ("propose", "--target") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("propose", "--target", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     if len(tokens) in {3, 4} and tokens[:2] == ("triage", "--target") and tokens[2]:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
@@ -399,6 +421,35 @@ def route_input(text: str) -> RoutedCommand:
 
     lowered = _normalize_intent_text(raw)
     raw_lower = raw.lower()
+    proposal_cues = (
+        "what would you propose",
+        "what should we propose",
+        "propose next step",
+        "what would you do next",
+        "what is the safe proposal",
+        "propose for the top suspect",
+        "show me the proposal",
+    )
+    if any(cue in lowered for cue in proposal_cues):
+        if any(
+            mut in lowered
+            for mut in ("restart it", "execute", "apply", "run the plan", "fix it", "do it")
+        ):
+            return RoutedCommand(name="ask", args=raw)
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("propose", "--from-triage"))
+    target_proposal = None
+    if "propose restart" not in lowered and "propose remediation" not in lowered:
+        target_proposal = re.search(
+            r"\bwhat\s+would\s+you\s+propose\s+for\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b|"
+            r"\bpropose\b.*\b(?:for|target)\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    if target_proposal:
+        target = next((g for g in target_proposal.groups() if g), "")
+        if target.lower() in {"the", "top", "suspect"}:
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=("propose", "--from-triage"))
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("propose", "--target", target))
     if any(phrase in lowered or phrase in raw_lower for phrase in _QUICK_MUTATION_PHRASES):
         return RoutedCommand(name="mutation_refused", args=raw)
     if any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_PHRASES):

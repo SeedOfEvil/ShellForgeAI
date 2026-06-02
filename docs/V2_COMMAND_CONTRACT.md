@@ -58,13 +58,22 @@ anything.
      <top>` from the compatibility path). With no suspects, the first safe
      command is a read-only status/report command (`shellforgeai status
      --json`) — never a detail command for a suspect that does not exist.
-   - Golden path: `status -> triage -> triage --target <target>` /
-     `triage docker detail <target>`, then gated
-     `remediation eligibility --target <target> --explain`.
+   - Golden path: `status -> triage -> propose`, with `triage --target <target>` /
+     `triage docker detail <target>` and gated `remediation eligibility --target <target> --explain`
+     available as review drilldowns.
 3. **propose**
-   - Future V2 command family, not implemented here.
-   - Planned artifact fields: issue, evidence, proposed fix, risk, blast radius,
-rollback, and validation.
+   - Third command: `shellforgeai propose`.
+   - Brief/JSON/target forms: `shellforgeai propose --brief`,
+     `shellforgeai propose --json`, `shellforgeai propose --target <target>`,
+     and `shellforgeai propose --from-triage`.
+   - Contract: read-only deterministic next-action preview only. It summarizes
+     likely target, evidence, eligibility, first safe command, and governed
+     review/plan-only command when applicable. It does not create a remediation
+     plan artifact and never executes cleanup, remediation, rollback,
+     Docker/Compose, restart, shell, or natural-language mutation.
+   - Eligible disposable targets may show `shellforgeai remediation plan ...` as
+     **Plan-only. Does not execute remediation.** Execute commands are never
+     shown from `propose`.
 4. **approve/gate**
    - Future or existing governed policy gate flow, not expanded here.
    - Gate decisions must be explicit and auditable.
@@ -85,7 +94,7 @@ receipts, and validation reports.
 |---|---|---|
 | Status | `status`, `status --brief`, `status --json`; compatibility: `ops report --brief`, `ops report` | CORE / READ_ONLY first operator posture. |
 | Triage | `triage`, `triage --brief`, `triage --json`, `triage --target <target>`; compatibility: `triage docker`, `triage docker --brief`, `triage docker detail <target>` | Read-only deterministic suspect ranking with consistent `Status:`/`Risk:`/`Safety:` wording and a first-safe-command flow before any proposal/remediation lane. |
-| Propose | Future V2 proposal command | Deterministic proposal artifact; no execution. |
+| Propose | `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --from-triage` | Read-only deterministic next-action proposal preview; no plan artifact and no execution. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
 | Apply preview | Future V2 apply-preview command | Non-executing bundle only. |
 | Verify | `ops report compare/latest`, validation commands | Operator verifies with evidence and artifact deltas. |

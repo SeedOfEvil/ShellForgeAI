@@ -1190,6 +1190,30 @@ V2 golden-path first command. `shellforgeai status` is a concise, deterministic,
 - `shellforgeai status --json` emits strict JSON only, including `mode: "status"`, `read_only: true`, `mutation_performed: false`, a `safety` block, and `first_safe_command`.
 - Status never saves reports; use `shellforgeai ops report --save` when an artifact is needed.
 
+
+### `shellforgeai propose`
+
+V2 golden-path third command. `shellforgeai propose` is a deterministic, read-only next-action proposal preview after status/triage. It does not call the model/Codex, does not write a remediation plan artifact, and does not execute cleanup, remediation, rollback, Docker/Compose, restart, shell, or natural-language mutation.
+
+- `shellforgeai propose` uses the current deterministic triage ranking. With no suspects, it reports that no proposal is needed and points to `shellforgeai status --json`.
+- `shellforgeai propose --brief` emits a bounded four-line operator preview: proposal state, target, first safe command, and safety.
+- `shellforgeai propose --json` emits strict JSON only with `mode: "v2_propose"`, `read_only: true`, `mutation_performed: false`, `plan_created: false`, and `remediation_executed: false`.
+- `shellforgeai propose --target <target>` previews one exact target. Unknown targets return controlled blocked/not-found output and suggest read-only triage/detail review.
+- `shellforgeai propose --from-triage` explicitly uses the current triage ranking and top suspect.
+- Eligible disposable/allowlisted targets may show `shellforgeai remediation plan --target <target> --scenario <scenario>` as **Plan-only. Does not execute remediation.** `propose` never prints remediation/rollback/cleanup execute commands.
+
+Examples:
+
+```bash
+shellforgeai status
+shellforgeai triage
+shellforgeai propose
+shellforgeai propose --brief
+shellforgeai propose --json
+shellforgeai propose --target sfai-crashloop
+shellforgeai propose --from-triage --json
+```
+
 - `shellforgeai ops report`
 - `shellforgeai ops report --brief` renders a compact, read-only, human-only pressure-mode view: status, risk, top issue/evidence, exactly one first safe command, and a safety line. Combine with `--json` to keep the existing strict JSON output; `--brief` does not add human prose in JSON mode.
 - `shellforgeai ops report --json`

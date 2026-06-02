@@ -91,6 +91,12 @@ Debug
   bounded read-only triage view; mutation phrasings tied to triage ("restart
   the top suspect", "fix the top suspect", "docker compose restart") are
   refused with no action taken.
+- Proposal entries (`propose`, `propose --brief`, `propose --json`,
+  `propose --target <target>`, `propose --target <target> --json`, and
+  `propose --from-triage`) route to the V2 read-only proposal preview. Natural
+  proposal prompts such as "what would you propose?" route deterministically to
+  the same read-only preview; mixed prompts like "show me the proposal and
+  restart it" show/refers to the preview and refuse the mutation part.
 
 
 ## Interactive help
@@ -228,6 +234,7 @@ read-only or safety/readiness handlers:
 - `ops report`, `ops report --brief`, `ops report --json`, `ops report --save`, `ops report history`, `ops report history --limit 5`, `ops report compare-latest`, and `ops report compare-latest --json`
   - Pressure phrases such as `no novel`, `quick status`, and `what is on fire, keep it short` dispatch to the same read-only brief status / ops report shape.
 - `triage`, `triage --brief`, `triage --json`, and `triage --target <target>` for the V2 read-only triage entrypoint.
+- `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --target <target> --json`, and `propose --from-triage` for the V2 read-only next-action proposal preview.
 - `triage docker`, `triage docker --brief` (safe alias for `triage --brief`), `triage docker --json`, `triage docker detail <target>`, and `triage docker detail <target> --json`
 - `diagnose <target>` through the existing read-only diagnose route
 - `remediation self-test quick|standard|full` and `remediation self-test --profile quick|standard|full [--json]`

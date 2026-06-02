@@ -8886,6 +8886,258 @@ def _render_v2_triage_detail_human(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _v2_propose_safety() -> dict[str, Any]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "plan_created": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "cleanup_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "natural_language_execution": False,
+        "model_called": False,
+    }
+
+
+def _scene_labels_for_target(
+    scene: dict[str, Any], target: str
+) -> tuple[dict[str, str] | None, bool]:
+    for row in scene.get("containers") or []:
+        if not isinstance(row, dict):
+            continue
+        names = {str(row.get("name") or "").lstrip("/")}
+        if row.get("names"):
+            raw_names = row.get("names")
+            if isinstance(raw_names, list):
+                names.update(str(n).lstrip("/") for n in raw_names)
+            else:
+                names.add(str(raw_names).lstrip("/"))
+        if target not in names:
+            continue
+        labels_raw = row.get("labels") if isinstance(row.get("labels"), dict) else {}
+        return {str(k): str(v) for k, v in labels_raw.items()}, True
+    return None, False
+
+
+def _target_suspect(ranked: dict[str, Any], target: str | None) -> dict[str, Any] | None:
+    suspects = ranked.get("suspects") if isinstance(ranked.get("suspects"), list) else []
+    if target is None:
+        return suspects[0] if suspects else None
+    for suspect in suspects:
+        if isinstance(suspect, dict) and str(suspect.get("name") or "") == target:
+            return suspect
+    return None
+
+
+def _eligibility_summary(report: dict[str, Any]) -> tuple[str, str]:
+    status = str(report.get("status") or "unknown")
+    eligibility = report.get("eligibility") if isinstance(report.get("eligibility"), dict) else {}
+    reasons = [str(r) for r in (eligibility.get("blocked_reasons") or []) if r]
+    if status == "ok" or eligibility.get("state") == "eligible_for_plan":
+        return "eligible", "eligible for plan — plan command is plan-only and does not execute"
+    if status == "not_found":
+        return "blocked", "blocked — target not found in current triage scene"
+    if reasons:
+        preferred = (
+            next((r for r in reasons if "production" in r), None)
+            or next((r for r in reasons if "allowlist" in r), None)
+            or reasons[0]
+        )
+        if preferred == "target missing allowlist labels":
+            preferred = "target missing allowlist label"
+        return "blocked", f"blocked — {preferred}"
+    return "unknown", "unknown — eligibility could not be established from current evidence"
+
+
+def _build_v2_propose_payload(
+    *, target: str | None = None, from_triage: bool = False, top: int = 5
+) -> dict[str, Any]:
+    from shellforgeai.core import triage_ranking
+    from shellforgeai.core.disposable_remediation import (
+        SUPPORTED_SCENARIO,
+        build_eligibility_explain_report,
+    )
+
+    scene = triage_ranking.collect_scene()
+    ranked = triage_ranking.rank_scene(scene)
+    suspects = list(ranked.get("suspects") or [])[:top]
+    selected = _target_suspect({**ranked, "suspects": suspects}, target)
+    safety = _v2_propose_safety()
+    base = {
+        "schema_version": 1,
+        "mode": "v2_propose",
+        "read_only": True,
+        "mutation_performed": False,
+        "plan_created": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "cleanup_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "natural_language_execution": False,
+        "model_called": False,
+        "from_triage": bool(from_triage),
+        "safety": safety,
+        "warnings": list(ranked.get("warnings") or []),
+    }
+    if selected is None and target is None:
+        return {
+            **base,
+            "status": "ok",
+            "proposal_status": "no_action_needed",
+            "target": None,
+            "evidence_summary": "no ranked suspects from current deterministic triage",
+            "eligibility": {"state": "not_applicable", "summary": "not applicable — no target"},
+            "first_safe_command": "shellforgeai status --json",
+            "next_governed_command": "",
+            "plan_only_command": "",
+            "not_executed": [
+                "no plan created",
+                "no remediation executed",
+                "no rollback executed",
+                "no cleanup executed",
+                "no Docker/Compose mutation",
+                "no model call",
+            ],
+        }
+
+    selected_name = target or str((selected or {}).get("name") or "")
+    labels, found_in_scene = _scene_labels_for_target(scene, selected_name)
+    target_known = selected is not None or found_in_scene
+    if not target_known:
+        return {
+            **base,
+            "status": "blocked",
+            "proposal_status": "not_found",
+            "target": selected_name,
+            "evidence_summary": "target not found in current deterministic triage scene",
+            "eligibility": {
+                "state": "blocked",
+                "summary": "blocked — target not found in current triage scene",
+                "blocked_reasons": ["target not found"],
+            },
+            "first_safe_command": "shellforgeai triage",
+            "next_governed_command": "",
+            "plan_only_command": "",
+            "review_commands": [
+                "shellforgeai triage",
+                f"shellforgeai triage docker detail {selected_name}",
+            ],
+            "not_executed": ["no plan created", "no action executed"],
+        }
+
+    if labels is None:
+        labels = {}
+    explain = build_eligibility_explain_report(
+        target=selected_name,
+        scenario=SUPPORTED_SCENARIO,
+        labels=labels,
+        target_found=target_known,
+        explicit_target=bool(target),
+    )
+    eligibility_state, eligibility_text = _eligibility_summary(explain)
+    evidence_summary = _v2_evidence_summary(selected or {})
+    plan_only_command = str(explain.get("suggested_plan_command") or "")
+    return {
+        **base,
+        "status": "proposal_available" if eligibility_state == "eligible" else "blocked",
+        "proposal_status": "available" if eligibility_state == "eligible" else "blocked",
+        "target": selected_name,
+        "likely_target": selected_name,
+        "evidence_summary": evidence_summary,
+        "evidence": list((selected or {}).get("evidence") or []),
+        "eligibility": {
+            "state": eligibility_state,
+            "summary": eligibility_text,
+            "details": explain.get("eligibility") or {},
+            "target": explain.get("target") or {},
+        },
+        "first_safe_command": triage_detail_command(selected_name),
+        "next_governed_command": remediation_eligibility_explain_command(selected_name),
+        "plan_only_command": plan_only_command,
+        "plan_only_note": "Plan-only. Does not execute remediation." if plan_only_command else "",
+        "not_executed": [
+            "no plan created",
+            "no remediation executed",
+            "no rollback executed",
+            "no cleanup executed",
+            "no Docker/Compose mutation",
+            "no action executed",
+            "no model call",
+        ],
+    }
+
+
+def _render_v2_propose_human(payload: dict[str, Any]) -> str:
+    target = payload.get("target")
+    if payload.get("proposal_status") == "no_action_needed":
+        lines = [
+            "Proposal: none needed",
+            "Status: no current suspects",
+            "First safe command:",
+            f"  {payload.get('first_safe_command')}",
+            "Safety: read-only. No plan was created. No action was taken.",
+        ]
+        return "\n".join(lines).rstrip() + "\n"
+    if payload.get("proposal_status") == "not_found":
+        lines = [
+            "Proposal: blocked",
+            f"Target: {target}",
+            "Why: target not found in current deterministic triage scene",
+            "Eligibility: blocked — target not found in current triage scene",
+            "First safe command:",
+            "  shellforgeai triage",
+            "Next review command:",
+            f"  shellforgeai triage docker detail {target}",
+            "Safety: read-only. No plan was created. No action was taken.",
+        ]
+        return "\n".join(lines).rstrip() + "\n"
+    eligibility = payload.get("eligibility") if isinstance(payload.get("eligibility"), dict) else {}
+    lines = [
+        f"Proposal: {'available' if payload.get('proposal_status') == 'available' else 'blocked'}",
+        f"Target: {target}",
+        f"Why: {payload.get('evidence_summary')}",
+        f"Eligibility: {eligibility.get('summary')}",
+        "First safe command:",
+        f"  {payload.get('first_safe_command')}",
+        "Next review command:",
+        f"  {payload.get('next_governed_command')}",
+    ]
+    if payload.get("plan_only_command"):
+        lines.extend(
+            [
+                "Plan-only command:",
+                f"  {payload.get('plan_only_command')}",
+                "Plan-only. Does not execute remediation.",
+            ]
+        )
+    lines.append("Safety: read-only. No plan was created. No action was taken.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_propose_brief(payload: dict[str, Any]) -> str:
+    status = payload.get("proposal_status")
+    if status == "no_action_needed":
+        proposal = "none needed"
+    elif status == "available":
+        proposal = "proposal available"
+    else:
+        proposal = "blocked"
+    target = payload.get("target") or "none"
+    return (
+        f"Proposal: {proposal}\n"
+        f"Target: {target}\n"
+        f"First safe command: {payload.get('first_safe_command')}\n"
+        "Safety: read-only; no plan or action executed\n"
+    )
+
+
 def _render_ops_report_brief(payload: dict[str, Any]) -> str:
     summary = payload.get("summary") or {}
     suspects = payload.get("suspects") or []
@@ -9447,6 +9699,89 @@ def _handle_v2_triage_ask(question: str) -> bool:
     return True
 
 
+_PROPOSE_ASK_TARGET_RE = re.compile(
+    r"\bpropose\b.*\b(?:for|target)\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b|"
+    r"\bwhat\s+would\s+you\s+propose\s+for\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+    re.IGNORECASE,
+)
+_PROPOSE_MUTATION_CUES = (
+    "execute the proposal",
+    "apply the proposal",
+    "execute proposal",
+    "apply proposal",
+    "run the plan",
+)
+_PROPOSE_ASK_CUES = (
+    "what would you propose",
+    "what should we propose",
+    "propose next step",
+    "what would you do next",
+    "what is the safe proposal",
+    "propose for the top suspect",
+    "safe proposal",
+    "show me the proposal",
+)
+
+
+def _proposal_ask_target(question: str) -> str | None:
+    m = _PROPOSE_ASK_TARGET_RE.search(question or "")
+    if not m:
+        return None
+    target = next((g for g in m.groups() if g), None)
+    if target and target.lower() in {"the", "top", "suspect"}:
+        return None
+    return target
+
+
+def _is_proposal_ask(question: str) -> bool:
+    q = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    if not q:
+        return False
+    if "propose restart" in q or "propose remediation" in q:
+        return False
+    if _proposal_ask_target(question):
+        return True
+    return any(cue in q for cue in _PROPOSE_ASK_CUES)
+
+
+def _proposal_mutation_cues(question: str) -> list[str]:
+    q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
+    return [cue for cue in _PROPOSE_MUTATION_CUES if cue in q]
+
+
+def _handle_v2_propose_mutation_refusal(question: str) -> bool:
+    if not _proposal_mutation_cues(question):
+        return False
+    console.print("Refused: proposal execution is not available from ask mode.")
+    console.print("Propose is read-only and creates no plan.")
+    console.print("No action was taken.")
+    return True
+
+
+def _handle_v2_propose_ask(question: str) -> bool:
+    proposal = _is_proposal_ask(question)
+    mutation_cues = _proposal_mutation_cues(question)
+    if proposal:
+        mixed_q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
+        mutation_cues.extend(
+            cue
+            for cue in ("restart it", "fix it", "do it", "execute", "apply", "run the plan")
+            if cue in mixed_q and cue not in mutation_cues
+        )
+    if not proposal:
+        return False
+    target = _proposal_ask_target(question)
+    payload = _build_v2_propose_payload(target=target, from_triage=True)
+    console.print("Read-only proposal (deterministic ask routing):")
+    console.print("")
+    typer.echo(_render_v2_propose_human(payload), nl=False)
+    if mutation_cues:
+        console.print("Refused mutation part of the request.")
+        console.print("ShellForgeAI did not execute, apply, restart, fix, or run a plan.")
+        console.print("No action was taken.")
+    return True
+
+
 def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool = False) -> dict:
     data_dir = Path(runtime.session.data_dir)
     audit = AuditStorage(data_dir)
@@ -9612,6 +9947,34 @@ def status(
 
 
 @app.command()
+def propose(
+    ctx: typer.Context,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    brief: Annotated[bool, typer.Option("--brief", help="Emit bounded proposal preview.")] = False,
+    target: Annotated[
+        str | None, typer.Option("--target", help="Preview next action for one target.")
+    ] = None,
+    from_triage: Annotated[
+        bool,
+        typer.Option(
+            "--from-triage",
+            help="Use current deterministic triage ranking as proposal input.",
+        ),
+    ] = False,
+) -> None:
+    """Read-only V2 next-action proposal preview. No plan or action is created."""
+    _ = ctx
+    payload = _build_v2_propose_payload(target=target, from_triage=from_triage)
+    if json_output:
+        typer.echo(json.dumps(payload))
+        return
+    if brief:
+        typer.echo(_render_v2_propose_brief(payload), nl=False)
+        return
+    typer.echo(_render_v2_propose_human(payload), nl=False)
+
+
+@app.command()
 def ask(
     ctx: typer.Context,
     question: str,
@@ -9630,6 +9993,10 @@ def ask(
             console.print("Read-only status (deterministic ask routing):")
             console.print("")
             typer.echo(_render_status_human(payload), nl=False)
+            return
+        if _handle_v2_propose_ask(question):
+            return
+        if _handle_v2_propose_mutation_refusal(question):
             return
         if _handle_retention_ask(runtime, question):
             return

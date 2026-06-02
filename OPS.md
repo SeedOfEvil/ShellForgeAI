@@ -4,9 +4,10 @@
 
 1. `shellforgeai status` — read-only concise status; no model call and no mutation.
 2. `shellforgeai triage --brief` — bounded read-only ranked suspect view with the first safe command.
-3. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
-4. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
-5. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
+3. `shellforgeai propose` — read-only next-action proposal preview; no plan created and no action executed.
+4. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
+5. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
+6. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
 
 `shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
 `shellforgeai triage docker` / `triage docker --brief` views all share the same
@@ -47,8 +48,9 @@ Use this concise, safe path for the V1 demo and handoff contract:
 5. `shellforgeai remediation self-test --profile quick`
 6. `shellforgeai status`
 7. `shellforgeai triage`
-8. `shellforgeai triage --target <target>`
-9. `shellforgeai remediation eligibility --target <target> --explain`
+8. `shellforgeai propose`
+9. `shellforgeai triage --target <target>`
+10. `shellforgeai remediation eligibility --target <target> --explain`
 10. `shellforgeai ops report --save`
 11. `shellforgeai ops report history --limit 5`
 12. `shellforgeai ops report compare-latest`
