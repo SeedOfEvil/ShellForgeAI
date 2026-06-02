@@ -1214,6 +1214,26 @@ shellforgeai propose --target sfai-crashloop
 shellforgeai propose --from-triage --json
 ```
 
+### `shellforgeai apply-preview`
+
+V2 golden-path fourth command. `shellforgeai apply-preview` is a deterministic, read-only execution-boundary preview after `propose`. It does not apply anything, create a mission, create an apply record, create a remediation execution receipt, restart a container, call Docker Compose, write a remediation plan artifact, call the model/Codex, or use shell execution.
+
+- `shellforgeai apply-preview` reports `no_action` when no deterministic proposal/action context is eligible and points first to `shellforgeai propose --json` or triage JSON.
+- `shellforgeai apply-preview --brief` emits a bounded operator preview: preview state, target, first safe command, and safety.
+- `shellforgeai apply-preview --json` emits strict JSON only with `mode: "v2_apply_preview"`, `read_only: true`, `mutation_performed: false`, `apply_executed: false`, `mission_created: false`, `plan_created: false`, and execution safety fields for remediation, rollback, cleanup, Docker/Compose, container restart, `shell_true`, arbitrary command execution, natural-language execution, and model calls.
+- `shellforgeai apply-preview --target <target>` previews gates for one exact target. Unknown targets are blocked as target-not-found; production-like targets such as `shellforgeai` are refused.
+- `shellforgeai apply-preview --from-propose` and `shellforgeai apply-preview --from-triage` use current deterministic context, but still create no executable plan or action.
+
+Examples:
+
+```bash
+shellforgeai apply-preview
+shellforgeai apply-preview --brief
+shellforgeai apply-preview --json
+shellforgeai apply-preview --from-propose
+shellforgeai apply-preview --target sfai-crashloop
+```
+
 - `shellforgeai ops report`
 - `shellforgeai ops report --brief` renders a compact, read-only, human-only pressure-mode view: status, risk, top issue/evidence, exactly one first safe command, and a safety line. Combine with `--json` to keep the existing strict JSON output; `--brief` does not add human prose in JSON mode.
 - `shellforgeai ops report --json`

@@ -235,6 +235,7 @@ read-only or safety/readiness handlers:
   - Pressure phrases such as `no novel`, `quick status`, and `what is on fire, keep it short` dispatch to the same read-only brief status / ops report shape.
 - `triage`, `triage --brief`, `triage --json`, and `triage --target <target>` for the V2 read-only triage entrypoint.
 - `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --target <target> --json`, and `propose --from-triage` for the V2 read-only next-action proposal preview.
+- `apply-preview`, `apply-preview --brief`, `apply-preview --json`, `apply-preview --target <target>`, `apply-preview --target <target> --json`, and `apply-preview --from-propose` for the V2 read-only execution-boundary preview.
 - `triage docker`, `triage docker --brief` (safe alias for `triage --brief`), `triage docker --json`, `triage docker detail <target>`, and `triage docker detail <target> --json`
 - `diagnose <target>` through the existing read-only diagnose route
 - `remediation self-test quick|standard|full` and `remediation self-test --profile quick|standard|full [--json]`

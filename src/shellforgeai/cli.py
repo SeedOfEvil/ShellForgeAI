@@ -17,7 +17,7 @@ from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
 from posixpath import normpath
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
 from rich.console import Console
@@ -9074,6 +9074,247 @@ def _build_v2_propose_payload(
     }
 
 
+def _v2_apply_preview_safety() -> dict[str, Any]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "apply_executed": False,
+        "mission_created": False,
+        "plan_created": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "cleanup_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "natural_language_execution": False,
+        "model_called": False,
+    }
+
+
+def _v2_apply_preview_base(
+    *, from_propose: bool = False, from_triage: bool = False
+) -> dict[str, Any]:
+    safety = _v2_apply_preview_safety()
+    return {
+        "schema_version": 1,
+        "mode": "v2_apply_preview",
+        **safety,
+        "from_propose": bool(from_propose),
+        "from_triage": bool(from_triage),
+        "target": {
+            "name": None,
+            "found": False,
+            "production_target": False,
+            "allowlisted": False,
+            "disposable": False,
+        },
+        "preview": {
+            "action": None,
+            "exact_target_only": True,
+            "execution_boundary": "not_crossed",
+            "operator_approval_required": True,
+            "confirm_required": True,
+        },
+        "gates": [],
+        "warnings": [],
+        "safe_next_commands": [],
+        "safety": safety,
+    }
+
+
+def _build_v2_apply_preview_payload(
+    *,
+    target: str | None = None,
+    from_propose: bool = False,
+    from_triage: bool = False,
+    top: int = 5,
+) -> dict[str, Any]:
+    from shellforgeai.core import triage_ranking
+    from shellforgeai.core.disposable_remediation import (
+        SUPPORTED_SCENARIO,
+        build_eligibility_explain_report,
+    )
+
+    scene = triage_ranking.collect_scene()
+    ranked = triage_ranking.rank_scene(scene)
+    suspects = list(ranked.get("suspects") or [])[:top]
+    selected = _target_suspect({**ranked, "suspects": suspects}, target)
+    payload = _v2_apply_preview_base(from_propose=from_propose, from_triage=from_triage)
+    payload["warnings"] = list(ranked.get("warnings") or [])
+
+    if selected is None and target is None:
+        payload.update(
+            {
+                "status": "no_action",
+                "message": "no eligible action to preview",
+                "reason": "no eligible proposal/action found",
+                "first_safe_command": "shellforgeai propose --json",
+                "safe_next_commands": ["shellforgeai propose --json", "shellforgeai triage --json"],
+            }
+        )
+        return payload
+
+    selected_name = target or str((selected or {}).get("name") or "")
+    labels, found_in_scene = _scene_labels_for_target(scene, selected_name)
+    target_known = selected is not None or found_in_scene
+    explain = build_eligibility_explain_report(
+        target=selected_name,
+        scenario=SUPPORTED_SCENARIO,
+        labels=labels if labels is not None else ({} if target_known else None),
+        target_found=target_known,
+        explicit_target=bool(target),
+    )
+    eligibility = cast(
+        dict[str, Any],
+        explain.get("eligibility") if isinstance(explain.get("eligibility"), dict) else {},
+    )
+    target_meta = cast(
+        dict[str, Any], explain.get("target") if isinstance(explain.get("target"), dict) else {}
+    )
+    blocked_reasons = [str(r) for r in (eligibility.get("blocked_reasons") or []) if r]
+    production = bool(target_meta.get("production_target") or eligibility.get("production_target"))
+    disposable = bool(target_meta.get("disposable") or eligibility.get("disposable"))
+    allowlisted = bool(
+        target_meta.get("target_allowlisted")
+        or target_meta.get("allowlisted")
+        or eligibility.get("target_allowlisted")
+    )
+    payload["target"] = {
+        "name": selected_name,
+        "found": bool(target_known),
+        "production_target": production,
+        "allowlisted": allowlisted,
+        "disposable": disposable,
+    }
+    payload["gates"] = list(explain.get("gates") or [])
+
+    if production:
+        payload.update(
+            {
+                "status": "blocked",
+                "reason": "production target refused",
+                "message": "production target refused",
+                "first_safe_command": "shellforgeai status --json",
+                "safe_next_commands": ["shellforgeai status --json", "shellforgeai triage --json"],
+            }
+        )
+        return payload
+
+    if not target_known:
+        payload.update(
+            {
+                "status": "blocked",
+                "reason": "target not found in current deterministic triage scene",
+                "message": "target not found in current deterministic triage scene",
+                "first_safe_command": "shellforgeai triage --json",
+                "safe_next_commands": [
+                    "shellforgeai triage --json",
+                    f"shellforgeai triage docker detail {selected_name}",
+                ],
+            }
+        )
+        return payload
+
+    gates = [
+        "target_allowlisted=true",
+        "disposable=true",
+        "explicit approval required",
+        "confirm required",
+        "rollback/verification required",
+    ]
+    payload["preview"] = {
+        **payload["preview"],
+        "action": "bounded exact-target remediation preview"
+        if allowlisted and disposable
+        else None,
+        "proposed_command_preview": explain.get("suggested_plan_command") or None,
+    }
+    status = "preview_ready" if allowlisted and disposable and not blocked_reasons else "blocked"
+    reason = (
+        "all preview gates visible; execution boundary still not crossed"
+        if status == "preview_ready"
+        else (blocked_reasons[0] if blocked_reasons else "required gates are not satisfied")
+    )
+    payload.update(
+        {
+            "status": status,
+            "reason": reason,
+            "message": reason,
+            "required_gates": gates,
+            "first_safe_command": f"shellforgeai triage docker detail {selected_name}",
+            "safe_next_commands": [
+                f"shellforgeai triage docker detail {selected_name}",
+                f"shellforgeai remediation eligibility --target {selected_name} --explain",
+            ],
+        }
+    )
+    return payload
+
+
+def _render_v2_apply_preview_human(payload: dict[str, Any]) -> str:
+    target = cast(
+        dict[str, Any], payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    )
+    target_name = target.get("name")
+    status = str(payload.get("status") or "blocked")
+    if status == "no_action":
+        lines = [
+            "Apply preview: no action ready",
+            "Status: no eligible proposal/action found",
+            "First safe command:",
+            f"  {payload.get('first_safe_command')}",
+            "",
+            "Safety:",
+            "- Read-only preview.",
+            (
+                "- No plan, mission, apply, remediation, rollback, cleanup, Docker, "
+                "or Compose action was executed."
+            ),
+            "- No action was taken.",
+        ]
+        return "\n".join(lines).rstrip() + "\n"
+    if status == "blocked":
+        lines = ["Apply preview: blocked"]
+        if target_name:
+            lines.append(f"Target: {target_name}")
+        lines.append(f"Reason: {payload.get('reason')}")
+        lines.extend(["", "First safe command:", f"  {payload.get('first_safe_command')}"])
+        lines.extend(["", "Safety:", "- Read-only preview.", "- No action was taken."])
+        return "\n".join(lines).rstrip() + "\n"
+    lines = [
+        "Apply preview: gated",
+        f"Target: {target_name}",
+        "Would require:",
+    ]
+    for gate in payload.get("required_gates") or []:
+        lines.append(f"- {gate}")
+    preview = cast(
+        dict[str, Any], payload.get("preview") if isinstance(payload.get("preview"), dict) else {}
+    )
+    if preview.get("proposed_command_preview"):
+        lines.extend(
+            ["Previewed command boundary:", f"  {preview.get('proposed_command_preview')}"]
+        )
+    lines.extend(["", "No action was taken."])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_apply_preview_brief(payload: dict[str, Any]) -> str:
+    target = cast(
+        dict[str, Any], payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    )
+    label = "gated" if payload.get("status") == "preview_ready" else payload.get("status")
+    return (
+        f"Apply preview: {label}\n"
+        f"Target: {target.get('name') or 'none'}\n"
+        f"First safe command: {payload.get('first_safe_command')}\n"
+        "Safety: read-only; no plan, mission, apply, remediation, rollback, cleanup, "
+        "Docker, or Compose action executed\n"
+    )
+
+
 def _render_v2_propose_human(payload: dict[str, Any]) -> str:
     target = payload.get("target")
     if payload.get("proposal_status") == "no_action_needed":
@@ -9699,6 +9940,79 @@ def _handle_v2_triage_ask(question: str) -> bool:
     return True
 
 
+_APPLY_PREVIEW_CUES = (
+    "apply preview",
+    "preview apply",
+    "what would applying this require",
+    "what would applying the proposed action require",
+    "what would happen if we applied it",
+    "show apply gates",
+    "preview the proposed action",
+    "can this be applied",
+)
+_APPLY_PREVIEW_MUTATION_CUES = (
+    "apply it",
+    "execute it",
+    "apply now",
+    "confirm apply",
+)
+
+
+def _apply_preview_target(question: str) -> str | None:
+    m = re.search(
+        r"\b(?:apply-preview|apply preview|preview apply)\b.*\b(?:for|target)\s+"
+        r"([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        question or "",
+        flags=re.IGNORECASE,
+    )
+    return m.group(1) if m else None
+
+
+def _is_apply_preview_ask(question: str) -> bool:
+    q = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    if not q:
+        return False
+    return bool(_apply_preview_target(question)) or any(cue in q for cue in _APPLY_PREVIEW_CUES)
+
+
+def _apply_preview_mutation_cues(question: str) -> list[str]:
+    q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
+    return [cue for cue in _APPLY_PREVIEW_MUTATION_CUES if cue in q]
+
+
+def _handle_v2_apply_preview_ask(question: str) -> bool:
+    preview = _is_apply_preview_ask(question)
+    mutation_cues = _apply_preview_mutation_cues(question)
+    if preview:
+        mixed_q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
+        mutation_cues.extend(
+            cue
+            for cue in ("restart", "execute", "apply now", "run it", "run compose")
+            if cue in mixed_q and cue not in mutation_cues
+        )
+    if not preview:
+        return False
+    target = _apply_preview_target(question)
+    payload = _build_v2_apply_preview_payload(target=target, from_propose=True)
+    console.print("Read-only apply preview (deterministic ask routing):")
+    console.print("")
+    typer.echo(_render_v2_apply_preview_human(payload), nl=False)
+    if mutation_cues:
+        console.print("Refused mutation part of the request.")
+        console.print("ShellForgeAI did not execute, apply, restart, remediate, or run Compose.")
+        console.print("No action was taken.")
+    return True
+
+
+def _handle_v2_apply_preview_mutation_refusal(question: str) -> bool:
+    if not _apply_preview_mutation_cues(question):
+        return False
+    console.print("Refused: natural-language mutation is not allowed.")
+    console.print("Use `shellforgeai apply-preview` to inspect gates without execution.")
+    console.print("No action was taken.")
+    return True
+
+
 _PROPOSE_ASK_TARGET_RE = re.compile(
     r"\bpropose\b.*\b(?:for|target)\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b|"
     r"\bwhat\s+would\s+you\s+propose\s+for\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
@@ -9974,6 +10288,37 @@ def propose(
     typer.echo(_render_v2_propose_human(payload), nl=False)
 
 
+@app.command("apply-preview")
+def apply_preview(
+    ctx: typer.Context,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    brief: Annotated[bool, typer.Option("--brief", help="Emit bounded apply preview.")] = False,
+    target: Annotated[
+        str | None, typer.Option("--target", help="Preview gates for one exact target.")
+    ] = None,
+    from_propose: Annotated[
+        bool,
+        typer.Option("--from-propose", help="Use current deterministic proposal context."),
+    ] = False,
+    from_triage: Annotated[
+        bool,
+        typer.Option("--from-triage", help="Use current deterministic triage context."),
+    ] = False,
+) -> None:
+    """Read-only V2 execution-boundary preview. Does not apply or execute."""
+    _ = ctx
+    payload = _build_v2_apply_preview_payload(
+        target=target, from_propose=from_propose, from_triage=from_triage
+    )
+    if json_output:
+        typer.echo(json.dumps(payload))
+        return
+    if brief:
+        typer.echo(_render_v2_apply_preview_brief(payload), nl=False)
+        return
+    typer.echo(_render_v2_apply_preview_human(payload), nl=False)
+
+
 @app.command()
 def ask(
     ctx: typer.Context,
@@ -9993,6 +10338,10 @@ def ask(
             console.print("Read-only status (deterministic ask routing):")
             console.print("")
             typer.echo(_render_status_human(payload), nl=False)
+            return
+        if _handle_v2_apply_preview_ask(question):
+            return
+        if _handle_v2_apply_preview_mutation_refusal(question):
             return
         if _handle_v2_propose_ask(question):
             return
