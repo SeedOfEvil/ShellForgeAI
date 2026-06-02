@@ -97,6 +97,18 @@ Debug
   proposal prompts such as "what would you propose?" route deterministically to
   the same read-only preview; mixed prompts like "show me the proposal and
   restart it" show/refers to the preview and refuse the mutation part.
+- Apply-preview entries (`apply-preview`, `apply-preview --brief`,
+  `apply-preview --json`, `apply-preview --target <target>`, and
+  `apply-preview --from-propose`) route to the V2 read-only execution-boundary
+  preview.
+- Verify entries (`verify`, `verify --brief`, `verify --json`,
+  `verify --target <target>`, `verify --from-status`, `verify --from-triage`,
+  `verify --from-propose`, and `verify --from-apply-preview`) route to the V2
+  read-only current-state verification entrypoint. Natural verify prompts such
+  as "verify status", "verify the system", "did anything improve?", and "is it
+  fixed?" verify current observed state only; they do not claim a completed
+  remediation. Mixed mutation phrasing such as "verify and restart" or "apply
+  and verify" is refused with no action taken.
 
 
 ## Interactive help
@@ -104,6 +116,7 @@ Debug
 Type `help`, `/help`, `?`, `commands`, or `what can I do?` inside the REPL to
 show a short operator help screen. The help lists exact interactive-supported
 forms for fast status (`status`, `status --brief`, `status --json`, `ops report --brief`, `v1 check quick`, `doctor`),
+V2 verification (`verify`, `verify --json`, `verify --target <target>`),
 Docker triage (`triage docker detail <target>`), reports/artifacts (`ops report
 history --limit 5`, `ops report compare-latest`), safe remediation readiness
 (`remediation eligibility --target <target> --explain`), and session follow-ups

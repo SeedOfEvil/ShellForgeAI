@@ -116,13 +116,16 @@ asks deterministically, and refuses or gates mutation.
 ### What this is (V1)
 
 - Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
-- V2 read-only status, triage, propose, and apply-preview entrypoints (`status`,
-  `triage`, `triage --target <target>`, `propose`, `propose --target <target>`,
-  `apply-preview`, `apply-preview --target <target>`) backed by deterministic
-  Docker triage compatibility commands (`triage docker`, `triage docker detail
-  <target>`). `propose` is preview-only: no plan artifact and no action
-  executed. `apply-preview` is an execution-boundary preview only: no apply,
-  mission, remediation, rollback, cleanup, Docker, or Compose action executes.
+- V2 read-only status, triage, propose, apply-preview, and verify entrypoints
+  (`status`, `triage`, `triage --target <target>`, `propose`, `propose
+  --target <target>`, `apply-preview`, `apply-preview --target <target>`,
+  `verify`, `verify --target <target>`) backed by deterministic Docker triage
+  compatibility commands (`triage docker`, `triage docker detail <target>`).
+  `propose` is preview-only: no plan artifact and no action executed.
+  `apply-preview` is an execution-boundary preview only: no apply, mission,
+  remediation, rollback, cleanup, Docker, or Compose action executes. `verify`
+  checks current observed state only; it does not prove any action was applied
+  without a future receipt/artifact.
 - Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
   `--save`, `history`, `compare`, `compare-latest`, `export`,
   `export-validate`, `validate`).
