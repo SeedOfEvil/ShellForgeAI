@@ -77,12 +77,14 @@ Session:
 
 Fast status:
   status [--brief|--json]
-  ops report --brief
-  ops report / ops report --json
-  v1 check quick
-  v1 check --profile quick --json
-  doctor
-  model doctor
+  ops report / ops report --brief / ops report --json
+  v1 check quick / v1 check --profile quick --json
+  doctor / model doctor
+
+V2 golden path:
+  status / triage / propose [--brief|--json]
+  triage --target <target>
+  propose --target <target> [--json] / propose --from-triage
 
 Triage/detail:
   triage [--brief|--json] / triage --target <target>
@@ -105,10 +107,8 @@ V1/readiness:
 Follow-ups/session:
   /summary
   what happened in this session?
-  what did you find?
-  get that info
-  dig deeper
-  proceed
+  what did you find? / get that info
+  dig deeper / proceed
   pending
   /pending
   exit

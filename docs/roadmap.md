@@ -73,6 +73,12 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
   prechecks, options, rollback, and post-fix validation. ShellForgeAI
   does not execute any of the steps; `apply` remains validation-only.
 
+## V2 golden-path milestones
+
+- Completed: V2 read-only `status` entrypoint.
+- Completed: V2 read-only `triage` entrypoint and command consistency.
+- Completed: PR147 V2 read-only `propose` entrypoint for next-action proposal previews. `propose` creates no remediation plan artifact and executes nothing.
+
 ## Next
 
 - Model-driven hand-off into a richer plan synthesis surface (still
