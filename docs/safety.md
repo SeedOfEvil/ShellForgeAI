@@ -277,6 +277,12 @@ export/guard/refusal trail — it does not prove external operator execution.
 
 The status safety block is invariant: `read_only=true`, `mutation_performed=false`, `artifact_written=false`, `model_called=false`, `shell_true=false`, and `arbitrary_command_execution=false`. It reports ShellForgeAI's current read-only inspection result; it is not proof of external operator behavior outside ShellForgeAI.
 
+## Apply-preview safety
+
+`shellforgeai apply-preview` is strictly read-only. It previews the V2 execution boundary after `propose` by reporting no-action, blocked, or gated preview state for an exact target. It does not apply anything, create a mission, create an apply record, create a remediation execution receipt, create an executable plan, call Docker or Docker Compose, restart containers, mutate files/services/host state, call the model, or use shell execution.
+
+The apply-preview JSON safety block is invariant: `read_only=true`, `mutation_performed=false`, `apply_executed=false`, `mission_created=false`, `plan_created=false`, `remediation_executed=false`, `rollback_executed=false`, `cleanup_executed=false`, `docker_compose_executed=false`, `container_restarted=false`, `shell_true=false`, `arbitrary_command_execution=false`, `natural_language_execution=false`, and `model_called=false`. Production-like targets are refused, missing targets are blocked, and mixed natural-language preview-plus-mutation asks keep the preview read-only while refusing the mutation part.
+
 ## Metadata hygiene safety
 - Doctor/status metadata hygiene is report-and-guidance only.
 - A metadata hygiene `warning`/`critical` is ShellForgeAI-owned artifact hygiene (accumulated reports/exports/bundles under `data_dir`). It is **not** an automatic Docker/system runtime failure, and it does **not** mean any cleanup was performed.

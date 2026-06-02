@@ -58,9 +58,10 @@ anything.
      <top>` from the compatibility path). With no suspects, the first safe
      command is a read-only status/report command (`shellforgeai status
      --json`) — never a detail command for a suspect that does not exist.
-   - Golden path: `status -> triage -> propose`, with `triage --target <target>` /
-     `triage docker detail <target>` and gated `remediation eligibility --target <target> --explain`
-     available as review drilldowns.
+   - Golden path: `status -> triage -> propose -> apply-preview`, with
+     `triage --target <target>` / `triage docker detail <target>` and gated
+     `remediation eligibility --target <target> --explain` available as review
+     drilldowns.
 3. **propose**
    - Third command: `shellforgeai propose`.
    - Brief/JSON/target forms: `shellforgeai propose --brief`,
@@ -74,13 +75,22 @@ anything.
    - Eligible disposable targets may show `shellforgeai remediation plan ...` as
      **Plan-only. Does not execute remediation.** Execute commands are never
      shown from `propose`.
-4. **approve/gate**
+4. **apply-preview**
+   - Fourth command: `shellforgeai apply-preview`.
+   - Brief/JSON/target forms: `shellforgeai apply-preview --brief`,
+     `shellforgeai apply-preview --json`, `shellforgeai apply-preview --target
+     <target>`, `shellforgeai apply-preview --from-propose`, and optional
+     `shellforgeai apply-preview --from-triage`.
+   - Contract: read-only execution-boundary preview only. It answers whether an
+     action is eligible to preview, the exact target, production/disposable/
+     allowlist gates, approval/confirm expectations, rollback/verification
+     expectations, and the first safe read-only command. It does **not** apply,
+     create a mission, create an apply record, create a remediation receipt, run
+     Docker/Compose, restart containers, write a plan artifact, call the model,
+     or cross the execution boundary.
+5. **approve/gate**
    - Future or existing governed policy gate flow, not expanded here.
    - Gate decisions must be explicit and auditable.
-5. **apply-preview**
-   - Future non-executing command bundle, not implemented here.
-   - The bundle should show exact commands, preflight checks, expected output,
-rollback, and validation commands for an operator to review.
 6. **verify**
    - Current commands include `shellforgeai ops report compare-latest`,
 `compare`, export validation commands, and artifact validation commands.
@@ -95,8 +105,8 @@ receipts, and validation reports.
 | Status | `status`, `status --brief`, `status --json`; compatibility: `ops report --brief`, `ops report` | CORE / READ_ONLY first operator posture. |
 | Triage | `triage`, `triage --brief`, `triage --json`, `triage --target <target>`; compatibility: `triage docker`, `triage docker --brief`, `triage docker detail <target>` | Read-only deterministic suspect ranking with consistent `Status:`/`Risk:`/`Safety:` wording and a first-safe-command flow before any proposal/remediation lane. |
 | Propose | `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --from-triage` | Read-only deterministic next-action proposal preview; no plan artifact and no execution. |
+| Apply preview | `apply-preview`, `apply-preview --brief`, `apply-preview --json`, `apply-preview --target <target>`, `apply-preview --from-propose`, `apply-preview --from-triage` | Read-only execution-boundary preview; no apply, mission, plan artifact, remediation receipt, Docker/Compose action, restart, shell, model call, or mutation. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
-| Apply preview | Future V2 apply-preview command | Non-executing bundle only. |
 | Verify | `ops report compare/latest`, validation commands | Operator verifies with evidence and artifact deltas. |
 | Handoff | report export, session summary, receipts | Portable evidence and receipts without mutation. |
 

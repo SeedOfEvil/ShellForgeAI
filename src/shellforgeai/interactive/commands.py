@@ -39,6 +39,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "propose --brief",
     "propose --json",
     "propose --target <target>",
+    "apply-preview",
+    "apply-preview --brief",
+    "apply-preview --json",
+    "apply-preview --target <target>",
     "triage docker",
     "triage docker --brief",
     "triage docker --json",
@@ -61,6 +65,7 @@ _COMMAND_LIKE_STARTS = (
     "triage",
     "trage",
     "propose",
+    "apply-preview",
     "v1",
     "doctor",
     "model",
@@ -102,6 +107,21 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("propose", "--json"): ("propose", "--json"),
     ("propose", "--from-triage"): ("propose", "--from-triage"),
     ("propose", "--from-triage", "--json"): ("propose", "--from-triage", "--json"),
+    ("apply-preview",): ("apply-preview",),
+    ("apply-preview", "--brief"): ("apply-preview", "--brief"),
+    ("apply-preview", "--json"): ("apply-preview", "--json"),
+    ("apply-preview", "--from-propose"): ("apply-preview", "--from-propose"),
+    ("apply-preview", "--from-propose", "--json"): (
+        "apply-preview",
+        "--from-propose",
+        "--json",
+    ),
+    ("apply-preview", "--from-triage"): ("apply-preview", "--from-triage"),
+    ("apply-preview", "--from-triage", "--json"): (
+        "apply-preview",
+        "--from-triage",
+        "--json",
+    ),
     ("triage", "docker"): ("triage", "docker"),
     ("triage", "docker", "--brief"): ("triage", "docker", "--brief"),
     ("triage", "docker", "--json"): ("triage", "docker", "--json"),
@@ -232,6 +252,13 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
             argv = ("propose", "--target", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("apply-preview", "--target") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("apply-preview", "--target", original_tokens[2])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
@@ -450,6 +477,24 @@ def route_input(text: str) -> RoutedCommand:
         if target.lower() in {"the", "top", "suspect"}:
             return RoutedCommand(name="cli_dispatch", args=raw, argv=("propose", "--from-triage"))
         return RoutedCommand(name="cli_dispatch", args=raw, argv=("propose", "--target", target))
+    apply_preview_cues = (
+        "apply preview",
+        "preview apply",
+        "what would applying this require",
+        "what would applying the proposed action require",
+        "what would happen if we applied it",
+        "show apply gates",
+        "preview the proposed action",
+        "can this be applied",
+    )
+    if any(cue in lowered for cue in apply_preview_cues):
+        if any(
+            mut in lowered for mut in ("restart", "execute", "apply now", "confirm apply", "run it")
+        ):
+            return RoutedCommand(name="ask", args=raw)
+        return RoutedCommand(
+            name="cli_dispatch", args=raw, argv=("apply-preview", "--from-propose")
+        )
     if any(phrase in lowered or phrase in raw_lower for phrase in _QUICK_MUTATION_PHRASES):
         return RoutedCommand(name="mutation_refused", args=raw)
     if any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_PHRASES):
