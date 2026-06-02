@@ -584,11 +584,20 @@ def rank_scene(scene: dict[str, Any]) -> dict[str, Any]:
     if not suspects and not watch:
         warnings.append("no suspects ranked from provided scene")
 
-    next_safe_commands = [
-        "shellforgeai triage docker detail --rank 1",
-        remediation_self_test_command(profile="quick"),
-        triage_snapshot_command(include_details=True),
-    ]
+    if suspects:
+        next_safe_commands = [
+            "shellforgeai triage docker detail --rank 1",
+            remediation_self_test_command(profile="quick"),
+            triage_snapshot_command(include_details=True),
+        ]
+    else:
+        # No ranked suspects: never point the operator at a nonexistent
+        # rank-1 detail command. Route the first safe step to a read-only
+        # status/report command instead (PR146 command consistency).
+        next_safe_commands = [
+            "shellforgeai status --json",
+            "shellforgeai ops report --json",
+        ]
 
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -611,6 +620,8 @@ def rank_scene(scene: dict[str, Any]) -> dict[str, Any]:
             "read_only": True,
             "mutation_performed": False,
             "cleanup_executed": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
             "proposal_created": False,
             "mission_created": False,
             "apply_executed": False,
@@ -868,17 +879,20 @@ def render_human(payload: dict[str, Any]) -> str:
     lines.append("")
     summary = payload.get("summary", {})
     suspects = payload.get("suspects") or []
-    lines.append(
-        "Status: "
-        f"{'degraded' if suspects else 'ok'} — "
-        f"{summary.get('critical', 0)} critical, {summary.get('high', 0)} high suspects."
-    )
+    critical = summary.get("critical", 0)
+    high = summary.get("high", 0)
     if suspects:
+        lines.append(f"Status: degraded — {critical} critical, {high} high suspects.")
+        lines.append(f"Risk: {critical} critical, {high} high suspects")
         top = suspects[0]
         lines.append(
             f"Top suspect: {top['name']} — {top['severity']} / {top['confidence']} confidence."
         )
         lines.append(f"First safe command: shellforgeai triage docker detail {top['name']}")
+    else:
+        lines.append("Status: ok — no ranked Docker suspects.")
+        lines.append("Risk: no ranked Docker suspects")
+        lines.append("First safe command: shellforgeai status --json")
     lines.append("")
     lines.append("Safety:")
     lines.append("- read_only: true")

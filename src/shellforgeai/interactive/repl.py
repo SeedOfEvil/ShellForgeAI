@@ -85,9 +85,8 @@ Fast status:
   model doctor
 
 Triage/detail:
-  triage docker
-  triage docker --json
-  triage docker detail <target>
+  triage [--brief|--json] / triage --target <target>
+  triage docker [--brief|--json]
   triage docker detail <target> --json
   diagnose <target>
 

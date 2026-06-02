@@ -46,10 +46,21 @@ anything.
    - Second command: `shellforgeai triage`.
    - Brief/JSON/detail forms: `shellforgeai triage --brief`,
      `shellforgeai triage --json`, and `shellforgeai triage --target <target>`.
-   - Underlying compatibility path: `shellforgeai triage docker` and
-     `shellforgeai triage docker detail <target>`. The V2 entrypoint remains
-     read-only, ranks suspects deterministically, and prints the first safe
-     inspection command.
+   - Underlying compatibility path: `shellforgeai triage docker`,
+     `shellforgeai triage docker --brief` (a safe alias that mirrors
+     `triage --brief`), and `shellforgeai triage docker detail <target>`. The
+     V2 entrypoint remains read-only, ranks suspects deterministically, and
+     prints the first safe inspection command.
+   - Consistency contract (PR146): every triage view leads with `Status:` /
+     `Risk:` and closes with `Safety: Read-only. No mutation executed.`. With
+     suspects, the detail/eligibility drilldown is the first safe command
+     (`triage --target <top>` from the entrypoint, `triage docker detail
+     <top>` from the compatibility path). With no suspects, the first safe
+     command is a read-only status/report command (`shellforgeai status
+     --json`) — never a detail command for a suspect that does not exist.
+   - Golden path: `status -> triage -> triage --target <target>` /
+     `triage docker detail <target>`, then gated
+     `remediation eligibility --target <target> --explain`.
 3. **propose**
    - Future V2 command family, not implemented here.
    - Planned artifact fields: issue, evidence, proposed fix, risk, blast radius,
@@ -73,7 +84,7 @@ receipts, and validation reports.
 | V2 job | Current command family | Contract |
 |---|---|---|
 | Status | `status`, `status --brief`, `status --json`; compatibility: `ops report --brief`, `ops report` | CORE / READ_ONLY first operator posture. |
-| Triage | `triage`, `triage --brief`, `triage --json`, `triage --target <target>`; compatibility: `triage docker`, `triage docker detail <target>` | Read-only deterministic suspect ranking and first-safe-command flow before any proposal/remediation lane. |
+| Triage | `triage`, `triage --brief`, `triage --json`, `triage --target <target>`; compatibility: `triage docker`, `triage docker --brief`, `triage docker detail <target>` | Read-only deterministic suspect ranking with consistent `Status:`/`Risk:`/`Safety:` wording and a first-safe-command flow before any proposal/remediation lane. |
 | Propose | Future V2 proposal command | Deterministic proposal artifact; no execution. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
 | Apply preview | Future V2 apply-preview command | Non-executing bundle only. |

@@ -82,6 +82,15 @@ Debug
   inspect first?") route to the V2 read-only triage entrypoint. The response
   ranks suspects, shows the first safe inspection command, and does not call
   the model or run mutation.
+- The Docker compatibility forms `triage docker`, `triage docker --brief`,
+  `triage docker --json`, and `triage docker detail <target>` are also
+  supported. `triage docker --brief` is a safe alias that mirrors the bounded
+  `triage --brief` view, so the brief shape is identical regardless of which
+  entrypoint you type.
+- Brief-style triage asks ("quick triage", "no novel, triage") render the
+  bounded read-only triage view; mutation phrasings tied to triage ("restart
+  the top suspect", "fix the top suspect", "docker compose restart") are
+  refused with no action taken.
 
 
 ## Interactive help
@@ -218,7 +227,8 @@ read-only or safety/readiness handlers:
 - `status`, `status --brief`, and `status --json` for the V2 read-only golden-path entrypoint.
 - `ops report`, `ops report --brief`, `ops report --json`, `ops report --save`, `ops report history`, `ops report history --limit 5`, `ops report compare-latest`, and `ops report compare-latest --json`
   - Pressure phrases such as `no novel`, `quick status`, and `what is on fire, keep it short` dispatch to the same read-only brief status / ops report shape.
-- `triage docker [--json]`, `triage docker detail <target>`, and `triage docker detail <target> --json`
+- `triage`, `triage --brief`, `triage --json`, and `triage --target <target>` for the V2 read-only triage entrypoint.
+- `triage docker`, `triage docker --brief` (safe alias for `triage --brief`), `triage docker --json`, `triage docker detail <target>`, and `triage docker detail <target> --json`
 - `diagnose <target>` through the existing read-only diagnose route
 - `remediation self-test quick|standard|full` and `remediation self-test --profile quick|standard|full [--json]`
 - `remediation eligibility --target <target> --explain [--json]`
