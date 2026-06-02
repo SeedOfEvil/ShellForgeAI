@@ -82,10 +82,10 @@ Fast status:
   doctor / model doctor
 
 V2 golden path:
-  status / triage / propose [--brief|--json] / apply-preview [--brief|--json]
-  triage --target <target>
+  status / triage / propose [--brief|--json]
+  apply-preview [--brief|--json] / verify [--brief|--json] / triage --target <target>
   propose --target <target> [--json] / propose --from-triage
-  apply-preview --target <target> [--json] / apply-preview --from-propose
+  verify --target <target> [--json] / verify --from-apply-preview
 
 Triage/detail:
   triage [--brief|--json] / triage --target <target>

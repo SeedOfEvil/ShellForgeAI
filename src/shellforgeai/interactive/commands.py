@@ -43,6 +43,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "apply-preview --brief",
     "apply-preview --json",
     "apply-preview --target <target>",
+    "verify",
+    "verify --brief",
+    "verify --json",
+    "verify --target <target>",
     "triage docker",
     "triage docker --brief",
     "triage docker --json",
@@ -66,6 +70,7 @@ _COMMAND_LIKE_STARTS = (
     "trage",
     "propose",
     "apply-preview",
+    "verify",
     "v1",
     "doctor",
     "model",
@@ -120,6 +125,21 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("apply-preview", "--from-triage", "--json"): (
         "apply-preview",
         "--from-triage",
+        "--json",
+    ),
+    ("verify",): ("verify",),
+    ("verify", "--brief"): ("verify", "--brief"),
+    ("verify", "--json"): ("verify", "--json"),
+    ("verify", "--from-status"): ("verify", "--from-status"),
+    ("verify", "--from-status", "--json"): ("verify", "--from-status", "--json"),
+    ("verify", "--from-triage"): ("verify", "--from-triage"),
+    ("verify", "--from-triage", "--json"): ("verify", "--from-triage", "--json"),
+    ("verify", "--from-propose"): ("verify", "--from-propose"),
+    ("verify", "--from-propose", "--json"): ("verify", "--from-propose", "--json"),
+    ("verify", "--from-apply-preview"): ("verify", "--from-apply-preview"),
+    ("verify", "--from-apply-preview", "--json"): (
+        "verify",
+        "--from-apply-preview",
         "--json",
     ),
     ("triage", "docker"): ("triage", "docker"),
@@ -259,6 +279,13 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
             argv = ("apply-preview", "--target", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("verify", "--target") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("verify", "--target", original_tokens[2])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
@@ -437,6 +464,18 @@ def route_input(text: str) -> RoutedCommand:
     if exact_session in {"restart compose", "compose restart"}:
         return RoutedCommand(name="mutation_refused", args=raw)
 
+    verify_mutation_phrases = (
+        "verify and restart",
+        "verify then fix",
+        "apply and verify",
+        "restart and verify",
+        "clean up and verify",
+        "cleanup and verify",
+        "execute then verify",
+    )
+    if any(phrase in exact_session for phrase in verify_mutation_phrases):
+        return RoutedCommand(name="mutation_refused", args=raw)
+
     safe_dispatch = _dispatch_safe_cli_command(raw)
     if safe_dispatch is not None:
         return safe_dispatch
@@ -495,6 +534,37 @@ def route_input(text: str) -> RoutedCommand:
         return RoutedCommand(
             name="cli_dispatch", args=raw, argv=("apply-preview", "--from-propose")
         )
+    verify_cues = (
+        "verify status",
+        "verify the system",
+        "verify docker",
+        "verify current state",
+        "did anything improve",
+        "did the issue clear",
+        "is it fixed",
+        "verify the top suspect",
+    )
+    verify_mutations = (
+        "verify and restart",
+        "verify then fix",
+        "apply and verify",
+        "restart and verify",
+        "clean up and verify",
+        "cleanup and verify",
+        "execute then verify",
+        "restart compose",
+    )
+    if any(cue in lowered for cue in verify_cues) or re.search(
+        r"\bverify\s+[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\b", raw, flags=re.IGNORECASE
+    ):
+        if any(mut in lowered for mut in verify_mutations):
+            return RoutedCommand(name="mutation_refused", args=raw)
+        m = re.search(r"\bverify\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b", raw, flags=re.IGNORECASE)
+        if m and m.group(1).lower() not in {"status", "the", "docker", "current", "system"}:
+            return RoutedCommand(
+                name="cli_dispatch", args=raw, argv=("verify", "--target", m.group(1))
+            )
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("verify", "--from-triage"))
     if any(phrase in lowered or phrase in raw_lower for phrase in _QUICK_MUTATION_PHRASES):
         return RoutedCommand(name="mutation_refused", args=raw)
     if any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_PHRASES):

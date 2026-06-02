@@ -58,10 +58,10 @@ anything.
      <top>` from the compatibility path). With no suspects, the first safe
      command is a read-only status/report command (`shellforgeai status
      --json`) — never a detail command for a suspect that does not exist.
-   - Golden path: `status -> triage -> propose -> apply-preview`, with
-     `triage --target <target>` / `triage docker detail <target>` and gated
-     `remediation eligibility --target <target> --explain` available as review
-     drilldowns.
+   - Golden path: `status -> triage -> propose -> apply-preview -> verify`,
+     with `triage --target <target>` / `triage docker detail <target>` and
+     gated `remediation eligibility --target <target> --explain` available as
+     review drilldowns.
 3. **propose**
    - Third command: `shellforgeai propose`.
    - Brief/JSON/target forms: `shellforgeai propose --brief`,
@@ -88,12 +88,24 @@ anything.
      create a mission, create an apply record, create a remediation receipt, run
      Docker/Compose, restart containers, write a plan artifact, call the model,
      or cross the execution boundary.
-5. **approve/gate**
+5. **verify**
+   - Fifth command: `shellforgeai verify`.
+   - Brief/JSON/target/source forms: `shellforgeai verify --brief`,
+     `shellforgeai verify --json`, `shellforgeai verify --target <target>`,
+     `shellforgeai verify --from-status`, `shellforgeai verify --from-triage`,
+     `shellforgeai verify --from-propose`, and `shellforgeai verify
+     --from-apply-preview`.
+   - Contract: read-only current-state verification only. It collects/reuses
+     deterministic status/triage evidence, reports `ok`, `degraded`, `blocked`,
+     or `unknown`, lists evidence/limitations, and suggests a first safe
+     command. It does not apply, create a receipt, create a mission or plan,
+     execute remediation/rollback/cleanup, run Docker/Compose, restart
+     containers, call the model, or assume any action happened. `--from-propose`
+     and `--from-apply-preview` only name the previous context; they do not
+     prove an action was executed unless a future receipt/artifact is supplied.
+6. **approve/gate**
    - Future or existing governed policy gate flow, not expanded here.
    - Gate decisions must be explicit and auditable.
-6. **verify**
-   - Current commands include `shellforgeai ops report compare-latest`,
-`compare`, export validation commands, and artifact validation commands.
 7. **handoff/receipt**
    - Current support includes ops report exports, session summary artifacts,
 receipts, and validation reports.
@@ -106,8 +118,8 @@ receipts, and validation reports.
 | Triage | `triage`, `triage --brief`, `triage --json`, `triage --target <target>`; compatibility: `triage docker`, `triage docker --brief`, `triage docker detail <target>` | Read-only deterministic suspect ranking with consistent `Status:`/`Risk:`/`Safety:` wording and a first-safe-command flow before any proposal/remediation lane. |
 | Propose | `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --from-triage` | Read-only deterministic next-action proposal preview; no plan artifact and no execution. |
 | Apply preview | `apply-preview`, `apply-preview --brief`, `apply-preview --json`, `apply-preview --target <target>`, `apply-preview --from-propose`, `apply-preview --from-triage` | Read-only execution-boundary preview; no apply, mission, plan artifact, remediation receipt, Docker/Compose action, restart, shell, model call, or mutation. |
+| Verify | `verify`, `verify --brief`, `verify --json`, `verify --target <target>`, `verify --from-status`, `verify --from-triage`, `verify --from-propose`, `verify --from-apply-preview` | Read-only current-state verification; no action/receipt assumed and no execution. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
-| Verify | `ops report compare/latest`, validation commands | Operator verifies with evidence and artifact deltas. |
 | Handoff | report export, session summary, receipts | Portable evidence and receipts without mutation. |
 
 ## Support commands

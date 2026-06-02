@@ -9253,6 +9253,253 @@ def _build_v2_apply_preview_payload(
     return payload
 
 
+def _v2_verify_safety() -> dict[str, Any]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "apply_executed": False,
+        "mission_created": False,
+        "plan_created": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "cleanup_executed": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "natural_language_execution": False,
+        "model_called": False,
+    }
+
+
+def _v2_verify_source(
+    *,
+    from_status: bool = False,
+    from_triage: bool = False,
+    from_propose: bool = False,
+    from_apply_preview: bool = False,
+) -> str:
+    if from_apply_preview:
+        return "apply_preview"
+    if from_propose:
+        return "propose"
+    if from_triage:
+        return "triage"
+    if from_status:
+        return "status"
+    return "triage"
+
+
+def _is_v2_verify_production_target(name: str, labels: dict[str, str] | None = None) -> bool:
+    lowered = name.lower().strip()
+    if lowered in {"shellforgeai", "prod", "production"} or "prod" in lowered:
+        return True
+    labels = labels or {}
+    for key, value in labels.items():
+        label = f"{key}={value}".lower()
+        if ("production" in label or "prod" in label) and value.lower() not in {
+            "false",
+            "0",
+            "no",
+        }:
+            return True
+    return False
+
+
+def _build_v2_verify_payload(
+    *,
+    target: str | None = None,
+    from_status: bool = False,
+    from_triage: bool = False,
+    from_propose: bool = False,
+    from_apply_preview: bool = False,
+    top: int = 5,
+) -> dict[str, Any]:
+    from shellforgeai.core import triage_ranking
+
+    scene = triage_ranking.collect_scene()
+    ranked = triage_ranking.rank_scene(scene)
+    suspects = list(ranked.get("suspects") or [])[:top]
+    summary = dict(ranked.get("summary") or {})
+    critical = int(summary.get("critical", 0) or 0)
+    high = int(summary.get("high", 0) or 0)
+    selected = _target_suspect({**ranked, "suspects": suspects}, target)
+    source = _v2_verify_source(
+        from_status=from_status,
+        from_triage=from_triage,
+        from_propose=from_propose,
+        from_apply_preview=from_apply_preview,
+    )
+    safety = _v2_verify_safety()
+    limitations = [
+        "Read-only deterministic current-state verification only.",
+        "No apply receipt was provided or consumed by this command.",
+    ]
+    warnings = list(ranked.get("warnings") or [])
+    findings: list[dict[str, Any]] = []
+    target_payload: dict[str, Any] = {
+        "name": target,
+        "found": False,
+        "production_target": False,
+    }
+    status = "degraded" if suspects else "ok"
+    reason = "no current Docker suspects" if not suspects else "ranked suspects visible"
+    first_safe = "shellforgeai status --json" if not suspects else "shellforgeai triage --json"
+    safe_next = [first_safe]
+
+    if target:
+        labels, found_in_scene = _scene_labels_for_target(scene, target)
+        target_known = selected is not None or found_in_scene
+        production = _is_v2_verify_production_target(target, labels)
+        target_payload = {
+            "name": target,
+            "found": bool(target_known),
+            "production_target": production,
+        }
+        if not target_known:
+            status = "unknown"
+            reason = "target not found in current deterministic triage scene"
+            first_safe = "shellforgeai triage --json"
+            safe_next = [first_safe, f"shellforgeai triage docker detail {target}"]
+            findings.append({"severity": "unknown", "message": reason})
+        else:
+            first_safe = f"shellforgeai triage docker detail {target}"
+            safe_next = [first_safe, "shellforgeai status --json"]
+            if selected:
+                status = "degraded"
+                reason = "target is visible in current ranked suspects"
+                findings.append(
+                    {
+                        "severity": str(selected.get("severity") or "unknown"),
+                        "message": _v2_evidence_summary(selected),
+                    }
+                )
+            else:
+                status = "ok"
+                reason = "target visible with no current ranked suspect evidence"
+                findings.append({"severity": "info", "message": reason})
+            if production:
+                warnings.append(
+                    "Production-like target: verification is read-only; no restart or "
+                    "remediation suggested."
+                )
+                limitations.append(
+                    "Production-like target caution: inspect only unless governed workflows "
+                    "authorize change."
+                )
+    elif suspects:
+        top_suspect = suspects[0]
+        first_safe = "shellforgeai triage --json"
+        safe_next = [first_safe, _v2_triage_target_command(str(top_suspect.get("name") or ""))]
+        findings.append(
+            {
+                "severity": str(top_suspect.get("severity") or "unknown"),
+                "target": top_suspect.get("name"),
+                "message": _v2_evidence_summary(top_suspect),
+            }
+        )
+
+    if from_apply_preview:
+        warnings.append("No apply receipt was provided; verifying current observed state only.")
+    if from_propose:
+        warnings.append("Proposal context does not imply any action was applied.")
+
+    return {
+        "schema_version": 1,
+        "mode": "v2_verify",
+        "status": status,
+        "reason": reason,
+        "read_only": True,
+        "mutation_performed": False,
+        "verification_type": "current_state",
+        "applied_action_assumed": False,
+        "apply_receipt_present": False,
+        "from_status": bool(from_status),
+        "from_triage": bool(from_triage),
+        "from_propose": bool(from_propose),
+        "from_apply_preview": bool(from_apply_preview),
+        "target": target_payload,
+        "evidence": {
+            "source": source,
+            "suspects_ranked": len(suspects),
+            "critical": critical,
+            "high": high,
+        },
+        "findings": findings,
+        "limitations": limitations,
+        "first_safe_command": first_safe,
+        "safe_next_commands": safe_next,
+        "safety": safety,
+        "warnings": warnings,
+        **safety,
+    }
+
+
+def _render_v2_verify_human(payload: dict[str, Any]) -> str:
+    target = cast(
+        dict[str, Any], payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    )
+    evidence = cast(
+        dict[str, Any], payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    )
+    status = str(payload.get("status") or "unknown")
+    lines: list[str] = [f"Verify: {status.upper() if status == 'ok' else status}"]
+    if target.get("name"):
+        lines.append(f"Target: {target.get('name')}")
+    if payload.get("from_apply_preview"):
+        lines.append("No apply receipt was provided; verifying current observed state only.")
+    elif payload.get("from_propose"):
+        lines.append("No proposal was assumed to have been applied.")
+    if target.get("name") and not target.get("found"):
+        lines.append(f"Reason: {payload.get('reason')}")
+    elif not target.get("name") and int(evidence.get("suspects_ranked", 0) or 0) == 0:
+        lines.extend(
+            [
+                "Status: no current Docker suspects",
+                "Risk: low from current container-visible evidence",
+            ]
+        )
+    else:
+        lines.append(f"Reason: {payload.get('reason')}")
+        lines.append(
+            "Evidence: "
+            f"{evidence.get('suspects_ranked', 0)} ranked suspects; "
+            f"{evidence.get('critical', 0)} critical; {evidence.get('high', 0)} high"
+        )
+    if target.get("production_target"):
+        lines.append("Caution: production-like target; read-only verification only.")
+    lines.extend(
+        [
+            "",
+            "No applied action was detected or assumed.",
+            "This is a read-only current-state verification.",
+            "This command did not verify a completed remediation.",
+            "",
+            "First safe command:",
+            f"  {payload.get('first_safe_command')}",
+            "",
+            "Safety:",
+            "- Read-only verification.",
+            "- No apply, remediation, rollback, cleanup, Docker, or Compose action was executed.",
+            "- No action was taken.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_verify_brief(payload: dict[str, Any]) -> str:
+    target = cast(
+        dict[str, Any], payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    )
+    name = target.get("name") or "none"
+    return (
+        f"Verify: {payload.get('status')}\n"
+        f"Target: {name}\n"
+        f"First safe command: {payload.get('first_safe_command')}\n"
+        "Safety: read-only; no apply/remediation/rollback/cleanup/Docker/Compose action executed\n"
+    )
+
+
 def _render_v2_apply_preview_human(payload: dict[str, Any]) -> str:
     target = cast(
         dict[str, Any], payload.get("target") if isinstance(payload.get("target"), dict) else {}
@@ -10096,6 +10343,101 @@ def _handle_v2_propose_ask(question: str) -> bool:
     return True
 
 
+_VERIFY_ASK_TARGET_RE = re.compile(
+    r"\bverify\b(?:\s+the)?\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+    re.IGNORECASE,
+)
+_VERIFY_ASK_CUES = (
+    "verify status",
+    "verify the system",
+    "verify docker",
+    "verify current state",
+    "did anything improve",
+    "did the issue clear",
+    "is it fixed",
+    "verify the top suspect",
+)
+_VERIFY_MUTATION_CUES = (
+    "verify and restart",
+    "verify then fix",
+    "apply and verify",
+    "restart and verify",
+    "clean up and verify",
+    "cleanup and verify",
+    "execute then verify",
+    "restart compose",
+    "restart docker",
+    "fix it",
+    "apply it",
+)
+
+
+def _verify_ask_target(question: str) -> str | None:
+    m = _VERIFY_ASK_TARGET_RE.search(question or "")
+    if not m:
+        return None
+    target = m.group(1)
+    if target.lower() in {
+        "status",
+        "system",
+        "docker",
+        "current",
+        "state",
+        "the",
+        "top",
+        "suspect",
+    }:
+        return None
+    return target
+
+
+def _verify_mutation_cues(question: str) -> list[str]:
+    q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
+    return [cue for cue in _VERIFY_MUTATION_CUES if cue in q]
+
+
+def _is_verify_ask(question: str) -> bool:
+    q = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    if not q:
+        return False
+    return bool(_verify_ask_target(question)) or any(cue in q for cue in _VERIFY_ASK_CUES)
+
+
+def _handle_v2_verify_ask(question: str) -> bool:
+    verify = _is_verify_ask(question)
+    mutation_cues = _verify_mutation_cues(question)
+    q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
+    verify_mutation_only = any(
+        cue in q
+        for cue in (
+            "apply and verify",
+            "restart and verify",
+            "clean up and verify",
+            "cleanup and verify",
+            "execute then verify",
+        )
+    )
+    if not verify and not verify_mutation_only:
+        return False
+    if not verify:
+        console.print("Refused: natural-language mutation is not allowed.")
+        console.print("Use `shellforgeai verify` to inspect current state without execution.")
+        console.print("No action was taken.")
+        return True
+    target = _verify_ask_target(question)
+    payload = _build_v2_verify_payload(target=target, from_triage=True)
+    console.print("Read-only verify (deterministic ask routing):")
+    console.print("")
+    typer.echo(_render_v2_verify_human(payload), nl=False)
+    if mutation_cues:
+        console.print("Refused mutation part of the request.")
+        console.print(
+            "ShellForgeAI did not execute, apply, restart, fix, clean up, or run Compose."
+        )
+        console.print("No action was taken.")
+    return True
+
+
 def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool = False) -> dict:
     data_dir = Path(runtime.session.data_dir)
     audit = AuditStorage(data_dir)
@@ -10288,6 +10630,50 @@ def propose(
     typer.echo(_render_v2_propose_human(payload), nl=False)
 
 
+@app.command("verify")
+def verify(
+    ctx: typer.Context,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    brief: Annotated[bool, typer.Option("--brief", help="Emit bounded verify output.")] = False,
+    target: Annotated[
+        str | None, typer.Option("--target", help="Verify one exact visible target.")
+    ] = None,
+    from_status: Annotated[
+        bool, typer.Option("--from-status", help="Use current deterministic status context.")
+    ] = False,
+    from_triage: Annotated[
+        bool, typer.Option("--from-triage", help="Use current deterministic triage context.")
+    ] = False,
+    from_propose: Annotated[
+        bool,
+        typer.Option("--from-propose", help="Verify current state after proposal context only."),
+    ] = False,
+    from_apply_preview: Annotated[
+        bool,
+        typer.Option(
+            "--from-apply-preview",
+            help="Verify current state after apply-preview context only; no apply is assumed.",
+        ),
+    ] = False,
+) -> None:
+    """Read-only V2 current-state verification. Does not apply or execute."""
+    _ = ctx
+    payload = _build_v2_verify_payload(
+        target=target,
+        from_status=from_status,
+        from_triage=from_triage,
+        from_propose=from_propose,
+        from_apply_preview=from_apply_preview,
+    )
+    if json_output:
+        typer.echo(json.dumps(payload))
+        return
+    if brief:
+        typer.echo(_render_v2_verify_brief(payload), nl=False)
+        return
+    typer.echo(_render_v2_verify_human(payload), nl=False)
+
+
 @app.command("apply-preview")
 def apply_preview(
     ctx: typer.Context,
@@ -10333,6 +10719,8 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _handle_v2_verify_ask(question):
+            return
         if _is_status_ask(question):
             payload = _build_status_payload()
             console.print("Read-only status (deterministic ask routing):")
