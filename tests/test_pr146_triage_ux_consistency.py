@@ -300,11 +300,97 @@ def test_triage_surfaces_have_no_forbidden_commands(monkeypatch, tmp_path) -> No
         _assert_no_forbidden(result.stdout)
 
 
+STALE_RANK_COMMAND = "shellforgeai triage docker detail --rank 1"
+
+
+def _crashloop_scene() -> dict:
+    return {
+        "containers": [
+            {
+                "name": "sfai-crashloop",
+                "state": "restarting",
+                "exit_code": 42,
+                "restart_count": 12,
+                "oom_killed": False,
+                "health": None,
+                "log_themes": {"error_line": 4, "traceback": 1},
+            }
+        ]
+    }
+
+
+def _patch_scene(monkeypatch, tmp_path: Path, scene: dict) -> None:
+    """Patch only collect_scene so the real deterministic rank_scene runs."""
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.core.triage_ranking.collect_scene", lambda: scene)
+
+
+# No-suspect command consistency for the full `triage docker` compatibility path.
+def test_triage_docker_no_suspect_human_is_consistent(monkeypatch, tmp_path) -> None:
+    _patch_scene(monkeypatch, tmp_path, {"containers": []})
+    result = runner.invoke(app, ["triage", "docker"])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "Status:" in out
+    assert "Risk:" in out
+    assert "no ranked" in out.lower()
+    assert ("shellforgeai status --json" in out) or ("shellforgeai ops report --json" in out)
+    assert STALE_RANK_COMMAND not in out
+    _assert_no_forbidden(out)
+
+
+def test_triage_docker_no_suspect_json_routes_to_status_report(monkeypatch, tmp_path) -> None:
+    _patch_scene(monkeypatch, tmp_path, {"containers": []})
+    result = runner.invoke(app, ["triage", "docker", "--json"])
+    assert result.exit_code == 0
+    body = result.stdout.strip()
+    assert body.startswith("{") and body.endswith("}")
+    assert STALE_RANK_COMMAND not in body
+    payload = json.loads(body)
+    next_safe = payload.get("next_safe_commands") or []
+    assert STALE_RANK_COMMAND not in next_safe
+    assert ("shellforgeai status --json" in next_safe) or (
+        "shellforgeai ops report --json" in next_safe
+    )
+    safety = payload["safety"]
+    for key in (
+        "read_only",
+        "mutation_performed",
+        "cleanup_executed",
+        "remediation_executed",
+        "rollback_executed",
+        "docker_compose_executed",
+        "container_restarted",
+    ):
+        expected = key == "read_only"
+        assert safety[key] is expected, key
+
+
+def test_triage_docker_suspect_present_still_suggests_detail(monkeypatch, tmp_path) -> None:
+    _patch_scene(monkeypatch, tmp_path, _crashloop_scene())
+    payload = json.loads(runner.invoke(app, ["triage", "docker", "--json"]).stdout)
+    next_safe = payload.get("next_safe_commands") or []
+    # With a ranked suspect, the rank-1 detail command is valid and must remain.
+    assert STALE_RANK_COMMAND in next_safe
+    human = runner.invoke(app, ["triage", "docker"]).stdout
+    assert "shellforgeai triage docker detail sfai-crashloop" in human
+
+
+def test_triage_docker_no_suspect_brief_mirrors_top_level(monkeypatch, tmp_path) -> None:
+    _patch_scene(monkeypatch, tmp_path, {"containers": []})
+    docker_brief = runner.invoke(app, ["triage", "docker", "--brief"])
+    top_brief = runner.invoke(app, ["triage", "--brief"])
+    assert docker_brief.exit_code == 0
+    assert docker_brief.stdout == top_brief.stdout
+    assert STALE_RANK_COMMAND not in docker_brief.stdout
+
+
 # 17-23. Safety regression: triage UX changes introduce no execution primitives.
 def test_triage_sources_stay_read_only_and_shell_free() -> None:
     touched = [
         Path("src/shellforgeai/cli.py"),
         Path("src/shellforgeai/core/ask_routing.py"),
+        Path("src/shellforgeai/core/triage_ranking.py"),
         Path("src/shellforgeai/interactive/commands.py"),
         Path("src/shellforgeai/interactive/repl.py"),
     ]
