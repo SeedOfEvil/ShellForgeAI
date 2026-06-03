@@ -1254,6 +1254,30 @@ shellforgeai verify --from-apply-preview
 shellforgeai verify --target sfai-crashloop
 ```
 
+### `shellforgeai handoff`
+
+V2 golden-path sixth (final) command. `shellforgeai handoff` is a deterministic, read-only operator handoff packet. It collects/reuses the deterministic status/triage/propose/apply-preview/verify posture and presents a concise summary an operator can hand to the next shift: current status, risk, suspect count, proposal/apply-preview/verify state, the first safe next command, and what was **not** done. It does **not** execute fixes, create an executable mission, create an apply record or remediation receipt, imply remediation happened, restart anything, run Docker/Compose, call the model/Codex, use shell execution, or assume any action was applied. When no action was applied it states `No applied action was detected or assumed` and `This handoff is a read-only operator summary`.
+
+- `shellforgeai handoff` reports the handoff status, the per-stage V2 path summary, one first safe command, what was not done, and read-only/no-action safety wording.
+- `shellforgeai handoff --brief` emits a bounded operator view: handoff state, risk, first safe command, and safety.
+- `shellforgeai handoff --json` emits strict JSON only with `mode: "v2_handoff"`, `read_only: true`, `mutation_performed: false`, `artifact_written: false`, `handoff_id: null`, `handoff_path: null`, a compact `golden_path` (status/triage/propose/apply_preview/verify), a `summary`, `first_safe_command`, `safe_next_commands`, `limitations`, `warnings`, and a `safety` block with execution flags for apply, mission, plan, remediation, rollback, cleanup, Docker/Compose, container restart, `shell_true`, arbitrary command execution, natural-language execution, and model calls (all `false`).
+- `shellforgeai handoff --save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/<handoff_id>/` (`handoff.json`, `handoff.md`, `manifest.json`) with checksums and explicit non-mutating safety flags, then sets `artifact_written: true` with `handoff_id`/`handoff_path`. It never writes outside that ShellForgeAI-owned path and never mutates Docker/Compose/host state. Validate/export of saved handoffs is deferred to a later PR, so no validate/export commands are printed.
+- `shellforgeai handoff --target <target>` includes one visible target's read-only context. Unknown targets produce `unknown` with `target not found in current deterministic triage scene` and `shellforgeai triage --json` as the first safe command; production-like targets stay read-only with a production-like caution and never suggest restart/remediation.
+- `shellforgeai handoff --from-status`, `--from-triage`, `--from-propose`, `--from-apply-preview`, and `--from-verify` only name the prior deterministic context; none of them assume an action was applied.
+
+Examples:
+
+```bash
+shellforgeai handoff
+shellforgeai handoff --brief
+shellforgeai handoff --json
+shellforgeai handoff --save
+shellforgeai handoff --from-verify
+shellforgeai handoff --target sfai-crashloop
+```
+
+V2 golden path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
+
 - `shellforgeai ops report`
 - `shellforgeai ops report --brief` renders a compact, read-only, human-only pressure-mode view: status, risk, top issue/evidence, exactly one first safe command, and a safety line. Combine with `--json` to keep the existing strict JSON output; `--brief` does not add human prose in JSON mode.
 - `shellforgeai ops report --json`

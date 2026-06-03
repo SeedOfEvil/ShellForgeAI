@@ -47,6 +47,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "verify --brief",
     "verify --json",
     "verify --target <target>",
+    "handoff",
+    "handoff --brief",
+    "handoff --json",
+    "handoff --save",
     "triage docker",
     "triage docker --brief",
     "triage docker --json",
@@ -71,6 +75,7 @@ _COMMAND_LIKE_STARTS = (
     "propose",
     "apply-preview",
     "verify",
+    "handoff",
     "v1",
     "doctor",
     "model",
@@ -142,6 +147,17 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
         "--from-apply-preview",
         "--json",
     ),
+    ("handoff",): ("handoff",),
+    ("handoff", "--brief"): ("handoff", "--brief"),
+    ("handoff", "--json"): ("handoff", "--json"),
+    ("handoff", "--save"): ("handoff", "--save"),
+    ("handoff", "--save", "--json"): ("handoff", "--save", "--json"),
+    ("handoff", "summary"): ("handoff",),
+    ("handoff", "--from-status"): ("handoff", "--from-status"),
+    ("handoff", "--from-triage"): ("handoff", "--from-triage"),
+    ("handoff", "--from-propose"): ("handoff", "--from-propose"),
+    ("handoff", "--from-apply-preview"): ("handoff", "--from-apply-preview"),
+    ("handoff", "--from-verify"): ("handoff", "--from-verify"),
     ("triage", "docker"): ("triage", "docker"),
     ("triage", "docker", "--brief"): ("triage", "docker", "--brief"),
     ("triage", "docker", "--json"): ("triage", "docker", "--json"),
@@ -286,6 +302,13 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
             argv = ("verify", "--target", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("handoff", "--target") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("handoff", "--target", original_tokens[2])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
@@ -476,6 +499,25 @@ def route_input(text: str) -> RoutedCommand:
     if any(phrase in exact_session for phrase in verify_mutation_phrases):
         return RoutedCommand(name="mutation_refused", args=raw)
 
+    handoff_mutation_phrases = (
+        "handoff and restart",
+        "handoff then restart",
+        "handoff and apply",
+        "handoff then apply",
+        "handoff and fix",
+        "handoff and clean up",
+        "handoff and cleanup",
+        "handoff and execute",
+        "handoff and remediate",
+        "handoff and rollback",
+        "summarize and fix",
+        "summarise and fix",
+        "write handoff and clean up",
+        "write handoff and cleanup",
+    )
+    if any(phrase in exact_session for phrase in handoff_mutation_phrases):
+        return RoutedCommand(name="mutation_refused", args=raw)
+
     safe_dispatch = _dispatch_safe_cli_command(raw)
     if safe_dispatch is not None:
         return safe_dispatch
@@ -565,6 +607,42 @@ def route_input(text: str) -> RoutedCommand:
                 name="cli_dispatch", args=raw, argv=("verify", "--target", m.group(1))
             )
         return RoutedCommand(name="cli_dispatch", args=raw, argv=("verify", "--from-triage"))
+    handoff_cues = (
+        "give me a handoff",
+        "give me the handoff",
+        "give me an operator handoff",
+        "give me the operator handoff",
+        "operator handoff",
+        "handoff summary",
+        "summarize for handoff",
+        "summary for handoff",
+        "what should i tell the next operator",
+        "what do i tell the next operator",
+        "what do i hand over",
+        "make a shift handoff",
+        "shift handoff",
+        "save handoff",
+        "save the handoff",
+    )
+    handoff_mutations = (
+        "restart",
+        "and apply",
+        "then apply",
+        "fix it",
+        "and fix",
+        "clean up",
+        "cleanup",
+        "execute",
+        "remediate",
+        "rollback",
+        "compose",
+    )
+    if any(cue in lowered for cue in handoff_cues) or re.search(r"\bhandoff\b", lowered):
+        if any(mut in lowered for mut in handoff_mutations):
+            return RoutedCommand(name="mutation_refused", args=raw)
+        if "save handoff" in lowered or "save the handoff" in lowered:
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=("handoff", "--save"))
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("handoff",))
     if any(phrase in lowered or phrase in raw_lower for phrase in _QUICK_MUTATION_PHRASES):
         return RoutedCommand(name="mutation_refused", args=raw)
     if any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_PHRASES):

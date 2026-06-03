@@ -116,16 +116,20 @@ asks deterministically, and refuses or gates mutation.
 ### What this is (V1)
 
 - Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
-- V2 read-only status, triage, propose, apply-preview, and verify entrypoints
-  (`status`, `triage`, `triage --target <target>`, `propose`, `propose
-  --target <target>`, `apply-preview`, `apply-preview --target <target>`,
-  `verify`, `verify --target <target>`) backed by deterministic Docker triage
-  compatibility commands (`triage docker`, `triage docker detail <target>`).
-  `propose` is preview-only: no plan artifact and no action executed.
-  `apply-preview` is an execution-boundary preview only: no apply, mission,
-  remediation, rollback, cleanup, Docker, or Compose action executes. `verify`
-  checks current observed state only; it does not prove any action was applied
-  without a future receipt/artifact.
+- V2 read-only status, triage, propose, apply-preview, verify, and handoff
+  entrypoints (`status`, `triage`, `triage --target <target>`, `propose`,
+  `propose --target <target>`, `apply-preview`, `apply-preview --target
+  <target>`, `verify`, `verify --target <target>`, `handoff`, `handoff --save`)
+  backed by deterministic Docker triage compatibility commands (`triage docker`,
+  `triage docker detail <target>`). `propose` is preview-only: no plan artifact
+  and no action executed. `apply-preview` is an execution-boundary preview only:
+  no apply, mission, remediation, rollback, cleanup, Docker, or Compose action
+  executes. `verify` checks current observed state only; it does not prove any
+  action was applied without a future receipt/artifact. `handoff` is a read-only
+  operator handoff packet that summarizes the golden-path posture and first safe
+  command; it does not execute fixes or imply remediation happened, and
+  `handoff --save` writes only a ShellForgeAI-owned artifact under
+  `<data_dir>/v2_handoffs/`.
 - Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
   `--save`, `history`, `compare`, `compare-latest`, `export`,
   `export-validate`, `validate`).
@@ -160,6 +164,9 @@ shellforgeai propose
 shellforgeai propose --target <target>
 shellforgeai apply-preview
 shellforgeai apply-preview --target <target>
+shellforgeai verify
+shellforgeai handoff
+shellforgeai handoff --save
 shellforgeai triage --target <target>
 shellforgeai triage docker detail <target>  # compatibility detail path
 shellforgeai remediation eligibility --target <target> --explain
@@ -182,9 +189,13 @@ shellforgeai remediation self-test --profile full
 7. `shellforgeai triage`
 8. `shellforgeai propose`
 9. `shellforgeai apply-preview`
-10. `shellforgeai triage --target <target>` (compatibility: `shellforgeai triage docker detail <target>`)
-11. `shellforgeai remediation eligibility --target <target> --explain`
-12. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
+10. `shellforgeai verify`
+11. `shellforgeai handoff` (read-only operator handoff; `--save` writes a ShellForgeAI-owned packet)
+12. `shellforgeai triage --target <target>` (compatibility: `shellforgeai triage docker detail <target>`)
+13. `shellforgeai remediation eligibility --target <target> --explain`
+14. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
+
+V2 golden path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
 
 Safety promise: V1 is read-only by default, deterministic ask routes do not
 require model availability for safety/refusal paths, and production mutation is

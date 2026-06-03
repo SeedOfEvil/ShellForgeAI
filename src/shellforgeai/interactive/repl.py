@@ -83,9 +83,9 @@ Fast status:
 
 V2 golden path:
   status / triage / propose [--brief|--json]
-  apply-preview [--brief|--json] / verify [--brief|--json] / triage --target <target>
-  propose --target <target> [--json] / propose --from-triage
-  verify --target <target> [--json] / verify --from-apply-preview
+  apply-preview [--brief|--json] / verify [--brief|--json] / handoff [--brief|--json|--save]
+  triage/propose/verify/handoff --target <target> [--json] / handoff summary
+  full path: status -> triage -> propose -> apply-preview -> verify -> handoff
 
 Triage/detail:
   triage [--brief|--json] / triage --target <target>
@@ -1628,6 +1628,7 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("ops", "report", "compare-latest"): "Running read-only ops report compare-latest...",
     ("triage", "docker"): "Running read-only Docker triage...",
     ("triage", "docker", "detail"): "Running read-only Docker triage detail...",
+    ("handoff",): "Running read-only operator handoff...",
     ("diagnose",): "Running read-only diagnose...",
     ("v1", "check"): "Running V1 readiness check...",
     ("remediation", "self-test"): "Running read-only remediation self-test...",
@@ -1828,6 +1829,10 @@ def _record_cli_dispatch_in_session_summary(
             state.note_finding("remediation eligibility: eligible")
         elif output:
             state.note_finding("remediation eligibility reviewed")
+    elif argv[:1] == ("handoff",):
+        state.note_check("handoff")
+        if "--save" in argv:
+            state.note_finding("read-only handoff artifact saved")
     elif argv[:2] == ("v1", "check"):
         state.note_check("v1 check")
     elif argv[:2] == ("remediation", "self-test"):
