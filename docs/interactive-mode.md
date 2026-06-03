@@ -109,6 +109,18 @@ Debug
   fixed?" verify current observed state only; they do not claim a completed
   remediation. Mixed mutation phrasing such as "verify and restart" or "apply
   and verify" is refused with no action taken.
+- Handoff entries (`handoff`, `handoff --brief`, `handoff --json`,
+  `handoff --save`, `handoff summary`, `handoff --target <target>`, and
+  `handoff --from-status` / `--from-triage` / `--from-propose` /
+  `--from-apply-preview` / `--from-verify`) route to the V2 read-only operator
+  handoff packet. Natural handoff prompts such as "give me a handoff", "give me
+  the operator handoff", "handoff summary", "what should I tell the next
+  operator?", "what do I hand over?", and "make a shift handoff" produce the
+  same read-only handoff. `handoff --save` writes only a ShellForgeAI-owned
+  artifact under `<data_dir>/v2_handoffs/`. Mixed mutation phrasing such as
+  "handoff and restart", "handoff then apply", "summarize and fix it", or "give
+  me a handoff and restart compose" is refused with no action taken; the handoff
+  itself never executes fixes or implies remediation happened.
 
 
 ## Interactive help
@@ -117,6 +129,7 @@ Type `help`, `/help`, `?`, `commands`, or `what can I do?` inside the REPL to
 show a short operator help screen. The help lists exact interactive-supported
 forms for fast status (`status`, `status --brief`, `status --json`, `ops report --brief`, `v1 check quick`, `doctor`),
 V2 verification (`verify`, `verify --json`, `verify --target <target>`),
+V2 handoff (`handoff`, `handoff --json`, `handoff --save`, `handoff summary`),
 Docker triage (`triage docker detail <target>`), reports/artifacts (`ops report
 history --limit 5`, `ops report compare-latest`), safe remediation readiness
 (`remediation eligibility --target <target> --explain`), and session follow-ups

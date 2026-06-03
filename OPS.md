@@ -7,9 +7,12 @@
 3. `shellforgeai propose` — read-only next-action proposal preview; no plan created and no action executed.
 4. `shellforgeai apply-preview` — read-only execution-boundary preview; no apply, mission, remediation, rollback, cleanup, Docker, Compose, or restart action executed.
 5. `shellforgeai verify` — read-only current-state verification; no applied action or remediation receipt is assumed.
-6. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
-7. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
-8. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
+6. `shellforgeai handoff` — read-only operator handoff packet summarizing the golden-path posture and first safe command; it does not execute fixes or imply remediation happened. `shellforgeai handoff --save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/`.
+7. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
+8. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
+9. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
+
+Safe V2 path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
 
 `shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
 `shellforgeai triage docker` / `triage docker --brief` views all share the same
@@ -53,17 +56,19 @@ Use this concise, safe path for the V1 demo and handoff contract:
 8. `shellforgeai propose`
 9. `shellforgeai apply-preview`
 10. `shellforgeai verify`
-11. `shellforgeai triage --target <target>`
-12. `shellforgeai remediation eligibility --target <target> --explain`
-12. `shellforgeai ops report --save`
-13. `shellforgeai ops report history --limit 5`
-14. `shellforgeai ops report compare-latest`
-15. `shellforgeai ask "It's 2AM; what is on fire?"`
-16. Pressure-mode quick status: `shellforgeai status` / `shellforgeai status --brief` or `shellforgeai ask "quick status"`
-17. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
-18. `shellforgeai ask "show me the command to inspect sfai-crashloop"` (command-help: returns the read-only `shellforgeai triage docker detail sfai-crashloop` with `No action was taken.`; nothing is executed)
+11. `shellforgeai handoff` (read-only operator handoff; `--save` for a ShellForgeAI-owned packet)
+12. `shellforgeai triage --target <target>`
+13. `shellforgeai remediation eligibility --target <target> --explain`
+14. `shellforgeai ops report --save`
+15. `shellforgeai ops report history --limit 5`
+16. `shellforgeai ops report compare-latest`
+17. `shellforgeai ask "It's 2AM; what is on fire?"`
+18. Pressure-mode quick status: `shellforgeai status` / `shellforgeai status --brief` or `shellforgeai ask "quick status"`
+19. `shellforgeai ask "please restart shellforgeai"` (expected deterministic refusal)
+20. `shellforgeai ask "show me the command to inspect sfai-crashloop"` (command-help: returns the read-only `shellforgeai triage docker detail sfai-crashloop` with `No action was taken.`; nothing is executed)
+21. `shellforgeai ask "what should I tell the next operator?"` (read-only handoff routing; nothing is executed)
 
-Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path. Command-help ("show me the command ...", "how would I propose ..."), apply-preview prompts ("apply preview", "show apply gates"), and verify prompts ("verify status", "did anything improve?") explain safe current state/gates without running anything or assuming an apply happened; "do it" / "run that" mutation phrasings are refused.
+Safety reminder: read-only by default; no casual restart/remediation/cleanup execute in the V1 demo path. Command-help ("show me the command ...", "how would I propose ..."), apply-preview prompts ("apply preview", "show apply gates"), verify prompts ("verify status", "did anything improve?"), and handoff prompts ("give me a handoff", "what should I tell the next operator?") explain safe current state/gates/posture without running anything or assuming an apply happened; "do it" / "run that" / "handoff and restart" mutation phrasings are refused.
 
 Operator smoke tests and runbook tips.
 

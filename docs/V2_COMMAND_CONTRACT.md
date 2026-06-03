@@ -58,10 +58,10 @@ anything.
      <top>` from the compatibility path). With no suspects, the first safe
      command is a read-only status/report command (`shellforgeai status
      --json`) — never a detail command for a suspect that does not exist.
-   - Golden path: `status -> triage -> propose -> apply-preview -> verify`,
-     with `triage --target <target>` / `triage docker detail <target>` and
-     gated `remediation eligibility --target <target> --explain` available as
-     review drilldowns.
+   - Golden path: `status -> triage -> propose -> apply-preview -> verify ->
+     handoff`, with `triage --target <target>` / `triage docker detail
+     <target>` and gated `remediation eligibility --target <target> --explain`
+     available as review drilldowns.
 3. **propose**
    - Third command: `shellforgeai propose`.
    - Brief/JSON/target forms: `shellforgeai propose --brief`,
@@ -103,10 +103,32 @@ anything.
      containers, call the model, or assume any action happened. `--from-propose`
      and `--from-apply-preview` only name the previous context; they do not
      prove an action was executed unless a future receipt/artifact is supplied.
-6. **approve/gate**
+6. **handoff**
+   - Sixth command: `shellforgeai handoff`.
+   - Brief/JSON/save/source forms: `shellforgeai handoff --brief`,
+     `shellforgeai handoff --json`, `shellforgeai handoff --save`,
+     `shellforgeai handoff --target <target>`, and `shellforgeai handoff
+     --from-status` / `--from-triage` / `--from-propose` /
+     `--from-apply-preview` / `--from-verify`.
+   - Contract: read-only operator handoff packet only. It collects/reuses the
+     deterministic status/triage/propose/apply-preview/verify posture, reports a
+     concise current status, risk, suspect count, proposal/apply-preview/verify
+     state, the first safe next command, and what was **not** done. It does
+     **not** execute fixes, create an executable mission, create an apply record
+     or remediation receipt, imply remediation happened, restart containers, run
+     Docker/Compose, call the model, or assume any action was applied. When no
+     action was applied it states `No applied action was detected or assumed`
+     and `This handoff is a read-only operator summary`.
+   - `--save` writes only a ShellForgeAI-owned artifact under
+     `<data_dir>/v2_handoffs/<handoff_id>/` (`handoff.json`, `handoff.md`,
+     `manifest.json`) with checksums and explicit non-mutating safety flags. It
+     never writes outside that ShellForgeAI-owned path and never mutates Docker,
+     Compose, files, services, containers, or host state. Validate/export of
+     saved handoffs is deferred to a later PR.
+7. **approve/gate**
    - Future or existing governed policy gate flow, not expanded here.
    - Gate decisions must be explicit and auditable.
-7. **handoff/receipt**
+8. **receipt/export**
    - Current support includes ops report exports, session summary artifacts,
 receipts, and validation reports.
 
@@ -119,8 +141,9 @@ receipts, and validation reports.
 | Propose | `propose`, `propose --brief`, `propose --json`, `propose --target <target>`, `propose --from-triage` | Read-only deterministic next-action proposal preview; no plan artifact and no execution. |
 | Apply preview | `apply-preview`, `apply-preview --brief`, `apply-preview --json`, `apply-preview --target <target>`, `apply-preview --from-propose`, `apply-preview --from-triage` | Read-only execution-boundary preview; no apply, mission, plan artifact, remediation receipt, Docker/Compose action, restart, shell, model call, or mutation. |
 | Verify | `verify`, `verify --brief`, `verify --json`, `verify --target <target>`, `verify --from-status`, `verify --from-triage`, `verify --from-propose`, `verify --from-apply-preview` | Read-only current-state verification; no action/receipt assumed and no execution. |
+| Handoff | `handoff`, `handoff --brief`, `handoff --json`, `handoff --save`, `handoff --target <target>`, `handoff --from-status`, `handoff --from-triage`, `handoff --from-propose`, `handoff --from-apply-preview`, `handoff --from-verify` | Read-only operator handoff packet summarizing the deterministic golden-path posture and first safe command. It does not execute fixes, create an executable mission/apply record/receipt, imply remediation happened, or mutate Docker/Compose/host state. `--save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/<handoff_id>/`. |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
-| Handoff | report export, session summary, receipts | Portable evidence and receipts without mutation. |
+| Receipt/export | report export, session summary, receipts | Portable evidence and receipts without mutation. |
 
 ## Support commands
 
