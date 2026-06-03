@@ -98,6 +98,7 @@ Reports/artifacts:
   ops report history --limit 5
   ops report compare-latest
   ops report compare-latest --json
+  handoff --save / handoff validate / handoff export / handoff export-validate <id>
 
 V1/readiness:
   remediation self-test quick
@@ -110,8 +111,7 @@ Follow-ups/session:
   what happened in this session?
   what did you find? / get that info
   dig deeper / proceed
-  pending
-  /pending
+  pending / /pending
   exit
   /exit
 
@@ -1629,6 +1629,9 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("triage", "docker"): "Running read-only Docker triage...",
     ("triage", "docker", "detail"): "Running read-only Docker triage detail...",
     ("handoff",): "Running read-only operator handoff...",
+    ("handoff", "validate"): "Running read-only handoff validation...",
+    ("handoff", "export"): "Running read-only handoff export...",
+    ("handoff", "export-validate"): "Running read-only handoff export validation...",
     ("diagnose",): "Running read-only diagnose...",
     ("v1", "check"): "Running V1 readiness check...",
     ("remediation", "self-test"): "Running read-only remediation self-test...",
@@ -1829,6 +1832,13 @@ def _record_cli_dispatch_in_session_summary(
             state.note_finding("remediation eligibility: eligible")
         elif output:
             state.note_finding("remediation eligibility reviewed")
+    elif argv[:2] == ("handoff", "validate"):
+        state.note_check("handoff validate")
+    elif argv[:2] == ("handoff", "export-validate"):
+        state.note_check("handoff export-validate")
+    elif argv[:2] == ("handoff", "export"):
+        state.note_check("handoff export")
+        state.note_finding("read-only handoff artifact exported")
     elif argv[:1] == ("handoff",):
         state.note_check("handoff")
         if "--save" in argv:

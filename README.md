@@ -130,6 +130,12 @@ asks deterministically, and refuses or gates mutation.
   command; it does not execute fixes or imply remediation happened, and
   `handoff --save` writes only a ShellForgeAI-owned artifact under
   `<data_dir>/v2_handoffs/`.
+- Read-only handoff artifact lifecycle (`handoff --save`, `handoff validate
+  <handoff_ref>`, `handoff export <handoff_ref>`, `handoff export-validate
+  <export_ref>`, each with `--json`). Save/export write only ShellForgeAI-owned
+  artifacts (`<data_dir>/v2_handoffs/...`, `<data_dir>/exports/export_...`);
+  validate/export-validate are strictly read-only. No collector rerun, model
+  call, Docker/Compose mutation, restart, shell, or arbitrary command.
 - Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
   `--save`, `history`, `compare`, `compare-latest`, `export`,
   `export-validate`, `validate`).
