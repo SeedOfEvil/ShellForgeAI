@@ -51,6 +51,9 @@ _SAFE_SUGGESTION_COMMANDS = (
     "handoff --brief",
     "handoff --json",
     "handoff --save",
+    "handoff validate <handoff_id>",
+    "handoff export <handoff_id>",
+    "handoff export-validate <export_id>",
     "triage docker",
     "triage docker --brief",
     "triage docker --json",
@@ -309,6 +312,18 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
             argv = ("handoff", "--target", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {3, 4}
+        and tokens[0] == "handoff"
+        and tokens[1] in {"validate", "export", "export-validate"}
+        and tokens[2]
+    ):
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("handoff", original_tokens[1], original_tokens[2])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)

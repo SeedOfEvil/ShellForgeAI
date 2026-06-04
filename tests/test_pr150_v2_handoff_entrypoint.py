@@ -328,14 +328,19 @@ def test_handoff_save_invalid_path_is_rejected(monkeypatch, tmp_path):  # 29
         save_v2_handoff(unsafe, tmp_path)
 
 
-def test_handoff_save_human_omits_validate_export(monkeypatch, tmp_path):  # save human contract
+def test_handoff_save_human_points_to_validate(monkeypatch, tmp_path):  # save human contract
+    # PR152 implements the handoff artifact lifecycle, so --save now points to the
+    # first safe lifecycle step (validate) instead of deferring it. It must still
+    # never suggest an execute/apply/confirm command.
     _patch_triage(monkeypatch, tmp_path, empty=True)
     result = runner.invoke(app, ["handoff", "--save"])
     assert result.exit_code == 0
     assert "Handoff saved:" in result.stdout
+    assert "shellforgeai handoff validate" in result.stdout
     low = result.stdout.lower()
-    assert "handoff validate" not in low
-    assert "handoff export" not in low
+    assert "--execute" not in low
+    assert "--confirm" not in low
+    _assert_forbidden_absent(result.stdout)
 
 
 # --------------------------------------------------------------------------- #

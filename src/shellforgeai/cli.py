@@ -253,6 +253,11 @@ ops_app = typer.Typer(help="Read-only operator status board.")
 session_app = typer.Typer(help="Session handoff artifact utilities (read-only metadata).")
 session_summary_app = typer.Typer(help="Interactive session summary artifact workflow.")
 ops_report_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
+handoff_app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help="Read-only V2 operator handoff packet and artifact lifecycle. No mutation.",
+)
 self_test_app = typer.Typer(
     help="Safe read-only command coverage harness (PR79). No mutation, no execute.",
 )
@@ -289,6 +294,7 @@ app.add_typer(self_test_app, name="self-test")
 app.add_typer(v1_app, name="v1")
 v1_app.add_typer(v1_packet_app, name="packet")
 app.add_typer(triage_app, name="triage")
+app.add_typer(handoff_app, name="handoff")
 app.add_typer(remediation_app, name="remediation")
 remediation_app.add_typer(remediation_receipt_app, name="receipt")
 triage_app.add_typer(triage_docker_app, name="docker")
@@ -9827,8 +9833,60 @@ def _render_v2_handoff_saved_human(saved: dict[str, Any]) -> str:
         f"  {saved.get('handoff_id')}",
         "Path:",
         f"  {saved.get('handoff_path')}",
+        "First safe command:",
+        f"  shellforgeai handoff validate {saved.get('handoff_id')}",
         "Safety: read-only handoff; no mutation performed.",
     ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_handoff_validate_human(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "failed")
+    lines = [f"Handoff validation: {status}"]
+    if status == "ok":
+        lines.append("Checks: required files, JSON, manifest, checksums, safety")
+        lines.append("Safety: read-only; no mutation recorded")
+    else:
+        lines.append(f"Handoff: {payload.get('handoff_id') or 'unknown'}")
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+        lines.append("Safety: read-only; no mutation recorded")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_handoff_export_human(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "failed")
+    if status != "exported":
+        lines = [f"Handoff export: {status}"]
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+        lines.append("Safety: artifact export only; no mutation recorded")
+        return "\n".join(lines).rstrip() + "\n"
+    export = payload.get("export") if isinstance(payload.get("export"), dict) else {}
+    header = (
+        "Handoff export already exists (reused)"
+        if payload.get("existing")
+        else "Handoff export created"
+    )
+    lines = [
+        header,
+        f"Export ID: {export.get('id')}",
+        f"Path: {export.get('path')}",
+        "First safe command:",
+        f"  shellforgeai handoff export-validate {export.get('id')}",
+        "Safety: artifact export only; no mutation recorded",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_handoff_export_validate_human(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "failed")
+    lines = [f"Handoff export validation: {status}"]
+    if status != "ok":
+        lines.append(f"Export: {payload.get('export_id') or 'unknown'}")
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+    lines.append("Safety: artifact export only; no mutation recorded")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -10819,6 +10877,14 @@ def _handoff_mutation_cues(question: str) -> list[str]:
     return [cue for cue in _HANDOFF_MUTATION_CUES if cue in q]
 
 
+_HANDOFF_LIFECYCLE_CUES = ("validate", "export", "save")
+
+
+def _handoff_lifecycle_intent(question: str) -> bool:
+    q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
+    return any(cue in q.split() for cue in _HANDOFF_LIFECYCLE_CUES)
+
+
 def _handle_v2_handoff_ask(question: str) -> bool:
     if not _is_handoff_ask(question):
         return False
@@ -10833,6 +10899,13 @@ def _handle_v2_handoff_ask(question: str) -> bool:
             "ShellForgeAI did not execute, apply, restart, remediate, clean up, or run Compose."
         )
         console.print("No action was taken.")
+    if _handoff_lifecycle_intent(question):
+        console.print("")
+        console.print("Handoff artifact lifecycle (read-only, ShellForgeAI-owned artifacts):")
+        console.print("  shellforgeai handoff --save")
+        console.print("  shellforgeai handoff validate <handoff_id>")
+        console.print("  shellforgeai handoff export <handoff_id>")
+        console.print("  shellforgeai handoff export-validate <export_id>")
     return True
 
 
@@ -11103,7 +11176,7 @@ def apply_preview(
     typer.echo(_render_v2_apply_preview_human(payload), nl=False)
 
 
-@app.command("handoff")
+@handoff_app.callback()
 def handoff(
     ctx: typer.Context,
     json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
@@ -11140,8 +11213,11 @@ def handoff(
     creates a mission/plan/receipt, executes remediation/rollback/cleanup, runs
     Docker/Compose, restarts containers, calls the model, or assumes any action
     happened. With ``--save`` it writes only a ShellForgeAI-owned handoff artifact.
+    Subcommands ``validate``/``export``/``export-validate`` cover the read-only
+    handoff artifact lifecycle.
     """
-    _ = ctx
+    if ctx.invoked_subcommand is not None:
+        return
     payload = _build_v2_handoff_payload(
         target=target,
         from_status=from_status,
@@ -11166,6 +11242,63 @@ def handoff(
         typer.echo(_render_v2_handoff_brief(payload), nl=False)
         return
     typer.echo(_render_v2_handoff_human(payload), nl=False)
+
+
+@handoff_app.command("validate")
+def handoff_validate(
+    handoff_ref: Annotated[
+        str, typer.Argument(help="Handoff id or ShellForgeAI-owned handoff directory path")
+    ],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Read-only validation of a saved ShellForgeAI handoff artifact."""
+    from shellforgeai.core.v2_handoff_artifact import validate_v2_handoff
+
+    payload = validate_v2_handoff(handoff_ref, Path(load_settings().app.data_dir))
+    if json_output:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    typer.echo(_render_v2_handoff_validate_human(payload), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@handoff_app.command("export")
+def handoff_export(
+    handoff_ref: Annotated[
+        str, typer.Argument(help="Handoff id or ShellForgeAI-owned handoff directory path")
+    ],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Copy a validated handoff into a portable ShellForgeAI-owned export."""
+    from shellforgeai.core.v2_handoff_artifact import export_v2_handoff
+
+    payload = export_v2_handoff(handoff_ref, Path(load_settings().app.data_dir))
+    if json_output:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "exported" else 1)
+    typer.echo(_render_v2_handoff_export_human(payload), nl=False)
+    if payload.get("status") != "exported":
+        raise typer.Exit(1)
+
+
+@handoff_app.command("export-validate")
+def handoff_export_validate(
+    export_ref: Annotated[
+        str, typer.Argument(help="Export id or ShellForgeAI-owned export directory path")
+    ],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Read-only validation of an exported ShellForgeAI handoff artifact."""
+    from shellforgeai.core.v2_handoff_artifact import validate_v2_handoff_export
+
+    payload = validate_v2_handoff_export(export_ref, Path(load_settings().app.data_dir))
+    if json_output:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    typer.echo(_render_v2_handoff_export_validate_human(payload), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
 
 
 @app.command()

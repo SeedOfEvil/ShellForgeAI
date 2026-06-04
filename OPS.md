@@ -8,6 +8,12 @@
 4. `shellforgeai apply-preview` — read-only execution-boundary preview; no apply, mission, remediation, rollback, cleanup, Docker, Compose, or restart action executed.
 5. `shellforgeai verify` — read-only current-state verification; no applied action or remediation receipt is assumed.
 6. `shellforgeai handoff` — read-only operator handoff packet summarizing the golden-path posture and first safe command; it does not execute fixes or imply remediation happened. `shellforgeai handoff --save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/`.
+   - Handoff artifact lifecycle (read-only except ShellForgeAI-owned writes):
+     - `shellforgeai handoff --save` — write the handoff artifact (`<data_dir>/v2_handoffs/<handoff_id>/`).
+     - `shellforgeai handoff validate <handoff_id>` — read-only validation (required files, JSON, manifest, checksums, safety, secrets).
+     - `shellforgeai handoff export <handoff_id>` — copy a validated handoff into a portable export (`<data_dir>/exports/export_<handoff_id>/`); idempotent if it already exists.
+     - `shellforgeai handoff export-validate <export_id>` — read-only validation of the exported bundle.
+     - Each step accepts `--json` for strict output. Missing/malformed refs fail cleanly (non-zero, no traceback). No collector rerun, model call, Docker/Compose mutation, restart, shell, or arbitrary command.
 7. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
 8. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
 9. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.

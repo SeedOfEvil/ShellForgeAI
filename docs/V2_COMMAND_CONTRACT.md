@@ -123,8 +123,28 @@ anything.
      `<data_dir>/v2_handoffs/<handoff_id>/` (`handoff.json`, `handoff.md`,
      `manifest.json`) with checksums and explicit non-mutating safety flags. It
      never writes outside that ShellForgeAI-owned path and never mutates Docker,
-     Compose, files, services, containers, or host state. Validate/export of
-     saved handoffs is deferred to a later PR.
+     Compose, files, services, containers, or host state.
+   - **Handoff artifact lifecycle** (read-only except ShellForgeAI-owned writes):
+     `shellforgeai handoff --save` → `shellforgeai handoff validate
+     <handoff_ref>` → `shellforgeai handoff export <handoff_ref>` →
+     `shellforgeai handoff export-validate <export_ref>`, each with an optional
+     `--json` strict mode (`v2_handoff`, `v2_handoff_validate`,
+     `v2_handoff_export`, `v2_handoff_export_validate`).
+     - `validate` is read-only: it checks required files, JSON parse,
+       `schema_version`, `mode=v2_handoff`, manifest, checksum match, the
+       non-mutating safety block, and obvious secret leakage. Missing/unsafe
+       refs return a controlled `not_found`/`failed` with a non-zero exit and no
+       traceback.
+     - `export` copies a validated handoff into a portable, ShellForgeAI-owned
+       export under `<data_dir>/exports/export_<handoff_id>/`
+       (`handoff.json`, `handoff.md`, `manifest.json`, `export-manifest.json`).
+       It records an `artifact_export_only=true` / `arbitrary_path_write=false`
+       safety block, reruns no collectors, calls no model, mutates nothing, and
+       is idempotent (`existing: true`) when the export already exists and
+       validates. It accepts a handoff id or a ShellForgeAI-owned path only.
+     - `export-validate` is read-only: it checks the export's required files,
+       export manifest, source manifest, checksum match, the source and export
+       safety blocks, and secret leakage.
 7. **approve/gate**
    - Future or existing governed policy gate flow, not expanded here.
    - Gate decisions must be explicit and auditable.
@@ -142,6 +162,7 @@ receipts, and validation reports.
 | Apply preview | `apply-preview`, `apply-preview --brief`, `apply-preview --json`, `apply-preview --target <target>`, `apply-preview --from-propose`, `apply-preview --from-triage` | Read-only execution-boundary preview; no apply, mission, plan artifact, remediation receipt, Docker/Compose action, restart, shell, model call, or mutation. |
 | Verify | `verify`, `verify --brief`, `verify --json`, `verify --target <target>`, `verify --from-status`, `verify --from-triage`, `verify --from-propose`, `verify --from-apply-preview` | Read-only current-state verification; no action/receipt assumed and no execution. |
 | Handoff | `handoff`, `handoff --brief`, `handoff --json`, `handoff --save`, `handoff --target <target>`, `handoff --from-status`, `handoff --from-triage`, `handoff --from-propose`, `handoff --from-apply-preview`, `handoff --from-verify` | Read-only operator handoff packet summarizing the deterministic golden-path posture and first safe command. It does not execute fixes, create an executable mission/apply record/receipt, imply remediation happened, or mutate Docker/Compose/host state. `--save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/<handoff_id>/`. |
+| Handoff artifact lifecycle | `handoff --save`, `handoff validate <handoff_ref>`, `handoff export <handoff_ref>`, `handoff export-validate <export_ref>` (each `--json`) | Read-only deterministic handoff artifact lifecycle. Save/export write only ShellForgeAI-owned artifacts (`<data_dir>/v2_handoffs/...`, `<data_dir>/exports/export_...`); validate/export-validate are strictly read-only. No collector rerun, model call, Docker/Compose mutation, restart, shell, arbitrary command, or natural-language execution. Missing/malformed refs fail cleanly (non-zero, no traceback). |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
 | Receipt/export | report export, session summary, receipts | Portable evidence and receipts without mutation. |
 

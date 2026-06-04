@@ -121,6 +121,21 @@ Debug
   "handoff and restart", "handoff then apply", "summarize and fix it", or "give
   me a handoff and restart compose" is refused with no action taken; the handoff
   itself never executes fixes or implies remediation happened.
+- Handoff artifact lifecycle entries route through the safe interactive
+  allowlist: `handoff --save`, `handoff validate <ref>`,
+  `handoff export <ref>`, and `handoff export-validate <ref>` (each accepts a
+  trailing `--json`) dispatch to the read-only handoff lifecycle. Save/export
+  write only ShellForgeAI-owned artifacts; validate/export-validate are
+  read-only. Natural prompts mentioning "validate handoff" or "export handoff"
+  show the read-only handoff plus safe lifecycle command guidance and never
+  mutate. Example session:
+
+  ```text
+  > handoff --save
+  > handoff validate <handoff_id>
+  > handoff export <handoff_id>
+  > handoff export-validate <export_id>
+  ```
 
 
 ## Interactive help

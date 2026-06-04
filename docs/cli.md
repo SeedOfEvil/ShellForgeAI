@@ -1261,9 +1261,17 @@ V2 golden-path sixth (final) command. `shellforgeai handoff` is a deterministic,
 - `shellforgeai handoff` reports the handoff status, the per-stage V2 path summary, one first safe command, what was not done, and read-only/no-action safety wording.
 - `shellforgeai handoff --brief` emits a bounded operator view: handoff state, risk, first safe command, and safety.
 - `shellforgeai handoff --json` emits strict JSON only with `mode: "v2_handoff"`, `read_only: true`, `mutation_performed: false`, `artifact_written: false`, `handoff_id: null`, `handoff_path: null`, a compact `golden_path` (status/triage/propose/apply_preview/verify), a `summary`, `first_safe_command`, `safe_next_commands`, `limitations`, `warnings`, and a `safety` block with execution flags for apply, mission, plan, remediation, rollback, cleanup, Docker/Compose, container restart, `shell_true`, arbitrary command execution, natural-language execution, and model calls (all `false`).
-- `shellforgeai handoff --save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/<handoff_id>/` (`handoff.json`, `handoff.md`, `manifest.json`) with checksums and explicit non-mutating safety flags, then sets `artifact_written: true` with `handoff_id`/`handoff_path`. It never writes outside that ShellForgeAI-owned path and never mutates Docker/Compose/host state. Validate/export of saved handoffs is deferred to a later PR, so no validate/export commands are printed.
+- `shellforgeai handoff --save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/<handoff_id>/` (`handoff.json`, `handoff.md`, `manifest.json`) with checksums and explicit non-mutating safety flags, then sets `artifact_written: true` with `handoff_id`/`handoff_path`. It never writes outside that ShellForgeAI-owned path and never mutates Docker/Compose/host state. The human output prints `shellforgeai handoff validate <id>` as the first safe lifecycle step.
 - `shellforgeai handoff --target <target>` includes one visible target's read-only context. Unknown targets produce `unknown` with `target not found in current deterministic triage scene` and `shellforgeai triage --json` as the first safe command; production-like targets stay read-only with a production-like caution and never suggest restart/remediation.
 - `shellforgeai handoff --from-status`, `--from-triage`, `--from-propose`, `--from-apply-preview`, and `--from-verify` only name the prior deterministic context; none of them assume an action was applied.
+
+#### Handoff artifact lifecycle
+
+The handoff artifact lifecycle is `handoff --save → validate → export → export-validate`. Save and export write only ShellForgeAI-owned artifacts; validate and export-validate are strictly read-only. None of these rerun collectors, call the model, execute shell, run arbitrary commands, or mutate Docker/Compose/containers/host state.
+
+- `shellforgeai handoff validate <handoff_ref> [--json]` validates a saved handoff. `<handoff_ref>` is a handoff id or a ShellForgeAI-owned handoff directory path. Checks: required files, JSON parse, `schema_version`, `mode=v2_handoff`, manifest kind, checksum match, the non-mutating safety block, and obvious secret leakage. `--json` emits strict JSON with `mode: "v2_handoff_validate"`, `status: "ok|failed|not_found"`, a `checks` map, and a read-only `safety` block. Missing refs return `not_found`, unsafe/malformed refs return `failed`, both with a non-zero exit and no traceback.
+- `shellforgeai handoff export <handoff_ref> [--json]` copies a validated handoff into a portable export under `<data_dir>/exports/export_<handoff_id>/` (`handoff.json`, `handoff.md`, `manifest.json`, `export-manifest.json`) with checksums and an `artifact_export_only: true` / `arbitrary_path_write: false` safety block. It accepts a handoff id or a ShellForgeAI-owned path only, is idempotent (`existing: true`) when a valid export already exists, and emits strict JSON with `mode: "v2_handoff_export"` under `--json`. It writes nothing outside the owned export path.
+- `shellforgeai handoff export-validate <export_ref> [--json]` validates an exported handoff. Checks: required files, export manifest, source manifest, checksum match, the source and export safety blocks, and secret leakage. `--json` emits strict JSON with `mode: "v2_handoff_export_validate"`.
 
 Examples:
 
@@ -1274,6 +1282,11 @@ shellforgeai handoff --json
 shellforgeai handoff --save
 shellforgeai handoff --from-verify
 shellforgeai handoff --target sfai-crashloop
+# Artifact lifecycle (read-only except ShellForgeAI-owned writes)
+shellforgeai handoff --save --json
+shellforgeai handoff validate <handoff_id> --json
+shellforgeai handoff export <handoff_id> --json
+shellforgeai handoff export-validate <export_id> --json
 ```
 
 V2 golden path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
