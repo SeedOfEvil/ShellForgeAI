@@ -54,6 +54,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "handoff validate <handoff_id>",
     "handoff export <handoff_id>",
     "handoff export-validate <export_id>",
+    "handoff history",
+    "handoff history --limit 5",
+    "handoff compare-latest",
+    "handoff compare <before> <after>",
     "triage docker",
     "triage docker --brief",
     "triage docker --json",
@@ -161,6 +165,21 @@ _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("handoff", "--from-propose"): ("handoff", "--from-propose"),
     ("handoff", "--from-apply-preview"): ("handoff", "--from-apply-preview"),
     ("handoff", "--from-verify"): ("handoff", "--from-verify"),
+    ("handoff", "history"): ("handoff", "history"),
+    ("handoff", "history", "--json"): ("handoff", "history", "--json"),
+    ("handoff", "history", "--limit", "5"): ("handoff", "history", "--limit", "5"),
+    ("handoff", "compare-latest"): ("handoff", "compare-latest"),
+    ("handoff", "compare-latest", "--json"): ("handoff", "compare-latest", "--json"),
+    ("handoff", "compare-latest", "--only-changed"): (
+        "handoff",
+        "compare-latest",
+        "--only-changed",
+    ),
+    ("handoff", "compare-latest", "--include-stable"): (
+        "handoff",
+        "compare-latest",
+        "--include-stable",
+    ),
     ("triage", "docker"): ("triage", "docker"),
     ("triage", "docker", "--brief"): ("triage", "docker", "--brief"),
     ("triage", "docker", "--json"): ("triage", "docker", "--json"),
@@ -324,6 +343,30 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
             argv = ("handoff", original_tokens[1], original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {4, 5}
+        and tokens[0] == "handoff"
+        and tokens[1] == "compare"
+        and tokens[2]
+        and tokens[3]
+    ):
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("handoff", "compare", original_tokens[2], original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {4, 5}
+        and tokens[:3] == ("handoff", "history", "--limit")
+        and tokens[3].isdigit()
+    ):
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("handoff", "history", "--limit", original_tokens[3])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)

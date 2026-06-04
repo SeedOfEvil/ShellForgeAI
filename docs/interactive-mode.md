@@ -137,6 +137,20 @@ Debug
   > handoff export-validate <export_id>
   ```
 
+- Handoff history/compare entries also route through the safe allowlist:
+  `handoff history`, `handoff history --limit 5`, `handoff compare <before>
+  <after>`, and `handoff compare-latest` (each accepts a trailing `--json`)
+  dispatch to the strictly read-only history/compare workflow. Natural prompts
+  such as "show handoff history", "compare latest handoffs", and "what changed
+  since last handoff?" route deterministically to the read-only history /
+  compare-latest guidance without a model fallback or mutation. Example session:
+
+  ```text
+  > handoff history
+  > handoff compare-latest
+  > handoff compare <before_id> <after_id>
+  ```
+
 
 ## Interactive help
 

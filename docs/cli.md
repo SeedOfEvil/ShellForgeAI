@@ -1273,6 +1273,14 @@ The handoff artifact lifecycle is `handoff --save → validate → export → ex
 - `shellforgeai handoff export <handoff_ref> [--json]` copies a validated handoff into a portable export under `<data_dir>/exports/export_<handoff_id>/` (`handoff.json`, `handoff.md`, `manifest.json`, `export-manifest.json`) with checksums and an `artifact_export_only: true` / `arbitrary_path_write: false` safety block. It accepts a handoff id or a ShellForgeAI-owned path only, is idempotent (`existing: true`) when a valid export already exists, and emits strict JSON with `mode: "v2_handoff_export"` under `--json`. It writes nothing outside the owned export path.
 - `shellforgeai handoff export-validate <export_ref> [--json]` validates an exported handoff. Checks: required files, export manifest, source manifest, checksum match, the source and export safety blocks, and secret leakage. `--json` emits strict JSON with `mode: "v2_handoff_export_validate"`.
 
+#### Handoff artifact history/compare
+
+Read-only history and drift compare make saved handoffs reviewable over time. None of these write new artifacts, rerun collectors, call the model, execute shell, or mutate Docker/Compose/host state.
+
+- `shellforgeai handoff history [--limit N] [--json]` lists recent saved handoffs (latest first) with id, timestamp (`created_at`), status, risk, target, and quick local validity, plus the latest handoff id. `--json` emits strict JSON with `mode: "v2_handoff_history"`, `status: "ok|empty"`, `count`, `latest_handoff_id`, a `handoffs` list, and a read-only `safety` block. An empty history returns `status: "empty"` with `shellforgeai handoff --save` as the first safe command (no traceback). `--limit N` bounds the rendered list while `count` reflects all saved handoffs.
+- `shellforgeai handoff compare <before_ref> <after_ref> [--only-changed] [--include-stable] [--json]` loads two saved handoffs by id or ShellForgeAI-owned path and reports drift in `status`, `risk`, `target`, `current_status`, the golden-path stage summaries (status/triage/propose/apply-preview/verify), `first_safe_command`, `safe_next_commands`, `limitations`, `warnings`, and the safety flags (including critical false→true safety drift). `--only-changed` suppresses stable items; `--include-stable` lists them. `--json` emits strict JSON with `mode: "v2_handoff_compare"`, `before`/`after` refs, a `summary` (`new`/`resolved_or_missing`/`changed`/`stable`/`safety_drift`), `changes`, `stable`, and `warnings`. Missing refs return `not_found`, unsafe/malformed refs return `failed`, both with a non-zero exit and no traceback.
+- `shellforgeai handoff compare-latest [--only-changed] [--include-stable] [--json]` compares the two most recent saved handoffs (`mode: "v2_handoff_compare_latest"`, `latest: true`). With fewer than two saved handoffs it returns a controlled `status: "not_enough_history"` with `shellforgeai handoff --save` as the first safe command and no traceback.
+
 Examples:
 
 ```bash
@@ -1287,6 +1295,11 @@ shellforgeai handoff --save --json
 shellforgeai handoff validate <handoff_id> --json
 shellforgeai handoff export <handoff_id> --json
 shellforgeai handoff export-validate <export_id> --json
+# History / compare (strictly read-only)
+shellforgeai handoff history
+shellforgeai handoff history --limit 5 --json
+shellforgeai handoff compare <before_id> <after_id> --only-changed
+shellforgeai handoff compare-latest --json
 ```
 
 V2 golden path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
