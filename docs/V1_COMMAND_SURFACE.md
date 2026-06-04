@@ -155,3 +155,13 @@ No casual execution steps are part of this path.
 - deterministic ask-route check (`2AM operator report` / `what is on fire`)
 - mutation refusal check (`restart/delete/prune` prompts)
 - `pytest -q`
+
+
+## V2 support: governed recipe registry
+
+`recipes` and `safe-actions` are V2 support commands, not V1 mutation lanes.
+They classify the future locked toolbox, expose strict JSON safety flags, and
+perform read-only eligibility checks for named recipes/targets. They do not
+execute cleanup, remediation, rollback, Docker/Compose mutation, container
+restart, production restart, arbitrary shell commands, or natural-language
+mutation.

@@ -172,6 +172,15 @@ from shellforgeai.core.mission_report import (
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
+from shellforgeai.core.recipe_registry import (
+    detail_payload as recipe_detail_payload,
+)
+from shellforgeai.core.recipe_registry import (
+    eligibility_payload as recipe_eligibility_payload,
+)
+from shellforgeai.core.recipe_registry import (
+    registry_payload as recipe_registry_payload,
+)
 from shellforgeai.core.reference_resolver import ReferenceFilters, resolve_reference
 from shellforgeai.core.restart_plan import (
     _resolve_proposal as resolve_restart_plan_proposal,
@@ -276,6 +285,11 @@ triage_docker_snapshot_app = typer.Typer(
 )
 remediation_app = typer.Typer(help="Disposable governed remediation proof flow.")
 remediation_receipt_app = typer.Typer(help="Disposable remediation receipt utilities.")
+recipes_app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help="Read-only V2 governed recipe registry and eligibility map. No execution.",
+)
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -296,6 +310,7 @@ v1_app.add_typer(v1_packet_app, name="packet")
 app.add_typer(triage_app, name="triage")
 app.add_typer(handoff_app, name="handoff")
 app.add_typer(remediation_app, name="remediation")
+app.add_typer(recipes_app, name="recipes")
 remediation_app.add_typer(remediation_receipt_app, name="receipt")
 triage_app.add_typer(triage_docker_app, name="docker")
 triage_docker_app.add_typer(triage_docker_snapshot_app, name="snapshot")
@@ -6359,7 +6374,6 @@ def _handle_mission_restart_ask(runtime: RuntimeContext, question: str) -> bool:
         "execute the restart mission",
         "approve and execute the restart mission",
         "approve and run the restart mission",
-        "restart it now",
         "fire the restart mission",
         "run mission and export",
     )
@@ -10418,14 +10432,12 @@ def _is_pressure_mutation_request(question: str) -> bool:
     phrases = (
         "quickly restart",
         "quick restart",
-        "restart it now",
         "restart now",
         "no novel clean up",
         "no novel cleanup",
         "clean up docker",
         "cleanup docker",
         "fast fix it",
-        "fix it now",
         "just fix it",
     )
     return any(phrase in q for phrase in phrases)
@@ -11579,6 +11591,310 @@ def handoff_compare_latest(
     typer.echo(_render_v2_handoff_compare_human(payload, include_stable=include_stable), nl=False)
 
 
+def _render_recipe_groups_human(payload: dict[str, Any]) -> str:
+    groups = (
+        ("Available read-only", lambda r: r.get("status") == "available_read_only"),
+        (
+            "Preview-only / disabled until governed execution lane",
+            lambda r: (
+                str(r.get("status", "")).startswith("disabled_until")
+                or r.get("status") == "preview_only"
+            ),
+        ),
+        ("Future / forbidden", lambda r: r.get("status") == "future"),
+    )
+    lines = ["ShellForgeAI V2 governed recipe registry", ""]
+    recipes = list(payload.get("recipes") or [])
+    for title, predicate in groups:
+        members = [r for r in recipes if predicate(r)]
+        if not members:
+            continue
+        lines.append(title + ":")
+        for recipe in members:
+            lines.append(
+                f"- {recipe['recipe_id']} — {recipe['title']} "
+                f"[{recipe['status']}; mutation={recipe['mutation_class']}]"
+            )
+            lines.append(f"  First safe command: {recipe['first_safe_command']}")
+        lines.append("")
+    lines.append("Safety note: This command is read-only. No recipe was executed.")
+    return "\n".join(lines) + "\n"
+
+
+def _render_recipe_detail_human(payload: dict[str, Any]) -> str:
+    if payload.get("status") == "not_found":
+        return (
+            f"Recipe not found: {payload.get('recipe_id')}\n"
+            "No action was taken.\n"
+            "Safe next command: shellforgeai recipes list\n"
+        )
+    recipe = payload.get("recipe") or {}
+    lines = [
+        f"Recipe: {recipe.get('recipe_id')}",
+        f"Title: {recipe.get('title')}",
+        f"Status: {recipe.get('status')}",
+        f"Mutation class: {recipe.get('mutation_class')}",
+        f"Description: {recipe.get('description')}",
+        "",
+        "Required gates:",
+    ]
+    gates = list(recipe.get("preflight_gates") or []) + list(recipe.get("approval_gates") or [])
+    if gates:
+        lines.extend(f"- {gate}" for gate in gates)
+    else:
+        lines.append("- none for read-only inspection")
+    lines.extend(
+        [
+            "",
+            f"Verification required: {str(bool(recipe.get('verification_required'))).lower()}",
+            f"Rollback available: {str(bool(recipe.get('rollback_available'))).lower()}",
+            f"Receipt required: {str(bool(recipe.get('receipt_required'))).lower()}",
+            f"First safe command: {recipe.get('first_safe_command')}",
+            "Why safe/disabled:",
+        ]
+    )
+    notes = list(recipe.get("safety_notes") or [])
+    if recipe.get("blocked_reason"):
+        notes.append(recipe["blocked_reason"])
+    lines.extend(f"- {note}" for note in (notes or ["Read-only registry detail; no action taken."]))
+    lines.append("No action was taken.")
+    return "\n".join(lines) + "\n"
+
+
+def _render_recipe_eligibility_human(payload: dict[str, Any]) -> str:
+    if payload.get("status") == "not_found":
+        return (
+            f"Recipe not found: {payload.get('recipe_id')}\n"
+            "Eligibility: blocked\n"
+            "No action was taken.\n"
+            "First safe command: shellforgeai recipes list\n"
+        )
+    meta = payload.get("target_metadata") or {}
+    lines = [
+        f"Recipe: {payload.get('recipe_id')}",
+        f"Eligibility: {payload.get('eligibility')}",
+        f"Target: {payload.get('target')}",
+        f"target_found: {str(bool(meta.get('target_found'))).lower()}",
+        f"production_target: {str(bool(meta.get('production_target'))).lower()}",
+        "Required labels present:",
+    ]
+    present = list(meta.get("required_labels_present") or [])
+    missing = list(meta.get("required_labels_missing") or [])
+    lines.extend(f"- {label}" for label in (present or ["none"]))
+    lines.append("Required labels missing:")
+    lines.extend(f"- {label}" for label in (missing or ["none"]))
+    lines.append("Blockers:")
+    lines.extend(f"- {blocker}" for blocker in (payload.get("blockers") or ["none"]))
+    lines.extend(
+        [
+            f"First safe command: {payload.get('first_safe_command')}",
+            "No action was taken.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+@recipes_app.callback(invoke_without_command=True)
+def recipes_root(
+    ctx: typer.Context,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """List the read-only V2 governed recipe registry."""
+    if ctx.invoked_subcommand is not None:
+        return
+    payload = recipe_registry_payload()
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_groups_human(payload), nl=False)
+
+
+@recipes_app.command("list")
+def recipes_list(
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """List governed recipes without executing any recipe."""
+    payload = recipe_registry_payload()
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_groups_human(payload), nl=False)
+
+
+@recipes_app.command("inspect")
+def recipes_inspect(
+    recipe_id: Annotated[str, typer.Argument(help="Recipe id to inspect.")],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Inspect one governed recipe. No action is taken."""
+    payload = recipe_detail_payload(recipe_id)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_detail_human(payload), nl=False)
+    if payload.get("status") == "not_found":
+        raise typer.Exit(1)
+
+
+@recipes_app.command("eligibility")
+def recipes_eligibility(
+    recipe_id: Annotated[str, typer.Option("--recipe", help="Recipe id to evaluate.")],
+    target: Annotated[str, typer.Option("--target", help="Exact target name to evaluate.")],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Evaluate read-only recipe eligibility for an exact target. No execution."""
+    from shellforgeai.core import triage_ranking
+
+    try:
+        scene = triage_ranking.collect_scene()
+    except Exception:
+        scene = {"containers": []}
+    payload = recipe_eligibility_payload(recipe_id, target, scene=scene)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_eligibility_human(payload), nl=False)
+    if payload.get("status") == "not_found":
+        raise typer.Exit(1)
+
+
+@app.command("safe-actions")
+def safe_actions(
+    target: Annotated[
+        str, typer.Option("--target", help="Optional exact target to evaluate.")
+    ] = "",
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Summarize current read-only safe actions and disabled governed recipes."""
+    payload = recipe_registry_payload()
+    if target:
+        from shellforgeai.core import triage_ranking
+
+        try:
+            scene = triage_ranking.collect_scene()
+        except Exception:
+            scene = {"containers": []}
+        payload = {
+            **payload,
+            "mode": "v2_safe_actions",
+            "target": target,
+            "eligibility": [
+                recipe_eligibility_payload(r["recipe_id"], target, scene=scene)
+                for r in payload.get("recipes", [])
+                if r.get("mutation_class") != "none"
+            ],
+        }
+    else:
+        payload = {**payload, "mode": "v2_safe_actions", "target": ""}
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+    typer.echo(_render_recipe_groups_human(payload), nl=False)
+    if target:
+        typer.echo(f"Target evaluated: {target}\n")
+    typer.echo("No action was taken.\n", nl=False)
+
+
+def _is_recipe_guidance_ask(question: str) -> bool:
+    low = " ".join((question or "").lower().split())
+    if not low:
+        return False
+    cues = (
+        "what can shellforgeai safely do next",
+        "what can you safely do",
+        "what can shellforgeai safely do",
+        "what fixes are available",
+        "what recipes exist",
+        "safe action",
+        "safe actions",
+        "can you fix this",
+        "can shellforgeai restart this safely",
+        "can you restart this safely",
+        "restart this safely",
+        "recipes",
+    )
+    return any(cue in low for cue in cues)
+
+
+def _is_recipe_execution_request(question: str) -> bool:
+    low = " ".join((question or "").lower().split())
+    execution_cues = (
+        "execute the recipe",
+        "execute recipe",
+        "run the restart recipe",
+        "run restart recipe",
+        "apply it",
+        "apply the recipe",
+    )
+    return any(cue in low for cue in execution_cues)
+
+
+def _extract_safe_action_target(question: str) -> str:
+    match = re.search(
+        r"\b(?:for|target|restart)\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        question or "",
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    target = match.group(1).strip("?.!,")
+    if target.lower() in {"this", "safely", "it", "compose", "docker"}:
+        return ""
+    return target
+
+
+def _handle_recipe_registry_ask(question: str) -> bool:
+    low = " ".join((question or "").lower().split())
+    if _is_recipe_execution_request(question):
+        console.print(
+            "Refused: ShellForgeAI recipes are read-only in this release.\n"
+            "No action was taken.\n"
+            "No recipe was executed.\n"
+            "Use read-only guidance instead:\n"
+            "  shellforgeai recipes list\n"
+            "  shellforgeai recipes inspect docker.disposable_restart\n"
+        )
+        return True
+    if not _is_recipe_guidance_ask(question):
+        return False
+    target = _extract_safe_action_target(question)
+    mixed_mutation = any(
+        cue in low
+        for cue in (
+            "restart compose",
+            "compose restart",
+            "docker compose restart",
+            " and restart",
+            " then restart",
+            " restart it",
+            " fix it now",
+        )
+    )
+    payload = recipe_registry_payload()
+    console.print("ShellForgeAI governed recipe registry (deterministic ask routing):")
+    console.print("")
+    typer.echo(_render_recipe_groups_human(payload), nl=False)
+    if target:
+        console.print(f"Eligibility check command for target {target}:")
+        console.print(
+            "  shellforgeai recipes eligibility --recipe docker.disposable_restart "
+            f"--target {target} --json"
+        )
+    else:
+        console.print("Recipe registry command: shellforgeai recipes list")
+        console.print("First safe command: shellforgeai status --json")
+    if "restart" in low or "fix" in low:
+        console.print(
+            "Governed fixes are not executable yet; docker.disposable_restart is disabled "
+            "until the execute lane exists."
+        )
+        console.print("Preview boundary: shellforgeai apply-preview --target <target> --json")
+    if mixed_mutation or "compose" in low:
+        console.print("Refused mutation portion: Docker/Compose restart was not run.")
+    console.print("No action was taken.")
+    return True
+
+
 @app.command()
 def ask(
     ctx: typer.Context,
@@ -11593,6 +11909,8 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _handle_recipe_registry_ask(question):
+            return
         if _handle_v2_handoff_ask(question):
             return
         if _handle_v2_verify_ask(question):

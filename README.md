@@ -386,3 +386,7 @@ make check    # format + lint + type + tests
 MIT. See `LICENSE`.
 
 - Run `shellforgeai v1 check` to verify the V1 knife surface.
+
+## V2 governed recipes
+
+`shellforgeai recipes list` exposes the read-only locked toolbox map for future governed actions.

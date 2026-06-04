@@ -80,9 +80,9 @@ Fast status:
   ops report / ops report --brief / ops report --json
   v1 check quick / v1 check --profile quick --json
   doctor / model doctor
-
 V2 golden path:
   status / triage / propose [--brief|--json]
+  recipes [--json] / recipes inspect <id> / safe-actions [--target <target>]
   apply-preview [--brief|--json] / verify [--brief|--json] / handoff [--brief|--json|--save]
   triage/propose/verify/handoff --target <target> [--json] / handoff summary
   full path: status -> triage -> propose -> apply-preview -> verify -> handoff
@@ -1639,6 +1639,11 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("v1", "check"): "Running V1 readiness check...",
     ("remediation", "self-test"): "Running read-only remediation self-test...",
     ("remediation", "eligibility"): "Running read-only remediation eligibility explain...",
+    ("recipes",): "Running read-only recipe registry...",
+    ("recipes", "list"): "Running read-only recipe registry...",
+    ("recipes", "inspect"): "Running read-only recipe inspection...",
+    ("recipes", "eligibility"): "Running read-only recipe eligibility...",
+    ("safe-actions",): "Running read-only safe-actions summary...",
 }
 
 
@@ -1706,7 +1711,9 @@ def _interactive_mutation_refusal(text: str) -> str:
         "- ops report\n"
         "- triage docker\n"
         "- triage docker detail <target>\n"
-        "- remediation eligibility --target <target> --explain"
+        "- remediation eligibility --target <target> --explain\n"
+        "- recipes list\n"
+        "- recipes eligibility --recipe docker.disposable_restart --target <target>"
     )
 
 
@@ -1821,6 +1828,15 @@ def _record_cli_dispatch_in_session_summary(
         )
     elif argv[:2] == ("triage", "docker"):
         state.note_check("triage docker")
+    elif argv[:1] == ("recipes",):
+        state.note_check("recipes")
+        if len(argv) >= 3 and argv[1] == "inspect":
+            state.note_check(f"recipes inspect {argv[2]}")
+        elif len(argv) >= 6 and argv[1] == "eligibility":
+            state.note_check("recipes eligibility")
+            state.latest_target = argv[5]
+    elif argv[:1] == ("safe-actions",):
+        state.note_check("safe-actions")
     elif argv[:2] == ("remediation", "eligibility"):
         target = argv[3] if len(argv) >= 4 and argv[2] == "--target" else ""
         if target:

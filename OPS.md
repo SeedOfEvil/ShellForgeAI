@@ -97,6 +97,28 @@ after the PR56–PR77 arc:
 
 - [`docs/release-baseline.md`](docs/release-baseline.md)
 
+
+## What can ShellForgeAI safely do next?
+
+Use the governed recipe registry before thinking about fixes:
+
+```bash
+shellforgeai recipes list
+shellforgeai recipes inspect docker.disposable_restart
+shellforgeai recipes eligibility --recipe docker.disposable_restart --target <target>
+shellforgeai safe-actions --target <target>
+```
+
+Interpretation:
+
+- `available_read_only` recipes are safe reports/previews operators can run now.
+- `disabled_until_execute_lane` and `disabled_until_explicit_cleanup_lane` recipes
+  document future gates only; they do not execute.
+- Production targets such as `shellforgeai`, broad targets such as `all`, missing
+  targets, and unlabeled targets are blocked.
+- If asked to restart, fix, clean up, roll back, or execute a recipe, ShellForgeAI
+  must refuse and state that no action was taken.
+
 ## Interactive smoke test
 
 ```bash

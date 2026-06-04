@@ -65,6 +65,12 @@ _SAFE_SUGGESTION_COMMANDS = (
     "remediation self-test quick",
     "remediation self-test --profile quick --json",
     "remediation eligibility --target <target> --explain",
+    "recipes",
+    "recipes --json",
+    "recipes list",
+    "recipes inspect docker.disposable_restart",
+    "recipes eligibility --recipe docker.disposable_restart --target <target>",
+    "safe-actions",
     "help",
     "pending",
     "summary",
@@ -88,6 +94,8 @@ _COMMAND_LIKE_STARTS = (
     "model",
     "remediation",
     "remediaton",
+    "recipes",
+    "safe-actions",
     "audit",
 )
 
@@ -228,6 +236,17 @@ for _profile in _SAFE_PROFILES:
         "--json",
     )
 
+_ALLOWED_CLI_DISPATCH.update(
+    {
+        ("recipes",): ("recipes",),
+        ("recipes", "--json"): ("recipes", "--json"),
+        ("recipes", "list"): ("recipes", "list"),
+        ("recipes", "list", "--json"): ("recipes", "list", "--json"),
+        ("safe-actions",): ("safe-actions",),
+        ("safe-actions", "--json"): ("safe-actions", "--json"),
+    }
+)
+
 _BRIEF_OPS_REPORT_PHRASES = (
     "no novel",
     "give me the short version",
@@ -257,6 +276,10 @@ _QUICK_MUTATION_PHRASES = (
     "apply proposal",
     "apply the proposal",
     "run the plan",
+    "execute recipe",
+    "execute the recipe",
+    "run restart recipe",
+    "run the restart recipe",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -278,6 +301,7 @@ _DANGEROUS_COMMAND_PATTERNS = (
     ("audit", "cleanup", "execute"),
     ("remediation", "execute"),
     ("remediation", "rollback-execute"),
+    ("recipes", "execute"),
     ("rollback", "execute"),
     ("rollback-execute",),
     ("mission", "execute"),
@@ -400,6 +424,41 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
                 original_tokens[3],
                 "--explain",
             )
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("recipes", "inspect") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("recipes", "inspect", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {6, 7}
+        and tokens[:2] == ("recipes", "eligibility")
+        and tokens[2] == "--recipe"
+        and tokens[3]
+        and tokens[4] == "--target"
+        and tokens[5]
+    ):
+        json_flag = len(tokens) == 7 and tokens[6] == "--json"
+        if len(tokens) == 6 or json_flag:
+            argv = (
+                "recipes",
+                "eligibility",
+                "--recipe",
+                original_tokens[3],
+                "--target",
+                original_tokens[5],
+            )
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("safe-actions", "--target") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("safe-actions", "--target", original_tokens[2])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
@@ -587,6 +646,28 @@ def route_input(text: str) -> RoutedCommand:
 
     lowered = _normalize_intent_text(raw)
     raw_lower = raw.lower()
+    if any(
+        cue in lowered
+        for cue in (
+            "what can shellforgeai safely do next",
+            "what can you safely do",
+            "what fixes are available",
+            "what recipes exist",
+            "safe actions",
+            "safe action",
+        )
+    ):
+        target_match = re.search(
+            r"\b(?:for|target)\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b", raw, flags=re.IGNORECASE
+        )
+        if target_match:
+            return RoutedCommand(
+                name="cli_dispatch",
+                args=raw,
+                argv=("safe-actions", "--target", target_match.group(1)),
+            )
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("safe-actions",))
+
     proposal_cues = (
         "what would you propose",
         "what should we propose",
