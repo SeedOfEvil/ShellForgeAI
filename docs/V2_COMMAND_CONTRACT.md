@@ -145,6 +145,26 @@ anything.
      - `export-validate` is read-only: it checks the export's required files,
        export manifest, source manifest, checksum match, the source and export
        safety blocks, and secret leakage.
+   - **Handoff artifact history/compare** (strictly read-only):
+     `shellforgeai handoff history`, `shellforgeai handoff compare
+     <before_ref> <after_ref>`, and `shellforgeai handoff compare-latest`, each
+     with an optional `--json` strict mode (`v2_handoff_history`,
+     `v2_handoff_compare`, `v2_handoff_compare_latest`).
+     - `history` lists recent saved handoffs (latest first) with id, timestamp,
+       status, risk, target, and quick local validity. Empty history returns a
+       controlled `empty` status with `shellforgeai handoff --save` as the first
+       safe command (no traceback). `--limit N` bounds the rendered list.
+     - `compare` loads two saved handoffs by id or ShellForgeAI-owned path and
+       reports drift in status/risk/target/current_status, the golden-path stage
+       summaries, the first safe command, safe-next commands, limitations,
+       warnings, and safety flags, including critical safety drift. `--only-changed`
+       suppresses stable items; `--include-stable` lists them. Missing/unsafe/
+       malformed refs return a controlled `not_found`/`failed` with a non-zero
+       exit and no traceback.
+     - `compare-latest` compares the two most recent saved handoffs or returns a
+       controlled `not_enough_history` status with `shellforgeai handoff --save`
+       as the first safe command. None of these rerun collectors, call the model,
+       execute shell, write artifacts, or mutate Docker/Compose/host state.
 7. **approve/gate**
    - Future or existing governed policy gate flow, not expanded here.
    - Gate decisions must be explicit and auditable.
@@ -163,6 +183,7 @@ receipts, and validation reports.
 | Verify | `verify`, `verify --brief`, `verify --json`, `verify --target <target>`, `verify --from-status`, `verify --from-triage`, `verify --from-propose`, `verify --from-apply-preview` | Read-only current-state verification; no action/receipt assumed and no execution. |
 | Handoff | `handoff`, `handoff --brief`, `handoff --json`, `handoff --save`, `handoff --target <target>`, `handoff --from-status`, `handoff --from-triage`, `handoff --from-propose`, `handoff --from-apply-preview`, `handoff --from-verify` | Read-only operator handoff packet summarizing the deterministic golden-path posture and first safe command. It does not execute fixes, create an executable mission/apply record/receipt, imply remediation happened, or mutate Docker/Compose/host state. `--save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/<handoff_id>/`. |
 | Handoff artifact lifecycle | `handoff --save`, `handoff validate <handoff_ref>`, `handoff export <handoff_ref>`, `handoff export-validate <export_ref>` (each `--json`) | Read-only deterministic handoff artifact lifecycle. Save/export write only ShellForgeAI-owned artifacts (`<data_dir>/v2_handoffs/...`, `<data_dir>/exports/export_...`); validate/export-validate are strictly read-only. No collector rerun, model call, Docker/Compose mutation, restart, shell, arbitrary command, or natural-language execution. Missing/malformed refs fail cleanly (non-zero, no traceback). |
+| Handoff artifact history/compare | `handoff history [--limit N]`, `handoff compare <before_ref> <after_ref>`, `handoff compare-latest` (each `--json`; compare/compare-latest accept `--only-changed`/`--include-stable`) | Strictly read-only history and drift compare for saved handoff artifacts. `history` lists recent saved handoffs (empty → controlled `empty`); `compare` reports status/risk/target/current_status/golden-path/first-safe-command/safe-next-commands/limitations/warnings/safety-flag drift; `compare-latest` compares the newest two (or `not_enough_history`). No artifact writes, collector rerun, model call, shell, or Docker/Compose/host mutation. Missing/malformed refs fail cleanly (non-zero, no traceback). |
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
 | Receipt/export | report export, session summary, receipts | Portable evidence and receipts without mutation. |
 

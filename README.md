@@ -136,6 +136,12 @@ asks deterministically, and refuses or gates mutation.
   artifacts (`<data_dir>/v2_handoffs/...`, `<data_dir>/exports/export_...`);
   validate/export-validate are strictly read-only. No collector rerun, model
   call, Docker/Compose mutation, restart, shell, or arbitrary command.
+- Read-only handoff history/compare (`handoff history`, `handoff compare
+  <before_ref> <after_ref>`, `handoff compare-latest`, each with `--json`;
+  compare accepts `--only-changed`/`--include-stable`) to list recent saved
+  handoffs and report status/risk/golden-path/safety drift over time. These
+  never write artifacts, rerun collectors, call the model, execute shell, or
+  mutate Docker/Compose/host state.
 - Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
   `--save`, `history`, `compare`, `compare-latest`, `export`,
   `export-validate`, `validate`).

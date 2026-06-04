@@ -9890,6 +9890,121 @@ def _render_v2_handoff_export_validate_human(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_v2_handoff_history_human(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "empty")
+    lines = ["V2 handoff history", ""]
+    if status != "ok":
+        lines.append("No saved V2 handoff artifacts found.")
+        lines.extend(["", "First safe command:", f"  {payload.get('first_safe_command')}"])
+        lines.extend(["", "Safety:", "- read_only=true", "- mutation_performed=false"])
+        return "\n".join(lines).rstrip() + "\n"
+    lines.append(f"Saved handoffs: {payload.get('count', 0)}")
+    lines.append(f"Latest handoff id: {payload.get('latest_handoff_id') or '-'}")
+    lines.append("")
+    for idx, handoff_entry in enumerate(payload.get("handoffs") or [], start=1):
+        lines.append(f"{idx}. {handoff_entry.get('handoff_id')}")
+        lines.append(f"   created: {handoff_entry.get('created_at') or '-'}")
+        lines.append(f"   status: {handoff_entry.get('status') or '-'}")
+        lines.append(f"   risk: {handoff_entry.get('risk') or '-'}")
+        if handoff_entry.get("target"):
+            lines.append(f"   target: {handoff_entry.get('target')}")
+        lines.append(f"   valid: {str(handoff_entry.get('valid', False)).lower()}")
+        lines.append(f"   path: {handoff_entry.get('path')}")
+    lines.extend(["", "Compare-latest availability:"])
+    lines.append(
+        "- available"
+        if int(payload.get("count", 0) or 0) >= 2
+        else "- unavailable (need >=2 saved handoffs)"
+    )
+    if payload.get("warnings"):
+        lines.extend(["", "Warnings:"])
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+    lines.extend(["", "Safe next commands:"])
+    for cmd in (payload.get("safe_next_commands") or [])[:5]:
+        lines.append(f"- {cmd}")
+    lines.extend(["", "Safety:", "- read_only=true", "- mutation_performed=false"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_v2_handoff_compare_human(
+    payload: dict[str, Any], *, include_stable: bool = False
+) -> str:
+    status = str(payload.get("status") or "failed")
+    before = payload.get("before") if isinstance(payload.get("before"), dict) else {}
+    after = payload.get("after") if isinstance(payload.get("after"), dict) else {}
+    is_latest = bool(payload.get("latest")) or payload.get("mode") == "v2_handoff_compare_latest"
+    title = "V2 handoff compare-latest" if is_latest else "V2 handoff compare"
+    lines = [title, ""]
+    if status != "ok":
+        lines.append(f"Status: {status}")
+        for warning in payload.get("warnings") or []:
+            lines.append(f"- {warning}")
+        if payload.get("first_safe_command"):
+            lines.extend(["", "First safe command:", f"  {payload.get('first_safe_command')}"])
+        lines.extend(["", "Safety:", "- read_only=true", "- mutation_performed=false"])
+        return "\n".join(lines).rstrip() + "\n"
+    lines.append("Handoffs:")
+    lines.append(f"- before: {before.get('handoff_id') or before.get('handoff_ref') or 'unknown'}")
+    lines.append(f"- after:  {after.get('handoff_id') or after.get('handoff_ref') or 'unknown'}")
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    lines.extend(["", "Summary of changes:"])
+    for key in ("changed", "new", "resolved_or_missing", "stable", "safety_drift"):
+        lines.append(f"- {key.replace('_', ' ')}: {summary.get(key, 0)}")
+    changes = payload.get("changes") or []
+    drift_changes = [c for c in changes if "drift" in c]
+    lines.extend(["", "Changes:"])
+    if not changes:
+        lines.append("- none (handoffs are equivalent)")
+    for change in changes:
+        field = change.get("field")
+        if "drift" in change:
+            lines.append(f"- {field}: drift")
+        elif "new" in change or "resolved_or_missing" in change:
+            new = change.get("new") or []
+            missing = change.get("resolved_or_missing") or []
+            lines.append(f"- {field}: +{len(new)} / -{len(missing)}")
+            for item in new:
+                lines.append(f"    + {item}")
+            for item in missing:
+                lines.append(f"    - {item}")
+        else:
+            lines.append(f"- {field}: {change.get('before')} -> {change.get('after')}")
+    lines.extend(["", "Safety drift:"])
+    if drift_changes:
+        for change in drift_changes:
+            for item in change.get("drift") or []:
+                lines.append(
+                    f"- {item.get('flag')}: {str(item.get('before')).lower()} -> "
+                    f"{str(item.get('after')).lower()}"
+                )
+    else:
+        lines.append("- none")
+    if include_stable and payload.get("stable"):
+        lines.extend(["", "Stable:"])
+        for entry in payload.get("stable") or []:
+            if "stable" in entry:
+                lines.append(f"- {entry.get('field')}: {len(entry.get('stable') or [])} stable")
+            else:
+                lines.append(f"- {entry.get('field')}: {entry.get('value')}")
+    lines.extend(
+        [
+            "",
+            "First safe command:",
+            f"  {payload.get('first_safe_command') or 'shellforgeai handoff history'}",
+        ]
+    )
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "- Read-only handoff compare.",
+            "- No collectors rerun, no model call, no shell, no mutation.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_v2_apply_preview_human(payload: dict[str, Any]) -> str:
     target = cast(
         dict[str, Any], payload.get("target") if isinstance(payload.get("target"), dict) else {}
@@ -10869,7 +10984,7 @@ def _is_handoff_ask(question: str) -> bool:
         return False
     if any(cue in q for cue in _HANDOFF_ASK_CUES):
         return True
-    return bool(re.search(r"\bhandoff\b", q))
+    return bool(re.search(r"\bhandoffs?\b", q))
 
 
 def _handoff_mutation_cues(question: str) -> list[str]:
@@ -10879,15 +10994,86 @@ def _handoff_mutation_cues(question: str) -> list[str]:
 
 _HANDOFF_LIFECYCLE_CUES = ("validate", "export", "save")
 
+_HANDOFF_COMPARE_CUES = (
+    "compare latest handoff",
+    "compare latest handoffs",
+    "compare the latest handoff",
+    "compare the latest handoffs",
+    "compare last two handoffs",
+    "compare the last two handoffs",
+    "compare handoffs",
+    "compare handoff",
+    "diff handoff",
+    "diff the handoff",
+    "handoff drift",
+    "what changed since last handoff",
+    "what changed since the last handoff",
+    "what changed since my last handoff",
+    "since the last handoff",
+    "since last handoff",
+)
+_HANDOFF_HISTORY_CUES = (
+    "handoff history",
+    "history of handoffs",
+    "history of handoff",
+    "list handoffs",
+    "list the handoffs",
+    "recent handoffs",
+    "past handoffs",
+    "previous handoffs",
+    "show handoffs",
+    "handoff log",
+    "saved handoffs",
+)
+
 
 def _handoff_lifecycle_intent(question: str) -> bool:
     q = " ".join(re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).split())
     return any(cue in q.split() for cue in _HANDOFF_LIFECYCLE_CUES)
 
 
+def _normalize_handoff_ask(question: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+
+
+def _handle_v2_handoff_compare_ask(question: str) -> bool:
+    from shellforgeai.core.v2_handoff_artifact import compare_latest_v2_handoffs
+
+    payload = compare_latest_v2_handoffs(Path(load_settings().app.data_dir))
+    console.print("Read-only handoff compare-latest (deterministic ask routing):")
+    console.print("")
+    typer.echo(_render_v2_handoff_compare_human(payload), nl=False)
+    console.print("")
+    console.print("Safe commands:")
+    console.print("  shellforgeai handoff compare-latest")
+    console.print("  shellforgeai handoff compare <before> <after>")
+    console.print("  shellforgeai handoff history")
+    return True
+
+
+def _handle_v2_handoff_history_ask(question: str) -> bool:
+    from shellforgeai.core.v2_handoff_artifact import v2_handoff_history
+
+    payload = v2_handoff_history(Path(load_settings().app.data_dir))
+    console.print("Read-only handoff history (deterministic ask routing):")
+    console.print("")
+    typer.echo(_render_v2_handoff_history_human(payload), nl=False)
+    console.print("")
+    console.print("Safe commands:")
+    console.print("  shellforgeai handoff history")
+    console.print("  shellforgeai handoff history --json")
+    console.print("  shellforgeai handoff compare-latest")
+    return True
+
+
 def _handle_v2_handoff_ask(question: str) -> bool:
     if not _is_handoff_ask(question):
         return False
+    normalized = _normalize_handoff_ask(question)
+    if any(cue in normalized for cue in _HANDOFF_COMPARE_CUES):
+        return _handle_v2_handoff_compare_ask(question)
+    if any(cue in normalized for cue in _HANDOFF_HISTORY_CUES):
+        return _handle_v2_handoff_history_ask(question)
     mutation_cues = _handoff_mutation_cues(question)
     payload = _build_v2_handoff_payload(from_triage=True)
     console.print("Read-only operator handoff (deterministic ask routing):")
@@ -11299,6 +11485,98 @@ def handoff_export_validate(
     typer.echo(_render_v2_handoff_export_validate_human(payload), nl=False)
     if payload.get("status") != "ok":
         raise typer.Exit(1)
+
+
+@handoff_app.command("history")
+def handoff_history(
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    limit: Annotated[int, typer.Option("--limit", min=1, help="Max recent handoffs to list.")] = 10,
+) -> None:
+    """Read-only list of recent saved ShellForgeAI V2 handoff artifacts.
+
+    Lists saved handoffs (latest first) with id, timestamp, status, risk, target,
+    and quick local validity. It never reruns collectors, calls the model,
+    executes shell, or mutates anything. An empty history returns ``empty`` with
+    ``shellforgeai handoff --save`` as the first safe command.
+    """
+    from shellforgeai.core.v2_handoff_artifact import v2_handoff_history
+
+    payload = v2_handoff_history(Path(load_settings().app.data_dir), limit=limit)
+    if json_output:
+        typer.echo(json.dumps(payload))
+        return
+    typer.echo(_render_v2_handoff_history_human(payload), nl=False)
+
+
+@handoff_app.command("compare")
+def handoff_compare(
+    before_ref: Annotated[
+        str, typer.Argument(help="Before handoff id or ShellForgeAI-owned handoff path")
+    ],
+    after_ref: Annotated[
+        str, typer.Argument(help="After handoff id or ShellForgeAI-owned handoff path")
+    ],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    only_changed: Annotated[
+        bool, typer.Option("--only-changed", help="Suppress stable items.")
+    ] = False,
+    include_stable: Annotated[
+        bool, typer.Option("--include-stable", help="Include stable items.")
+    ] = False,
+) -> None:
+    """Read-only drift compare of two saved ShellForgeAI V2 handoff artifacts.
+
+    Reports drift in status/risk/target/current_status, golden-path stage
+    summaries, first safe command, safe-next commands, limitations, warnings, and
+    safety flags. Missing/unsafe/malformed refs fail cleanly (non-zero, no
+    traceback). It never reruns collectors, calls the model, executes shell, or
+    mutates anything.
+    """
+    from shellforgeai.core.v2_handoff_artifact import compare_v2_handoffs
+
+    payload = compare_v2_handoffs(
+        before_ref,
+        after_ref,
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_output:
+        typer.echo(json.dumps(payload))
+        raise typer.Exit(0 if payload.get("status") == "ok" else 1)
+    typer.echo(_render_v2_handoff_compare_human(payload, include_stable=include_stable), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@handoff_app.command("compare-latest")
+def handoff_compare_latest(
+    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    only_changed: Annotated[
+        bool, typer.Option("--only-changed", help="Suppress stable items.")
+    ] = False,
+    include_stable: Annotated[
+        bool, typer.Option("--include-stable", help="Include stable items.")
+    ] = False,
+) -> None:
+    """Read-only compare of the two most recent saved V2 handoff artifacts.
+
+    Returns a controlled ``not_enough_history`` status with
+    ``shellforgeai handoff --save`` as the first safe command when fewer than two
+    handoffs exist. It never creates artifacts, reruns collectors, calls the
+    model, or executes shell.
+    """
+    from shellforgeai.core.v2_handoff_artifact import compare_latest_v2_handoffs
+
+    payload = compare_latest_v2_handoffs(
+        Path(load_settings().app.data_dir),
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+    if json_output:
+        typer.echo(json.dumps(payload))
+        return
+    typer.echo(_render_v2_handoff_compare_human(payload, include_stable=include_stable), nl=False)
 
 
 @app.command()

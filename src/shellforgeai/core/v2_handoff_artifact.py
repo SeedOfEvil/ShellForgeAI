@@ -588,3 +588,418 @@ def validate_v2_handoff_export(export_ref: str, data_dir: Path | str) -> dict[st
         "checks": checks,
         "warnings": warnings,
     }
+
+
+# --------------------------------------------------------------------------- #
+# History / compare (strictly read-only)                                       #
+# --------------------------------------------------------------------------- #
+# These never write artifacts, rerun collectors, call the model, execute shell,
+# or mutate Docker/Compose/host state. They only read ShellForgeAI-owned saved
+# V2 handoff artifacts under ``<data_dir>/v2_handoffs/``.
+def _history_safety() -> dict[str, bool]:
+    """Read-only safety block shared by handoff history/compare results."""
+    return _validate_safety()
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def _stable_repr(value: Any) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True, default=str)
+    return str(value)
+
+
+def _list_diff(before: Any, after: Any) -> tuple[list[Any], list[Any], list[Any]]:
+    before_items = _as_list(before)
+    after_items = _as_list(after)
+    before_keys = {_stable_repr(item): item for item in before_items}
+    after_keys = {_stable_repr(item): item for item in after_items}
+    new = [after_keys[k] for k in sorted(after_keys.keys() - before_keys.keys())]
+    missing = [before_keys[k] for k in sorted(before_keys.keys() - after_keys.keys())]
+    stable = [after_keys[k] for k in sorted(after_keys.keys() & before_keys.keys())]
+    return new, missing, stable
+
+
+def _manifest_created_at(artifact_dir: Path) -> str | None:
+    try:
+        manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return manifest.get("created_at")
+
+
+def _history_safe_next_commands(has_entries: bool) -> list[str]:
+    if not has_entries:
+        return ["shellforgeai handoff --save", "shellforgeai handoff history"]
+    return [
+        "shellforgeai handoff --save",
+        "shellforgeai handoff history --json",
+        "shellforgeai handoff compare-latest",
+        "shellforgeai handoff compare-latest --json",
+        "shellforgeai handoff compare <before> <after>",
+    ]
+
+
+def _handoff_history_entry(
+    payload: dict[str, Any], artifact_dir: Path, data_dir: Path | str
+) -> dict[str, Any]:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    validation = validate_v2_handoff(artifact_dir.name, data_dir)
+    return {
+        "handoff_id": payload.get("handoff_id") or artifact_dir.name,
+        "path": str(artifact_dir),
+        "created_at": _manifest_created_at(artifact_dir),
+        "status": payload.get("status"),
+        "risk": summary.get("risk"),
+        "current_status": summary.get("current_status"),
+        "target": summary.get("target"),
+        "valid": validation.get("status") == "ok",
+    }
+
+
+def v2_handoff_history(data_dir: Path | str, *, limit: int = 10) -> dict[str, Any]:
+    """List recent saved ShellForgeAI V2 handoff artifacts (read-only).
+
+    Reads only ``<data_dir>/v2_handoffs/handoff_*`` artifacts. Never reruns
+    collectors, calls the model, executes shell, or mutates anything. Returns a
+    controlled ``empty`` status (no traceback) when no handoffs are saved.
+    """
+    root = Path(data_dir) / "v2_handoffs"
+    warnings: list[str] = []
+    entries: list[dict[str, Any]] = []
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or not child.name.startswith("handoff_"):
+                continue
+            handoff_json = child / "handoff.json"
+            if not handoff_json.exists():
+                warnings.append(
+                    f"invalid handoff artifact ignored: {child.name} (missing handoff.json)"
+                )
+                continue
+            try:
+                payload = json.loads(handoff_json.read_text(encoding="utf-8"))
+            except Exception:
+                warnings.append(f"invalid handoff artifact ignored: {child.name} (malformed json)")
+                continue
+            if payload.get("mode") != "v2_handoff":
+                warnings.append(f"invalid handoff artifact ignored: {child.name} (unexpected mode)")
+                continue
+            entries.append(_handoff_history_entry(payload, child, data_dir))
+    entries.sort(key=lambda item: str(item.get("handoff_id") or ""), reverse=True)
+    effective_limit = max(1, limit)
+    limited = entries[:effective_limit]
+    latest_id = entries[0]["handoff_id"] if entries else None
+    first_safe = (
+        f"shellforgeai handoff validate {latest_id}" if latest_id else "shellforgeai handoff --save"
+    )
+    return {
+        "schema_version": 1,
+        "mode": "v2_handoff_history",
+        "status": "ok" if entries else "empty",
+        "read_only": True,
+        "mutation_performed": False,
+        "count": len(entries),
+        "limit": effective_limit,
+        "latest_handoff_id": latest_id,
+        "handoffs": limited,
+        "first_safe_command": first_safe,
+        "safe_next_commands": _history_safe_next_commands(bool(entries)),
+        "warnings": warnings,
+        "safety": _history_safety(),
+    }
+
+
+def _load_handoff_for_compare(
+    handoff_ref: str, data_dir: Path | str
+) -> tuple[dict[str, Any] | None, Path | None, str]:
+    """Structurally load a saved handoff payload for read-only compare.
+
+    Mirrors the established ops-report compare loader: it requires the artifact
+    to resolve safely inside the ShellForgeAI root, exist, expose the required
+    files, parse as JSON, and self-identify as ``mode=v2_handoff``. It reads the
+    raw safety block (rather than asserting it is non-mutating) so the compare
+    can *report* safety drift. Returns ``(payload, path, status)`` with status in
+    ``{"ok", "not_found", "failed"}``.
+    """
+    root = Path(data_dir) / "v2_handoffs"
+    d = _resolve_artifact_ref(handoff_ref, root)
+    if d is None:
+        return None, None, "failed"
+    if not d.is_dir():
+        return None, d, "not_found"
+    if any(not (d / f).exists() for f in REQUIRED_HANDOFF_FILES):
+        return None, d, "failed"
+    try:
+        payload = json.loads((d / "handoff.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None, d, "failed"
+    if not isinstance(payload, dict) or payload.get("mode") != "v2_handoff":
+        return None, d, "failed"
+    return payload, d, "ok"
+
+
+def _scalar_handoff_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    golden = payload.get("golden_path") if isinstance(payload.get("golden_path"), dict) else {}
+    fields: dict[str, Any] = {
+        "status": payload.get("status"),
+        "current_status": summary.get("current_status"),
+        "risk": summary.get("risk"),
+        "target": summary.get("target"),
+        "proposal_status": summary.get("proposal_status"),
+        "apply_preview_status": summary.get("apply_preview_status"),
+        "verify_status": summary.get("verify_status"),
+        "first_safe_command": payload.get("first_safe_command"),
+    }
+    for stage in ("status", "triage", "propose", "apply_preview", "verify"):
+        section = golden.get(stage) if isinstance(golden.get(stage), dict) else {}
+        fields[f"golden_path.{stage}"] = section.get("status")
+    return fields
+
+
+def _handoff_list_fields(payload: dict[str, Any]) -> dict[str, list[Any]]:
+    return {
+        "safe_next_commands": _as_list(payload.get("safe_next_commands")),
+        "limitations": _as_list(payload.get("limitations")),
+        "warnings": _as_list(payload.get("warnings")),
+    }
+
+
+def _handoff_safety_drift(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    b = before.get("safety") if isinstance(before.get("safety"), dict) else {}
+    a = after.get("safety") if isinstance(after.get("safety"), dict) else {}
+    drift: list[dict[str, Any]] = []
+    for key in sorted(set(b) | set(a) | set(_validate_safety())):
+        if b.get(key) != a.get(key):
+            drift.append({"flag": key, "before": b.get(key), "after": a.get(key)})
+    return drift
+
+
+def _empty_compare_summary() -> dict[str, int]:
+    return {
+        "new": 0,
+        "resolved_or_missing": 0,
+        "changed": 0,
+        "stable": 0,
+        "safety_drift": 0,
+    }
+
+
+def _compare_handoff_payload(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    before_ref: str,
+    before_path: Path,
+    after_ref: str,
+    after_path: Path,
+    *,
+    only_changed: bool,
+    include_stable: bool,
+) -> dict[str, Any]:
+    emit_stable = include_stable and not only_changed
+    changes: list[dict[str, Any]] = []
+    stable: list[dict[str, Any]] = []
+    stable_count = 0
+
+    b_scalars = _scalar_handoff_fields(before)
+    a_scalars = _scalar_handoff_fields(after)
+    changed_count = 0
+    for field in b_scalars:
+        bval = b_scalars.get(field)
+        aval = a_scalars.get(field)
+        if bval != aval:
+            changes.append({"field": field, "before": bval, "after": aval})
+            changed_count += 1
+        elif emit_stable:
+            stable.append({"field": field, "value": aval})
+            stable_count += 1
+
+    new_total = 0
+    missing_total = 0
+    b_lists = _handoff_list_fields(before)
+    a_lists = _handoff_list_fields(after)
+    for field in b_lists:
+        new, missing, same = _list_diff(b_lists[field], a_lists[field])
+        new_total += len(new)
+        missing_total += len(missing)
+        if new or missing:
+            changes.append({"field": field, "new": new, "resolved_or_missing": missing})
+        if same and emit_stable:
+            stable.append({"field": field, "stable": same})
+            stable_count += len(same)
+
+    drift = _handoff_safety_drift(before, after)
+    warnings: list[str] = []
+    if drift:
+        changes.append({"field": "safety", "drift": drift})
+        for item in drift:
+            b_flag = item.get("before")
+            a_flag = item.get("after")
+            if a_flag is True and b_flag is not True:
+                warnings.append(
+                    f"critical safety drift: {item.get('flag')} changed {str(b_flag).lower()}->true"
+                )
+            else:
+                warnings.append(
+                    f"safety drift: {item.get('flag')} changed "
+                    f"{str(b_flag).lower()}->{str(a_flag).lower()}"
+                )
+    elif emit_stable:
+        stable.append({"field": "safety", "value": "unchanged"})
+        stable_count += 1
+
+    first_safe = after.get("first_safe_command") or "shellforgeai handoff history"
+    return {
+        "schema_version": 1,
+        "mode": "v2_handoff_compare",
+        "status": "ok",
+        "read_only": True,
+        "mutation_performed": False,
+        "before": {
+            "handoff_ref": before_ref,
+            "handoff_id": before.get("handoff_id") or before_path.name,
+            "path": str(before_path),
+        },
+        "after": {
+            "handoff_ref": after_ref,
+            "handoff_id": after.get("handoff_id") or after_path.name,
+            "path": str(after_path),
+        },
+        "summary": {
+            "new": new_total,
+            "resolved_or_missing": missing_total,
+            "changed": changed_count,
+            "stable": stable_count,
+            "safety_drift": len(drift),
+        },
+        "changes": changes,
+        "stable": stable,
+        "first_safe_command": first_safe,
+        "safe_next_commands": [first_safe, "shellforgeai handoff history"],
+        "warnings": warnings,
+        "safety": _history_safety(),
+    }
+
+
+def _compare_load_failure(
+    *, which: str, status: str, before_ref: str, after_ref: str, path: Path | None
+) -> dict[str, Any]:
+    before_id = path.name if (which == "before" and path is not None) else None
+    after_id = path.name if (which == "after" and path is not None) else None
+    return {
+        "schema_version": 1,
+        "mode": "v2_handoff_compare",
+        "status": status,
+        "read_only": True,
+        "mutation_performed": False,
+        "before": {"handoff_ref": before_ref, "handoff_id": before_id},
+        "after": {"handoff_ref": after_ref, "handoff_id": after_id},
+        "summary": _empty_compare_summary(),
+        "changes": [],
+        "stable": [],
+        "first_safe_command": "shellforgeai handoff history",
+        "warnings": [f"{which} handoff validation failed ({status})"],
+        "safety": _history_safety(),
+    }
+
+
+def compare_v2_handoffs(
+    before_ref: str,
+    after_ref: str,
+    data_dir: Path | str,
+    *,
+    only_changed: bool = False,
+    include_stable: bool = False,
+) -> dict[str, Any]:
+    """Compare two saved ShellForgeAI V2 handoff artifacts (strictly read-only).
+
+    Loads both handoffs by id or ShellForgeAI-owned path, then reports drift in
+    status/risk/target/current_status, the golden-path stage summaries, the first
+    safe command, safe-next commands, limitations, warnings, and safety flags.
+    Missing/unsafe/malformed refs return a controlled ``not_found``/``failed``
+    payload (no traceback). Never reruns collectors, calls the model, executes
+    shell, or mutates anything.
+    """
+    before, before_path, before_status = _load_handoff_for_compare(before_ref, data_dir)
+    if before is None:
+        return _compare_load_failure(
+            which="before",
+            status=before_status,
+            before_ref=before_ref,
+            after_ref=after_ref,
+            path=before_path,
+        )
+    after, after_path, after_status = _load_handoff_for_compare(after_ref, data_dir)
+    if after is None:
+        payload = _compare_load_failure(
+            which="after",
+            status=after_status,
+            before_ref=before_ref,
+            after_ref=after_ref,
+            path=after_path,
+        )
+        payload["before"]["handoff_id"] = before.get("handoff_id") or before_path.name
+        return payload
+    return _compare_handoff_payload(
+        before,
+        after,
+        before_ref,
+        before_path,
+        after_ref,
+        after_path,
+        only_changed=only_changed,
+        include_stable=include_stable,
+    )
+
+
+def compare_latest_v2_handoffs(
+    data_dir: Path | str, *, only_changed: bool = False, include_stable: bool = False
+) -> dict[str, Any]:
+    """Compare the two most recent saved V2 handoff artifacts (read-only).
+
+    Returns a controlled ``not_enough_history`` status (no traceback, first safe
+    command ``shellforgeai handoff --save``) when fewer than two handoffs exist.
+    Never creates artifacts, reruns collectors, calls the model, or executes
+    shell.
+    """
+    hist = v2_handoff_history(data_dir, limit=50)
+    handoffs = hist.get("handoffs") or []
+    if len(handoffs) < 2:
+        return {
+            "schema_version": 1,
+            "mode": "v2_handoff_compare_latest",
+            "status": "not_enough_history",
+            "read_only": True,
+            "mutation_performed": False,
+            "before": {"handoff_ref": None, "handoff_id": None},
+            "after": {"handoff_ref": None, "handoff_id": None},
+            "summary": _empty_compare_summary(),
+            "available": len(handoffs),
+            "required": 2,
+            "changes": [],
+            "stable": [],
+            "first_safe_command": "shellforgeai handoff --save",
+            "safe_next_commands": [
+                "shellforgeai handoff --save",
+                "shellforgeai handoff history",
+            ],
+            "warnings": ["at least two saved V2 handoff artifacts are required"],
+            "safety": _history_safety(),
+        }
+    before_id = handoffs[1]["handoff_id"]
+    after_id = handoffs[0]["handoff_id"]
+    payload = compare_v2_handoffs(
+        before_id, after_id, data_dir, only_changed=only_changed, include_stable=include_stable
+    )
+    payload["mode"] = "v2_handoff_compare_latest"
+    payload["latest"] = True
+    return payload

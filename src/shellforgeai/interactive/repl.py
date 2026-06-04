@@ -96,9 +96,9 @@ Triage/detail:
 Reports/artifacts:
   ops report --save
   ops report history --limit 5
-  ops report compare-latest
-  ops report compare-latest --json
+  ops report compare-latest [--json]
   handoff --save / handoff validate / handoff export / handoff export-validate <id>
+  handoff history [--limit 5] / handoff compare <a> <b> / compare-latest [--json]
 
 V1/readiness:
   remediation self-test quick
@@ -1632,6 +1632,9 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("handoff", "validate"): "Running read-only handoff validation...",
     ("handoff", "export"): "Running read-only handoff export...",
     ("handoff", "export-validate"): "Running read-only handoff export validation...",
+    ("handoff", "history"): "Running read-only handoff history...",
+    ("handoff", "compare"): "Running read-only handoff compare...",
+    ("handoff", "compare-latest"): "Running read-only handoff compare-latest...",
     ("diagnose",): "Running read-only diagnose...",
     ("v1", "check"): "Running V1 readiness check...",
     ("remediation", "self-test"): "Running read-only remediation self-test...",
@@ -1839,6 +1842,12 @@ def _record_cli_dispatch_in_session_summary(
     elif argv[:2] == ("handoff", "export"):
         state.note_check("handoff export")
         state.note_finding("read-only handoff artifact exported")
+    elif argv[:2] == ("handoff", "history"):
+        state.note_check("handoff history")
+    elif argv[:2] == ("handoff", "compare-latest"):
+        state.note_check("handoff compare-latest")
+    elif argv[:2] == ("handoff", "compare"):
+        state.note_check("handoff compare")
     elif argv[:1] == ("handoff",):
         state.note_check("handoff")
         if "--save" in argv:

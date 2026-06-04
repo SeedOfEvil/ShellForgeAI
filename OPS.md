@@ -13,6 +13,9 @@
      - `shellforgeai handoff validate <handoff_id>` — read-only validation (required files, JSON, manifest, checksums, safety, secrets).
      - `shellforgeai handoff export <handoff_id>` — copy a validated handoff into a portable export (`<data_dir>/exports/export_<handoff_id>/`); idempotent if it already exists.
      - `shellforgeai handoff export-validate <export_id>` — read-only validation of the exported bundle.
+     - `shellforgeai handoff history [--limit N]` — read-only list of recent saved handoffs (latest first; empty → `shellforgeai handoff --save`).
+     - `shellforgeai handoff compare <before_id> <after_id>` — read-only drift compare of two saved handoffs (status/risk/target/current_status/golden-path/first-safe-command/safe-next-commands/limitations/warnings/safety drift); `--only-changed`/`--include-stable` available.
+     - `shellforgeai handoff compare-latest` — read-only compare of the two most recent saved handoffs (or `not_enough_history`).
      - Each step accepts `--json` for strict output. Missing/malformed refs fail cleanly (non-zero, no traceback). No collector rerun, model call, Docker/Compose mutation, restart, shell, or arbitrary command.
 7. `shellforgeai triage docker detail <target>` — inspect one suspect without mutation.
 8. `shellforgeai remediation eligibility --target <target> --explain` — explain gated readiness only.
