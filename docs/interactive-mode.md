@@ -295,7 +295,10 @@ read-only or safety/readiness handlers:
 - `diagnose <target>` through the existing read-only diagnose route
 - `remediation self-test quick|standard|full` and `remediation self-test --profile quick|standard|full [--json]`
 - `remediation eligibility --target <target> --explain [--json]`
+- `recipes [--json]`, `recipes list [--json]`, `recipes inspect <recipe_id> [--json]`, `recipes eligibility --recipe <recipe_id> --target <target> [--json]`, and `safe-actions [--target <target>] [--json]` for the read-only governed recipe registry and safe-action eligibility map.
 - `pending`/`/pending`, `help`/`/help`, `exit`/`/exit`
+
+Recipe and safe-action commands never execute recipes; interactive mutation phrases such as `execute recipe`, `run restart recipe`, and `restart it now` are refused.
 
 Mistyped ShellForgeAI command-like input does not execute and does not call the
 model. If a close safe allowlisted command exists, interactive mode prints

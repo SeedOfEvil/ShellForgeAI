@@ -76,6 +76,32 @@ that does not exist. The compatibility commands `triage docker`,
 `triage docker --json`, and `triage docker detail <target>` continue to work
 and share the same read-only safety wording.
 
+## V2 governed recipe registry
+
+The recipe registry is the read-only locked-toolbox map for future governed execution.
+It tells operators which actions are available as read-only guidance today, which
+recipes are preview-only or disabled until an execution lane exists, and why an
+exact target is eligible or blocked. Listing, inspection, safe-actions, and
+eligibility checks never execute a recipe.
+
+Core forms:
+
+- `shellforgeai recipes` / `shellforgeai recipes --json`
+- `shellforgeai recipes list` / `shellforgeai recipes list --json`
+- `shellforgeai recipes inspect <recipe_id>` / `--json`
+- `shellforgeai recipes eligibility --recipe <recipe_id> --target <target>` / `--json`
+- `shellforgeai safe-actions [--target <target>] [--json]`
+
+Initial read-only recipes include `status.report`, `triage.docker`,
+`propose.next_action`, `apply.preview`, `verify.current_state`,
+`handoff.operator`, and `metadata.cleanup_review`. Governed mutation recipes
+such as `docker.disposable_restart` and `metadata.cleanup_execute` are present
+only as disabled eligibility/preview contracts; they require future gates such
+as exact target, labels, preflight, confirmation, receipt, verification, and
+rollback posture where applicable. Production, unlabeled, missing, and broad
+targets are blocked. JSON output includes `read_only=true`,
+`mutation_performed=false`, and false execution safety flags.
+
 ## Commands
 
 | Command | Purpose |
