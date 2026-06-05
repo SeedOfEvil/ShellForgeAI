@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "title": "ShellForgeAI validation lane impact map",
+  "description": "Maps changed-file patterns to a validation lane and a recommended regression test group. This is read-only planning data consumed by scripts/validate_pr.py (PR157). It does not run anything by itself. Editing this file is itself a Lane C (full) change because it affects broad validation confidence.",
+  "lane_order": ["fast", "targeted_runtime", "full"],
+  "lane_letter": {"fast": "A", "targeted_runtime": "B", "full": "C"},
+  "runtime_class": {"fast": "short", "targeted_runtime": "medium", "full": "long"},
+  "lanes": {
+    "fast": {
+      "label": "Lane A: fast default",
+      "full_pytest_default": false,
+      "runtime_class": "short",
+      "use_for": [
+        "docs-only changes",
+        "README/OPS/roadmap edits",
+        "CLI help text only",
+        "wording-only changes",
+        "tests-only additions for docs/contract"
+      ]
+    },
+    "targeted_runtime": {
+      "label": "Lane B: targeted runtime",
+      "full_pytest_default": false,
+      "runtime_class": "medium",
+      "use_for": [
+        "ask routing",
+        "intent parsing",
+        "command dispatch",
+        "interactive UX",
+        "JSON output shape",
+        "artifact read/validate/export behavior",
+        "doctor output",
+        "status/triage/propose/apply-preview/verify/handoff wording or routing",
+        "recipe registry or preflight read-only logic"
+      ]
+    },
+    "full": {
+      "label": "Lane C: full validation",
+      "full_pytest_default": true,
+      "runtime_class": "long",
+      "use_for": [
+        "cleanup execution",
+        "remediation execution",
+        "rollback execution",
+        "Docker/Compose behavior",
+        "container restart behavior",
+        "recipe execution",
+        "apply/mission execution",
+        "safety gates/refusal core rewrites",
+        "broad command router rewrites",
+        "pyproject/dependency/Dockerfile changes",
+        "packaging/import changes",
+        "test harness or validation infrastructure changes",
+        "failures or suspicious targeted results",
+        "high-risk unknown changes"
+      ]
+    }
+  },
+  "rules": [
+    {"pattern": "docs/**", "lane": "fast", "reason": "documentation-only change", "tests": [
+      "tests/test_pr110_v1_docs_contract.py",
+      "tests/test_pr112_v1_demo_contract.py",
+      "tests/test_pr114_v1_command_surface.py",
+      "tests/test_pr119_v1_release_candidate_docs.py",
+      "tests/test_pr143_command_surface_audit.py"
+    ]},
+    {"pattern": "README.md", "lane": "fast", "reason": "README documentation change", "tests": [
+      "tests/test_pr110_v1_docs_contract.py",
+      "tests/test_pr114_v1_command_surface.py"
+    ]},
+    {"pattern": "OPS.md", "lane": "fast", "reason": "OPS runbook documentation change", "tests": [
+      "tests/test_pr110_v1_docs_contract.py"
+    ]},
+    {"pattern": "CHANGELOG.md", "lane": "fast", "reason": "changelog documentation change", "tests": [
+      "tests/test_pr120_v1_release_notes.py"
+    ]},
+    {"pattern": "HOMELAB.md", "lane": "fast", "reason": "documentation change", "tests": []},
+    {"pattern": "AGENTS.md", "lane": "fast", "reason": "documentation change", "tests": []},
+    {"pattern": "SHELLFORGE.md", "lane": "fast", "reason": "documentation change", "tests": []},
+    {"pattern": "examples/**", "lane": "fast", "reason": "example fixture/doc change", "tests": []},
+    {"pattern": "LICENSE", "lane": "fast", "reason": "license text change", "tests": []},
+    {"pattern": ".gitignore", "lane": "fast", "reason": "ignore-rule change", "tests": []},
+    {"pattern": ".env.example", "lane": "fast", "reason": "env example documentation change", "tests": []},
+    {"pattern": "*.md", "lane": "fast", "reason": "markdown documentation change", "tests": []},
+
+    {"pattern": "src/shellforgeai/core/ask_routing.py", "lane": "targeted_runtime", "reason": "ask routing changed", "tests": [
+      "tests/test_pr105_ask_ops_report_routing.py",
+      "tests/test_pr106_ask_mutation_refusal_routing.py",
+      "tests/test_pr42_ask_routing_hardening.py",
+      "tests/test_pr131_*",
+      "tests/test_pr134_*",
+      "tests/test_pr135_*",
+      "tests/test_pr156_*"
+    ]},
+    {"pattern": "src/shellforgeai/core/intent_nuance.py", "lane": "targeted_runtime", "reason": "intent parsing nuance changed", "tests": [
+      "tests/test_pr131_*",
+      "tests/test_pr134_*",
+      "tests/test_pr135_*"
+    ]},
+    {"pattern": "src/shellforgeai/core/recipe_registry.py", "lane": "targeted_runtime", "reason": "read-only recipe registry logic changed", "tests": [
+      "tests/test_pr154_v2_recipe_registry.py",
+      "tests/test_pr155_v2_recipe_preflight.py",
+      "tests/test_pr156_recipe_preflight_ask_target_extraction.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/recipe_preflight.py", "lane": "targeted_runtime", "reason": "read-only recipe preflight logic changed", "tests": [
+      "tests/test_pr155_v2_recipe_preflight.py",
+      "tests/test_pr156_recipe_preflight_ask_target_extraction.py",
+      "tests/test_pr99_remediation_self_test.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/*handoff*", "lane": "targeted_runtime", "reason": "read-only handoff artifact logic changed", "tests": [
+      "tests/test_pr150_v2_handoff_entrypoint.py",
+      "tests/test_pr152_v2_handoff_artifact_workflow.py",
+      "tests/test_pr153_v2_handoff_history_compare.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/ops_report_artifact.py", "lane": "targeted_runtime", "reason": "ops report artifact read/validate/export behavior changed", "tests": [
+      "tests/test_pr104_ops_report.py",
+      "tests/test_pr107_ops_report_artifacts.py",
+      "tests/test_pr108_ops_report_compare.py",
+      "tests/test_pr109_ops_report_history_compare_latest.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/interactive_summary_artifact.py", "lane": "targeted_runtime", "reason": "interactive summary artifact read/validate/export behavior changed", "tests": [
+      "tests/test_pr140_interactive_summary_artifact.py",
+      "tests/test_pr141_interactive_summary_history_compare.py",
+      "tests/test_pr142_interactive_summary_compare_export.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/triage_ranking.py", "lane": "targeted_runtime", "reason": "read-only triage ranking/detail changed", "tests": [
+      "tests/test_pr81_triage_ranking.py",
+      "tests/test_pr82_broad_ask_triage.py",
+      "tests/test_pr83_triage_detail.py",
+      "tests/test_pr146_triage_ux_consistency.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/diagnose.py", "lane": "targeted_runtime", "reason": "read-only diagnose evidence/classification changed", "tests": [
+      "tests/test_pr101_diagnose_triage_cohesion.py",
+      "tests/test_context_first_routing.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/followup_grounding.py", "lane": "targeted_runtime", "reason": "session-local follow-up grounding changed", "tests": [
+      "tests/test_pr132_followup_grounding.py",
+      "tests/test_pr124_followup_resolution.py"
+    ]},
+    {"pattern": "src/shellforgeai/interactive/**", "lane": "targeted_runtime", "reason": "interactive UX/command dispatch changed", "tests": [
+      "tests/test_pr122_*",
+      "tests/test_pr124_*",
+      "tests/test_pr128_*",
+      "tests/test_pr129_*",
+      "tests/test_pr130_*",
+      "tests/test_pr132_*",
+      "tests/test_pr136_*",
+      "tests/test_pr137_*",
+      "tests/test_pr138_*",
+      "tests/test_pr139_*",
+      "tests/test_pr140_*",
+      "tests/test_pr141_*",
+      "tests/test_pr142_*"
+    ]},
+    {"pattern": "src/shellforgeai/cli.py", "lane": "targeted_runtime", "reason": "command surface wiring changed (broad router rewrites should use --profile full)", "tests": [
+      "tests/test_cli.py",
+      "tests/test_pr114_v1_command_surface.py",
+      "tests/test_pr143_command_surface_audit.py"
+    ]},
+    {"pattern": "src/shellforgeai/app.py", "lane": "targeted_runtime", "reason": "application wiring changed", "tests": [
+      "tests/test_cli.py"
+    ]},
+    {"pattern": "src/shellforgeai/render/**", "lane": "targeted_runtime", "reason": "read-only rendering/output shape changed", "tests": [
+      "tests/test_pr126_concise_operator_output.py",
+      "tests/test_pr22_json_stdout_validity.py"
+    ]},
+
+    {"pattern": "src/shellforgeai/core/*remediation*", "lane": "full", "reason": "remediation execution / disposable executor changed", "tests": [
+      "tests/test_pr89_disposable_remediation.py",
+      "tests/test_pr91_*",
+      "tests/test_pr92_*",
+      "tests/test_pr93_*",
+      "tests/test_pr95_*",
+      "tests/test_pr96_*",
+      "tests/test_pr97_*",
+      "tests/test_pr99_*"
+    ]},
+    {"pattern": "src/shellforgeai/core/*rollback*", "lane": "full", "reason": "rollback execution / preview changed", "tests": [
+      "tests/test_pr93_remediation_rollback.py",
+      "tests/test_pr94_rollback_execute.py",
+      "tests/test_pr65_compose_rollback_preview.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/*restart*", "lane": "full", "reason": "restart execution behavior changed", "tests": [
+      "tests/test_pr47_lab_restart.py",
+      "tests/test_pr50_restart_proposal_builder.py",
+      "tests/test_pr51_restart_plan.py",
+      "tests/test_pr52_restart_mission.py",
+      "tests/test_pr62_compose_propose_restart.py",
+      "tests/test_pr63_compose_restart_preflight.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/*mission*", "lane": "full", "reason": "mission execution behavior changed", "tests": [
+      "tests/test_pr52_restart_mission.py",
+      "tests/test_pr53_mission_execute.py",
+      "tests/test_pr54_mission_report.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/*cleanup*", "lane": "full", "reason": "cleanup execution behavior changed", "tests": [
+      "tests/test_pr55_cleanup_workflow.py",
+      "tests/test_pr74_cleanup_review.py",
+      "tests/test_pr75_cleanup_prepare.py",
+      "tests/test_pr76_cleanup_execute_readiness.py",
+      "tests/test_pr77_cleanup_execute_polish.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/apply_bundle.py", "lane": "full", "reason": "apply bundle execution changed", "tests": [
+      "tests/test_pr33_apply_preflight.py",
+      "tests/test_pr37_action_compiler.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/approvals.py", "lane": "full", "reason": "approval / mutation gate changed", "tests": [
+      "tests/test_pr32_approvals.py",
+      "tests/test_pr46_mutation_gate.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/guards.py", "lane": "full", "reason": "core safety guard / refusal logic changed", "tests": [
+      "tests/test_pr46_mutation_gate.py",
+      "tests/test_pr42_ask_routing_hardening.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/disposable_*", "lane": "full", "reason": "disposable execution behavior changed", "tests": [
+      "tests/test_pr67_disposable_compose_harness.py",
+      "tests/test_pr68_disposable_compose_restart_proof.py",
+      "tests/test_pr89_disposable_remediation.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/compose_context.py", "lane": "full", "reason": "compose behavior context changed", "tests": [
+      "tests/test_pr56_compose_context.py",
+      "tests/test_pr57_compose_ask_routing.py",
+      "tests/test_pr58_compose_restart_enrichment.py"
+    ]},
+    {"pattern": "src/shellforgeai/policy/**", "lane": "full", "reason": "policy / safety engine changed", "tests": [
+      "tests/test_policy.py",
+      "tests/test_pr46_mutation_gate.py"
+    ]},
+    {"pattern": "src/shellforgeai/tools/**", "lane": "full", "reason": "tool execution surface changed", "tests": [
+      "tests/test_investigation_tools.py",
+      "tests/test_tools_files.py",
+      "tests/test_tools_host.py",
+      "tests/test_tools_systemd.py"
+    ]},
+    {"pattern": "src/shellforgeai/util/subprocess.py", "lane": "full", "reason": "subprocess execution wrapper changed", "tests": [
+      "tests/test_investigation_tools.py"
+    ]},
+
+    {"pattern": "Dockerfile", "lane": "full", "reason": "container image definition changed", "tests": []},
+    {"pattern": "*.Dockerfile", "lane": "full", "reason": "container image definition changed", "tests": []},
+    {"pattern": "pyproject.toml", "lane": "full", "reason": "packaging / dependency / test config changed", "tests": [
+      "tests/test_cli.py",
+      "tests/test_config.py"
+    ]},
+    {"pattern": "requirements*", "lane": "full", "reason": "dependency manifest changed", "tests": []},
+    {"pattern": "compose.yaml", "lane": "full", "reason": "compose definition changed", "tests": [
+      "tests/test_compose_runtime_hygiene.py"
+    ]},
+    {"pattern": "compose.yml", "lane": "full", "reason": "compose definition changed", "tests": [
+      "tests/test_compose_runtime_hygiene.py"
+    ]},
+    {"pattern": "docker-compose*", "lane": "full", "reason": "compose definition changed", "tests": [
+      "tests/test_compose_runtime_hygiene.py"
+    ]},
+    {"pattern": "Makefile", "lane": "full", "reason": "build entrypoint changed", "tests": []},
+    {"pattern": "config/**", "lane": "full", "reason": "runtime configuration changed", "tests": [
+      "tests/test_config.py",
+      "tests/test_profiles.py"
+    ]},
+    {"pattern": ".github/**", "lane": "full", "reason": "CI / workflow infrastructure changed", "tests": []},
+
+    {"pattern": "scripts/v1_validate.sh", "lane": "full", "reason": "V1 validation helper changed (broad confidence)", "tests": [
+      "tests/test_pr113_v1_validation_hardening.py",
+      "tests/test_pr118_v1_validate_packet_lane.py"
+    ]},
+    {"pattern": "scripts/validate_pr.py", "lane": "full", "reason": "validation lane optimizer changed (broad confidence)", "tests": [
+      "tests/test_pr157_validation_lane_optimizer.py"
+    ]},
+    {"pattern": "scripts/validation_matrix.json", "lane": "full", "reason": "validation impact map changed (broad confidence)", "tests": [
+      "tests/test_pr157_validation_lane_optimizer.py"
+    ]},
+    {"pattern": "scripts/sfai_docker01_pr_lane.py", "lane": "full", "reason": "Docker01 PR deploy lane helper changed", "tests": [
+      "tests/test_pr157_validation_lane_optimizer.py"
+    ]},
+    {"pattern": "scripts/**", "lane": "full", "reason": "operator/validation script changed", "tests": []},
+
+    {"pattern": "tests/conftest.py", "lane": "full", "reason": "shared test harness changed (broad confidence)", "tests": []},
+    {"pattern": "tests/**", "lane": "fast", "reason": "tests-only change (no product runtime change); changed tests are run directly", "tests": []}
+  ],
+  "source_fallback": {
+    "pattern": "src/**/*.py",
+    "lane": "targeted_runtime",
+    "reason": "unmapped source module; defaulting to targeted runtime lane (relies on PR-specific tests)",
+    "warn_if_no_tests": "no PR-specific or mapped tests matched this module; add a matrix entry, pass --pr <n>, or escalate with --profile full before skipping full pytest"
+  },
+  "unmatched": {
+    "lane": "full",
+    "reason": "unrecognized changed path; full validation recommended as a safe default"
+  },
+  "safety_escalation": {
+    "lane": "full",
+    "reason": "safety/execution-boundary keyword present in changed content",
+    "applies_to": "non-documentation changed content only (explicitly provided diff/content, or --scan-content). Documentation that merely describes these keywords does not escalate.",
+    "keywords": [
+      "execute",
+      "confirm",
+      "cleanup_executed",
+      "remediation_executed",
+      "rollback_executed",
+      "docker_compose_executed",
+      "container_restarted",
+      "shell_true",
+      "subprocess",
+      "os.system",
+      "shell=True",
+      "docker restart",
+      "docker compose",
+      "rm -rf",
+      "chmod",
+      "chown",
+      "apply_executed",
+      "mission_created",
+      "plan_created"
+    ]
+  }
+}

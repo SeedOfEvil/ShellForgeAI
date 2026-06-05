@@ -2,6 +2,24 @@
 
 All notable changes to ShellForgeAI are documented in this file.
 
+## [Unreleased]
+
+### Validation lanes (PR157)
+
+- Added the validation-lane optimizer `scripts/validate_pr.py` and the test
+  impact map `scripts/validation_matrix.json`: changed-file patterns map to a
+  validation lane (Lane A fast / Lane B targeted_runtime / Lane C full),
+  recommended regression tests, exact commands, an explicit
+  `full_pytest_required` answer with reason, and an estimated runtime class.
+- Targeted validation is now the documented default; full `pytest` is
+  exceptional. Execution/safety/packaging boundaries and safety keywords in
+  changed code still escalate to Lane C (`pytest -q --durations=25`).
+- Documentation: `docs/VALIDATION_LANES.md`, `docs/VALIDATION_MATRIX.md`, and an
+  OPS PR-lane policy. The helper is planning/dry-run only — no mutation,
+  Docker/Compose, remediation/rollback/cleanup/restart, `shell=True`, or
+  arbitrary command execution; `--execute` runs only the recommended
+  `ruff`/`compileall`/`pytest` commands.
+
 ## [1.0.0] - 2026-05-26
 
 ### V1 release cut: Keep It a Knife, Not a Toolbox
