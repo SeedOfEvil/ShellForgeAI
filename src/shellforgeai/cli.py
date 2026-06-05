@@ -64,6 +64,7 @@ from shellforgeai.core.ask_routing import (
     evidence_brief,
     extract_compose_target,
     extract_container_target,
+    extract_recipe_preflight_target,
     has_compose_artifact_reference_phrase,
     is_apply_approved_intent,
     is_brief_ops_report_ask,
@@ -12039,17 +12040,14 @@ def _is_recipe_execution_request(question: str) -> bool:
 
 
 def _extract_safe_action_target(question: str) -> str:
-    match = re.search(
-        r"\b(?:for|target|restart)\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
-        question or "",
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return ""
-    target = match.group(1).strip("?.!,")
-    if target.lower() in {"this", "safely", "it", "compose", "docker", "and", "then"}:
-        return ""
-    return target
+    """Extract the exact recipe target from a safe-action / preflight ask.
+
+    Delegates to the deterministic recipe-preflight target extractor so that
+    "preflight docker restart for <target>" and related phrasings resolve the
+    real target rather than a connector word like "for". Returns "" for
+    pronoun/connector-only targets so the caller asks for clarification.
+    """
+    return extract_recipe_preflight_target(question)
 
 
 def _handle_recipe_registry_ask(question: str) -> bool:
@@ -12096,6 +12094,10 @@ def _handle_recipe_registry_ask(question: str) -> bool:
                 f"docker.disposable_restart --target {target} --save"
             )
         else:
+            console.print(
+                "Specify the exact container target; I will not guess a target from a "
+                "pronoun or broad word."
+            )
             console.print("First safe command:")
             console.print(
                 "  shellforgeai recipes preflight --recipe docker.disposable_restart "
