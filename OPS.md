@@ -1667,8 +1667,10 @@ Lanes (see [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) and
 - **Lane C (full)** — cleanup/remediation/rollback/restart/recipe/apply/mission
   execution, Docker/Compose behavior, safety-gate or refusal-core rewrites,
   broad command-router rewrites, `pyproject`/dependency/`Dockerfile`/packaging,
-  and validation-infrastructure changes. Lane C runs
-  `pytest -q --durations=25`.
+  and validation-infrastructure changes. Lane C runs the bounded full pytest
+  runner: `python scripts/run_full_pytest.py`. The runner uses `pytest-xdist`
+  when available, falls back to serial pytest when unavailable, and always
+  includes slow-test duration reporting (`--durations=25`).
 
 Pick the lane from the changed files with the read-only optimizer (it never
 mutates, deploys, or runs Docker/Compose; it only plans unless you pass
@@ -1683,11 +1685,21 @@ python scripts/validate_pr.py --changed-files src/shellforgeai/core/disposable_r
 python scripts/validate_pr.py --changed-files docs/cli.md --full-validation  # force Lane C
 ```
 
+
+Docker01 may optionally use a reusable ShellForgeAI validation image with dev
+dependencies preinstalled (for example `pytest-xdist`) to reduce apt/pip setup
+time. This is only a validation-speed optimization: if the image is unavailable,
+use the current writable validation container path, and never use the image to
+skip tests or weaken Lane C safety gates.
+
 Every Docker01 PR report should record:
 
 - the **selected lane** (A / B / C) and **why**,
 - the **commands run**,
 - whether **full `pytest`** was required,
+- for Lane C, the `python scripts/run_full_pytest.py` command output, including
+  the slow-test duration table,
+- whether the runner used xdist or printed the serial fallback warning,
 - if full `pytest` was **skipped**, why that is acceptable (e.g. "Lane B
   read-only routing change; targeted regression group green; no safety or
   execution boundary touched").

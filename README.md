@@ -288,8 +288,9 @@ explicit CLI lane.
 - [`HOMELAB.md`](HOMELAB.md) — Docker01 / homelab state and caveats.
 - [`docs/roadmap.md`](docs/roadmap.md) — milestone history and next tracks.
 - [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) — PR validation lanes
-  (fast / targeted / full) and the `scripts/validate_pr.py` lane optimizer;
-  see [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
+  (fast / targeted / full), the `scripts/validate_pr.py` lane optimizer, and
+  the Lane C `scripts/run_full_pytest.py` full-validation runner; see
+  [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
 
 ## Using OpenAI Codex / ChatGPT sign-in
 

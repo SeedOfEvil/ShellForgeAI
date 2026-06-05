@@ -127,17 +127,34 @@ ruff check .
 python -m compileall -q src tests
 pytest -q <PR-specific tests>
 pytest -q <related regression group>
-pytest -q --durations=25
+python scripts/run_full_pytest.py
 ```
 
 Estimated runtime class: **long**.
 
 Full `pytest` belongs in Lane C, in scheduled / nightly / mainline runs, or in
-explicit reviewer-requested validation. The optimizer prints the top slow tests
-(via `--durations=25`) whenever Lane C is selected, so the slow tail stays
-visible.
+explicit reviewer-requested validation. Lane C uses the bounded full-validation
+runner:
 
-> Visibility, not skipping. PR157 does not mark any test slow and does not skip
+```bash
+python scripts/run_full_pytest.py
+```
+
+The runner detects `pytest-xdist` and, when available, runs
+`python -m pytest -q -n auto --dist loadscope --durations=25`. If xdist is not
+installed, it prints a clear fallback warning and runs serial
+`python -m pytest -q --durations=25`. The serial fallback is acceptable; it must
+be reported in QA notes so reviewers know why the run was slower. Slow-test
+reporting is always enabled by default through `--durations=25`, keeping the
+slow tail visible without skipping tests.
+
+Optional Docker01/dev optimization: a reusable ShellForgeAI validation image may
+preinstall dev dependencies such as `pytest-xdist` to avoid repeated setup cost.
+That image is an optimization only. If unavailable, the current writable
+validation-container path still works, and the image must not be used to skip or
+weaken selected tests or safety gates.
+
+> Visibility, not skipping. PR158 does not mark any test slow and does not skip
 > any test. `--durations=25` only reports timing. Optionally add
 > `--durations-min=1.0` to focus on tests slower than one second.
 
