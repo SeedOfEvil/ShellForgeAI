@@ -83,6 +83,8 @@ Fast status:
 V2 golden path:
   status / triage / propose [--brief|--json]
   recipes [--json] / recipes inspect <id> / safe-actions [--target <target>]
+  recipes eligibility --recipe docker.disposable_restart --target <target>
+  recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
   apply-preview [--brief|--json] / verify [--brief|--json] / handoff [--brief|--json|--save]
   triage/propose/verify/handoff --target <target> [--json] / handoff summary
   full path: status -> triage -> propose -> apply-preview -> verify -> handoff
@@ -101,16 +103,13 @@ Reports/artifacts:
   handoff history [--limit 5] / handoff compare <a> <b> / compare-latest [--json]
 
 V1/readiness:
-  remediation self-test quick
-  remediation self-test --profile quick --json
+  remediation self-test quick / remediation self-test --profile quick --json
   remediation eligibility --target <target> --explain
   remediation eligibility --target <target> --explain --json
-
 Follow-ups/session:
   /summary
   what happened in this session?
-  what did you find? / get that info
-  dig deeper / proceed
+  what did you find? / get that info / dig deeper / proceed
   pending / /pending
   exit
   /exit

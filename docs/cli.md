@@ -1260,6 +1260,28 @@ shellforgeai apply-preview --from-propose
 shellforgeai apply-preview --target sfai-crashloop
 ```
 
+
+### `shellforgeai recipes preflight`
+
+V2 governed recipe preflight is the read-only readiness packet for the disabled `docker.disposable_restart` recipe. It evaluates exactly one target and answers whether the target exists, is disposable, is allowlisted, is not production-like, is not broad/wildcard/Compose-pattern input, and what gates a future execution lane would require.
+
+Examples:
+
+```bash
+shellforgeai recipes preflight --recipe docker.disposable_restart --target sfai-test
+shellforgeai recipes preflight --recipe docker.disposable_restart --target sfai-test --json
+shellforgeai recipes preflight --recipe docker.disposable_restart --target sfai-test --save
+shellforgeai recipes preflight --recipe docker.disposable_restart --target sfai-test --save --json
+shellforgeai recipes preflight validate <preflight_id>
+shellforgeai recipes preflight validate <preflight_id-or-path> --json
+```
+
+JSON mode emits strict JSON with `mode=v2_recipe_preflight`, `read_only=true`, `mutation_performed=false`, `execution_available=false`, `command_preview_only=true`, `command_executed=false`, `exact_target_only=true`, target label metadata, action preview argv, gates, blockers, first safe command, and a safety block where mutation flags remain false. Eligible disposable targets return `status=preflight_ready`; blocked, missing, broad, production, unlabeled, or partially labeled targets return `blocked`/`not_found` and a read-only first safe command.
+
+`--save` writes only ShellForgeAI-owned metadata under `<data_dir>/recipe_preflights/<preflight_id>/`: `recipe-preflight.json`, `recipe-preflight.md`, and `manifest.json` with checksums. `recipes preflight validate` checks required files, JSON/schema/mode, manifest, checksums, recipe/target consistency, non-mutating safety flags, `command_executed=false`, `container_restarted=false`, and possible secret-shaped content. Invalid or malformed refs exit non-zero without a traceback.
+
+Safety: this command does not execute recipes, does not restart containers, does not create remediation receipts, mission/apply records, cleanup/rollback actions, Docker Compose actions, shell execution, natural-language mutation, or model-driven execution.
+
 ### `shellforgeai verify`
 
 V2 golden-path fifth command. `shellforgeai verify` is deterministic, read-only current-state verification after status/triage/propose/apply-preview. It inspects current status/triage evidence and reports whether the observed state looks `ok`, `degraded`, `blocked`, or `unknown`. It does not apply anything, create a remediation receipt, create a plan or mission, restart containers, call Docker Compose, call the model/Codex, or use shell execution. It also does not claim a previous action happened unless a future receipt/artifact is provided.

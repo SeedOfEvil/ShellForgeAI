@@ -1663,3 +1663,18 @@ Handoff emphasis:
 - Ops report artifact lifecycle (`save/validate/export/export-validate/history/compare-latest`) is core operator workflow.
 - `v1_validate` packet/export helpers are for the dev-validation lane, not minimal runtime image.
 - Normal V1 validation path remains read-only and non-mutating.
+
+## Safe governed recipe preflight workflow
+
+Use this read-only sequence before any future governed execution lane exists:
+
+```bash
+shellforgeai recipes list
+shellforgeai recipes eligibility --recipe docker.disposable_restart --target <target> --json
+shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save
+shellforgeai recipes preflight validate <preflight_id>
+```
+
+The preflight packet may preview the bounded argv `docker restart <target>` for an eligible disposable allowlisted container, but it is preview-only: `execution_available=false`, `command_preview_only=true`, `command_executed=false`, and `container_restarted=false`. Production targets, broad targets (`all`, `*`), missing targets, unlabeled targets, and Docker Compose patterns remain blocked.
+
+Do not treat a preflight packet as permission to execute. Future execution must require explicit confirmation, an execution receipt, post-verification, and rollback posture handling.

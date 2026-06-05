@@ -389,4 +389,12 @@ MIT. See `LICENSE`.
 
 ## V2 governed recipes
 
-`shellforgeai recipes list` exposes the read-only locked toolbox map for future governed actions.
+`shellforgeai recipes list` exposes the read-only locked toolbox map for future governed actions. The governed restart frontier now stops at a read-only preflight packet for one exact disposable target:
+
+```bash
+shellforgeai recipes eligibility --recipe docker.disposable_restart --target <target> --json
+shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save
+shellforgeai recipes preflight validate <preflight_id>
+```
+
+Disposable preflight packets may preview `docker restart <target>` as bounded argv only, but they report `execution_available=false`, `command_preview_only=true`, and `command_executed=false`; no container is restarted and no recipe execution lane is enabled.
