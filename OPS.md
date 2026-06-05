@@ -1649,6 +1649,66 @@ shellforgeai v1 packet export-validate <export>
 - When reviewing V1 release readiness, check `docs/V1_COMMAND_SURFACE.md` and keep packet mode in the validation lane.
 
 
+## PR validation lane policy (PR157)
+
+Full `pytest` is no longer the default confidence blanket for every PR. Choose a
+validation lane explicitly, state why, and reserve full validation for
+execution/safety/packaging boundaries. Targeted validation is the default; full
+validation is exceptional. Safety gates are never weakened to go faster.
+
+Lanes (see [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) and
+[`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md)):
+
+- **Lane A (fast)** — docs / README / OPS / roadmap / wording / tests-only.
+- **Lane B (targeted runtime)** — read-only ask routing, intent, dispatch,
+  interactive UX, JSON/output shape, artifact read/validate/export, doctor,
+  status/triage/propose/apply-preview/verify/handoff wording, recipe
+  registry/preflight read-only logic.
+- **Lane C (full)** — cleanup/remediation/rollback/restart/recipe/apply/mission
+  execution, Docker/Compose behavior, safety-gate or refusal-core rewrites,
+  broad command-router rewrites, `pyproject`/dependency/`Dockerfile`/packaging,
+  and validation-infrastructure changes. Lane C runs
+  `pytest -q --durations=25`.
+
+Pick the lane from the changed files with the read-only optimizer (it never
+mutates, deploys, or runs Docker/Compose; it only plans unless you pass
+`--execute`):
+
+```bash
+python scripts/validate_pr.py --changed-files <files...>
+python scripts/validate_pr.py --base main --head HEAD --json
+python scripts/validate_pr.py --changed-files docs/cli.md            # Lane A
+python scripts/validate_pr.py --changed-files src/shellforgeai/core/ask_routing.py --pr 156  # Lane B
+python scripts/validate_pr.py --changed-files src/shellforgeai/core/disposable_remediation.py # Lane C
+python scripts/validate_pr.py --changed-files docs/cli.md --full-validation  # force Lane C
+```
+
+Every Docker01 PR report should record:
+
+- the **selected lane** (A / B / C) and **why**,
+- the **commands run**,
+- whether **full `pytest`** was required,
+- if full `pytest` was **skipped**, why that is acceptable (e.g. "Lane B
+  read-only routing change; targeted regression group green; no safety or
+  execution boundary touched").
+
+Rules of the road:
+
+- Full validation is **required** for execution/safety boundary PRs and stays
+  **always available** (`--profile full` / `--full-validation`); it is never
+  removed.
+- Targeted validation is **acceptable** for docs / routing / output polish.
+- Safety/execution keywords in changed **code** content (`shell=True`,
+  `docker compose`, `os.system`, `*_executed`, `rm -rf`, …) escalate to full;
+  documentation that merely describes those keywords does not.
+- Live smoke on Docker01 should match the changed behavior.
+- Deploy/snapshot/compose railings are **unchanged**: snapshot before mutation,
+  atomic/temp compose config update, cached build default, no direct compose
+  write, no destructive cleanup, no volume prune, and no
+  remediation/rollback/cleanup execution outside an explicit, scoped PR. The
+  lane optimizer touches none of these — it is planning-only.
+
+
 ## V1 release handoff (PR120)
 
 ShellForgeAI V1 handoff packet is finalized for operator/admin sign-off.
