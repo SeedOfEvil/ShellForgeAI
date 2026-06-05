@@ -9,6 +9,11 @@ definitions and policy live in [`VALIDATION_LANES.md`](VALIDATION_LANES.md).
 When the JSON and this table disagree, **the JSON wins** — it is what the
 optimizer actually uses. Keep them in sync when editing.
 
+For every **full** row, the full-suite command is the bounded runner
+`python scripts/run_full_pytest.py`, not raw `pytest -q`. The runner uses
+`pytest-xdist` when available, falls back to serial pytest when unavailable, and
+always includes `--durations=25` so slow tests are visible.
+
 How matching works:
 
 - Patterns are matched **first-match-wins, in order**, against each changed
@@ -40,32 +45,32 @@ How matching works:
 | `src/shellforgeai/interactive/**` | targeted_runtime | `test_pr122_*`, `test_pr124_*`, `test_pr128_*`, `test_pr129_*`, `test_pr130_*`, `test_pr132_*`, `test_pr136_*` … `test_pr142_*` |
 | `src/shellforgeai/cli.py` | targeted_runtime | `test_cli`, `test_pr114_*`, `test_pr143_*` (broad router rewrites → use `--profile full`) |
 | `src/shellforgeai/render/**` | targeted_runtime | `test_pr126_*`, `test_pr22_json_stdout_validity` |
-| `src/shellforgeai/core/*remediation*` | **full** | remediation suite (`test_pr89_*`, `test_pr91_*`–`test_pr99_*`) + full pytest |
-| `src/shellforgeai/core/*rollback*` | **full** | `test_pr93_*`, `test_pr94_rollback_execute`, `test_pr65_*` + full pytest |
-| `src/shellforgeai/core/*restart*` | **full** | restart/mission suite + full pytest |
-| `src/shellforgeai/core/*mission*` | **full** | `test_pr52_*`, `test_pr53_mission_execute`, `test_pr54_*` + full pytest |
-| `src/shellforgeai/core/*cleanup*` | **full** | cleanup suite (`test_pr55_*`, `test_pr74_*`–`test_pr77_*`) + full pytest |
-| `src/shellforgeai/core/apply_bundle.py` | **full** | `test_pr33_apply_preflight`, `test_pr37_action_compiler` + full pytest |
-| `src/shellforgeai/core/approvals.py` | **full** | `test_pr32_approvals`, `test_pr46_mutation_gate` + full pytest |
-| `src/shellforgeai/core/guards.py` | **full** | `test_pr46_mutation_gate`, `test_pr42_ask_routing_hardening` + full pytest |
-| `src/shellforgeai/core/disposable_*` | **full** | disposable harness + remediation suite + full pytest |
-| `src/shellforgeai/core/compose_context.py` | **full** | compose suite + full pytest |
-| `src/shellforgeai/policy/**` | **full** | `test_policy`, `test_pr46_mutation_gate` + full pytest |
-| `src/shellforgeai/tools/**` | **full** | tool suites + full pytest |
-| `src/shellforgeai/util/subprocess.py` | **full** | `test_investigation_tools` + full pytest |
-| `Dockerfile`, `*.Dockerfile` | **full** | packaging/import + full pytest |
-| `pyproject.toml` | **full** | `test_cli`, `test_config` + full pytest |
-| `requirements*` | **full** | packaging/import + full pytest |
-| `compose.yaml` / `compose.yml` / `docker-compose*` | **full** | `test_compose_runtime_hygiene` + full pytest |
-| `Makefile` | **full** | build + full pytest |
-| `config/**` | **full** | `test_config`, `test_profiles` + full pytest |
-| `.github/**` | **full** | CI/workflow + full pytest |
-| `scripts/v1_validate.sh` | **full** | `test_pr113_*`, `test_pr118_*` + full pytest |
-| `scripts/validate_pr.py` | **full** | `test_pr157_validation_lane_optimizer` + full pytest |
-| `scripts/validation_matrix.json` | **full** | `test_pr157_validation_lane_optimizer` + full pytest |
-| `scripts/sfai_docker01_pr_lane.py` | **full** | validation-lane helper tests + full pytest |
-| `scripts/**` (other) | **full** | + full pytest |
-| `tests/conftest.py` | **full** | shared harness → full pytest |
+| `src/shellforgeai/core/*remediation*` | **full** | remediation suite (`test_pr89_*`, `test_pr91_*`–`test_pr99_*`) + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/*rollback*` | **full** | `test_pr93_*`, `test_pr94_rollback_execute`, `test_pr65_*` + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/*restart*` | **full** | restart/mission suite + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/*mission*` | **full** | `test_pr52_*`, `test_pr53_mission_execute`, `test_pr54_*` + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/*cleanup*` | **full** | cleanup suite (`test_pr55_*`, `test_pr74_*`–`test_pr77_*`) + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/apply_bundle.py` | **full** | `test_pr33_apply_preflight`, `test_pr37_action_compiler` + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/approvals.py` | **full** | `test_pr32_approvals`, `test_pr46_mutation_gate` + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/guards.py` | **full** | `test_pr46_mutation_gate`, `test_pr42_ask_routing_hardening` + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/disposable_*` | **full** | disposable harness + remediation suite + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/core/compose_context.py` | **full** | compose suite + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/policy/**` | **full** | `test_policy`, `test_pr46_mutation_gate` + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/tools/**` | **full** | tool suites + `python scripts/run_full_pytest.py` |
+| `src/shellforgeai/util/subprocess.py` | **full** | `test_investigation_tools` + `python scripts/run_full_pytest.py` |
+| `Dockerfile`, `*.Dockerfile` | **full** | packaging/import + `python scripts/run_full_pytest.py` |
+| `pyproject.toml` | **full** | `test_cli`, `test_config` + `python scripts/run_full_pytest.py` |
+| `requirements*` | **full** | packaging/import + `python scripts/run_full_pytest.py` |
+| `compose.yaml` / `compose.yml` / `docker-compose*` | **full** | `test_compose_runtime_hygiene` + `python scripts/run_full_pytest.py` |
+| `Makefile` | **full** | build + `python scripts/run_full_pytest.py` |
+| `config/**` | **full** | `test_config`, `test_profiles` + `python scripts/run_full_pytest.py` |
+| `.github/**` | **full** | CI/workflow + `python scripts/run_full_pytest.py` |
+| `scripts/v1_validate.sh` | **full** | `test_pr113_*`, `test_pr118_*` + `python scripts/run_full_pytest.py` |
+| `scripts/validate_pr.py` | **full** | `test_pr157_validation_lane_optimizer` + `python scripts/run_full_pytest.py` |
+| `scripts/validation_matrix.json` | **full** | `test_pr157_validation_lane_optimizer` + `python scripts/run_full_pytest.py` |
+| `scripts/sfai_docker01_pr_lane.py` | **full** | validation-lane helper tests + `python scripts/run_full_pytest.py` |
+| `scripts/**` (other) | **full** | + `python scripts/run_full_pytest.py` |
+| `tests/conftest.py` | **full** | shared harness → `python scripts/run_full_pytest.py` |
 | `tests/**` | fast | the changed test files are run directly |
 | `src/**/*.py` (unmatched) | targeted_runtime | PR-specific tests + **warning** if none resolve |
 | anything else (unmatched) | **full** | safe default |
@@ -107,7 +112,7 @@ python scripts/validate_pr.py --changed-files docs/cli.md
 # ask routing → Lane B (targeted), PR-specific + related tests, no full pytest
 python scripts/validate_pr.py --changed-files src/shellforgeai/core/ask_routing.py --pr 156
 
-# remediation execution → Lane C (full), includes pytest -q --durations=25
+# remediation execution → Lane C (full), includes python scripts/run_full_pytest.py
 python scripts/validate_pr.py --changed-files src/shellforgeai/core/disposable_remediation.py
 
 # Dockerfile / dependency → Lane C (full)

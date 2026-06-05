@@ -40,6 +40,7 @@ from pathlib import Path
 HELPER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = HELPER_DIR.parent
 DEFAULT_MATRIX = HELPER_DIR / "validation_matrix.json"
+FULL_PYTEST_RUNNER = "python scripts/run_full_pytest.py"
 
 LANE_ORDER = {"fast": 0, "targeted_runtime": 1, "full": 2}
 LANE_LETTER = {"fast": "A", "targeted_runtime": "B", "full": "C"}
@@ -242,9 +243,9 @@ def _build_commands(lane: str, tests: list[str]) -> list[dict]:
     if lane == "full":
         commands.append(
             _cmd(
-                "pytest -q --durations=25",
-                [PY_EXEC, "-m", "pytest", "-q", "--durations=25"],
-                "pytest_full",
+                FULL_PYTEST_RUNNER,
+                [PY_EXEC, "scripts/run_full_pytest.py"],
+                "pytest_full_runner",
             )
         )
     return commands
@@ -382,6 +383,9 @@ def plan_validation(
         "recommended_tests": recommended_tests,
         "recommended_commands": [c["display"] for c in commands],
         "full_pytest_required": full_pytest_required,
+        "full_pytest_runner": FULL_PYTEST_RUNNER if full_pytest_required else None,
+        "duration_reporting": full_pytest_required,
+        "xdist_used_if_available": full_pytest_required,
         "full_pytest_reason": full_pytest_reason,
         "estimated_runtime_class": runtime_class,
         "warnings": warnings,
@@ -514,6 +518,16 @@ def render_human(plan: dict) -> str:
     lines.append(f"Estimated runtime: {plan['estimated_runtime_class']}")
     lines.append(f"Full pytest required: {'yes' if plan['full_pytest_required'] else 'no'}")
     lines.append(f"Full pytest reason: {plan['full_pytest_reason']}")
+    lines.append(f"selected_lane={plan['selected_lane']}")
+    lines.append(f"full_pytest_required={str(plan['full_pytest_required']).lower()}")
+    if plan["full_pytest_required"]:
+        lines.append(f"full_pytest_runner={plan['full_pytest_runner']}")
+        lines.append(f"duration_reporting={str(plan['duration_reporting']).lower()}")
+        lines.append(f"xdist_used_if_available={str(plan['xdist_used_if_available']).lower()}")
+        lines.append(
+            "Lane C runner uses pytest-xdist when available and falls back to serial pytest "
+            "when unavailable."
+        )
 
     hits = plan["safety_escalations"]
     if hits:

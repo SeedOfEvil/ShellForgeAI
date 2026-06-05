@@ -159,7 +159,7 @@ def test_17_commands_include_related_tests_from_matrix():
 
 def test_18_full_lane_includes_durations():
     p = plan(["Dockerfile"])
-    assert "pytest -q --durations=25" in commands(p)
+    assert "python scripts/run_full_pytest.py" in commands(p)
 
 
 def test_19_fast_lane_excludes_full_pytest():
@@ -248,7 +248,7 @@ def test_25_output_includes_estimated_runtime_class():
 def test_full_validation_remains_available_via_profile():
     p = plan(["docs/cli.md"], profile="full")
     assert p["selected_lane"] == "full"
-    assert "pytest -q --durations=25" in commands(p)
+    assert "python scripts/run_full_pytest.py" in commands(p)
 
 
 def test_full_validation_flag_forces_full_via_cli():

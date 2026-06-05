@@ -19,7 +19,7 @@ version="1.0.0"
 requires-python=">=3.12"
 dependencies=["typer>=0.12","rich>=13","pydantic>=2","pydantic-settings>=2","pyyaml>=6","httpx>=0.27"]
 [project.optional-dependencies]
-dev=["pytest>=8","ruff>=0.5","mypy>=1.10","types-PyYAML"]
+dev=["pytest>=8","pytest-xdist>=3.6","ruff>=0.5","mypy>=1.10","types-PyYAML"]
 [project.scripts]
 shellforgeai="shellforgeai.cli:app"
 sfai="shellforgeai.cli:app"
@@ -45,3 +45,11 @@ disallow_untyped_defs=false
 testpaths=["tests"]
 pythonpath=["src"]
 addopts="-q"
+markers=[
+  "slow: slow tests that are expected to take noticeable time",
+  "integration: integration-style tests",
+  "safety: tests covering safety boundaries and mutation refusal",
+  "docker: tests requiring Docker or Docker-shaped fixtures",
+  "artifact: artifact lifecycle tests",
+  "interactive: interactive transcript tests",
+]
