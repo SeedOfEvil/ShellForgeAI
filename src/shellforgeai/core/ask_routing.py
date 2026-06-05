@@ -925,6 +925,99 @@ def _is_valid_compose_target(target: str) -> bool:
     return re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", target) is not None
 
 
+# --- V2 governed recipe preflight target extraction (read-only) --------------
+#
+# Natural-language recipe preflight asks ("preflight docker restart for X",
+# "is X eligible for disposable restart?", "what gates are needed to restart
+# X?") must resolve the *exact* target X. Generic "first verb + next word"
+# parsing is unsafe: in "restart for X" it captures the connector "for", and in
+# "eligible for disposable restart" it captures the domain word "disposable".
+# This deterministic helper extracts the target from the known recipe-preflight
+# phrasings only. It never executes anything and never invents a target.
+
+_RECIPE_TARGET_TOKEN = r"([A-Za-z0-9*][A-Za-z0-9_.*-]{0,127})"
+
+# Tokens that are never a concrete target on their own. They resolve to "no
+# target" so the caller routes to target clarification / safe no-target
+# guidance instead of mis-parsing a connector or pronoun as a target.
+_RECIPE_TARGET_CONNECTORS = frozenset(
+    {
+        "for",
+        "this",
+        "it",
+        "that",
+        "them",
+        "then",
+        "and",
+        "or",
+        "safely",
+        "the",
+        "a",
+        "an",
+        "here",
+        "there",
+        "now",
+        "please",
+        "recipe",
+        "disposable",
+        "restart",
+        "to",
+        "me",
+        "us",
+        "my",
+        "our",
+        "your",
+    }
+)
+
+# Ordered recipe-preflight phrasings. The first match wins. Each pattern
+# captures exactly the target token in the position the operator named it, so
+# connector/domain words ("for", "recipe", "disposable") are consumed by the
+# pattern rather than captured as the target.
+_RECIPE_TARGET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Family A: preflight [docker] restart [recipe] for <target>
+    re.compile(rf"\brestart(?:\s+recipe)?\s+for\s+{_RECIPE_TARGET_TOKEN}", re.IGNORECASE),
+    # Family C: is/are <target> eligible for ... restart
+    re.compile(rf"\b(?:is|are)\s+{_RECIPE_TARGET_TOKEN}\s+eligible\b", re.IGNORECASE),
+    # Family B: ... restart <target> safely
+    re.compile(rf"\brestart\s+{_RECIPE_TARGET_TOKEN}\s+safely\b", re.IGNORECASE),
+    # Family D: ... to restart <target>
+    re.compile(rf"\bto\s+restart\s+{_RECIPE_TARGET_TOKEN}", re.IGNORECASE),
+    # Explicit "target <target>" / "--target <target>" phrasing.
+    re.compile(rf"\btarget\s+{_RECIPE_TARGET_TOKEN}", re.IGNORECASE),
+)
+
+
+def extract_recipe_preflight_target(text: str) -> str:
+    """Return the exact target named in a recipe-preflight ask, or "".
+
+    Deterministic and read-only. Connector/pronoun-only tokens (``for``,
+    ``this``, ``it`` ...) resolve to ``""`` so the caller can ask for target
+    clarification instead of inventing one. Broad words (``all``, ``*``,
+    ``everything``, ``compose`` ...) are returned verbatim so the downstream
+    read-only preflight blocks them as broad/unsafe rather than treating them
+    as executable targets. No command is ever executed.
+    """
+
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    # Never parse shell-meta-bearing input as a target.
+    if any(ch in raw for ch in (";", "&", "|", "$", "`", ">", "<", "\n", "\r", "\t", "(", ")")):
+        return ""
+    lowered = " ".join(raw.lower().split())
+    for pattern in _RECIPE_TARGET_PATTERNS:
+        match = pattern.search(lowered)
+        if not match:
+            continue
+        token = (match.group(1) or "").strip("\"'?.!,")
+        if not token or token in _RECIPE_TARGET_CONNECTORS:
+            # Pronoun/connector target → no concrete target; ask for clarity.
+            return ""
+        return token
+    return ""
+
+
 def network_reachability_brief(
     findings,
     evidence_items,

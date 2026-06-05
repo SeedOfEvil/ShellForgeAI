@@ -1280,6 +1280,8 @@ JSON mode emits strict JSON with `mode=v2_recipe_preflight`, `read_only=true`, `
 
 `--save` writes only ShellForgeAI-owned metadata under `<data_dir>/recipe_preflights/<preflight_id>/`: `recipe-preflight.json`, `recipe-preflight.md`, and `manifest.json` with checksums. `recipes preflight validate` checks required files, JSON/schema/mode, manifest, checksums, recipe/target consistency, non-mutating safety flags, `command_executed=false`, `container_restarted=false`, and possible secret-shaped content. Invalid or malformed refs exit non-zero without a traceback.
 
+Natural-language ask routing is read-only and resolves the exact target. `shellforgeai ask "preflight docker restart for <target>"`, `ask "is <target> eligible for disposable restart?"`, `ask "check if you could restart <target> safely"`, and `ask "what gates are needed to restart <target>?"` route deterministically to this preflight and extract the exact `<target>` (for example `shellforgeai` or `sfai-crashloop`) — never the connector word `for`. Production targets are refused, broad/wildcard targets (`all`, `*`, `everything`, `compose`) are blocked as broad, and pronoun-only targets (`it`, `this`) ask for an exact target rather than guessing. Direct execution phrasings such as `ask "restart <target> now"` or `ask "execute the restart recipe for <target>"` remain refused. No action is taken.
+
 Safety: this command does not execute recipes, does not restart containers, does not create remediation receipts, mission/apply records, cleanup/rollback actions, Docker Compose actions, shell execution, natural-language mutation, or model-driven execution.
 
 ### `shellforgeai verify`
