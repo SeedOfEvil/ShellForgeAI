@@ -458,3 +458,19 @@ and any `target_host`, `target_port`, or `target_domain` parsed from the
 question. `/pending` displays this target alongside the label, and
 `proceed` runs a target-specific read-only deep dive that reuses the same
 host/port/domain instead of a generic network pass.
+
+## Governed recipe preflight in interactive mode
+
+Interactive mode accepts the same read-only governed recipe preflight forms as the CLI dispatcher:
+
+```text
+recipes preflight --recipe docker.disposable_restart --target sfai-test
+recipes preflight --recipe docker.disposable_restart --target sfai-test --json
+recipes preflight --recipe docker.disposable_restart --target sfai-test --save
+recipes preflight validate <preflight_id>
+recipes preflight validate <preflight_id> --json
+preflight restart sfai-test
+preflight docker restart sfai-test
+```
+
+These routes build or validate preflight packets only. Dangerous phrases such as `execute the recipe`, `restart it now`, and `run docker restart` are refused by interactive mode; no Docker/Compose/remediation/cleanup/rollback command is executed.

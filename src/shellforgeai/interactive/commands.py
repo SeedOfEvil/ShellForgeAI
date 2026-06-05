@@ -70,6 +70,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes list",
     "recipes inspect docker.disposable_restart",
     "recipes eligibility --recipe docker.disposable_restart --target <target>",
+    "recipes preflight --recipe docker.disposable_restart --target <target>",
+    "recipes preflight --recipe docker.disposable_restart --target <target> --json",
+    "recipes preflight --recipe docker.disposable_restart --target <target> --save",
+    "recipes preflight validate <preflight_id>",
     "safe-actions",
     "help",
     "pending",
@@ -280,6 +284,10 @@ _QUICK_MUTATION_PHRASES = (
     "execute the recipe",
     "run restart recipe",
     "run the restart recipe",
+    "execute the restart recipe",
+    "run " + "docker" + " restart",
+    "confirm restart",
+    "apply the restart",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -431,6 +439,63 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
             argv = ("recipes", "inspect", original_tokens[2])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {6, 7, 8}
+        and tokens[:2] == ("recipes", "preflight")
+        and tokens[2] == "--recipe"
+        and tokens[3]
+        and tokens[4] == "--target"
+        and tokens[5]
+    ):
+        flags = set(tokens[6:])
+        if len(tokens) == 6 or flags in ({"--json"}, {"--save"}, {"--save", "--json"}):
+            argv = (
+                "recipes",
+                "preflight",
+                "--recipe",
+                original_tokens[3],
+                "--target",
+                original_tokens[5],
+            )
+            for flag in original_tokens[6:]:
+                if flag.lower() in {"--save", "--json"}:
+                    argv = (*argv, flag)
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {4, 5} and tokens[:3] == ("recipes", "preflight", "validate") and tokens[3]:
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("recipes", "preflight", "validate", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("preflight", "restart") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = (
+                "recipes",
+                "preflight",
+                "--recipe",
+                "docker.disposable_restart",
+                "--target",
+                original_tokens[2],
+            )
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {4, 5} and tokens[:3] == ("preflight", "docker", "restart") and tokens[3]:
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = (
+                "recipes",
+                "preflight",
+                "--recipe",
+                "docker.disposable_restart",
+                "--target",
+                original_tokens[3],
+            )
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
@@ -667,6 +732,50 @@ def route_input(text: str) -> RoutedCommand:
                 argv=("safe-actions", "--target", target_match.group(1)),
             )
         return RoutedCommand(name="cli_dispatch", args=raw, argv=("safe-actions",))
+
+    preflight_cues = (
+        "preflight " + "docker" + " restart",
+        "preflight restart",
+        "preflight the restart recipe",
+        "check if you could restart",
+        "restart this safely",
+        "eligible for disposable restart",
+        "what gates are needed to restart",
+    )
+    if any(cue in lowered for cue in preflight_cues):
+        target_match = re.search(
+            r"\b(?:for|target|restart)\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        target = target_match.group(1).strip("?.!,") if target_match else ""
+        if target.lower() in {"this", "safely", "it", "docker"}:
+            target = ""
+        if target:
+            return RoutedCommand(
+                name="cli_dispatch",
+                args=raw,
+                argv=(
+                    "recipes",
+                    "preflight",
+                    "--recipe",
+                    "docker.disposable_restart",
+                    "--target",
+                    target,
+                ),
+            )
+        return RoutedCommand(
+            name="cli_dispatch",
+            args=raw,
+            argv=(
+                "recipes",
+                "eligibility",
+                "--recipe",
+                "docker.disposable_restart",
+                "--target",
+                "<target>",
+            ),
+        )
 
     proposal_cues = (
         "what would you propose",

@@ -165,3 +165,10 @@ perform read-only eligibility checks for named recipes/targets. They do not
 execute cleanup, remediation, rollback, Docker/Compose mutation, container
 restart, production restart, arbitrary shell commands, or natural-language
 mutation.
+
+## Governed recipe preflight classification
+
+- `shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> [--json]` is a governed plan-only/read-only artifact command. It evaluates one exact Docker container target, label gates (`shellforgeai.disposable=true` and `shellforgeai.allow_restart=true`), production/broad-target blockers, and future confirm/receipt/verification/rollback gates. It previews only the bounded argv `docker restart <target>` and records `execution_available=false`, `command_preview_only=true`, and `command_executed=false`.
+- `shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save` writes only ShellForgeAI-owned metadata under the configured data directory (`recipe_preflights/<preflight_id>/`).
+- `shellforgeai recipes preflight validate <preflight_ref> [--json]` validates a saved packet read-only. Missing, malformed, or tampered packets fail cleanly with no traceback.
+- The command is not an apply lane: no cleanup/remediation/rollback execution, Docker/Compose mutation, container restart, production restart, `shell=True`, arbitrary command execution, natural-language mutation, model call, mission/apply record, or remediation receipt is created.

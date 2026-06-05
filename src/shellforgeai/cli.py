@@ -172,6 +172,11 @@ from shellforgeai.core.mission_report import (
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
+from shellforgeai.core.recipe_preflight import (
+    build_preflight_packet,
+    save_preflight_packet,
+    validate_preflight_packet,
+)
 from shellforgeai.core.recipe_registry import (
     detail_payload as recipe_detail_payload,
 )
@@ -288,7 +293,15 @@ remediation_receipt_app = typer.Typer(help="Disposable remediation receipt utili
 recipes_app = typer.Typer(
     invoke_without_command=True,
     no_args_is_help=False,
-    help="Read-only V2 governed recipe registry and eligibility map. No execution.",
+    help=(
+        "Read-only V2 governed recipe registry, eligibility map, and preflight packets. "
+        "No execution."
+    ),
+)
+recipes_preflight_app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help="Read-only governed recipe preflight packets. No execution.",
 )
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
@@ -311,6 +324,7 @@ app.add_typer(triage_app, name="triage")
 app.add_typer(handoff_app, name="handoff")
 app.add_typer(remediation_app, name="remediation")
 app.add_typer(recipes_app, name="recipes")
+recipes_app.add_typer(recipes_preflight_app, name="preflight")
 remediation_app.add_typer(remediation_receipt_app, name="receipt")
 triage_app.add_typer(triage_docker_app, name="docker")
 triage_docker_app.add_typer(triage_docker_snapshot_app, name="snapshot")
@@ -11758,6 +11772,176 @@ def recipes_eligibility(
         raise typer.Exit(1)
 
 
+def _collect_recipe_scene() -> dict[str, Any]:
+    from shellforgeai.core import triage_ranking
+
+    try:
+        return triage_ranking.collect_scene()
+    except Exception:
+        return {"containers": []}
+
+
+def _render_recipe_preflight_human(payload: dict[str, Any]) -> str:
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    target_name = str(target.get("name") or payload.get("target") or "")
+    status = str(payload.get("status") or "blocked")
+    lines: list[str] = []
+    if status == "preflight_ready":
+        lines.extend(
+            [
+                "Recipe preflight: ready",
+                f"Recipe: {payload.get('recipe_id')}",
+                f"Target: {target_name}",
+                (
+                    "Target class: "
+                    f"{payload.get('target_class') or 'disposable allowlisted container'}"
+                ),
+                "",
+                "Would preview:",
+            ]
+        )
+        argv = (
+            (payload.get("action_preview") or {}).get("argv")
+            if isinstance(payload.get("action_preview"), dict)
+            else []
+        )
+        lines.append(f"  {' '.join(str(part) for part in (argv or []))}")
+        lines.extend(["", "Gates:"])
+        for gate in payload.get("gates") or []:
+            label = str(gate.get("name") or "").replace("_", " ")
+            lines.append(f"- {label}: {gate.get('status')}")
+    else:
+        lines.extend(
+            [
+                "Recipe preflight: blocked"
+                if status != "not_found"
+                else "Recipe preflight: not_found",
+                f"Recipe: {payload.get('recipe_id')}",
+                f"Target: {target_name}",
+                (
+                    "Reason: "
+                    f"{payload.get('reason') or ', '.join(payload.get('blockers') or ['blocked'])}"
+                ),
+            ]
+        )
+    if payload.get("artifact_written"):
+        lines.extend(
+            [
+                "",
+                f"Preflight ID: {payload.get('preflight_id')}",
+                f"Preflight path: {payload.get('preflight_path')}",
+                f"Manifest path: {payload.get('manifest_path')}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "- Read-only preflight.",
+            "- No command was executed.",
+            "- No container was restarted.",
+            "- No remediation, rollback, cleanup, Docker Compose, or shell action occurred.",
+            "",
+            "First safe command:",
+            f"  {payload.get('first_safe_command')}",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _render_recipe_preflight_validate_human(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Recipe preflight validation: {payload.get('status')}",
+        f"Preflight ID: {payload.get('preflight_id') or 'unknown'}",
+        f"Path: {payload.get('preflight_path') or 'not found'}",
+        "Checks:",
+    ]
+    for key, value in (payload.get("checks") or {}).items():
+        lines.append(f"- {key}: {str(bool(value)).lower()}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.append("No action was taken.")
+    return "\n".join(lines) + "\n"
+
+
+@recipes_preflight_app.callback(invoke_without_command=True)
+def recipes_preflight_root(
+    ctx: typer.Context,
+    recipe_id: Annotated[
+        str | None, typer.Option("--recipe", help="Recipe id to preflight.")
+    ] = None,
+    target: Annotated[
+        str | None, typer.Option("--target", help="Exact target name to evaluate.")
+    ] = None,
+    save: Annotated[
+        bool, typer.Option("--save", help="Write a ShellForgeAI-owned preflight artifact.")
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Build a read-only governed recipe preflight packet. No execution."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if not recipe_id or not target:
+        message = "--recipe and --target are required for recipes preflight"
+        if json_out:
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "mode": "v2_recipe_preflight",
+                        "status": "error",
+                        "read_only": True,
+                        "mutation_performed": False,
+                        "blockers": [message],
+                    }
+                )
+            )
+        else:
+            typer.echo(
+                f"Recipe preflight: blocked\nReason: {message}\nNo action was taken.\n", nl=False
+            )
+        raise typer.Exit(2)
+    runtime = _ctx(ctx)
+    payload = build_preflight_packet(recipe_id, target, scene=_collect_recipe_scene())
+    if save:
+        try:
+            payload = save_preflight_packet(payload, runtime.session.data_dir)
+        except ValueError as exc:
+            payload = {
+                **payload,
+                "status": "error",
+                "warnings": [str(exc)],
+                "artifact_written": False,
+            }
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_preflight_human(payload), nl=False)
+    if payload.get("status") == "error":
+        raise typer.Exit(1)
+
+
+@recipes_preflight_app.command("validate")
+def recipes_preflight_validate(
+    ctx: typer.Context,
+    preflight_ref: Annotated[
+        str, typer.Argument(help="Saved preflight id or ShellForgeAI-owned path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Validate a saved recipe preflight packet. Read-only."""
+    runtime = _ctx(ctx)
+    payload = validate_preflight_packet(preflight_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_preflight_validate_human(payload), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
 @app.command("safe-actions")
 def safe_actions(
     target: Annotated[
@@ -11795,6 +11979,24 @@ def safe_actions(
     typer.echo("No action was taken.\n", nl=False)
 
 
+def _is_recipe_preflight_ask(question: str) -> bool:
+    low = " ".join((question or "").lower().split())
+    if not low:
+        return False
+    cues = (
+        "preflight docker restart",
+        "preflight restart",
+        "preflight the restart recipe",
+        "check if you could restart",
+        "restart this safely",
+        "eligible for disposable restart",
+        "eligible for restart",
+        "what gates are needed to restart",
+        "gates are needed to restart",
+    )
+    return any(cue in low for cue in cues)
+
+
 def _is_recipe_guidance_ask(question: str) -> bool:
     low = " ".join((question or "").lower().split())
     if not low:
@@ -11825,6 +12027,13 @@ def _is_recipe_execution_request(question: str) -> bool:
         "run restart recipe",
         "apply it",
         "apply the recipe",
+        "execute the restart recipe",
+        "run docker restart",
+        "confirm restart",
+        "apply the restart",
+        "restart it now",
+        "then do it",
+        "and then do it",
     )
     return any(cue in low for cue in execution_cues)
 
@@ -11838,24 +12047,28 @@ def _extract_safe_action_target(question: str) -> str:
     if not match:
         return ""
     target = match.group(1).strip("?.!,")
-    if target.lower() in {"this", "safely", "it", "compose", "docker"}:
+    if target.lower() in {"this", "safely", "it", "compose", "docker", "and", "then"}:
         return ""
     return target
 
 
 def _handle_recipe_registry_ask(question: str) -> bool:
     low = " ".join((question or "").lower().split())
-    if _is_recipe_execution_request(question):
+    preflight_ask = _is_recipe_preflight_ask(question)
+    execution_request = _is_recipe_execution_request(question)
+    if execution_request and not preflight_ask:
         console.print(
             "Refused: ShellForgeAI recipes are read-only in this release.\n"
             "No action was taken.\n"
             "No recipe was executed.\n"
-            "Use read-only guidance instead:\n"
-            "  shellforgeai recipes list\n"
+            "No container was restarted.\n"
+            "Use safe read-only guidance instead:\n"
+            "  shellforgeai recipes preflight --recipe docker.disposable_restart "
+            "--target <target> --json\n"
             "  shellforgeai recipes inspect docker.disposable_restart\n"
         )
         return True
-    if not _is_recipe_guidance_ask(question):
+    if not (preflight_ask or _is_recipe_guidance_ask(question)):
         return False
     target = _extract_safe_action_target(question)
     mixed_mutation = any(
@@ -11871,26 +12084,50 @@ def _handle_recipe_registry_ask(question: str) -> bool:
         )
     )
     payload = recipe_registry_payload()
-    console.print("ShellForgeAI governed recipe registry (deterministic ask routing):")
-    console.print("")
-    typer.echo(_render_recipe_groups_human(payload), nl=False)
-    if target:
-        console.print(f"Eligibility check command for target {target}:")
-        console.print(
-            "  shellforgeai recipes eligibility --recipe docker.disposable_restart "
-            f"--target {target} --json"
-        )
+    if preflight_ask:
+        console.print("Read-only recipe preflight (deterministic ask routing):")
+        if target:
+            preflight = build_preflight_packet(
+                "docker.disposable_restart", target, scene=_collect_recipe_scene()
+            )
+            typer.echo(_render_recipe_preflight_human(preflight), nl=False)
+            console.print(
+                "Save packet command: shellforgeai recipes preflight --recipe "
+                f"docker.disposable_restart --target {target} --save"
+            )
+        else:
+            console.print("First safe command:")
+            console.print(
+                "  shellforgeai recipes preflight --recipe docker.disposable_restart "
+                "--target <target> --json"
+            )
+            console.print("Eligibility command:")
+            console.print(
+                "  shellforgeai recipes eligibility --recipe docker.disposable_restart "
+                "--target <target> --json"
+            )
     else:
-        console.print("Recipe registry command: shellforgeai recipes list")
-        console.print("First safe command: shellforgeai status --json")
+        console.print("ShellForgeAI governed recipe registry (deterministic ask routing):")
+        console.print("")
+        typer.echo(_render_recipe_groups_human(payload), nl=False)
+        if target:
+            console.print(f"Eligibility check command for target {target}:")
+            console.print(
+                "  shellforgeai recipes eligibility --recipe docker.disposable_restart "
+                f"--target {target} --json"
+            )
+        else:
+            console.print("Recipe registry command: shellforgeai recipes list")
+            console.print("First safe command: shellforgeai status --json")
     if "restart" in low or "fix" in low:
         console.print(
             "Governed fixes are not executable yet; docker.disposable_restart is disabled "
             "until the execute lane exists."
         )
         console.print("Preview boundary: shellforgeai apply-preview --target <target> --json")
-    if mixed_mutation or "compose" in low:
-        console.print("Refused mutation portion: Docker/Compose restart was not run.")
+    if execution_request or mixed_mutation or "compose" in low:
+        console.print("Refused mutation portion: execution/restart was not run.")
+        console.print("No container was restarted.")
     console.print("No action was taken.")
     return True
 
