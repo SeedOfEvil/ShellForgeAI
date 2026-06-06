@@ -1702,14 +1702,30 @@ only a validation-speed optimization: if the image is unavailable, use the
 current writable validation container path, let the runner report the serial
 fallback, and never use the image to skip tests or weaken Lane C safety gates.
 
-Every Docker01 PR report should record:
+Every Docker01 PR report now has two durable evidence artifacts from
+`scripts/sfai_docker01_pr_lane.py`: a structured JSON manifest
+(`mode=docker01_pr_validation_manifest`, `schema_version=1`) and a bounded
+human summary. Architect/safety review should prefer the manifest values for
+lane selection, lane reason, validation status, safety flags, command/phase
+durations, log paths, final container health, final disk state when available,
+known non-blockers, and the final verdict. The human summary is the
+copy/paste-friendly companion for PR comments, not the source of truth.
+
+Every Docker01 PR report should record through the manifest/summary:
 
 - the **selected lane** (A / B / C) and **why**,
-- the **commands run**,
+- the **commands run** and their durations/log paths,
+- the validation phases completed and the failed phase/error summary on hold or
+  failure,
 - whether **full `pytest`** was required,
 - for Lane C, the `python scripts/run_full_pytest.py` command output, including
   live pytest progress and the slow-test duration table,
 - whether the runner used xdist or printed the serial fallback warning,
+- final container status/health/restart count when available,
+- snapshot/compose backup/final config/image metadata when available,
+- explicit safety flags showing no cleanup/remediation/rollback execution, no
+  prune, no direct compose write, no production restart, no `shell=True`, no
+  arbitrary command execution, and no natural-language mutation,
 - if full `pytest` was **skipped**, why that is acceptable (e.g. "Lane B
   read-only routing change; targeted regression group green; no safety or
   execution boundary touched").
