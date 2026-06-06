@@ -12,6 +12,7 @@ import argparse
 import importlib.util
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -153,9 +154,20 @@ def main(argv: list[str] | None = None) -> int:
             print(render_plan(plan, dry_run=True))
         return 0
 
+    start = time.monotonic()
     if not args.json:
         print(render_plan(plan, dry_run=False), flush=True)
+        print(
+            f"Running full pytest with xdist: {'yes' if plan.xdist_enabled else 'no'}", flush=True
+        )
+        print(f"Command: {' '.join(plan.command)}", flush=True)
+        print("Pytest output streams live below.", flush=True)
         completed = subprocess.run(plan.command, cwd=str(REPO_ROOT), check=False)
+        elapsed = time.monotonic() - start
+        print(
+            f"Full pytest finished with exit code {int(completed.returncode)} in {elapsed:.1f}s",
+            flush=True,
+        )
         return int(completed.returncode)
 
     completed = subprocess.run(
@@ -165,7 +177,9 @@ def main(argv: list[str] | None = None) -> int:
         capture_output=True,
         text=True,
     )
+    elapsed = time.monotonic() - start
     payload = plan_json(plan, returncode=int(completed.returncode))
+    payload["elapsed_seconds"] = round(elapsed, 3)
     payload["stdout"] = completed.stdout
     payload["stderr"] = completed.stderr
     print(json.dumps(payload, sort_keys=True))

@@ -11,7 +11,31 @@ def _env(tmp_path):
     return {"SHELLFORGEAI_DATA_DIR": str(tmp_path / "data")}
 
 
-def test_v1_check_profiles_json(tmp_path):
+def test_v1_check_profiles_json(tmp_path, monkeypatch):
+    def _fast_readiness(_app, profile="standard"):
+        return {
+            "schema_version": 1,
+            "mode": "v1_readiness_check",
+            "profile": profile,
+            "status": "ok",
+            "ci_status": "passed",
+            "summary": {"passed": 1, "failed": 0, "warned": 0, "skipped": 0},
+            "checks": [
+                {
+                    "name": "command_surface_version",
+                    "status": "passed",
+                    "message": "version surface",
+                    "mutation": False,
+                }
+            ],
+            "warnings": [],
+            "skipped": [],
+            "safety": {"read_only": True, "mutation_performed": False},
+            "next_safe_commands": ["shellforgeai doctor --json"],
+        }
+
+    monkeypatch.setattr("shellforgeai.core.v1_readiness.run_v1_readiness_check", _fast_readiness)
+
     for profile in ("quick", "standard", "full"):
         r = runner.invoke(app, ["v1", "check", "--profile", profile, "--json"], env=_env(tmp_path))
         assert r.exit_code in {0, 1}
@@ -58,7 +82,7 @@ def test_v1_check_fail_on_warn(tmp_path, monkeypatch):
 
 
 def test_v1_check_safe_commands_are_canonical(tmp_path):
-    r = runner.invoke(app, ["v1", "check", "--json"], env=_env(tmp_path))
+    r = runner.invoke(app, ["v1", "check", "--profile", "quick", "--json"], env=_env(tmp_path))
     p = json.loads(r.stdout)
     allowed = {
         "shellforgeai doctor --json",
