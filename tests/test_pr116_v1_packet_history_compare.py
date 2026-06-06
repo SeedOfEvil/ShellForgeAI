@@ -1,20 +1,60 @@
 import json
+from itertools import count
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from shellforgeai.cli import app
+from shellforgeai.core.ops_report_artifact import _safety
+from shellforgeai.core.v1_packet import PACKET_MODE, SCHEMA_VERSION, save_packet
 
 runner = CliRunner()
+_PACKET_COUNTER = count(1)
 
 
 def _env(tmp_path):
     return {"SHELLFORGEAI_DATA_DIR": str(tmp_path / "data")}
 
 
-def _save_packet(tmp_path):
-    r = runner.invoke(app, ["v1", "packet", "--save", "--json"], env=_env(tmp_path))
-    return json.loads(r.stdout)
+def _packet_payload(*, status: str = "ok", warnings: list[str] | None = None):
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": PACKET_MODE,
+        "status": status,
+        "created_at": "2026-06-06T00:00:00Z",
+        "checks": {
+            "v1_check": {
+                "status": status,
+                "summary": {
+                    "quick": {"passed": 3, "failed": 0, "warned": 0},
+                    "standard": {"passed": 8, "failed": 0, "warned": 0},
+                    "full": {"passed": 12, "failed": 0, "warned": 0},
+                },
+            },
+            "safety": {"status": "ok", "flags": _safety()},
+        },
+        "summary": {"passed": 2, "failed": 0, "warned": 0, "status": status},
+        "safe_next_commands": ["shellforgeai v1 check --profile standard --json"],
+        "safety": _safety(),
+        "warnings": warnings or [],
+    }
+
+
+def _save_packet(tmp_path, *, payload: dict | None = None):
+    packet = payload or _packet_payload()
+    saved = save_packet(packet, tmp_path / "data")
+    original_path = Path(saved["packet_path"])
+    seq = next(_PACKET_COUNTER)
+    deterministic_id = f"v1_packet_20260606_000000_{seq:06d}"
+    deterministic_path = original_path.parent / deterministic_id
+    original_path.rename(deterministic_path)
+    manifest_path = deterministic_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["packet_id"] = deterministic_id
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    saved["packet_id"] = deterministic_id
+    saved["packet_path"] = str(deterministic_path)
+    return {**packet, **saved}
 
 
 def _patch_packet(packet_path: str, fn):

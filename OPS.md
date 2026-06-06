@@ -1669,8 +1669,9 @@ Lanes (see [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) and
   broad command-router rewrites, `pyproject`/dependency/`Dockerfile`/packaging,
   and validation-infrastructure changes. Lane C runs the bounded full pytest
   runner: `python scripts/run_full_pytest.py`. The runner uses `pytest-xdist`
-  when available, falls back to serial pytest when unavailable, and always
-  includes slow-test duration reporting (`--durations=25`).
+  when available, falls back to serial pytest when unavailable, streams pytest
+  output during execution, and always includes slow-test duration reporting
+  (`--durations=25`).
 
 Pick the lane from the changed files with the read-only optimizer (it never
 mutates, deploys, or runs Docker/Compose; it only plans unless you pass
@@ -1689,10 +1690,10 @@ python scripts/validate_pr.py --changed-files docs/cli.md --full-validation  # f
 The guarded Docker01 PR lane helper (`scripts/sfai_docker01_pr_lane.py`) uses
 the same Lane C runner command as the planner: `python scripts/run_full_pytest.py`.
 It prints the selected lane, the full-validation reason, the runner command,
-duration reporting (`--durations=25`), and the runner output showing whether
-xdist was available/used or whether serial fallback occurred. Lane C remains
-exceptional and explicit; Lane A/B runs do not invoke the full runner by
-default.
+duration reporting (`--durations=25`), live pytest progress/output, elapsed
+runtime, and the runner output showing whether xdist was available/used or
+whether serial fallback occurred. Lane C remains exceptional and explicit; Lane
+A/B runs do not invoke the full runner by default.
 
 Docker01 may optionally use a reusable ShellForgeAI validation image with dev
 dependencies preinstalled (for example `pytest-xdist`, included in the project
@@ -1707,7 +1708,7 @@ Every Docker01 PR report should record:
 - the **commands run**,
 - whether **full `pytest`** was required,
 - for Lane C, the `python scripts/run_full_pytest.py` command output, including
-  the slow-test duration table,
+  live pytest progress and the slow-test duration table,
 - whether the runner used xdist or printed the serial fallback warning,
 - if full `pytest` was **skipped**, why that is acceptable (e.g. "Lane B
   read-only routing change; targeted regression group green; no safety or
@@ -1718,6 +1719,9 @@ Rules of the road:
 - Full validation is **required** for execution/safety boundary PRs and stays
   **always available** (`--profile full` / `--full-validation`); it is never
   removed.
+- Review `--durations=25` output for future slow-test follow-up. Optimize
+  repeated expensive setup when coverage remains equivalent; do not skip slow
+  tests silently.
 - Targeted validation is **acceptable** for docs / routing / output polish.
 - Safety/execution keywords in changed **code** content (`shell=True`,
   `docker compose`, `os.system`, `*_executed`, `rm -rf`, …) escalate to full;

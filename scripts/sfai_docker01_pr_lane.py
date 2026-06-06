@@ -162,13 +162,16 @@ def run_validation(plan: dict, *, runner=subprocess.run) -> int:
             print(f"Full pytest runner: {display}", flush=True)
             print("duration reporting: --durations=25", flush=True)
         print(f"==> {display}", flush=True)
-        completed = runner(
-            command["argv"],
-            cwd=str(REPO_ROOT),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        if command["kind"] == "pytest_full_runner":
+            completed = runner(command["argv"], cwd=str(REPO_ROOT), check=False)
+        else:
+            completed = runner(
+                command["argv"],
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
         stdout = getattr(completed, "stdout", "") or ""
         stderr = getattr(completed, "stderr", "") or ""
         if stdout:

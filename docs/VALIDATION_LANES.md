@@ -144,9 +144,11 @@ The runner detects `pytest-xdist` and, when available, runs
 `python -m pytest -q -n auto --dist loadscope --durations=25`. If xdist is not
 installed, it prints a clear fallback warning and runs serial
 `python -m pytest -q --durations=25`. The serial fallback is acceptable; it must
-be reported in QA notes so reviewers know why the run was slower. Slow-test
-reporting is always enabled by default through `--durations=25`, keeping the
-slow tail visible without skipping tests.
+be reported in QA notes so reviewers know why the run was slower. Execution mode
+streams pytest output directly, prints the exact command before pytest starts,
+and reports elapsed time when pytest exits. Dry-run JSON remains strict metadata
+only for planning automation. Slow-test reporting is always enabled by default
+through `--durations=25`, keeping the slow tail visible without skipping tests.
 
 Docker01 PR lane integration: the guarded Docker01 lane helper uses this same
 Lane C command (`python scripts/run_full_pytest.py`) for full validation instead
@@ -161,9 +163,12 @@ That image is an optimization only. If unavailable, the current writable
 validation-container path still works, the runner reports serial fallback, and
 the image must not be used to skip or weaken selected tests or safety gates.
 
-> Visibility, not skipping. PR158 does not mark any test slow and does not skip
-> any test. `--durations=25` only reports timing. Optionally add
-> `--durations-min=1.0` to focus on tests slower than one second.
+> Visibility, not skipping. PR158/PR160 do not mark any test slow and do not
+> skip any test. `--durations=25` only reports timing. Use the slowest-test
+> table to identify repeated expensive setup, replace repetitive CLI setup with
+> equivalent helper-level fixture builders where safe, and keep one
+> representative CLI path when CLI behavior itself is the coverage target. Any
+> skip or marker policy must be explicit and safety-reviewed.
 
 ---
 
