@@ -1711,6 +1711,19 @@ durations, log paths, final container health, final disk state when available,
 known non-blockers, and the final verdict. The human summary is the
 copy/paste-friendly companion for PR comments, not the source of truth.
 
+If full validation or QA already completed in a separate operator log, do not rerun expensive validation solely to populate `not_run` manifest fields. Finalize/import the completed evidence instead:
+
+```bash
+python scripts/finalize_validation_manifest.py /tmp/sfai-pr162-manifest.json \
+  --validation-log /tmp/sfai-pr162-validation.log \
+  --qa-log /tmp/sfai-pr162-qa.log \
+  --status passed \
+  --verdict pass \
+  --summary-output /tmp/sfai-pr162-finalized-summary.txt
+```
+
+The finalizer reads the existing manifest, parses conservative pass/fail signals from supplied logs, writes `<manifest>.finalized.json` by default, and records `evidence_source=imported_log`, `imported=true`, and `executed_by_helper=false` on imported command statuses. Use `--in-place` only when you intentionally want to update the original manifest. Imported evidence is different from helper-executed evidence: the finalizer does not run pytest, Docker, Compose, cleanup, remediation, rollback, deploy, restart, or any arbitrary command. Ambiguous or conflicting logs are recorded as warnings and must not be treated as an automatic pass without an explicit operator `--status` / `--verdict` override.
+
 Every Docker01 PR report should record through the manifest/summary:
 
 - the **selected lane** (A / B / C) and **why**,
