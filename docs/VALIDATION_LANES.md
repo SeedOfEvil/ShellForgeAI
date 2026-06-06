@@ -148,11 +148,18 @@ be reported in QA notes so reviewers know why the run was slower. Slow-test
 reporting is always enabled by default through `--durations=25`, keeping the
 slow tail visible without skipping tests.
 
+Docker01 PR lane integration: the guarded Docker01 lane helper uses this same
+Lane C command (`python scripts/run_full_pytest.py`) for full validation instead
+of raw `pytest -q`. Its dry-run/planning output shows the runner command, and
+execution logs preserve the runner output so reviewers can see xdist
+availability/use, serial fallback, and slow-test duration reporting.
+
 Optional Docker01/dev optimization: a reusable ShellForgeAI validation image may
-preinstall dev dependencies such as `pytest-xdist` to avoid repeated setup cost.
+preinstall dev dependencies such as `pytest-xdist` (included in the project
+`dev` extra) to avoid repeated setup cost and enable parallel full validation.
 That image is an optimization only. If unavailable, the current writable
-validation-container path still works, and the image must not be used to skip or
-weaken selected tests or safety gates.
+validation-container path still works, the runner reports serial fallback, and
+the image must not be used to skip or weaken selected tests or safety gates.
 
 > Visibility, not skipping. PR158 does not mark any test slow and does not skip
 > any test. `--durations=25` only reports timing. Optionally add
