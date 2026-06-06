@@ -113,7 +113,7 @@ python scripts/finalize_validation_manifest.py /tmp/sfai-pr162-manifest.json \
   --verdict pass
 ```
 
-By default the helper preserves the original manifest and writes `<manifest>.finalized.json`; `--in-place` is required to overwrite the source manifest. It imports conservative known pass/fail signals, records imported evidence metadata, can append non-blockers, and can render a finalized human summary with `--summary-output`. It does not run tests, call Docker/Compose, deploy, restart, clean up, remediate, roll back, or execute arbitrary commands. Missing, ambiguous, and conflicting logs are captured as evidence-import warnings instead of silently becoming a pass.
+By default the helper preserves the original manifest and writes `<manifest>.finalized.json`; `--in-place` is required to overwrite the source manifest. It imports conservative known pass/fail signals, distinguishes zero-failure summaries such as `failed: 0` or `0 failed` from real failures, records imported evidence metadata, de-duplicates repeated non-blocker notes while preserving order, and can render a finalized human summary with `--summary-output`. It does not run tests, call Docker/Compose, deploy, restart, clean up, remediate, roll back, or execute arbitrary commands. Missing, ambiguous, and genuinely conflicting logs are captured as evidence-import warnings instead of silently becoming a pass.
 
 ## Lane C — full validation
 

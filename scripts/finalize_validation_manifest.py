@@ -67,16 +67,32 @@ PASS_PATTERNS = {
     "v1_quick": [r"v1 quick:\s*7 passed / 0 failed"],
     "v1_standard": [r"v1 standard:\s*14 passed / 0 failed"],
 }
+GENERIC_PASS_PATTERNS = [
+    r"\b0\s+failed\b",
+    r"[\"]?failed[\"]?\s*[:=]\s*0\b",
+    r"\bstatus\s*=?\s*ok\b",
+    r"\bci_status\s*=\s*passed\b",
+    r"\b100%\s+passed\b",
+    r"\bprocess exited 0\b",
+    r"\bexit code 0\b",
+]
 FAIL_PATTERNS = [
-    r"\bFAILED\b",
-    r"(?<!0\s)\bfailed\b",
+    r"[\"]?failed[\"]?\s*[:=]\s*[1-9]\d*\b",
+    r"\b[1-9]\d*\s+failed\b",
+    r"(?-i:\bFAILED\s+tests?/)",
+    r"(?-i:\bFAILED\b)",
+    r"\bERROR\b",
     r"Traceback",
-    r"helper exit 1",
-    r"exit code 1",
+    r"helper exit [1-9]\d*",
+    r"exit code [1-9]\d*",
+    r"process exited [1-9]\d*",
     r"status=failed",
+    r"ci_status=failed",
     r"container unhealthy",
     r"restart_count[^\n]*(?:failure|failed|unexpectedly nonzero|nonzero)",
     r"not mergeable",
+    r"assertion failed",
+    r"pytest failed",
     r"\bBLOCKED\b",
     r"\bHOLD\b",
     r"\bFAIL\b",
@@ -163,16 +179,19 @@ def parse_log_text(text: str) -> dict[str, Any]:
         for name, patterns in PASS_PATTERNS.items()
         if (matched := _matches(patterns, text))
     }
+    generic_passes = _matches(GENERIC_PASS_PATTERNS, text)
     failures = _matches(FAIL_PATTERNS, text)
-    ambiguous = not passes and not failures
+    has_pass = bool(passes or generic_passes)
+    ambiguous = not has_pass and not failures
     return {
         "passed_commands": sorted(passes),
         "pass_patterns": passes,
+        "generic_pass_patterns": generic_passes,
         "fail_patterns": failures,
-        "has_pass": bool(passes),
+        "has_pass": has_pass,
         "has_fail": bool(failures),
         "ambiguous": ambiguous,
-        "conflict": bool(passes and failures),
+        "conflict": bool(has_pass and failures),
     }
 
 
@@ -406,11 +425,25 @@ def update_logs(manifest: dict[str, Any], evidence: dict[str, Any]) -> None:
             logs[record["type"]] = path
 
 
+def _dedupe_non_blockers(items: list[Any]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        note = item.strip()
+        if not note or note in seen:
+            continue
+        seen.add(note)
+        deduped.append(note)
+    return deduped
+
+
 def append_non_blockers(manifest: dict[str, Any], non_blockers: list[str]) -> None:
     existing = manifest.setdefault("non_blockers", [])
     if not isinstance(existing, list):
-        manifest["non_blockers"] = existing = []
-    existing.extend(item for item in non_blockers if item)
+        existing = []
+    manifest["non_blockers"] = _dedupe_non_blockers([*existing, *non_blockers])
 
 
 def finalize_manifest(manifest: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
