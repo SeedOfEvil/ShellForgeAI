@@ -91,10 +91,16 @@ def render_plan(plan: FullPytestPlan, *, dry_run: bool) -> str:
     lines.append(f"xdist_used={str(plan.xdist_enabled).lower()}")
     lines.append(f"duration_reporting=true (--durations={plan.durations})")
     if plan.fallback:
+        lines.append("xdist: unavailable, falling back to serial pytest")
         lines.append("WARNING: pytest-xdist not available; falling back to serial full pytest")
     elif plan.forced_serial:
+        if plan.xdist_available:
+            lines.append("xdist: available but disabled by --no-xdist, using serial pytest")
+        else:
+            lines.append("xdist: unavailable; --no-xdist requested serial pytest")
         lines.append("xdist disabled by --no-xdist; using serial full pytest")
     else:
+        lines.append(f"xdist: available, using -n {plan.workers} --dist {plan.dist}")
         lines.append("pytest-xdist available; using parallel workers when pytest starts")
     prefix = "Would run" if dry_run else "Running"
     lines.append(f"{prefix}: {' '.join(plan.command)}")

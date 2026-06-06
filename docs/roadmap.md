@@ -1,6 +1,8 @@
 
 ## PR143 command surface audit
 
+- PR159 (June 6, 2026): Docker01 PR lane full-validation runner integration. Adds `scripts/sfai_docker01_pr_lane.py` as a validation-only Docker01 PR helper that plans through `scripts/validate_pr.py` and, when Lane C/full validation is selected, executes `python scripts/run_full_pytest.py` instead of raw `pytest -q`. The lane logs the full-validation reason, runner command, xdist availability/use or serial fallback from the runner output, and duration reporting (`--durations=25`). Dev validation keeps `pytest-xdist` in the project `dev` extra for parallel full validation when installed. Lane A/B remain targeted by default, Docker01 compose/deploy railings remain checklist-only/unchanged, and no runtime product feature, cleanup/remediation/rollback execution, Docker/Compose mutation, restart, `shell=True`, arbitrary command execution, or natural-language mutation was added.
+
 PR143 adds the command-surface audit and V2 anti-bloat map for the planning
 lane. It documents command classifications, the V2 golden path, support and
 governed lanes, compatibility/deprecation candidates, and explicit non-goals

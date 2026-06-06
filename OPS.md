@@ -1686,11 +1686,20 @@ python scripts/validate_pr.py --changed-files docs/cli.md --full-validation  # f
 ```
 
 
+The guarded Docker01 PR lane helper (`scripts/sfai_docker01_pr_lane.py`) uses
+the same Lane C runner command as the planner: `python scripts/run_full_pytest.py`.
+It prints the selected lane, the full-validation reason, the runner command,
+duration reporting (`--durations=25`), and the runner output showing whether
+xdist was available/used or whether serial fallback occurred. Lane C remains
+exceptional and explicit; Lane A/B runs do not invoke the full runner by
+default.
+
 Docker01 may optionally use a reusable ShellForgeAI validation image with dev
-dependencies preinstalled (for example `pytest-xdist`) to reduce apt/pip setup
-time. This is only a validation-speed optimization: if the image is unavailable,
-use the current writable validation container path, and never use the image to
-skip tests or weaken Lane C safety gates.
+dependencies preinstalled (for example `pytest-xdist`, included in the project
+`dev` extra) to reduce setup cost and enable parallel full validation. This is
+only a validation-speed optimization: if the image is unavailable, use the
+current writable validation container path, let the runner report the serial
+fallback, and never use the image to skip tests or weaken Lane C safety gates.
 
 Every Docker01 PR report should record:
 
