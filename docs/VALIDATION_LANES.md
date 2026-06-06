@@ -164,6 +164,16 @@ and reports elapsed time when pytest exits. Dry-run JSON remains strict metadata
 only for planning automation. Slow-test reporting is always enabled by default
 through `--durations=25`, keeping the slow tail visible without skipping tests.
 
+Full-validation logs can be converted into trendable slow-test evidence with
+`python scripts/track_pytest_durations.py --log <pytest-log> --json`. The helper
+parses the `slowest 25 durations` section, emits structured records, can append
+to an explicit local history only with `--history <history.json> --update-history`,
+and can compare against `--baseline <history.json>` to surface warning-only
+regressions. A regression warning never skips tests and does not fail Lane C by
+default; it identifies slow tests for follow-up optimization PRs. When an
+explicit `--manifest <manifest.json>` is supplied, the helper backs up that
+manifest as `<manifest>.bak` and adds an additive `duration_report` field.
+
 Docker01 PR lane integration: the guarded Docker01 lane helper uses this same
 Lane C command (`python scripts/run_full_pytest.py`) for full validation instead
 of raw `pytest -q`. Its dry-run/planning output shows the runner command, and
@@ -179,7 +189,8 @@ the image must not be used to skip or weaken selected tests or safety gates.
 
 > Visibility, not skipping. PR158/PR160 do not mark any test slow and do not
 > skip any test. `--durations=25` only reports timing. Use the slowest-test
-> table to identify repeated expensive setup, replace repetitive CLI setup with
+> table and optional duration history/regression report to identify repeated
+> expensive setup, replace repetitive CLI setup with
 > equivalent helper-level fixture builders where safe, and keep one
 > representative CLI path when CLI behavior itself is the coverage target. Any
 > skip or marker policy must be explicit and safety-reviewed.
@@ -262,6 +273,8 @@ Every Docker01 PR report must state through the manifest/summary:
 - the **commands run** plus durations/log paths
 - the **phases** completed and any failed phase/error summary
 - whether **full `pytest`** was required
+- when a full pytest log is available, the optional duration tracking summary
+  path/report and any warning-only slow-test regressions
 - final container status/health/restart count when available
 - safety flags for snapshot-before-mutation, compose atomic update, direct
   compose write, cleanup/remediation/rollback, prune, mutation beyond deploy,
