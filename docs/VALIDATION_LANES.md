@@ -101,6 +101,20 @@ Estimated runtime class: **medium**.
 
 ---
 
+## Manifest finalization/import workflow
+
+Docker01 validation reports may be finalized from already-completed evidence when rerunning full pytest would only duplicate an expensive validation run. Use the offline finalizer to attach completed logs to an existing `mode=docker01_pr_validation_manifest` JSON artifact:
+
+```bash
+python scripts/finalize_validation_manifest.py /tmp/sfai-pr162-manifest.json \
+  --validation-log /tmp/sfai-pr162-validation.log \
+  --qa-log /tmp/sfai-pr162-qa.log \
+  --status passed \
+  --verdict pass
+```
+
+By default the helper preserves the original manifest and writes `<manifest>.finalized.json`; `--in-place` is required to overwrite the source manifest. It imports conservative known pass/fail signals, records imported evidence metadata, can append non-blockers, and can render a finalized human summary with `--summary-output`. It does not run tests, call Docker/Compose, deploy, restart, clean up, remediate, roll back, or execute arbitrary commands. Missing, ambiguous, and conflicting logs are captured as evidence-import warnings instead of silently becoming a pass.
+
 ## Lane C — full validation
 
 **Use for**

@@ -1,3 +1,4 @@
+- PR162 (June 6, 2026): Docker01 validation manifest finalization/import milestone. Adds an offline `scripts/finalize_validation_manifest.py` helper that attaches already-completed validation/QA/runner/targeted/full-pytest logs to an existing Docker01 validation manifest, conservatively imports known pass/fail signals, records `evidence_import` metadata and explicit operator status/verdict overrides, writes a `.finalized.json` copy by default, and can render a finalized human summary that states tests were not rerun. Validation/reporting infrastructure only: no runtime feature work, cleanup/remediation/rollback execution, Docker/Compose mutation, container restart, production restart, `shell=True`, arbitrary command execution, or natural-language mutation.
 
 ## PR143 command surface audit
 
