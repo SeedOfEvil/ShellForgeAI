@@ -1692,8 +1692,12 @@ the same Lane C runner command as the planner: `python scripts/run_full_pytest.p
 It prints the selected lane, the full-validation reason, the runner command,
 duration reporting (`--durations=25`), live pytest progress/output, elapsed
 runtime, and the runner output showing whether xdist was available/used or
-whether serial fallback occurred. Lane C remains exceptional and explicit; Lane
-A/B runs do not invoke the full runner by default.
+whether serial fallback occurred. Lane C can also parse the full pytest log with
+`scripts/track_pytest_durations.py` (or the helper's `--duration-log`) so the
+manifest includes a warning-only duration report with the slowest tests and any
+regressions against an explicit local history/baseline. Lane C remains
+exceptional and explicit; Lane A/B runs do not invoke the full runner by
+default.
 
 Docker01 may optionally use a reusable ShellForgeAI validation image with dev
 dependencies preinstalled (for example `pytest-xdist`, included in the project
@@ -1707,9 +1711,10 @@ Every Docker01 PR report now has two durable evidence artifacts from
 (`mode=docker01_pr_validation_manifest`, `schema_version=1`) and a bounded
 human summary. Architect/safety review should prefer the manifest values for
 lane selection, lane reason, validation status, safety flags, command/phase
-durations, log paths, final container health, final disk state when available,
-known non-blockers, and the final verdict. The human summary is the
-copy/paste-friendly companion for PR comments, not the source of truth.
+durations, slow-test duration records when supplied, log paths, final container
+health, final disk state when available, known non-blockers, and the final
+verdict. The human summary is the copy/paste-friendly companion for PR
+comments, not the source of truth.
 
 If full validation or QA already completed in a separate operator log, do not rerun expensive validation solely to populate `not_run` manifest fields. Finalize/import the completed evidence instead:
 
@@ -1733,6 +1738,9 @@ Every Docker01 PR report should record through the manifest/summary:
 - whether **full `pytest`** was required,
 - for Lane C, the `python scripts/run_full_pytest.py` command output, including
   live pytest progress and the slow-test duration table,
+- when available, a `duration_report` parsed from the full pytest log with the
+  slowest tests, total runtime, local-history comparison, and warning-only
+  regressions for follow-up optimization work,
 - whether the runner used xdist or printed the serial fallback warning,
 - final container status/health/restart count when available,
 - snapshot/compose backup/final config/image metadata when available,
@@ -1748,7 +1756,10 @@ Rules of the road:
 - Full validation is **required** for execution/safety boundary PRs and stays
   **always available** (`--profile full` / `--full-validation`); it is never
   removed.
-- Review `--durations=25` output for future slow-test follow-up. Optimize
+- Review `--durations=25` output and the optional `duration_report` / local
+  history from `scripts/track_pytest_durations.py` for future slow-test
+  follow-up. Duration regressions are warnings for operator review, not
+  automatic validation failures, and no tests are skipped. Optimize
   repeated expensive setup when coverage remains equivalent; do not skip slow
   tests silently.
 - Targeted validation is **acceptable** for docs / routing / output polish.

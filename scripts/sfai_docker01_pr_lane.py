@@ -24,6 +24,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+import track_pytest_durations
 import validate_pr
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -134,6 +135,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validation-log", help="Validation log path, if known.")
     parser.add_argument("--deploy-log", help="Deploy log path, if known.")
     parser.add_argument("--runner-log", help="Full runner log path, if known.")
+    parser.add_argument(
+        "--duration-log", help="Full pytest log to parse for optional duration tracking."
+    )
+    parser.add_argument(
+        "--duration-baseline",
+        help="Optional duration history/baseline JSON for warning-only regression comparison.",
+    )
+    parser.add_argument(
+        "--duration-history",
+        help=(
+            "Optional duration history JSON path to read as a baseline; "
+            "the lane helper does not update it."
+        ),
+    )
     parser.add_argument("--container-name", default="shellforgeai", help="Final container name.")
     parser.add_argument("--container-image", help="Final container image, if known.")
     parser.add_argument("--container-image-id", help="Final container image id, if known.")
@@ -335,6 +350,7 @@ def build_validation_manifest(
     failed_phase: str | None = None,
     error_summary: str | None = None,
     created_at: str | None = None,
+    duration_report: dict | None = None,
 ) -> dict:
     created_at = created_at or _utc_now()
     resolved_head = _optional(head_commit) or _git_value(["rev-parse", "HEAD"])
@@ -435,6 +451,11 @@ def build_validation_manifest(
         },
         "created_at": created_at,
     }
+    if duration_report is not None:
+        manifest["duration_report"] = duration_report
+        artifacts = manifest.get("artifacts")
+        if isinstance(artifacts, dict):
+            artifacts["duration_report"] = duration_report.get("log_path")
     return manifest
 
 
@@ -467,6 +488,11 @@ def render_human_summary(manifest: dict) -> str:
         f"* compileall: {validation.get('compileall', UNKNOWN)}",
         f"* targeted tests: {validation.get('targeted_tests', UNKNOWN)}",
         f"* full pytest: {validation.get('full_pytest', UNKNOWN)}",
+        "",
+        "Duration tracking:",
+        f"* status: {(manifest.get('duration_report') or {}).get('status', UNKNOWN)}",
+        f"* slow tests recorded: {(manifest.get('duration_report') or {}).get('count', 0)}",
+        f"* regressions: {len((manifest.get('duration_report') or {}).get('regressions') or [])}",
         "",
         "Safety:",
         f"* snapshot before mutation: {'yes' if safety.get('snapshot_before_mutation') else 'no'}",
@@ -599,6 +625,22 @@ def main(argv: list[str] | None = None) -> int:
     command_records = planned_command_records(plan, log_path=args.validation_log)
     return_code = 0
     error_summary = None
+    duration_report = None
+
+    duration_log = args.duration_log or args.runner_log
+    if duration_log and plan.get("full_pytest_required"):
+        baseline = None
+        baseline_warning = None
+        baseline_path = args.duration_baseline or args.duration_history
+        if baseline_path:
+            baseline, baseline_warning = track_pytest_durations.load_json_object(baseline_path)
+        parsed = track_pytest_durations.parse_log(duration_log)
+        duration_report = track_pytest_durations.build_report(
+            log_path=duration_log,
+            parsed=parsed,
+            baseline=baseline,
+            baseline_warning=baseline_warning,
+        )
 
     if args.execute_validation and not args.dry_run:
         start = time.monotonic()
@@ -663,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         verdict="fail" if return_code != 0 else "pass",
         error_summary=error_summary,
         created_at=created_at,
+        duration_report=duration_report,
     )
     summary = render_human_summary(manifest)
     write_manifest(manifest, manifest_path)
