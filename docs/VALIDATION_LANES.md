@@ -231,15 +231,45 @@ full. Unrecognized paths default to Lane C as a safe default.
 ## Docker01 PR lane report requirements
 
 Full validation on Docker01 is **exceptional, not default**. Every Docker01 PR
-report must state:
+run must produce a structured validation evidence manifest and a concise human
+summary from `scripts/sfai_docker01_pr_lane.py`. The manifest is the review
+source of truth: `schema_version=1`,
+`mode=docker01_pr_validation_manifest`, lane selection/reason, whether full
+validation was required, commands and phases with durations, log paths,
+deploy/snapshot/image metadata when available, final container health when
+available, validation statuses, safety flags, known non-blockers, and final
+verdict. Missing optional Docker01 metadata should be `null` or `unknown`, not
+invented.
+
+Every Docker01 PR report must state through the manifest/summary:
 
 - the **selected lane** (A / B / C)
 - **why** that lane was selected
-- the **commands run**
+- the **commands run** plus durations/log paths
+- the **phases** completed and any failed phase/error summary
 - whether **full `pytest`** was required
+- final container status/health/restart count when available
+- safety flags for snapshot-before-mutation, compose atomic update, direct
+  compose write, cleanup/remediation/rollback, prune, mutation beyond deploy,
+  production restart, `shell=True`, arbitrary command execution, and
+  natural-language mutation
+- known non-blockers
 - if full `pytest` was **skipped**, why that is acceptable (e.g. "Lane B
   read-only routing change; targeted regression group green; no safety or
   execution boundary touched")
+
+Verdicts:
+
+- **PASS** requires the selected lane to complete, validation statuses to be
+  green or explicitly not required, final container health to be acceptable when
+  collected, safety flags to remain within the Docker01 railings, and log paths
+  or artifacts to be present for review.
+- **HOLD** is for incomplete/partial evidence or known non-blockers needing
+  reviewer acknowledgement; the manifest should explain the missing data or
+  non-blocker without inventing success.
+- **FAIL** is for failed commands/phases, unhealthy final container state, or a
+  broken safety railing. The manifest must record the failed phase and error
+  summary when available.
 
 Rules:
 

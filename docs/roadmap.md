@@ -18,6 +18,7 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
 
 # Roadmap
 
+- PR161 (June 6, 2026): Docker01 validation evidence manifest and structured run summary. The guarded Docker01 PR lane helper now writes a stable JSON manifest (`schema_version=1`, `mode=docker01_pr_validation_manifest`) plus a bounded human summary for each run. The manifest captures PR/source metadata, selected lane and reason, full-validation requirement, commands/phases with durations, log paths, deployment/snapshot/image metadata when provided, final container and disk state when provided, validation statuses, explicit safety flags, known non-blockers, artifacts, and pass/hold/fail verdict/failure details. This is validation/reporting infrastructure only: no ShellForgeAI runtime product feature, cleanup/remediation/rollback execution, Docker/Compose mutation beyond the existing guarded deploy/recreate lane, production/container restart expansion, `shell=True`, arbitrary command execution, or natural-language mutation was added.
 > The roadmap captures direction, not commitments. Anything below the
 > "Shipped" header is current behavior. Anything below "Next" is intent.
 
