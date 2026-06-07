@@ -474,3 +474,7 @@ preflight docker restart sfai-test
 ```
 
 These routes build or validate preflight packets only. Dangerous phrases such as `execute the recipe`, `restart it now`, and `run docker restart` are refused by interactive mode; no Docker/Compose/remediation/cleanup/rollback command is executed.
+
+## Governed recipe execution in interactive mode
+
+Interactive mode may dispatch the explicit CLI form `recipes execute <preflight_id> --confirm [--json]` and `recipes receipt validate <receipt_id> [--json]`. Natural-language mutation phrases such as "execute the recipe", "restart it now", "run that", or "do it" are refused and show the governed workflow instead. Interactive mode is still not a shell and does not run raw Docker, Docker Compose, cleanup, remediation, rollback, or arbitrary commands from natural language.

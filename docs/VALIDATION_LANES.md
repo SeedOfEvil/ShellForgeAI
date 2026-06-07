@@ -367,3 +367,5 @@ railings.
 
 See [`../OPS.md`](../OPS.md) ("PR validation lane policy") for the operator
 runbook steps.
+
+Self-test profile checks that probe `compose env-check --target shellforgeai --json` treat a blocked/non-allowlisted production target as expected safe behavior, not as execution readiness. Positive readiness checks must use disposable allowlisted fixtures; production `shellforgeai` must remain blocked and non-mutating.

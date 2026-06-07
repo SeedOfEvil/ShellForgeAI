@@ -1455,3 +1455,18 @@ Read-only command that verifies the documented V1 command-surface contract witho
 - `shellforgeai v1 packet history [--limit N] [--json]` lists saved V1 readiness packets (newest first).
 - `shellforgeai v1 packet compare <before-packet-id-or-path> <after-packet-id-or-path> [--json] [--only-changed] [--include-stable] [--top N]` compares two saved V1 packets read-only.
 - `shellforgeai v1 packet compare-latest [--json] [--only-changed] [--include-stable] [--top N]` compares the latest two saved V1 packets.
+
+## V2 disposable restart recipe workflow
+
+The only governed recipe execution command currently supported is the disposable Docker restart lane:
+
+```bash
+shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save
+shellforgeai recipes preflight validate <preflight_id>
+shellforgeai recipes execute <preflight_id> --confirm
+shellforgeai recipes execute <preflight_id> --confirm --json
+shellforgeai recipes receipt validate <receipt_id>
+shellforgeai recipes receipt validate <receipt_id> --json
+```
+
+Execution blocks unless the saved preflight is valid and ready, the current target is still an exact non-production container, and labels `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true` are still present. The executor uses only `docker restart <exact-target>` as an argv list and writes a receipt with verification. Do not use this as general remediation; it is disposable-only.

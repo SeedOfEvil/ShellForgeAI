@@ -176,8 +176,8 @@ _RECIPES: tuple[Recipe, ...] = (
         status=STATUS_DISABLED_EXECUTE_LANE,
         mutation_class=MUTATION_GOVERNED_DISPOSABLE_ONLY,
         description=(
-            "Future governed restart for one exact disposable, allowlisted container. "
-            "Execution is disabled in this PR."
+            "Governed restart for one exact disposable, allowlisted container from a "
+            "valid saved preflight with explicit confirmation and receipt verification."
         ),
         required_target_labels=REQUIRED_DISPOSABLE_RESTART_LABELS,
         forbidden_targets=(
@@ -205,16 +205,30 @@ _RECIPES: tuple[Recipe, ...] = (
         verification_required=True,
         rollback_available=True,
         receipt_required=True,
-        first_safe_command="shellforgeai apply-preview --target <target> --json",
+        first_safe_command=(
+            "shellforgeai recipes preflight --recipe docker.disposable_restart "
+            "--target <target> --save"
+        ),
         safe_next_commands=(
             (
-                "shellforgeai recipes eligibility --recipe docker.disposable_restart "
-                "--target <target> --json"
+                "shellforgeai recipes preflight --recipe docker.disposable_restart "
+                "--target <target> --save"
             ),
-            "shellforgeai apply-preview --target <target> --json",
+            "shellforgeai recipes preflight validate <preflight_id>",
+            "shellforgeai recipes execute <preflight_id> --confirm",
+            "shellforgeai recipes receipt validate <receipt_id>",
         ),
-        blocked_reason="Execution lane is disabled; this PR only exposes eligibility and preview.",
-        safety_notes=("No restart command is run by the recipe registry.",),
+        blocked_reason="Execution requires a valid saved preflight and explicit --confirm.",
+        safety_notes=(
+            (
+                "Only recipes execute may run the exact disposable restart action for "
+                "an allowlisted target."
+            ),
+            (
+                "Natural-language execution, Docker Compose, cleanup, remediation, "
+                "and rollback stay refused."
+            ),
+        ),
     ),
     Recipe(
         recipe_id="metadata.cleanup_review",

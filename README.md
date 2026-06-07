@@ -403,3 +403,16 @@ shellforgeai recipes preflight validate <preflight_id>
 ```
 
 Disposable preflight packets may preview `docker restart <target>` as bounded argv only, but they report `execution_available=false`, `command_preview_only=true`, and `command_executed=false`; no container is restarted and no recipe execution lane is enabled.
+
+### Governed disposable recipe execution
+
+ShellForgeAI's first V2 governed execution lane is intentionally narrow: `docker.disposable_restart` may restart exactly one Docker container only when it is labeled `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true`, has a saved valid preflight packet, and the operator passes `--confirm`. The workflow is:
+
+```bash
+shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save
+shellforgeai recipes preflight validate <preflight_id>
+shellforgeai recipes execute <preflight_id> --confirm
+shellforgeai recipes receipt validate <receipt_id>
+```
+
+Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback, remediation execution, arbitrary shell, and model-driven execution remain out of scope.

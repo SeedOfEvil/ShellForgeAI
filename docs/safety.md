@@ -1070,3 +1070,7 @@ shellforgeai v1 packet is read-only by default; --save/export only write ShellFo
 `scripts/v1_validate.sh --packet` keeps this in the validation lane: after validation passes it saves + validates a V1 packet (optional export validation), writes only ShellForgeAI-owned packet/export artifacts, and does not execute remediation/rollback/cleanup or Docker/Compose mutation.
 
 `shellforgeai v1 packet history`, `shellforgeai v1 packet compare`, and `shellforgeai v1 packet compare-latest` are read-only artifact lifecycle commands: they read saved packet artifacts, compare in memory, and never regenerate checks, save packets, export bundles, or mutate packet files.
+
+## Governed disposable restart boundary
+
+The only V2 governed execution lane currently available is `docker.disposable_restart` through `shellforgeai recipes execute <preflight_ref> --confirm`. It must come from a valid saved ShellForgeAI preflight packet and may run only `docker restart <exact-target>` for a target that is still labeled `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true`. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup execution, rollback execution, arbitrary shell, and natural-language mutation remain refused. Execution writes a receipt and verifies the restart with Docker inspect evidence; rollback posture is documented but no rollback is executed.

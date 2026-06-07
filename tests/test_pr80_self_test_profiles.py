@@ -420,3 +420,112 @@ def test_ask_mutation_refusal_routing_present_in_each_profile(tmp_path: Path, mo
         assert rows, f"ask refusal smoke must run in profile={profile}"
         assert rows[0]["status"] == "pass"
         assert rows[0]["category"] == "safety"
+
+
+def test_self_test_env_check_production_block_counts_as_safe_pass(monkeypatch) -> None:
+    check = self_test_mod._Check(
+        "compose env-check production target blocks safely (shellforgeai)",
+        ("compose", "env-check", "--target", "shellforgeai", "--json"),
+        "compose",
+        profiles=frozenset({"standard"}),
+        expects_json=True,
+        compose_env_check_production_block_check=True,
+    )
+    payload = {
+        "status": "blocked",
+        "target_input": "shellforgeai",
+        "readiness": {"blockers": ["target_not_allowlisted"]},
+        "allowlist": {
+            "target_allowlisted": False,
+            "disposable": False,
+            "allow_restart": False,
+            "blockers": ["target_not_allowlisted"],
+        },
+        "target": {"container": "shellforgeai"},
+        "safety": {
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "remediation_executed": False,
+            "cleanup_executed": False,
+            "rollback_executed": False,
+            "arbitrary_command_execution": False,
+        },
+    }
+
+    monkeypatch.setattr(self_test_mod, "_read_only_checks", lambda: [check])
+
+    def stub_invoke(_runner, _app, argv):
+        if tuple(argv) == ("compose", "env-check", "--target", "shellforgeai", "--json"):
+            return 1, json.dumps(payload), "", SystemExit(1)
+        if tuple(argv) == ("ask", "show metadata hygiene"):
+            return 0, "metadata hygiene: no deletion was performed", "", None
+        if tuple(argv) == ("ask", "clean up now"):
+            return 0, "refusing: natural language cannot delete", "", None
+        return 0, "{}", "", None
+
+    monkeypatch.setattr(self_test_mod, "_runner_invoke", stub_invoke)
+
+    result = self_test_mod.run_self_test_commands(profile="standard")
+    assert result["status"] == "ok"
+    assert result["summary"]["failed"] == 0
+    row = result["checks"][0]
+    assert row["status"] == "pass"
+    assert "target_not_allowlisted" in row["reason"]
+
+
+def test_compose_env_check_shellforgeai_blocked_safety_contract(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        cli_mod,
+        "_build_compose_restart_preview",
+        lambda target: {
+            "status": "ok",
+            "compose": {
+                "compose_managed": True,
+                "container": target,
+                "project": "shellforgeai",
+                "service": "shellforgeai",
+                "working_dir": "/tmp",
+                "compose_file": "/tmp/docker-compose.yml",
+                "config_files": ["/tmp/docker-compose.yml"],
+                "labels": {},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        cli_mod,
+        "_compose_cli_preflight",
+        lambda _compose: {
+            "docker_cli_available": True,
+            "docker_socket_available": True,
+            "compose_cli_available": True,
+            "required_invocation_supported": True,
+        },
+    )
+    monkeypatch.setattr(cli_mod, "_compose_environment_readiness", lambda _preflight: ("ok", []))
+    monkeypatch.setattr(
+        cli_mod,
+        "_compose_config_snapshot",
+        lambda _compose: {
+            "compose_file_known": True,
+            "compose_file_snapshot_available": True,
+            "blockers": [],
+        },
+    )
+
+    out = runner.invoke(app, ["compose", "env-check", "--target", "shellforgeai", "--json"])
+    assert out.exit_code == 0
+    payload = json.loads(out.stdout)
+    assert payload["status"] == "blocked"
+    blockers = payload["readiness"]["blockers"] + payload["allowlist"]["blockers"]
+    assert "target_not_allowlisted" in blockers
+    assert payload["allowlist"]["disposable"] is False
+    assert payload["allowlist"]["allow_restart"] is False
+    safety = payload["safety"]
+    assert safety["docker_compose_executed"] is False
+    assert safety["container_restarted"] is False
+    assert safety["remediation_executed"] is False
+    assert safety["cleanup_executed"] is False
+    assert safety["rollback_executed"] is False
