@@ -1728,22 +1728,38 @@ python scripts/validate_pr.py --changed-files docs/cli.md --full-validation  # f
 
 The guarded Docker01 PR lane helper (`scripts/sfai_docker01_pr_lane.py`) uses
 the same Lane C runner command as the planner: `python scripts/run_full_pytest.py`.
-It prints the selected lane, the full-validation reason, the runner command,
-duration reporting (`--durations=25`), live pytest progress/output, elapsed
-runtime, and the runner output showing whether xdist was available/used or
-whether serial fallback occurred. Lane C can also parse the full pytest log with
-`scripts/track_pytest_durations.py` (or the helper's `--duration-log`) so the
-manifest includes a warning-only duration report with the slowest tests and any
-regressions against an explicit local history/baseline. Lane C remains
+When the validation container is new, stale, or suspect, first run the read-only
+environment doctor and carry any warnings into the QA handoff:
+
+```bash
+python scripts/check_validation_env.py --profile docker01
+```
+
+Use `--json` when the preflight should be attached as machine evidence, and use
+`--strict` only when missing recommended acceleration such as `pytest-xdist`
+should block Docker01 validation. Do not auto-install, delete caches, chmod,
+chown, or fix Docker/Compose during PR validation unless a human operator
+explicitly chooses a separate setup action outside the doctor. The doctor never
+contacts the Docker daemon by default.
+
+The lane helper prints the selected lane, the full-validation reason, the runner
+command, duration reporting (`--durations=25`), live pytest progress/output,
+elapsed runtime, and the runner output showing whether xdist was available/used
+or whether serial fallback occurred. Lane C can also parse the full pytest log
+with `scripts/track_pytest_durations.py` (or the helper's `--duration-log`) so
+the manifest includes a warning-only duration report with the slowest tests and
+any regressions against an explicit local history/baseline. Lane C remains
 exceptional and explicit; Lane A/B runs do not invoke the full runner by
 default.
 
-Docker01 may optionally use a reusable ShellForgeAI validation image with dev
-dependencies preinstalled (for example `pytest-xdist`, included in the project
-`dev` extra) to reduce setup cost and enable parallel full validation. This is
-only a validation-speed optimization: if the image is unavailable, use the
-current writable validation container path, let the runner report the serial
-fallback, and never use the image to skip tests or weaken Lane C safety gates.
+Docker01 may optionally use a reusable ShellForgeAI validation image, for
+example `shellforgeai-test-runner`, with Python 3.12, `git`, `rsync`,
+procps/`ps`, `pytest`, `pytest-xdist`, `ruff`, and the project dev extras
+preinstalled to reduce setup cost and enable parallel full validation. This is
+operator convenience only, not a normal-user requirement and not a
+test-selection input. Always run the same selected validation commands, always
+report xdist use/unavailability or serial fallback, and never use the image to
+skip tests or weaken Lane C safety gates.
 
 Every Docker01 PR report now has two durable evidence artifacts from
 `scripts/sfai_docker01_pr_lane.py`: a structured JSON manifest

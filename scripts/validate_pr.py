@@ -528,6 +528,9 @@ def render_human(plan: dict) -> str:
             "Lane C runner uses pytest-xdist when available and falls back to serial pytest "
             "when unavailable."
         )
+        lines.append(
+            "Recommended preflight: python scripts/check_validation_env.py --profile docker01"
+        )
 
     hits = plan["safety_escalations"]
     if hits:
