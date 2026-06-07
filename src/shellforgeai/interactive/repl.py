@@ -85,6 +85,8 @@ V2 golden path:
   recipes [--json] / recipes inspect <id> / safe-actions [--target <target>]
   recipes eligibility --recipe docker.disposable_restart --target <target>
   recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
+  recipes preflight validate <id> / recipes execute <id> --confirm [--json]
+  recipes receipt validate <id> [--json]
   apply-preview [--brief|--json] / verify [--brief|--json] / handoff [--brief|--json|--save]
   triage/propose/verify/handoff --target <target> [--json] / handoff summary
   full path: status -> triage -> propose -> apply-preview -> verify -> handoff
@@ -114,9 +116,7 @@ Follow-ups/session:
   exit
   /exit
 
-Pressure mode:
-  no novel, what is on fire?
-  quick status only
+Pressure mode: no novel, what is on fire? / quick status only
 
 Refused here (not run):
   {_REFUSED_DOCKER_RESTART}
@@ -129,7 +129,7 @@ Refused here (not run):
 Safety:
   Interactive mode is not a shell.
   No Docker/Compose/remediation/cleanup command runs from natural language.
-  Mutation requires governed explicit workflows."""
+  Mutation requires governed explicit workflows. Natural language cannot execute recipes."""
 
 
 def _ensure_artifact_dir(runtime: RuntimeContext) -> None:
@@ -1698,6 +1698,7 @@ def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> st
 
 def _interactive_mutation_refusal(text: str) -> str:
     return (
+        "Refused: natural-language mutation is not allowed.\n"
         "Refused: interactive mode is not a shell.\n"
         "No command was executed.\n"
         "No action was taken.\n"

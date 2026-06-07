@@ -407,6 +407,7 @@ def render_grounded_resolution(state: FollowupGroundingState, res: GroundingReso
     if res.kind == "mutation_refusal":
         commands = safe_commands_for_target(res.target)
         return (
+            "Refused: natural-language mutation is not allowed.\n"
             f"I’m not {_mutation_gerund(res.phrase)} {res.target} from natural language.\n"
             "No action was taken.\n"
             "Safe read-only alternatives:\n" + "\n".join(f"  {cmd}" for cmd in commands)

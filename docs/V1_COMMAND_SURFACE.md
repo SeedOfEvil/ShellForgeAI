@@ -172,3 +172,7 @@ mutation.
 - `shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save` writes only ShellForgeAI-owned metadata under the configured data directory (`recipe_preflights/<preflight_id>/`).
 - `shellforgeai recipes preflight validate <preflight_ref> [--json]` validates a saved packet read-only. Missing, malformed, or tampered packets fail cleanly with no traceback.
 - The command is not an apply lane: no cleanup/remediation/rollback execution, Docker/Compose mutation, container restart, production restart, `shell=True`, arbitrary command execution, natural-language mutation, model call, mission/apply record, or remediation receipt is created.
+
+## V2 governed execution classification
+
+`shellforgeai recipes execute <preflight_ref> --confirm` is not a casual V1 command and is not a natural-language action. It is a V2 governed execution lane for exactly `docker.disposable_restart`, requiring a valid saved preflight and explicit confirmation. All other mutation lanes, including cleanup execute, rollback execute, raw Docker restart, and Docker Compose mutation, remain outside the casual command surface.

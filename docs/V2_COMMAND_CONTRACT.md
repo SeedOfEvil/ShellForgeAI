@@ -245,3 +245,13 @@ non-goal, or refused context. They are not V2 golden-path commands. Dangerous go
 
 The V2 casual command path is status, triage, propose, approve/gate,
 apply-preview, verify, and handoff/receipt — not execution expansion.
+
+## Governed recipe execution boundary
+
+`recipes execute <preflight_ref> --confirm` is the first V2 governed execution boundary and supports only `docker.disposable_restart`. It requires a ShellForgeAI-owned saved preflight packet that validates successfully, `recipe_id=docker.disposable_restart`, `status=preflight_ready`, an exact target that is still present, current labels `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true`, a non-production/non-broad target, and explicit `--confirm`. The only command it may run is the argv list `docker restart <exact-target>`; it does not use `shell=True`.
+
+`recipes execute <preflight_ref> --confirm --json` emits strict JSON with action, verification, receipt, rollback posture, and safety fields. Blocked paths return nonzero, do not run Docker, and report `mutation_performed=false`, `container_restarted=false`, and `command_executed=false`. Successful execution writes `recipe-receipt.json`, `recipe-receipt.md`, and `manifest.json` under ShellForgeAI's recipe receipt data path.
+
+`recipes receipt validate <receipt_ref> [--json]` validates receipt files, checksums, recipe/target metadata, verification presence, and safety flags. Receipt validation is read-only. Production restart, Docker Compose mutation, cleanup execution, remediation execution outside this named recipe semantics, rollback execution, arbitrary shell, and natural-language execution remain refused.
+
+Rollback posture for this recipe is not true undo: bounded recovery is a future repeat exact-target restart requiring explicit confirmation; automatic rollback is disabled and this command executes no rollback.

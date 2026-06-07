@@ -1858,3 +1858,18 @@ shellforgeai recipes preflight validate <preflight_id>
 The preflight packet may preview the bounded argv `docker restart <target>` for an eligible disposable allowlisted container, but it is preview-only: `execution_available=false`, `command_preview_only=true`, `command_executed=false`, and `container_restarted=false`. Production targets, broad targets (`all`, `*`), missing targets, unlabeled targets, and Docker Compose patterns remain blocked.
 
 Do not treat a preflight packet as permission to execute. Future execution must require explicit confirmation, an execution receipt, post-verification, and rollback posture handling.
+
+## Docker01 lab-only disposable execution QA
+
+For lab QA of the governed disposable restart lane, use only a throwaway container explicitly labeled for this recipe. Confirm the target is not `shellforgeai`, not broad, and not a Compose service pattern. Suggested manual flow:
+
+```bash
+docker run -d --name sfai-pr167-user-sim --label shellforgeai.disposable=true --label shellforgeai.allow_restart=true alpine sleep 3600
+shellforgeai recipes preflight --recipe docker.disposable_restart --target sfai-pr167-user-sim --save
+shellforgeai recipes preflight validate <preflight_id>
+shellforgeai recipes execute <preflight_id> --confirm
+shellforgeai recipes receipt validate <receipt_id>
+docker rm -f sfai-pr167-user-sim
+```
+
+Expected: only the exact disposable allowlisted target restarts, a receipt is written and verifies, and `shellforgeai` is not restarted. Do not run Docker Compose restart/up/down, cleanup execute, rollback execute, production restart, or raw shell remediation as part of this QA.

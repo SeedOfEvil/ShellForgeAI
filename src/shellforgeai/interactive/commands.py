@@ -74,6 +74,8 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes preflight --recipe docker.disposable_restart --target <target> --json",
     "recipes preflight --recipe docker.disposable_restart --target <target> --save",
     "recipes preflight validate <preflight_id>",
+    "recipes execute <preflight_id> --confirm",
+    "recipes receipt validate <receipt_id>",
     "safe-actions",
     "help",
     "pending",
@@ -288,6 +290,10 @@ _QUICK_MUTATION_PHRASES = (
     "run " + "docker" + " restart",
     "confirm restart",
     "apply the restart",
+    "run that",
+    "do it",
+    "run the recipe",
+    "restart the disposable target",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -468,6 +474,20 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 5 and tokens[4] == "--json"
         if len(tokens) == 4 or json_flag:
             argv = ("recipes", "preflight", "validate", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {4, 5} and tokens[:2] == ("recipes", "execute") and tokens[2]:
+        flags = set(tokens[3:])
+        if flags == {"--confirm"} or flags == {"--confirm", "--json"}:
+            argv = ("recipes", "execute", original_tokens[2], "--confirm")
+            if "--json" in flags:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {4, 5} and tokens[:3] == ("recipes", "receipt", "validate") and tokens[3]:
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("recipes", "receipt", "validate", original_tokens[3])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)

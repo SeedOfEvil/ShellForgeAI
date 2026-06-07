@@ -173,6 +173,12 @@ from shellforgeai.core.mission_report import (
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.profiles import load_profile
+from shellforgeai.core.recipe_execution import (
+    execute_disposable_restart,
+)
+from shellforgeai.core.recipe_execution import (
+    validate_receipt as validate_recipe_receipt,
+)
 from shellforgeai.core.recipe_preflight import (
     build_preflight_packet,
     save_preflight_packet,
@@ -304,6 +310,7 @@ recipes_preflight_app = typer.Typer(
     no_args_is_help=False,
     help="Read-only governed recipe preflight packets. No execution.",
 )
+recipes_receipt_app = typer.Typer(help="Governed recipe execution receipt validation.")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -326,6 +333,7 @@ app.add_typer(handoff_app, name="handoff")
 app.add_typer(remediation_app, name="remediation")
 app.add_typer(recipes_app, name="recipes")
 recipes_app.add_typer(recipes_preflight_app, name="preflight")
+recipes_app.add_typer(recipes_receipt_app, name="receipt")
 remediation_app.add_typer(remediation_receipt_app, name="receipt")
 triage_app.add_typer(triage_docker_app, name="docker")
 triage_docker_app.add_typer(triage_docker_snapshot_app, name="snapshot")
@@ -11943,6 +11951,108 @@ def recipes_preflight_validate(
         raise typer.Exit(1)
 
 
+def _render_recipe_execute_human(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "blocked")
+    lines = [f"Recipe execution: {status}"]
+    if payload.get("recipe_id"):
+        lines.append(f"Recipe: {payload.get('recipe_id')}")
+    target = payload.get("target")
+    if isinstance(target, dict):
+        lines.append(f"Target: {target.get('name') or target.get('current_name')}")
+    if payload.get("reason"):
+        lines.append(f"Reason: {payload.get('reason')}")
+    action = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+    if action.get("argv"):
+        lines.append("Action argv: " + " ".join(str(part) for part in action.get("argv") or []))
+    lines.append(f"Command executed: {str(bool(action.get('command_executed'))).lower()}")
+    if action.get("return_code") is not None:
+        lines.append(f"Return code: {action.get('return_code')}")
+    verification = (
+        payload.get("verification") if isinstance(payload.get("verification"), dict) else {}
+    )
+    lines.append(f"Verification: {verification.get('status', 'not_run')}")
+    receipt = payload.get("receipt") if isinstance(payload.get("receipt"), dict) else None
+    if receipt:
+        lines.append(f"Receipt ID: {receipt.get('receipt_id')}")
+        lines.append(f"Receipt path: {receipt.get('path')}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}
+    lines.extend(
+        [
+            "Safety:",
+            f"- container_restarted: {str(bool(safety.get('container_restarted'))).lower()}",
+            "- docker_compose_executed: "
+            f"{str(bool(safety.get('docker_compose_executed'))).lower()}",
+            f"- shell_true: {str(bool(safety.get('shell_true'))).lower()}",
+            "- natural_language_execution: "
+            f"{str(bool(safety.get('natural_language_execution'))).lower()}",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _render_recipe_receipt_validate_human(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Recipe receipt validation: {payload.get('status')}",
+        f"Receipt ID: {payload.get('receipt_id') or 'unknown'}",
+        f"Path: {payload.get('receipt_path') or 'not found'}",
+        "Checks:",
+    ]
+    for key, value in (payload.get("checks") or {}).items():
+        lines.append(f"- {key}: {str(bool(value)).lower()}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.append("No action was taken by receipt validation.")
+    return "\n".join(lines) + "\n"
+
+
+@recipes_app.command("execute")
+def recipes_execute(
+    ctx: typer.Context,
+    preflight_ref: Annotated[
+        str, typer.Argument(help="Saved preflight id or ShellForgeAI-owned path.")
+    ],
+    confirm: Annotated[
+        bool,
+        typer.Option("--confirm", help="Explicitly confirm the governed exact-target restart."),
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Execute docker.disposable_restart from a valid saved preflight and confirmation."""
+    runtime = _ctx(ctx)
+    payload = execute_disposable_restart(preflight_ref, runtime.session.data_dir, confirm=confirm)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_execute_human(payload), nl=False)
+    if payload.get("status") != "executed":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("validate")
+def recipes_receipt_validate(
+    ctx: typer.Context,
+    receipt_ref: Annotated[
+        str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Validate a governed recipe execution receipt. Read-only."""
+    runtime = _ctx(ctx)
+    payload = validate_recipe_receipt(receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_validate_human(payload), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
 @app.command("safe-actions")
 def safe_actions(
     target: Annotated[
@@ -12024,15 +12134,20 @@ def _is_recipe_execution_request(question: str) -> bool:
     execution_cues = (
         "execute the recipe",
         "execute recipe",
+        "run the recipe",
         "run the restart recipe",
         "run restart recipe",
+        "restart the disposable target",
         "apply it",
         "apply the recipe",
+        "apply the restart recipe",
         "execute the restart recipe",
         "run docker restart",
         "confirm restart",
         "apply the restart",
         "restart it now",
+        "do it",
+        "run that",
         "then do it",
         "and then do it",
     )
@@ -12054,16 +12169,34 @@ def _handle_recipe_registry_ask(question: str) -> bool:
     low = " ".join((question or "").lower().split())
     preflight_ask = _is_recipe_preflight_ask(question)
     execution_request = _is_recipe_execution_request(question)
+    command_help = "command" in low and "execute" in low and "recipe" in low
+    if command_help:
+        console.print(
+            "No action was taken. Governed disposable restart execution uses this CLI workflow:\n"
+            "  1. shellforgeai recipes preflight --recipe docker.disposable_restart "
+            "--target <target> --save\n"
+            "  2. shellforgeai recipes preflight validate <preflight_id>\n"
+            "  3. shellforgeai recipes execute <preflight_id> --confirm\n"
+            "  4. shellforgeai recipes receipt validate <receipt_id>\n"
+            "Only this saved-preflight, explicit-confirm path can execute; no raw Docker "
+            "command was suggested or run.\n"
+        )
+        return True
     if execution_request and not preflight_ask:
         console.print(
-            "Refused: ShellForgeAI recipes are read-only in this release.\n"
+            "Refused: natural-language mutation is not allowed. "
+            "Recipe execution from natural language is not allowed.\n"
             "No action was taken.\n"
             "No recipe was executed.\n"
             "No container was restarted.\n"
-            "Use safe read-only guidance instead:\n"
-            "  shellforgeai recipes preflight --recipe docker.disposable_restart "
-            "--target <target> --json\n"
-            "  shellforgeai recipes inspect docker.disposable_restart\n"
+            "Safe read-only alternatives: status, triage, recipes preflight.\n"
+            "First safe command: shellforgeai recipes preflight --recipe "
+            "docker.disposable_restart --target <target> --save\n"
+            "Use the explicit governed CLI workflow instead:\n"
+            "  1. shellforgeai recipes preflight --recipe docker.disposable_restart "
+            "--target <target> --save\n"
+            "  2. shellforgeai recipes preflight validate <preflight_id>\n"
+            "  3. shellforgeai recipes execute <preflight_id> --confirm\n"
         )
         return True
     if not (preflight_ask or _is_recipe_guidance_ask(question)):
@@ -12123,9 +12256,17 @@ def _handle_recipe_registry_ask(question: str) -> bool:
             console.print("First safe command: shellforgeai status --json")
     if "restart" in low or "fix" in low:
         console.print(
-            "Governed fixes are not executable yet; docker.disposable_restart is disabled "
-            "until the execute lane exists."
+            "Governed fixes are not executable yet from natural language; "
+            "docker.disposable_restart is available only through a saved preflight "
+            "plus explicit CLI confirmation."
         )
+        console.print("Governed workflow:")
+        console.print(
+            "  shellforgeai recipes preflight --recipe docker.disposable_restart "
+            "--target <target> --save"
+        )
+        console.print("  shellforgeai recipes preflight validate <preflight_id>")
+        console.print("  shellforgeai recipes execute <preflight_id> --confirm")
         console.print("Preview boundary: shellforgeai apply-preview --target <target> --json")
     if execution_request or mixed_mutation or "compose" in low:
         console.print("Refused mutation portion: execution/restart was not run.")
