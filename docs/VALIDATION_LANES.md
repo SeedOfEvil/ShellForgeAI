@@ -42,6 +42,35 @@ gates are never weakened to go faster.
 
 ---
 
+
+## Mainline full baseline lane
+
+`mainline_full` is a separate manual/scheduled baseline lane for validating the
+current checkout or current deployed source state. It complements Lane A/B/C PR
+validation; it is not a replacement for PR-specific impact analysis, and it is
+not a hidden requirement that every PR run the full suite.
+
+Run it with:
+
+```bash
+python scripts/run_mainline_validation.py --dry-run
+python scripts/run_mainline_validation.py
+python scripts/run_mainline_validation.py --output-dir /srv/data/shellforgeai/validation-runs --baseline-name main
+```
+
+The default mainline baseline is explicit full validation: `ruff check .`,
+`python -m compileall -q src tests`, V1 quick validation when available, the
+full pytest runner, and duration tracking on the full pytest log. Outputs are a
+mainline validation manifest, human summary, logs, duration report, and duration
+history under the selected output directory. `--no-full-pytest` exists only for
+local quick checks and is recorded as `full_pytest=skipped_by_operator`; it is
+not recommended for the official scheduled baseline.
+
+The lane is validation/evidence only. It never auto-merges, deploys, builds
+images, edits Compose files, calls Docker/Compose, restarts containers, prunes,
+cleans up, remediates, rolls back, or expands ShellForgeAI runtime execution
+behavior.
+
 ## Lane A — fast default
 
 **Use for**

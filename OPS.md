@@ -30,6 +30,45 @@ read-only status/report command (`shellforgeai status --json`), never a detail
 command for a missing suspect.
 
 
+## Mainline/scheduled validation baseline
+
+Use `scripts/run_mainline_validation.py` when the operator needs an explicit
+mainline/current-checkout validation baseline that is separate from PR deploy
+validation. The helper is intended for manual runs today and for a future
+scheduled lane; it writes evidence artifacts only and does not change runtime
+ShellForgeAI product behavior.
+
+Recommended Docker01 artifact location for scheduled/mainline runs:
+
+```bash
+python scripts/run_mainline_validation.py \
+  --baseline-name main \
+  --output-dir /srv/data/shellforgeai/validation-runs/
+```
+
+Safe local planning and smoke forms:
+
+```bash
+python scripts/run_mainline_validation.py --dry-run
+python scripts/run_mainline_validation.py --dry-run --json
+python scripts/run_mainline_validation.py --output-dir /tmp/sfai-mainline-validation-test --no-full-pytest
+```
+
+The default executed baseline runs validation-only commands: `ruff check .`,
+`python -m compileall -q src tests`, `scripts/v1_validate.sh --quick` when the
+script is available/executable, `python scripts/run_full_pytest.py`, and
+duration tracking on the full pytest log when the tracker is available. It
+writes a manifest JSON, human summary, validation logs, and duration report /
+history under the selected output directory. `--no-full-pytest` is only a local
+quick-check escape hatch and is recorded in the manifest as
+`skipped_by_operator`; do not use it for the official scheduled baseline.
+
+Safety boundary: the mainline baseline helper does **not** auto-merge,
+auto-deploy, auto-remediate, build Docker images, edit Compose files, call
+Docker/Compose, restart containers, restart production, prune, clean up,
+remediate, roll back, push to GitHub, or execute model/natural-language driven
+commands. It is evidence generation, not deployment or remediation.
+
 ## V1 canonical operator path (knife, not toolbox)
 
 ## Safe compose update pattern (Docker01/lab)
