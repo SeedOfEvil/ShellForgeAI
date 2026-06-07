@@ -83,6 +83,16 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
   prechecks, options, rollback, and post-fix validation. ShellForgeAI
   does not execute any of the steps; `apply` remains validation-only.
 
+
+## Validation discipline milestones
+
+- Completed: PR165 mainline/scheduled validation baseline helper.
+  `scripts/run_mainline_validation.py` creates validation-only baseline
+  manifests, summaries, logs, and duration reports/history for the current
+  checkout. It keeps full-suite confidence in an explicit mainline lane instead
+  of overloading every PR, and it does not auto-merge, deploy, remediate, call
+  Docker/Compose, restart, prune, or change runtime product behavior.
+
 ## V2 golden-path milestones
 
 - Completed: V2 read-only `status` entrypoint.
