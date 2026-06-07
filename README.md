@@ -124,8 +124,10 @@ asks deterministically, and refuses or gates mutation.
   `triage docker detail <target>`). `propose` is preview-only: no plan artifact
   and no action executed. `apply-preview` is an execution-boundary preview only:
   no apply, mission, remediation, rollback, cleanup, Docker, or Compose action
-  executes. `verify` checks current observed state only; it does not prove any
-  action was applied without a future receipt/artifact. `handoff` is a read-only
+  executes. `verify` checks current observed state by default; `verify --receipt
+  <receipt_id>` performs read-only governed execution receipt verification for
+  an existing recipe receipt without retrying, rolling back, restarting, or
+  running Docker/Compose. `handoff` is a read-only
   operator handoff packet that summarizes the golden-path posture and first safe
   command; it does not execute fixes or imply remediation happened, and
   `handoff --save` writes only a ShellForgeAI-owned artifact under
@@ -413,6 +415,7 @@ shellforgeai recipes preflight --recipe docker.disposable_restart --target <targ
 shellforgeai recipes preflight validate <preflight_id>
 shellforgeai recipes execute <preflight_id> --confirm
 shellforgeai recipes receipt validate <receipt_id>
+shellforgeai verify --receipt <receipt_id>
 ```
 
 Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback, remediation execution, arbitrary shell, and model-driven execution remain out of scope.

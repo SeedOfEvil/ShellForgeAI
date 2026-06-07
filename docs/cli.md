@@ -76,6 +76,30 @@ that does not exist. The compatibility commands `triage docker`,
 `triage docker --json`, and `triage docker detail <target>` continue to work
 and share the same read-only safety wording.
 
+
+## V2 receipt-aware verify
+
+`verify` remains the golden-path verification entrypoint. By default it verifies
+current observed state only. With `--receipt`, it switches to read-only governed
+receipt verification:
+
+```bash
+shellforgeai verify --receipt <receipt_id>
+shellforgeai verify --receipt <receipt_id> --json
+shellforgeai verify --receipt <receipt_id> --brief
+shellforgeai recipes receipt verify <receipt_id> --json
+```
+
+Receipt-aware verify loads a ShellForgeAI-owned recipe execution receipt by id
+or owned receipt directory path, validates receipt structure/safety, reports the
+recorded recipe (`docker.disposable_restart` when supported), target, recorded
+action, execution result, and post-check status, then recommends a read-only
+next command such as `shellforgeai handoff --json`. It never retries the recipe,
+restarts a container, runs Docker Compose, rolls back, executes cleanup or
+remediation, creates a new execution receipt, calls a model, or treats natural
+language as authorization to mutate. Missing, malformed, unsupported, failed, or
+safety-drift receipts fail cleanly with strict JSON in `--json` mode.
+
 ## V2 governed recipe registry
 
 The recipe registry is the read-only locked-toolbox map for future governed execution.

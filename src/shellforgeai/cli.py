@@ -184,6 +184,7 @@ from shellforgeai.core.recipe_preflight import (
     save_preflight_packet,
     validate_preflight_packet,
 )
+from shellforgeai.core.recipe_receipt_verify import verify_recipe_receipt
 from shellforgeai.core.recipe_registry import (
     detail_payload as recipe_detail_payload,
 )
@@ -9530,7 +9531,65 @@ def _render_v2_verify_human(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_v2_receipt_verify_human(payload: dict[str, Any]) -> str:
+    receipt = payload.get("receipt") if isinstance(payload.get("receipt"), dict) else {}
+    recipe = payload.get("recipe") if isinstance(payload.get("recipe"), dict) else {}
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    execution = payload.get("execution") if isinstance(payload.get("execution"), dict) else {}
+    post_check = payload.get("post_check") if isinstance(payload.get("post_check"), dict) else {}
+    status = str(payload.get("status") or "unknown")
+    lines = [f"Verify: {status.replace('_', ' ')}", "Verification type: receipt"]
+    if recipe.get("recipe_id"):
+        lines.append(f"Recipe: {recipe.get('recipe_id')}")
+    if target.get("name"):
+        lines.append(f"Target: {target.get('name')}")
+    lines.append(f"Receipt: {receipt.get('receipt_id') or receipt.get('receipt_ref') or 'unknown'}")
+    if payload.get("status") == "not_found":
+        lines.extend(["", "First safe command:", f"  {payload.get('first_safe_command')}"])
+        return "\n".join(lines) + "\n"
+    warnings = list(payload.get("warnings") or [])
+    if warnings and status in {"failed", "safety_drift", "unsupported"}:
+        lines.append(f"Reason: {warnings[0]}")
+    if execution.get("recorded_action"):
+        lines.extend(["", "Recorded action:", f"  {execution.get('recorded_action')}"])
+    lines.extend(["", "Post-check:"])
+    lines.append(f"- verification {post_check.get('verification_status') or 'unknown'}")
+    lines.append(f"- exact target matched: {str(bool(execution.get('exact_target_only'))).lower()}")
+    lines.append(
+        f"- no production target: {str(not bool(target.get('production_target'))).lower()}"
+    )
+    if status in {"failed", "safety_drift"}:
+        lines.extend(["", "No retry was attempted."])
+    lines.extend(["", "First safe command:", f"  {payload.get('first_safe_command')}"])
+    if warnings:
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "- Read-only receipt verification.",
+            (
+                "- Verify did not execute Docker, Compose, cleanup, remediation, "
+                "rollback, or shell commands."
+            ),
+            "- No container was restarted by verify.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _render_v2_verify_brief(payload: dict[str, Any]) -> str:
+    if payload.get("verification_type") == "receipt":
+        receipt = payload.get("receipt") if isinstance(payload.get("receipt"), dict) else {}
+        recipe = payload.get("recipe") if isinstance(payload.get("recipe"), dict) else {}
+        return (
+            f"Verify: {payload.get('status') or 'unknown'}\n"
+            "Type: receipt\n"
+            f"Recipe: {recipe.get('recipe_id') or 'unknown'}\n"
+            f"Receipt: {receipt.get('receipt_id') or receipt.get('receipt_ref') or 'unknown'}\n"
+            "Safety: read-only; no command executed by verify\n"
+        )
     target = cast(
         dict[str, Any], payload.get("target") if isinstance(payload.get("target"), dict) else {}
     )
@@ -10433,6 +10492,8 @@ _ASK_MUTATION_TERMS: tuple[str, ...] = (
     "apply",
     "rollback",
     "roll back",
+    "retry",
+    "rerun",
     "recreate",
     "rebuild",
     "compose up",
@@ -10899,6 +10960,8 @@ _VERIFY_ASK_CUES = (
 )
 _VERIFY_MUTATION_CUES = (
     "verify and restart",
+    "verify and rerun",
+    "verify and retry",
     "verify then fix",
     "apply and verify",
     "restart and verify",
@@ -10909,7 +10972,75 @@ _VERIFY_MUTATION_CUES = (
     "restart docker",
     "fix it",
     "apply it",
+    "if failed retry",
+    "retry it",
+    "rerun it",
+    "rollback it",
+    "execute receipt",
 )
+
+
+def _receipt_verify_ref(question: str) -> str | None:
+    m = re.search(
+        (
+            r"\b(?:verify|check|inspect|show|what happened in)\s+(?:the\s+)?"
+            r"(?:execution\s+)?receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b"
+        ),
+        question or "",
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    m = re.search(
+        r"\breceipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        question or "",
+        flags=re.IGNORECASE,
+    )
+    if m and any(
+        cue in (question or "").lower() for cue in ("verify", "check", "what happened", "pass")
+    ):
+        return m.group(1)
+    return None
+
+
+def _is_receipt_verify_ask(question: str) -> bool:
+    q = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    return bool(_receipt_verify_ref(question)) or any(
+        cue in q
+        for cue in (
+            "verify the execution receipt",
+            "verify execution receipt",
+            "verify receipt",
+            "check receipt",
+            "did the restart receipt pass",
+            "what happened in receipt",
+        )
+    )
+
+
+def _handle_receipt_verify_ask(question: str) -> bool:
+    if not _is_receipt_verify_ask(question):
+        return False
+    mutation_cues = _verify_mutation_cues(question)
+    ref = _receipt_verify_ref(question)
+    if mutation_cues:
+        console.print("Refused mutation part of the request.")
+        console.print(
+            "Receipt verification is read-only; retry, rerun, rollback, and execute "
+            "are not allowed from ask."
+        )
+        console.print("No action was taken.")
+    if ref:
+        console.print("Read-only receipt verify (deterministic ask routing):")
+        console.print(f"  shellforgeai verify --receipt {ref}")
+        console.print(f"  shellforgeai verify --receipt {ref} --json")
+    else:
+        console.print("Receipt id required for read-only receipt verification.")
+        console.print("Safe command form:")
+        console.print("  shellforgeai verify --receipt <receipt_id>")
+        console.print("  shellforgeai verify --receipt <receipt_id> --json")
+    console.print("No action was taken.")
+    return True
 
 
 def _verify_ask_target(question: str) -> str | None:
@@ -10957,6 +11088,8 @@ def _handle_v2_verify_ask(question: str) -> bool:
             "execute then verify",
         )
     )
+    if _handle_receipt_verify_ask(question):
+        return True
     if not verify and not verify_mutation_only:
         return False
     if not verify:
@@ -11347,9 +11480,26 @@ def verify(
             help="Verify current state after apply-preview context only; no apply is assumed.",
         ),
     ] = False,
+    receipt: Annotated[
+        str | None,
+        typer.Option(
+            "--receipt", help="Verify a governed recipe execution receipt by id or owned path."
+        ),
+    ] = None,
 ) -> None:
-    """Read-only V2 current-state verification. Does not apply or execute."""
-    _ = ctx
+    """Read-only V2 verification. Current-state by default; receipt-aware with --receipt."""
+    runtime = _ctx(ctx)
+    if receipt:
+        payload = verify_recipe_receipt(receipt, runtime.session.data_dir)
+        if json_output:
+            typer.echo(json.dumps(payload))
+        elif brief:
+            typer.echo(_render_v2_verify_brief(payload), nl=False)
+        else:
+            typer.echo(_render_v2_receipt_verify_human(payload), nl=False)
+        if payload.get("status") != "passed":
+            raise typer.Exit(1)
+        return
     payload = _build_v2_verify_payload(
         target=target,
         from_status=from_status,
@@ -12031,6 +12181,25 @@ def recipes_execute(
     else:
         typer.echo(_render_recipe_execute_human(payload), nl=False)
     if payload.get("status") != "executed":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("verify")
+def recipes_receipt_verify(
+    ctx: typer.Context,
+    receipt_ref: Annotated[
+        str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Verify a governed recipe execution receipt. Read-only; no retry or rollback."""
+    runtime = _ctx(ctx)
+    payload = verify_recipe_receipt(receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_v2_receipt_verify_human(payload), nl=False)
+    if payload.get("status") != "passed":
         raise typer.Exit(1)
 
 

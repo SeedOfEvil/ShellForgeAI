@@ -217,6 +217,7 @@ _RECIPES: tuple[Recipe, ...] = (
             "shellforgeai recipes preflight validate <preflight_id>",
             "shellforgeai recipes execute <preflight_id> --confirm",
             "shellforgeai recipes receipt validate <receipt_id>",
+            "shellforgeai verify --receipt <receipt_id>",
         ),
         blocked_reason="Execution requires a valid saved preflight and explicit --confirm.",
         safety_notes=(
