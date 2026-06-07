@@ -183,6 +183,28 @@ runner:
 python scripts/run_full_pytest.py
 ```
 
+Before expensive Docker01/full validation, run the read-only validation
+environment doctor when the container or dev environment is new, stale, or
+suspect:
+
+```bash
+python scripts/check_validation_env.py --profile docker01
+```
+
+The doctor separates required checks from optional/recommended checks. Required
+checks cover the active Python interpreter, `shellforgeai` importability,
+`pytest`, `ruff`, `compileall`, core OS tools (`git`, `rsync`, `ps`/procps,
+`timeout`), and validation helper presence. Optional checks include
+`pytest-xdist`, `/usr/bin/python3`, package metadata in source/editable contexts,
+and Docker/Docker Compose CLI presence for Docker01. It is read-only: it does
+not install packages, delete caches, chmod/chown, contact the Docker daemon, or
+run Docker/Compose mutation.
+
+Use `--json` for strict machine-readable preflight evidence and `--strict` when
+Docker01 validation should fail fast on missing recommended acceleration such as
+`pytest-xdist`. Without `--strict`, missing xdist is a warning and the serial
+full-pytest fallback remains valid, just slower.
+
 The runner detects `pytest-xdist` and, when available, runs
 `python -m pytest -q -n auto --dist loadscope --durations=25`. If xdist is not
 installed, it prints a clear fallback warning and runs serial
@@ -210,11 +232,13 @@ execution logs preserve the runner output so reviewers can see xdist
 availability/use, serial fallback, and slow-test duration reporting.
 
 Optional Docker01/dev optimization: a reusable ShellForgeAI validation image may
-preinstall dev dependencies such as `pytest-xdist` (included in the project
-`dev` extra) to avoid repeated setup cost and enable parallel full validation.
-That image is an optimization only. If unavailable, the current writable
-validation-container path still works, the runner reports serial fallback, and
-the image must not be used to skip or weaken selected tests or safety gates.
+be named `shellforgeai-test-runner` and may preinstall Python 3.12, `git`,
+`rsync`, procps/`ps`, `pytest`, `pytest-xdist`, `ruff`, and the project dev
+extras to avoid repeated setup cost and enable parallel full validation. That
+image is an optimization only, not a normal-user requirement and not a test
+skipping mechanism. If unavailable, the current writable validation-container
+path still works, the runner reports serial fallback, and the image must not be
+used to skip or weaken selected tests, selected commands, or safety gates.
 
 > Visibility, not skipping. PR158/PR160 do not mark any test slow and do not
 > skip any test. `--durations=25` only reports timing. Use the slowest-test

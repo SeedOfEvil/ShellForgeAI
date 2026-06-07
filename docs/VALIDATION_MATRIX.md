@@ -12,7 +12,12 @@ optimizer actually uses. Keep them in sync when editing.
 For every **full** row, the full-suite command is the bounded runner
 `python scripts/run_full_pytest.py`, not raw `pytest -q`. The runner uses
 `pytest-xdist` when available, falls back to serial pytest when unavailable, and
-always includes `--durations=25` so slow tests are visible.
+always includes `--durations=25` so slow tests are visible. For validation
+infrastructure changes or suspect Docker01/dev containers, preflight the
+environment first with `python scripts/check_validation_env.py --profile
+docker01`; the doctor is read-only and classifies missing dev dependencies, OS
+tools, Python path mismatches, xdist availability, and cache hygiene before the
+expensive lane runs.
 
 How matching works:
 
