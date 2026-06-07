@@ -229,11 +229,19 @@ def test_json_blocked_shape_has_non_mutating_safety(tmp_path: Path) -> None:
 
 def test_ask_routing_refuses_natural_language_execution() -> None:
     runner = CliRunner()
-    for prompt in ["execute the restart recipe", "run that"]:
+    for prompt in [
+        "execute the restart recipe",
+        "run that",
+        "restart shellforgeai now",
+        "run docker restart",
+        "apply the restart",
+    ]:
         res = runner.invoke(app, ["ask", prompt])
         assert res.exit_code == 0
         assert "Refused" in res.output
-        assert "recipes execute <preflight_id> --confirm" in res.output
+        assert "No action" in res.output or "No recipe was executed" in res.output
+        if "recipe" in prompt or prompt in {"run that", "apply the restart"}:
+            assert "recipes execute <preflight_id> --confirm" in res.output
         assert "docker restart" not in res.output
 
 

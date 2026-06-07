@@ -73,6 +73,7 @@ class _Check:
     audit_list_check: bool = False  # no audit storage → warn
     audit_timeline_check: bool = False  # no audit storage → warn
     compose_list_check: bool = False  # no docker → warn
+    compose_env_check_production_block_check: bool = False
 
 
 def _read_only_checks() -> list[_Check]:
@@ -172,11 +173,12 @@ def _read_only_checks() -> list[_Check]:
             compose_target_check=True,
         ),
         _Check(
-            f"compose env-check --target {target} --json",
+            f"compose env-check production target blocks safely ({target})",
             ("compose", "env-check", "--target", target, "--json"),
             "compose",
             profiles=standard,
             expects_json=True,
+            compose_env_check_production_block_check=True,
         ),
         _Check(
             f"compose env-contract --target {target} --json",
@@ -238,6 +240,47 @@ class _Result:
     mutation: bool = False
     reason: str | None = None
     warn: bool = False  # true when status=skip and the cause is environmental
+
+
+def _env_check_expected_safe_block(parsed: Any) -> tuple[bool, str]:
+    if not isinstance(parsed, dict):
+        return False, "env-check output is not an object"
+    status = str(parsed.get("status") or "").lower()
+    readiness = parsed.get("readiness") if isinstance(parsed.get("readiness"), dict) else {}
+    blockers = [str(b) for b in readiness.get("blockers") or []]
+    allowlist = parsed.get("allowlist") if isinstance(parsed.get("allowlist"), dict) else {}
+    allow_blockers = [str(b) for b in allowlist.get("blockers") or []]
+    target = parsed.get("target") if isinstance(parsed.get("target"), dict) else {}
+    safety = parsed.get("safety") if isinstance(parsed.get("safety"), dict) else {}
+    all_reasons = " ".join([status, *blockers, *allow_blockers]).lower()
+    safe_reason = any(
+        token in all_reasons
+        for token in (
+            "production target refused",
+            "target_not_allowlisted",
+            "missing disposable",
+            "shellforgeai.disposable",
+            "allow_restart",
+        )
+    )
+    no_mutation = all(
+        safety.get(flag) is False
+        for flag in (
+            "docker_compose_executed",
+            "container_restarted",
+            "remediation_executed",
+            "cleanup_executed",
+            "rollback_executed",
+            "arbitrary_command_execution",
+        )
+    )
+    target_ref = str(parsed.get("target_input") or target.get("container") or "").lower()
+    expected_target = (
+        target_ref == DEFAULT_COMPOSE_TARGET or target.get("container") == DEFAULT_COMPOSE_TARGET
+    )
+    ok = status == "blocked" and safe_reason and no_mutation and expected_target
+    reason = "; ".join(blockers or allow_blockers or ["production target blocked safely"])
+    return ok, reason
 
 
 def _classify_compose_failure(stdout: str, stderr: str) -> tuple[str, str, bool]:
@@ -361,6 +404,7 @@ def _run_command_checks(profile: str) -> list[_Result]:
             )
             continue
 
+        parsed: Any = None
         if check.expects_json:
             try:
                 parsed = json.loads(stdout) if stdout.strip() else None
@@ -375,6 +419,30 @@ def _run_command_checks(profile: str) -> list[_Result]:
                     )
                 )
                 continue
+            if check.compose_env_check_production_block_check:
+                ok, reason = _env_check_expected_safe_block(parsed)
+                if ok:
+                    results.append(
+                        _Result(
+                            name=check.name,
+                            command=cmd,
+                            status="pass",
+                            category=check.category,
+                            reason=reason,
+                        )
+                    )
+                    continue
+                if exit_code != 0:
+                    results.append(
+                        _Result(
+                            name=check.name,
+                            command=cmd,
+                            status="fail",
+                            category=check.category,
+                            reason=f"env-check did not report expected safe block: {reason}",
+                        )
+                    )
+                    continue
             if check.audit_timeline_check and (parsed in (None, [], {})):
                 results.append(
                     _Result(
