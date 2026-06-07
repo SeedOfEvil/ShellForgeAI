@@ -103,12 +103,21 @@ Debug
   preview.
 - Verify entries (`verify`, `verify --brief`, `verify --json`,
   `verify --target <target>`, `verify --from-status`, `verify --from-triage`,
-  `verify --from-propose`, and `verify --from-apply-preview`) route to the V2
-  read-only current-state verification entrypoint. Natural verify prompts such
-  as "verify status", "verify the system", "did anything improve?", and "is it
-  fixed?" verify current observed state only; they do not claim a completed
-  remediation. Mixed mutation phrasing such as "verify and restart" or "apply
-  and verify" is refused with no action taken.
+  `verify --from-propose`, `verify --from-apply-preview`,
+  `verify --receipt <receipt_id>`, and `verify --receipt <receipt_id> --json`)
+  route to the V2 read-only verification entrypoint. Natural verify prompts
+  such as "verify status", "verify the system", "did anything improve?", and
+  "is it fixed?" verify current observed state only; they do not claim a
+  completed remediation. Receipt prompts such as "verify receipt <id>" show the
+  safe receipt verification command. Mixed mutation phrasing such as "verify and
+  restart", "retry the receipt", or "rollback it" is refused with no action
+  taken. Example:
+
+  ```text
+  > verify --receipt <receipt_id>
+  > verify --receipt <receipt_id> --json
+  > recipes receipt verify <receipt_id> --json
+  ```
 - Handoff entries (`handoff`, `handoff --brief`, `handoff --json`,
   `handoff --save`, `handoff summary`, `handoff --target <target>`, and
   `handoff --from-status` / `--from-triage` / `--from-propose` /

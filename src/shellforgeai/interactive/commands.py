@@ -76,6 +76,8 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes preflight validate <preflight_id>",
     "recipes execute <preflight_id> --confirm",
     "recipes receipt validate <receipt_id>",
+    "recipes receipt verify <receipt_id>",
+    "verify --receipt <receipt_id>",
     "safe-actions",
     "help",
     "pending",
@@ -294,6 +296,10 @@ _QUICK_MUTATION_PHRASES = (
     "do it",
     "run the recipe",
     "restart the disposable target",
+    "retry the receipt",
+    "retry it",
+    "rerun it",
+    "rollback it",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -488,6 +494,20 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 5 and tokens[4] == "--json"
         if len(tokens) == 4 or json_flag:
             argv = ("recipes", "receipt", "validate", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {4, 5} and tokens[:3] == ("recipes", "receipt", "verify") and tokens[3]:
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("recipes", "receipt", "verify", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("verify", "--receipt") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("verify", "--receipt", original_tokens[2])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
@@ -862,8 +882,23 @@ def route_input(text: str) -> RoutedCommand:
         "clean up and verify",
         "cleanup and verify",
         "execute then verify",
+        "verify and rerun",
+        "verify and retry",
+        "retry the receipt",
+        "rollback it",
         "restart compose",
     )
+    receipt_match = re.search(
+        r"\b(?:verify|check)\s+(?:the\s+)?(?:execution\s+)?receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if receipt_match:
+        if any(mut in lowered for mut in verify_mutations):
+            return RoutedCommand(name="mutation_refused", args=raw)
+        return RoutedCommand(
+            name="cli_dispatch", args=raw, argv=("verify", "--receipt", receipt_match.group(1))
+        )
     if any(cue in lowered for cue in verify_cues) or re.search(
         r"\bverify\s+[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\b", raw, flags=re.IGNORECASE
     ):

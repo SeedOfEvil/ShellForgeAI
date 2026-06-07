@@ -95,14 +95,26 @@ anything.
      `shellforgeai verify --from-status`, `shellforgeai verify --from-triage`,
      `shellforgeai verify --from-propose`, and `shellforgeai verify
      --from-apply-preview`.
-   - Contract: read-only current-state verification only. It collects/reuses
-     deterministic status/triage evidence, reports `ok`, `degraded`, `blocked`,
-     or `unknown`, lists evidence/limitations, and suggests a first safe
-     command. It does not apply, create a receipt, create a mission or plan,
+   - Receipt-aware forms: `shellforgeai verify --receipt <receipt_ref>`,
+     `shellforgeai verify --receipt <receipt_ref> --brief`, and
+     `shellforgeai verify --receipt <receipt_ref> --json`; the recipe namespace
+     also exposes `shellforgeai recipes receipt verify <receipt_ref> [--json]`.
+   - Current-state contract: read-only current-state verification. It
+     collects/reuses deterministic status/triage evidence, reports `ok`,
+     `degraded`, `blocked`, or `unknown`, lists evidence/limitations, and
+     suggests a first safe command. `--from-propose` and `--from-apply-preview`
+     only name the previous context; they do not prove an action was executed.
+   - Receipt contract: read-only post-execution receipt verification. It loads a
+     ShellForgeAI-owned governed recipe execution receipt, validates structure,
+     manifest/checksum/safety signals, identifies the recorded recipe/target/argv
+     and execution result, reports the receipt's recorded post-check status, and
+     suggests the next safe read-only command. It verifies what the receipt says
+     happened; it does not re-run the recipe or assume current state equals the
+     recorded state.
+   - Both verify modes do not apply, create a receipt, create a mission or plan,
      execute remediation/rollback/cleanup, run Docker/Compose, restart
-     containers, call the model, or assume any action happened. `--from-propose`
-     and `--from-apply-preview` only name the previous context; they do not
-     prove an action was executed unless a future receipt/artifact is supplied.
+     containers, call the model, retry, roll back, or perform natural-language
+     mutation.
 6. **handoff**
    - Sixth command: `shellforgeai handoff`.
    - Brief/JSON/save/source forms: `shellforgeai handoff --brief`,

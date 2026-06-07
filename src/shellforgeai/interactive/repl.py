@@ -86,8 +86,9 @@ V2 golden path:
   recipes eligibility --recipe docker.disposable_restart --target <target>
   recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
   recipes preflight validate <id> / recipes execute <id> --confirm [--json]
-  recipes receipt validate <id> [--json]
-  apply-preview [--brief|--json] / verify [--brief|--json] / handoff [--brief|--json|--save]
+  recipes receipt validate <id> [--json] / recipes receipt verify <id> [--json]
+  apply-preview [--brief|--json] / verify [--brief|--json]
+  verify --receipt <id> [--json] / handoff [--brief|--json|--save]
   triage/propose/verify/handoff --target <target> [--json] / handoff summary
   full path: status -> triage -> propose -> apply-preview -> verify -> handoff
 

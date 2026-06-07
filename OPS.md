@@ -6,7 +6,7 @@
 2. `shellforgeai triage --brief` — bounded read-only ranked suspect view with the first safe command.
 3. `shellforgeai propose` — read-only next-action proposal preview; no plan created and no action executed.
 4. `shellforgeai apply-preview` — read-only execution-boundary preview; no apply, mission, remediation, rollback, cleanup, Docker, Compose, or restart action executed.
-5. `shellforgeai verify` — read-only current-state verification; no applied action or remediation receipt is assumed.
+5. `shellforgeai verify` — read-only current-state verification; no applied action or remediation receipt is assumed. Use `shellforgeai verify --receipt <receipt_id>` after governed recipe execution to verify the existing receipt without retrying, rolling back, restarting, or running Docker/Compose.
 6. `shellforgeai handoff` — read-only operator handoff packet summarizing the golden-path posture and first safe command; it does not execute fixes or imply remediation happened. `shellforgeai handoff --save` writes only a ShellForgeAI-owned artifact under `<data_dir>/v2_handoffs/`.
    - Handoff artifact lifecycle (read-only except ShellForgeAI-owned writes):
      - `shellforgeai handoff --save` — write the handoff artifact (`<data_dir>/v2_handoffs/<handoff_id>/`).
@@ -22,6 +22,8 @@
 9. `shellforgeai ops report --save` — preserve an evidence-backed report when handoff or comparison is needed.
 
 Safe V2 path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
+
+Governed disposable recipe path after preflight: `recipes preflight --save -> recipes preflight validate -> recipes execute <preflight_id> --confirm -> recipes receipt validate <receipt_id> -> verify --receipt <receipt_id> -> handoff`. Receipt-aware verify is read-only: it reads the governed execution receipt and reports recorded post-check evidence; it never re-executes the recipe, retries, rolls back, restarts containers, or calls Docker Compose.
 
 `shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
 `shellforgeai triage docker` / `triage docker --brief` views all share the same
@@ -1869,6 +1871,8 @@ shellforgeai recipes preflight --recipe docker.disposable_restart --target sfai-
 shellforgeai recipes preflight validate <preflight_id>
 shellforgeai recipes execute <preflight_id> --confirm
 shellforgeai recipes receipt validate <receipt_id>
+shellforgeai verify --receipt <receipt_id>
+shellforgeai handoff --json
 docker rm -f sfai-pr167-user-sim
 ```
 
