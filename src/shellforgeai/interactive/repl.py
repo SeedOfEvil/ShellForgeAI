@@ -86,7 +86,7 @@ V2 golden path:
   recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
   recipes preflight validate <id> / recipes execute <id> --confirm [--json]
   recipes receipt validate <id> [--json] / recipes receipt verify <id> [--json]
-  recipes receipt history/inspect/export/export-validate/compare/compare-latest [--json]
+  recipes receipt audit/history/inspect/export/export-validate/compare/compare-latest [--json]
   recipes receipt rollback-preview <id> / recovery-execute <id> --confirm / recovery-status <id>
   apply-preview [--brief|--json] / verify [--brief|--json]
   verify --receipt <id> [--json] / handoff [--brief|--json|--save]
@@ -1714,6 +1714,7 @@ def _interactive_mutation_refusal(text: str) -> str:
         "- triage docker detail <target>\n"
         "- remediation eligibility --target <target> --explain\n"
         "- recipes list\n"
+        "- recipes receipt audit\n"
         "- recipes eligibility --recipe docker.disposable_restart --target <target>"
     )
 

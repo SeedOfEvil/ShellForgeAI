@@ -417,8 +417,9 @@ shellforgeai recipes execute <preflight_id> --confirm
 shellforgeai recipes receipt validate <receipt_id>
 shellforgeai verify --receipt <receipt_id>
 shellforgeai recipes receipt rollback-preview <receipt_id>
+shellforgeai recipes receipt audit --json
 shellforgeai recipes receipt recovery-execute <receipt_id> --confirm
 shellforgeai verify --receipt <recovery_receipt_id> --json
 ```
 
-Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback execution, remediation execution, arbitrary shell, and model-driven execution remain out of scope. Receipt rollback-preview is read-only and explains that `docker.disposable_restart` has no true rollback. Recovery execution is a separate confirm-gated bounded repeat restart of the exact disposable allowlisted target from a valid receipt; it never runs from natural language and never uses Docker Compose.
+Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback execution, remediation execution, arbitrary shell, and model-driven execution remain out of scope. Receipt audit and rollback-preview are read-only: audit summarizes local execution/recovery receipt chains and flags malformed receipts, missing originals, failed verification, and safety drift without executing anything; rollback-preview explains that `docker.disposable_restart` has no true rollback. Recovery execution is a separate confirm-gated bounded repeat restart of the exact disposable allowlisted target from a valid receipt; it never runs from natural language and never uses Docker Compose.

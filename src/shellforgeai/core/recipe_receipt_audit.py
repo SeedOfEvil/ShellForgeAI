@@ -26,6 +26,7 @@ INSPECT_MODE = "v2_recipe_receipt_inspect"
 EXPORT_MODE = "v2_recipe_receipt_export"
 EXPORT_VALIDATE_MODE = "v2_recipe_receipt_export_validate"
 COMPARE_MODE = "v2_recipe_receipt_compare"
+AUDIT_MODE = "v2_recipe_receipt_audit"
 EXPORT_MANIFEST_KIND = "v2_recipe_receipt_export"
 DEFAULT_HISTORY_LIMIT = 20
 MAX_HISTORY_LIMIT = 100
@@ -57,6 +58,7 @@ def audit_safety() -> dict[str, bool]:
         "mutation_performed": False,
         "docker_compose_executed": False,
         "container_restarted": False,
+        "production_restart_executed": False,
         "recovery_executed": False,
         "rollback_executed": False,
         "remediation_executed": False,
@@ -185,6 +187,306 @@ def receipt_history(data_dir: Path | str, *, limit: int = DEFAULT_HISTORY_LIMIT)
         "safety": audit_safety(),
         "warnings": warnings,
     }
+
+
+_AUDIT_SAFETY_FLAG_KEYS = (
+    "container_restarted",
+    "production_restart_executed",
+    "docker_compose_executed",
+    "shell_true",
+    "arbitrary_command_execution",
+    "natural_language_execution",
+)
+
+
+def _status_for_audit(receipt: dict[str, Any]) -> str:
+    status = str(receipt.get("status") or "unknown")
+    if status == "verification_failed":
+        return "failed"
+    if status in {"executed", "failed", "blocked"}:
+        return status
+    return status or "unknown"
+
+
+def _receipt_type(receipt: dict[str, Any]) -> str:
+    return "recovery" if receipt.get("mode") == RECOVERY_RECEIPT_MODE else "execution"
+
+
+def _safety_flag(receipt: dict[str, Any], key: str) -> bool:
+    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    return safety.get(key) is True or receipt.get(key) is True
+
+
+def _audit_receipt_entry(receipt: dict[str, Any], path: Path) -> dict[str, Any]:
+    return {
+        "receipt_id": str(receipt.get("receipt_id") or path.name),
+        "receipt_type": _receipt_type(receipt),
+        "status": _status_for_audit(receipt),
+        "verification_status": _verification_status(receipt),
+        "created_at": receipt.get("created_at"),
+        "path": str(path),
+        "safety_summary": {key: _safety_flag(receipt, key) for key in _AUDIT_SAFETY_FLAG_KEYS},
+    }
+
+
+def _known_exports(data_dir: Path | str, receipt_id: str) -> list[dict[str, Any]]:
+    root = receipt_export_root(data_dir)
+    if not root.exists():
+        return []
+    exports: list[dict[str, Any]] = []
+    for d in root.iterdir():
+        if not d.is_dir():
+            continue
+        manifest, err = _read_json(d / "export-manifest.json")
+        if err or not manifest or manifest.get("source_receipt_id") != receipt_id:
+            continue
+        exports.append(
+            {
+                "export_id": manifest.get("export_id") or d.name,
+                "path": str(d),
+                "created_at": manifest.get("created_at"),
+            }
+        )
+    exports.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return exports
+
+
+def _audit_finding(kind: str, message: str, *, receipt_id: str | None = None) -> dict[str, Any]:
+    item: dict[str, Any] = {"kind": kind, "message": message}
+    if receipt_id:
+        item["receipt_id"] = receipt_id
+    return item
+
+
+def receipt_audit(
+    data_dir: Path | str,
+    *,
+    target: str | None = None,
+    recipe_id: str | None = None,
+    limit: int = DEFAULT_HISTORY_LIMIT,
+    include_exports: bool = False,
+    include_compare_summary: bool = False,
+) -> dict[str, Any]:
+    """Summarize governed execution/recovery receipt chains without executing anything."""
+    bounded_limit, limit_warnings = _coerce_limit(int(limit))
+    warnings: list[str] = [*limit_warnings]
+    findings: list[dict[str, Any]] = []
+    all_rows: list[tuple[dict[str, Any], Path, dict[str, Any]]] = []
+
+    root = recipe_receipt_root(data_dir)
+    if root.exists():
+        for d in root.iterdir():
+            if not d.is_dir():
+                continue
+            receipt_path = d / "recipe-receipt.json"
+            if not receipt_path.exists():
+                continue
+            receipt, err = _read_json(receipt_path)
+            if err or receipt is None:
+                msg = f"malformed receipt at {d.name}: {err or 'could not read receipt'}"
+                warnings.append(msg)
+                findings.append(_audit_finding("malformed_receipt", msg))
+                continue
+            validation = validate_receipt(str(receipt.get("receipt_id") or d.name), data_dir)
+            if validation.get("status") != "ok":
+                warnings.extend(str(w) for w in validation.get("warnings") or [])
+                findings.append(
+                    _audit_finding(
+                        "receipt_validation_warning",
+                        f"receipt validation status is {validation.get('status')}",
+                        receipt_id=str(receipt.get("receipt_id") or d.name),
+                    )
+                )
+            all_rows.append((receipt, d, validation))
+
+    all_rows.sort(key=lambda pair: _created_sort_key(pair[0], pair[1]), reverse=True)
+    inspected_rows = all_rows[:bounded_limit]
+    known_ids = {str(receipt.get("receipt_id") or path.name) for receipt, path, _ in all_rows}
+
+    chains_map: dict[str, dict[str, Any]] = {}
+    for receipt, path, validation in inspected_rows:
+        rid = str(receipt.get("receipt_id") or path.name)
+        rec_recipe = str(receipt.get("recipe_id") or "unknown")
+        rec_target = str(receipt.get("target") or "unknown")
+        if target and rec_target != target:
+            continue
+        if recipe_id and rec_recipe != recipe_id:
+            continue
+        original_id = str(receipt.get("original_receipt_id") or rid)
+        chain = chains_map.setdefault(
+            original_id,
+            {
+                "target": rec_target,
+                "recipe_id": rec_recipe,
+                "original_receipt_id": original_id,
+                "latest_receipt_id": rid,
+                "receipts": [],
+                "findings": [],
+                "warnings": [],
+            },
+        )
+        if str(receipt.get("created_at") or "") >= str(chain.get("latest_created_at") or ""):
+            chain["latest_receipt_id"] = rid
+            chain["latest_created_at"] = receipt.get("created_at") or ""
+        if chain.get("target") in {"unknown", ""} and rec_target:
+            chain["target"] = rec_target
+        if chain.get("recipe_id") in {"unknown", ""} and rec_recipe:
+            chain["recipe_id"] = rec_recipe
+        entry = _audit_receipt_entry(receipt, path)
+        if include_exports:
+            entry["exports"] = _known_exports(data_dir, rid)
+        chain["receipts"].append(entry)
+
+        if receipt.get("mode") not in _SUPPORTED_MODES:
+            msg = f"unsupported receipt mode: {receipt.get('mode') or 'unknown'}"
+            chain["warnings"].append(msg)
+            chain["findings"].append(_audit_finding("unsupported_receipt", msg, receipt_id=rid))
+        if rec_recipe != SUPPORTED_RECIPE:
+            msg = f"unsupported recipe id: {rec_recipe}"
+            chain["warnings"].append(msg)
+            chain["findings"].append(_audit_finding("unsupported_recipe", msg, receipt_id=rid))
+        if validation.get("status") != "ok":
+            msg = f"validation status is {validation.get('status')}"
+            chain["warnings"].append(msg)
+        if _verification_status(receipt) == "failed":
+            chain["findings"].append(
+                _audit_finding("verification_failed", "receipt verification failed", receipt_id=rid)
+            )
+        for key in _AUDIT_SAFETY_FLAG_KEYS:
+            if key == "container_restarted":
+                continue
+            if _safety_flag(receipt, key):
+                msg = f"safety flag recorded true: {key}"
+                chain["warnings"].append(msg)
+                chain["findings"].append(_audit_finding("safety_drift", msg, receipt_id=rid))
+        if receipt.get("mode") == RECOVERY_RECEIPT_MODE:
+            if original_id not in known_ids:
+                msg = f"recovery receipt links to missing original receipt: {original_id}"
+                chain["warnings"].append(msg)
+                chain["findings"].append(
+                    _audit_finding("missing_original_receipt", msg, receipt_id=rid)
+                )
+            else:
+                chain["findings"].append(
+                    _audit_finding(
+                        "recovery_links_original",
+                        "Recovery receipt links to original execution receipt.",
+                        receipt_id=rid,
+                    )
+                )
+
+    chains = list(chains_map.values())
+    for chain in chains:
+        chain["receipts"].sort(key=lambda item: str(item.get("created_at") or ""))
+        chain.pop("latest_created_at", None)
+    chains.sort(
+        key=lambda chain: max(str(item.get("created_at") or "") for item in chain["receipts"]),
+        reverse=True,
+    )
+
+    for chain in chains:
+        findings.extend(chain.get("findings") or [])
+        warnings.extend(str(w) for w in chain.get("warnings") or [])
+
+    receipt_entries = [entry for chain in chains for entry in chain["receipts"]]
+    summary = {
+        "receipts_found": len(receipt_entries),
+        "execution_receipts": sum(
+            1 for item in receipt_entries if item.get("receipt_type") == "execution"
+        ),
+        "recovery_receipts": sum(
+            1 for item in receipt_entries if item.get("receipt_type") == "recovery"
+        ),
+        "failed_receipts": sum(1 for item in receipt_entries if item.get("status") == "failed"),
+        "verification_failed": sum(
+            1 for item in receipt_entries if item.get("verification_status") == "failed"
+        ),
+        "safety_drift": sum(
+            1
+            for item in receipt_entries
+            if any(
+                item.get("safety_summary", {}).get(key) is True
+                for key in (
+                    "production_restart_executed",
+                    "docker_compose_executed",
+                    "shell_true",
+                    "arbitrary_command_execution",
+                    "natural_language_execution",
+                )
+            )
+        ),
+        "missing_original_receipts": sum(
+            1 for item in findings if item.get("kind") == "missing_original_receipt"
+        ),
+        "production_restart_recorded": sum(
+            1
+            for item in receipt_entries
+            if item.get("safety_summary", {}).get("production_restart_executed") is True
+        ),
+    }
+
+    if not all_rows and not warnings:
+        status = "empty"
+    elif all_rows and not receipt_entries:
+        status = "no_matches"
+    else:
+        status = "ok" if receipt_entries or warnings else "empty"
+
+    if receipt_entries and summary["safety_drift"] == 0:
+        findings.append(_audit_finding("no_safety_drift", "No safety drift detected."))
+    if receipt_entries and summary["production_restart_recorded"] == 0:
+        findings.append(
+            _audit_finding("no_production_restart", "No production target restart recorded.")
+        )
+
+    safe_next = ["shellforgeai recipes receipt history --json"]
+    if receipt_entries:
+        safe_next = [
+            "shellforgeai recipes receipt inspect <receipt_id> --json",
+            "shellforgeai recipes receipt history --json",
+            "shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id> --json",
+        ]
+    compare_summary: dict[str, Any] | None = None
+    if include_compare_summary:
+        compare_summary = {
+            "available": len(receipt_entries) >= 2,
+            "command": (
+                "shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id> --json"
+            ),
+            "note": (
+                "Receipt audit does not run compare automatically; use the explicit "
+                "read-only compare command."
+            ),
+        }
+        if len(receipt_entries) < 2:
+            warnings.append(
+                "compare summary requested but fewer than two matching receipts are present"
+            )
+
+    payload: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": AUDIT_MODE,
+        "status": status,
+        "read_only": True,
+        "mutation_performed": False,
+        "filters": {
+            "target": target or None,
+            "recipe_id": recipe_id or None,
+            "limit": bounded_limit,
+            "include_exports": bool(include_exports),
+            "include_compare_summary": bool(include_compare_summary),
+        },
+        "summary": summary,
+        "chains": chains,
+        "findings": findings,
+        "warnings": list(dict.fromkeys(warnings)),
+        "first_safe_command": safe_next[0],
+        "safe_next_commands": safe_next,
+        "safety": audit_safety(),
+    }
+    if compare_summary is not None:
+        payload["compare_summary"] = compare_summary
+    return payload
 
 
 def _resolve_and_validate_receipt(

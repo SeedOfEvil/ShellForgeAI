@@ -289,6 +289,7 @@ Rollback posture for this recipe is not true undo: bounded recovery is a future 
 Governed recipe receipts now have a read-only audit surface after execute, verify, rollback-preview, and recovery-execute:
 
 ```bash
+shellforgeai recipes receipt audit [--target <target>] [--recipe <recipe_id>] [--limit 20] [--include-exports] [--include-compare-summary] [--json]
 shellforgeai recipes receipt history [--limit 10] [--json]
 shellforgeai recipes receipt inspect <receipt_ref> [--json]
 shellforgeai recipes receipt export <receipt_ref> [--json]
@@ -297,4 +298,4 @@ shellforgeai recipes receipt compare <before_receipt_ref> <after_receipt_ref> [-
 shellforgeai recipes receipt compare-latest [--json]
 ```
 
-History, inspect, export-validate, compare, and compare-latest read only ShellForgeAI-owned receipt/export artifacts. Export first validates a ShellForgeAI-owned receipt and writes only a portable receipt export bundle under ShellForgeAI-owned export metadata; it does not inspect Docker, execute verify, recover, rollback, remediate, clean up, restart, call a model, or run shell commands. JSON modes emit strict JSON with `read_only`, `mutation_performed`, safety flags, warnings, and receipt lineage fields for recovery receipts.
+`audit` reads only ShellForgeAI-owned receipt artifacts and summarizes execution/recovery chains, original/recovery links, status, verification status, target, recipe, timestamps, and safety flags. It reports anomalies such as malformed receipts, unsupported recipes, missing original receipts, failed verification, production restart flags, Docker Compose flags, `shell_true`, arbitrary command execution, and natural-language execution; it never executes recipes, reruns receipts, restarts containers, calls Docker/Compose, creates exports, runs compare, or calls a model. History, inspect, export-validate, compare, and compare-latest read only ShellForgeAI-owned receipt/export artifacts. Export first validates a ShellForgeAI-owned receipt and writes only a portable receipt export bundle under ShellForgeAI-owned export metadata; it does not inspect Docker, execute verify, recover, rollback, remediate, clean up, restart, call a model, or run shell commands. JSON modes emit strict JSON with `read_only`, `mutation_performed`, safety flags, warnings, and receipt lineage fields for recovery receipts.
