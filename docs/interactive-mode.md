@@ -499,6 +499,10 @@ Interactive mode supports the exact command-form `recipes receipt recovery-execu
 Interactive mode accepts exact read-only receipt audit commands through the safe CLI dispatcher:
 
 ```text
+recipes receipt audit [--json]
+recipes receipt audit --target <target>
+recipes receipt audit --recipe docker.disposable_restart
+recipes receipt audit --limit 10 [--json]
 recipes receipt history [--json]
 recipes receipt history --limit 10 [--json]
 recipes receipt inspect <receipt_ref> [--json]
@@ -508,4 +512,4 @@ recipes receipt compare <a> <b> [--json|--only-changed]
 recipes receipt compare-latest [--json]
 ```
 
-Natural-language receipt mutation remains refused. Phrases such as `recover latest receipt now`, `rollback latest receipt`, `restart it again`, `rerun the receipt`, `apply the receipt`, and `cleanup old receipts` do not execute recovery, rollback, restart, cleanup, remediation, shell, Docker, Compose, or model-driven actions.
+Natural-language audit phrasing such as `audit recipe receipts`, `show disposable restart audit`, `what happened with the restart recipe?`, `summarize recovery receipts`, and `show receipt chain` routes to read-only audit guidance. Natural-language receipt mutation remains refused. Phrases such as `recover latest receipt now`, `rollback latest receipt`, `restart it again`, `rerun the receipt`, `rerun the last receipt`, `recover it again`, `execute the last recipe`, `rollback the last recovery`, `restart from the receipt`, `apply the receipt`, and `cleanup old receipts` do not execute recovery, rollback, restart, cleanup, remediation, shell, Docker, Compose, or model-driven actions.

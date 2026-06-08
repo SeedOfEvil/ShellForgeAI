@@ -1514,6 +1514,13 @@ Execution blocks unless the saved preflight is valid and ready, the current targ
 Recipe receipt audit commands list, inspect, export, validate exports, and compare existing governed execution/recovery receipts without executing anything:
 
 ```bash
+shellforgeai recipes receipt audit
+shellforgeai recipes receipt audit --json
+shellforgeai recipes receipt audit --target <target>
+shellforgeai recipes receipt audit --recipe docker.disposable_restart
+shellforgeai recipes receipt audit --limit 20
+shellforgeai recipes receipt audit --include-exports
+shellforgeai recipes receipt audit --include-compare-summary
 shellforgeai recipes receipt history
 shellforgeai recipes receipt history --limit 10 --json
 shellforgeai recipes receipt inspect <receipt_id>
@@ -1527,4 +1534,4 @@ shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id> --on
 shellforgeai recipes receipt compare-latest --json
 ```
 
-`history` shows ShellForgeAI-owned execution and recovery receipts newest first, including receipt id, mode, recipe id, target, status, creation time, verification status, and recovery lineage. `inspect` validates the receipt bundle before rendering identity, lineage, recorded argv, verification, safety flags, artifact paths, warnings, and safe next commands. `export` writes only a portable ShellForgeAI-owned metadata bundle under the receipt export area after validation; `export-validate` checks the exported manifest, JSON, checksums, schema, identity, and safety fields. `compare` and `compare-latest` compare recorded fields only and never call Docker, Compose, shell, verify execution, recovery, rollback, cleanup, remediation, or a model.
+`audit` summarizes local governed receipt chains without executing anything. It links recovery receipts to originals, counts execution/recovery/failed/verification-failed receipts, applies `--target`, `--recipe`, and `--limit` filters, and flags malformed receipts, missing original receipts, unsupported recipes, production restart flags, Docker Compose flags, `shell_true`, arbitrary command execution, and natural-language execution. `--include-exports` only lists known export refs when discoverable; `--include-compare-summary` points to the explicit read-only compare command and does not run compare. `history` shows ShellForgeAI-owned execution and recovery receipts newest first, including receipt id, mode, recipe id, target, status, creation time, verification status, and recovery lineage. `inspect` validates the receipt bundle before rendering identity, lineage, recorded argv, verification, safety flags, artifact paths, warnings, and safe next commands. `export` writes only a portable ShellForgeAI-owned metadata bundle under the receipt export area after validation; `export-validate` checks the exported manifest, JSON, checksums, schema, identity, and safety fields. `compare` and `compare-latest` compare recorded fields only and never call Docker, Compose, shell, verify execution, recovery, rollback, cleanup, remediation, or a model.

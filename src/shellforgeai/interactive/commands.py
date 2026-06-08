@@ -77,6 +77,9 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes execute <preflight_id> --confirm",
     "recipes receipt history",
     "recipes receipt history --limit 10",
+    "recipes receipt audit",
+    "recipes receipt audit --json",
+    "recipes receipt audit --limit 10",
     "recipes receipt inspect <receipt_id>",
     "recipes receipt export <receipt_id>",
     "recipes receipt export-validate <export_id>",
@@ -267,6 +270,11 @@ _ALLOWED_CLI_DISPATCH.update(
         ("recipes", "list", "--json"): ("recipes", "list", "--json"),
         ("recipes", "receipt", "history"): ("recipes", "receipt", "history"),
         ("recipes", "receipt", "history", "--json"): ("recipes", "receipt", "history", "--json"),
+        ("recipes", "receipt", "audit"): ("recipes", "receipt", "audit"),
+        ("recipes", "receipt", "audit", "--json"): ("recipes", "receipt", "audit", "--json"),
+        ("audit", "recipes"): ("recipes", "receipt", "audit"),
+        ("audit", "governed", "actions"): ("recipes", "receipt", "audit"),
+        ("audit", "recipes", "--json"): ("recipes", "receipt", "audit", "--json"),
         ("recipes", "receipt", "compare-latest"): ("recipes", "receipt", "compare-latest"),
         ("recipes", "receipt", "compare-latest", "--json"): (
             "recipes",
@@ -315,6 +323,7 @@ _QUICK_MUTATION_PHRASES = (
     "apply the proposal",
     "run the plan",
     "execute recipe",
+    "execute the last recipe",
     "execute the recipe",
     "run restart recipe",
     "run the restart recipe",
@@ -340,8 +349,12 @@ _QUICK_MUTATION_PHRASES = (
     "run recovery",
     "execute recovery",
     "rerun the receipt",
+    "rerun receipt",
     "recover latest receipt now",
     "rollback latest receipt",
+    "rollback the last recovery",
+    "restart from the receipt",
+    "recover it again",
     "apply the receipt",
     "cleanup old receipts",
     "clean up old receipts",
@@ -533,6 +546,29 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         if flags == {"--confirm"} or flags == {"--confirm", "--json"}:
             argv = ("recipes", "execute", original_tokens[2], "--confirm")
             if "--json" in flags:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:3] == ("recipes", "receipt", "audit"):
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("recipes", "receipt", "audit")
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {5, 6}
+        and tokens[:4]
+        in {
+            ("recipes", "receipt", "audit", "--target"),
+            ("recipes", "receipt", "audit", "--recipe"),
+            ("recipes", "receipt", "audit", "--limit"),
+        }
+        and tokens[4]
+    ):
+        json_flag = len(tokens) == 6 and tokens[5] == "--json"
+        if len(tokens) == 5 or json_flag:
+            argv = ("recipes", "receipt", "audit", original_tokens[3], original_tokens[4])
+            if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     if (
@@ -909,6 +945,19 @@ def route_input(text: str) -> RoutedCommand:
                 argv=("safe-actions", "--target", target_match.group(1)),
             )
         return RoutedCommand(name="cli_dispatch", args=raw, argv=("safe-actions",))
+
+    receipt_audit_cues = (
+        "audit recipe receipts",
+        "show recipe audit",
+        "what happened with the restart recipe",
+        "show disposable restart audit",
+        "summarize recovery receipts",
+        "what happened in the last recovery",
+        "show receipt chain",
+        "audit governed actions",
+    )
+    if any(cue in lowered for cue in receipt_audit_cues):
+        return RoutedCommand(name="cli_dispatch", args=raw, argv=("recipes", "receipt", "audit"))
 
     preflight_cues = (
         "preflight " + "docker" + " restart",

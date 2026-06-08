@@ -23,7 +23,7 @@
 
 Safe V2 path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
 
-Governed disposable recipe path after preflight: `recipes preflight --save -> recipes preflight validate -> recipes execute <preflight_id> --confirm -> recipes receipt validate <receipt_id> -> verify --receipt <receipt_id> -> recipes receipt rollback-preview <receipt_id> -> recipes receipt recovery-execute <receipt_id> --confirm -> verify --receipt <recovery_receipt_id> -> handoff`. Receipt-aware verify is read-only: it reads the governed execution or recovery receipt and reports recorded post-check evidence; it never re-executes the recipe, retries, rolls back, restarts containers, or calls Docker Compose. Receipt rollback-preview is also read-only: for `docker.disposable_restart` it states that no true rollback exists. Receipt recovery-execute is the only recovery execution lane and can only repeat the exact disposable restart target from a valid receipt after current label/production/broad-target gates and explicit `--confirm`; it does not execute Docker Compose, shell, model, cleanup, remediation, or arbitrary rollback.
+Governed disposable recipe path after preflight: `recipes preflight --save -> recipes preflight validate -> recipes execute <preflight_id> --confirm -> recipes receipt validate <receipt_id> -> verify --receipt <receipt_id> -> recipes receipt audit -> recipes receipt rollback-preview <receipt_id> -> recipes receipt recovery-execute <receipt_id> --confirm -> verify --receipt <recovery_receipt_id> -> handoff`. Receipt-aware verify is read-only: it reads the governed execution or recovery receipt and reports recorded post-check evidence; it never re-executes the recipe, retries, rolls back, restarts containers, or calls Docker Compose. Receipt rollback-preview is also read-only: for `docker.disposable_restart` it states that no true rollback exists. Receipt recovery-execute is the only recovery execution lane and can only repeat the exact disposable restart target from a valid receipt after current label/production/broad-target gates and explicit `--confirm`; it does not execute Docker Compose, shell, model, cleanup, remediation, or arbitrary rollback.
 
 `shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
 `shellforgeai triage docker` / `triage docker --brief` views all share the same
@@ -1891,10 +1891,16 @@ shellforgeai recipes receipt verify <receipt_id>
 shellforgeai recipes receipt rollback-preview <receipt_id>
 shellforgeai recipes receipt recovery-execute <receipt_id> --confirm
 shellforgeai recipes receipt verify <recovery_receipt_id>
+shellforgeai recipes receipt audit
+shellforgeai recipes receipt audit --json
+shellforgeai recipes receipt audit --target <target>
+shellforgeai recipes receipt audit --recipe docker.disposable_restart
 shellforgeai recipes receipt history
 shellforgeai recipes receipt inspect <receipt_id>
 shellforgeai recipes receipt export <receipt_id>
 shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id>
+
+`recipes receipt audit` is read-only. It summarizes governed execution/recovery chains, links recovery receipts to original receipts, reports verification and safety flags, and flags malformed receipts, missing originals, unsupported recipes, production restart flags, Docker Compose flags, `shell_true`, arbitrary command execution, and natural-language execution. It does not execute recipes, rerun receipts, recover, rollback, clean up, remediate, restart containers, call Docker/Compose, call shell, or call a model.
 ```
 
 The receipt audit commands are for history, inspection, portable metadata export, export validation, and comparison. Apart from the owned export bundle write, they are read-only and do not execute Docker/Compose, recovery, rollback, cleanup, remediation, shell commands, or model-driven actions.
