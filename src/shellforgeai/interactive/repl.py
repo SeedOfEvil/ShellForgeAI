@@ -86,7 +86,7 @@ V2 golden path:
   recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
   recipes preflight validate <id> / recipes execute <id> --confirm [--json]
   recipes receipt validate <id> [--json] / recipes receipt verify <id> [--json]
-  recipes receipt rollback-preview <id> [--json]  # read-only; no rollback
+  recipes receipt rollback-preview <id> / recovery-execute <id> --confirm / recovery-status <id>
   apply-preview [--brief|--json] / verify [--brief|--json]
   verify --receipt <id> [--json] / handoff [--brief|--json|--save]
   triage/propose/verify/handoff --target <target> [--json] / handoff summary

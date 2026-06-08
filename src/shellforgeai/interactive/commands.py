@@ -79,6 +79,10 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes receipt verify <receipt_id>",
     "recipes receipt rollback-preview <receipt_id>",
     "recipes receipt rollback-preview <receipt_id> --json",
+    "recipes receipt recovery-execute <receipt_id> --confirm",
+    "recipes receipt recovery-execute <receipt_id> --confirm --json",
+    "recipes receipt recovery-status <recovery_receipt_id>",
+    "recipes receipt recovery-validate <recovery_receipt_id>",
     "verify --receipt <receipt_id>",
     "safe-actions",
     "rollback-preview",
@@ -310,6 +314,10 @@ _QUICK_MUTATION_PHRASES = (
     "restart it again",
     "rerun the recipe",
     "rollback and restart",
+    "recover it now",
+    "run recovery",
+    "execute recovery",
+    "rerun the receipt",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -515,6 +523,38 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 5 and tokens[4] == "--json"
         if len(tokens) == 4 or json_flag:
             argv = ("recipes", "receipt", "rollback-preview", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {5, 6}
+        and tokens[:3] == ("recipes", "receipt", "recovery-execute")
+        and tokens[3]
+    ):
+        flags = set(tokens[4:])
+        if flags == {"--confirm"} or flags == {"--confirm", "--json"}:
+            argv = ("recipes", "receipt", "recovery-execute", original_tokens[3], "--confirm")
+            if "--json" in flags:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) == 4 and tokens[:3] == ("recipes", "receipt", "recovery-execute") and tokens[3]:
+        return RoutedCommand(
+            name="cli_dispatch",
+            args=raw,
+            argv=("recipes", "receipt", "recovery-execute", original_tokens[3]),
+        )
+    if (
+        len(tokens) in {4, 5}
+        and tokens[:3]
+        in {
+            ("recipes", "receipt", "recovery-status"),
+            ("recipes", "receipt", "recovery-validate"),
+        }
+        and tokens[3]
+    ):
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("recipes", "receipt", original_tokens[2], original_tokens[3])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)

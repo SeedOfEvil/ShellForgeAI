@@ -36,6 +36,8 @@ EXECUTE_MODE = "v2_recipe_execute"
 RECEIPT_MODE = "v2_recipe_execution_receipt"
 RECEIPT_VALIDATE_MODE = "v2_recipe_receipt_validate"
 RECEIPT_REQUIRED_FILES = ("recipe-receipt.json", "recipe-receipt.md", "manifest.json")
+RECOVERY_RECEIPT_MODE = "v2_recipe_recovery_receipt"
+RECOVERY_MANIFEST_KIND = "v2_recipe_recovery_receipt"
 _EXACT_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
@@ -74,13 +76,16 @@ class DockerExactTargetClient:
     """Tiny exact-target Docker client using argv lists only."""
 
     def inspect(self, target: str) -> DockerContainerState:
-        proc = subprocess.run(  # noqa: S603 - governed exact argv, shell=False by default.
-            ["docker", "inspect", target],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(  # noqa: S603 - governed exact argv, shell=False by default.
+                ["docker", "inspect", target],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.SubprocessError, OSError):
+            return DockerContainerState(found=False, name=target, labels={})
         if proc.returncode != 0:
             return DockerContainerState(found=False, name=target, labels={})
         try:
@@ -104,13 +109,18 @@ class DockerExactTargetClient:
 
     def restart(self, target: str) -> CommandResult:
         argv = ["docker", "restart", target]
-        proc = subprocess.run(  # noqa: S603 - only exact governed argv; shell=False by default.
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(  # noqa: S603 - only exact governed argv; shell=False by default.
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            return CommandResult(argv=argv, return_code=127, stdout="", stderr=str(exc))
+        except subprocess.SubprocessError as exc:
+            return CommandResult(argv=argv, return_code=124, stdout="", stderr=str(exc))
         return CommandResult(
             argv=argv, return_code=proc.returncode, stdout=proc.stdout, stderr=proc.stderr
         )
@@ -577,10 +587,13 @@ def validate_receipt(receipt_ref: str, data_dir: Path | str) -> dict[str, Any]:
     except Exception:
         return {**base, "status": "failed", "warnings": ["malformed json"]}
     checks["json_parse"] = True
-    checks["schema"] = (
-        receipt.get("schema_version") == SCHEMA_VERSION and receipt.get("mode") == RECEIPT_MODE
-    )
-    checks["manifest"] = manifest.get("kind") == "v2_recipe_execution_receipt"
+    receipt_mode = receipt.get("mode")
+    manifest_kind = manifest.get("kind")
+    checks["schema"] = receipt.get("schema_version") == SCHEMA_VERSION and receipt_mode in {
+        RECEIPT_MODE,
+        RECOVERY_RECEIPT_MODE,
+    }
+    checks["manifest"] = manifest_kind in {"v2_recipe_execution_receipt", RECOVERY_MANIFEST_KIND}
     checks["recipe_id"] = receipt.get("recipe_id") == manifest.get("recipe_id") == SUPPORTED_RECIPE
     checks["target"] = bool(receipt.get("target")) and receipt.get("target") == manifest.get(
         "target"
@@ -618,6 +631,9 @@ def validate_receipt(receipt_ref: str, data_dir: Path | str) -> dict[str, Any]:
         "checks": checks,
         "warnings": warnings,
         "receipt_status": receipt.get("status"),
+        "receipt_mode": receipt.get("mode"),
+        "original_receipt_id": receipt.get("original_receipt_id"),
+        "recovery_receipt_id": receipt.get("recovery_receipt_id"),
         "verification": verification,
         "safety": safety,
     }
