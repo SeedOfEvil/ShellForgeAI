@@ -184,6 +184,7 @@ from shellforgeai.core.recipe_preflight import (
     save_preflight_packet,
     validate_preflight_packet,
 )
+from shellforgeai.core.recipe_receipt_recovery import execute_receipt_recovery
 from shellforgeai.core.recipe_receipt_rollback_preview import preview_receipt_rollback
 from shellforgeai.core.recipe_receipt_verify import verify_recipe_receipt
 from shellforgeai.core.recipe_registry import (
@@ -313,7 +314,7 @@ recipes_preflight_app = typer.Typer(
     help="Read-only governed recipe preflight packets. No execution.",
 )
 recipes_receipt_app = typer.Typer(
-    help="Governed recipe execution receipt validation and read-only rollback preview."
+    help="Governed recipe receipt validation, verify, rollback preview, and confirm-gated recovery."
 )
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
@@ -10947,6 +10948,79 @@ def _handle_v2_propose_ask(question: str) -> bool:
     return True
 
 
+_RECOVERY_EXECUTE_MUTATION_CUES = (
+    "recover it now",
+    "run recovery",
+    "rollback now",
+    "execute recovery",
+    "restart it again",
+    "rerun the receipt",
+    "run docker restart",
+    "show recovery command and run it",
+)
+
+
+def _recovery_command_ref(question: str) -> str | None:
+    patterns = (
+        r"\brecover\s+receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        r"\brecovery\s+(?:for\s+)?receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        r"\breceipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+    )
+    low = (question or "").lower()
+    if "recovery" not in low and "recover" not in low:
+        return None
+    for pattern in patterns:
+        match = re.search(pattern, question or "", flags=re.IGNORECASE)
+        if match:
+            candidate = match.group(1)
+            if candidate.lower() not in {"command", "run", "it", "now", "for"}:
+                return candidate
+    return None
+
+
+def _is_recovery_command_help_ask(question: str) -> bool:
+    q = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    return any(
+        cue in q
+        for cue in (
+            "how would i recover receipt",
+            "what command would run recovery for receipt",
+            "show recovery command for receipt",
+            "show recovery command",
+        )
+    )
+
+
+def _handle_receipt_recovery_ask(question: str) -> bool:
+    low = " ".join((question or "").lower().split())
+    wants_help = _is_recovery_command_help_ask(question)
+    mutation_cues = [cue for cue in _RECOVERY_EXECUTE_MUTATION_CUES if cue in low]
+    if not wants_help and not mutation_cues:
+        return False
+    ref = _recovery_command_ref(question)
+    if wants_help:
+        console.print("Governed receipt recovery command (deterministic ask routing):")
+        if ref:
+            console.print(f"  shellforgeai recipes receipt recovery-execute {ref} --confirm")
+            console.print(f"  shellforgeai recipes receipt recovery-execute {ref} --confirm --json")
+        else:
+            console.print("  shellforgeai recipes receipt recovery-execute <receipt_id> --confirm")
+            console.print(
+                "  shellforgeai recipes receipt recovery-execute <receipt_id> --confirm --json"
+            )
+        console.print("This is not true rollback; it is a bounded disposable restart recovery.")
+    if mutation_cues:
+        console.print("Refused: natural-language mutation is not allowed.")
+        console.print("Refused recovery execution from natural language.")
+        console.print(
+            "Use explicit CLI confirmation only: "
+            "shellforgeai recipes receipt recovery-execute <receipt_id> --confirm"
+        )
+        console.print("No container was restarted.")
+    console.print("No action was taken.")
+    return True
+
+
 _VERIFY_ASK_TARGET_RE = re.compile(
     r"\bverify\b(?:\s+the)?\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
     re.IGNORECASE,
@@ -12281,6 +12355,67 @@ def _render_receipt_rollback_preview_human(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_receipt_recovery_execute_human(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "blocked")
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    target_name = target.get("name") or "unknown"
+    if status == "executed":
+        verification = (
+            payload.get("verification") if isinstance(payload.get("verification"), dict) else {}
+        )
+        action = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+        return (
+            "\n".join(
+                [
+                    "Recovery execution: completed",
+                    f"Receipt: {payload.get('receipt_id')}",
+                    f"Recovery receipt: {payload.get('recovery_receipt_id')}",
+                    f"Recipe: {payload.get('recipe_id')}",
+                    f"Target: {target_name}",
+                    "",
+                    "Action:",
+                    " ".join(str(part) for part in action.get("argv") or []),
+                    "",
+                    "Verification:",
+                    "- restart attempted: "
+                    f"{str(bool(action.get('docker_restart_attempted'))).lower()}",
+                    "- restart succeeded: "
+                    f"{str(bool(action.get('docker_restart_succeeded'))).lower()}",
+                    "- StartedAt changed: "
+                    f"{str(bool(verification.get('started_at_changed'))).lower()}",
+                    "",
+                    "Safety:",
+                    "- Exact disposable target only.",
+                    "- Explicit --confirm was required.",
+                    "- No Docker Compose command was executed.",
+                    "- No cleanup/remediation/rollback outside this recovery recipe was executed.",
+                    "- This is bounded recovery restart, not true rollback of prior process state.",
+                    "",
+                    "First safe command:",
+                    str(payload.get("first_safe_command") or ""),
+                ]
+            ).rstrip()
+            + "\n"
+        )
+
+    lines = ["Recovery execution: blocked"]
+    if target_name != "unknown":
+        lines.append(f"Target: {target_name}")
+    if payload.get("reason"):
+        lines.append(f"Reason: {payload.get('reason')}")
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "- No action was taken.",
+            "- No container was restarted.",
+            "- This is bounded recovery restart only when explicitly confirmed; "
+            "no true rollback is available.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_recipe_receipt_validate_human(payload: dict[str, Any]) -> str:
     lines = [
         f"Recipe receipt validation: {payload.get('status')}",
@@ -12354,6 +12489,67 @@ def rollback_preview_receipt(
     else:
         typer.echo(_render_receipt_rollback_preview_human(payload), nl=False)
     if payload.get("status") not in {"limited", "preview_ready", "unsupported_recipe"}:
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("recovery-execute")
+def recipes_receipt_recovery_execute(
+    ctx: typer.Context,
+    receipt_ref: Annotated[
+        str, typer.Argument(help="Saved disposable restart receipt id or ShellForgeAI-owned path.")
+    ],
+    confirm: Annotated[
+        bool,
+        typer.Option("--confirm", help="Explicitly confirm bounded recovery restart."),
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Execute bounded disposable recovery restart from a valid receipt. Not true rollback."""
+    runtime = _ctx(ctx)
+    payload = execute_receipt_recovery(receipt_ref, runtime.session.data_dir, confirm=confirm)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_receipt_recovery_execute_human(payload), nl=False)
+    if payload.get("status") != "executed":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("recovery-status")
+def recipes_receipt_recovery_status(
+    ctx: typer.Context,
+    recovery_receipt_ref: Annotated[
+        str, typer.Argument(help="Recovery receipt id or ShellForgeAI-owned path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Read-only status for a recovery receipt via receipt-aware verify."""
+    runtime = _ctx(ctx)
+    payload = verify_recipe_receipt(recovery_receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_v2_receipt_verify_human(payload), nl=False)
+    if payload.get("status") != "passed":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("recovery-validate")
+def recipes_receipt_recovery_validate(
+    ctx: typer.Context,
+    recovery_receipt_ref: Annotated[
+        str, typer.Argument(help="Recovery receipt id or ShellForgeAI-owned path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Validate a recovery receipt. Read-only."""
+    runtime = _ctx(ctx)
+    payload = validate_recipe_receipt(recovery_receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_validate_human(payload), nl=False)
+    if payload.get("status") != "ok":
         raise typer.Exit(1)
 
 
@@ -12631,6 +12827,8 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _handle_receipt_recovery_ask(question):
+            return
         if _handle_receipt_rollback_preview_ask(question):
             return
         if _handle_recipe_registry_ask(question):

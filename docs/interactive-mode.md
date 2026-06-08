@@ -488,3 +488,7 @@ These routes build or validate preflight packets only. Dangerous phrases such as
 ## Governed recipe execution in interactive mode
 
 Interactive mode may dispatch the explicit CLI form `recipes execute <preflight_id> --confirm [--json]`, `recipes receipt validate <receipt_id> [--json]`, and `recipes receipt rollback-preview <receipt_id> [--json]`. Rollback-preview is read-only and only explains receipt rollback/recovery posture; it does not rollback or restart anything. Natural-language mutation phrases such as "execute the recipe", "restart it now", "rollback now", "execute rollback", "run that", or "do it" are refused and show the governed workflow instead. Interactive mode is still not a shell and does not run raw Docker, Docker Compose, cleanup, remediation, rollback, or arbitrary commands from natural language.
+
+## Governed receipt recovery in interactive mode
+
+Interactive mode supports the exact command-form `recipes receipt recovery-execute <receipt_id> --confirm [--json]` and read-only `recipes receipt recovery-status <recovery_receipt_id>` / `recipes receipt recovery-validate <recovery_receipt_id>`. Natural-language recovery requests such as “recover it now”, “rollback now”, and “restart it again” remain refused. Recovery for `docker.disposable_restart` is a bounded repeat exact-target disposable restart, not true rollback, and still requires the same receipt validation, current target labels, non-production gate, argv-list Docker restart, recovery receipt, and verification.

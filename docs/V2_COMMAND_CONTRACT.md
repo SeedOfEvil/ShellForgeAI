@@ -1,5 +1,12 @@
 # V2 Command Contract
 
+
+## Receipt recovery execution
+
+`shellforgeai recipes receipt recovery-execute <receipt_ref> --confirm [--json]` is the confirm-gated governed recovery lane for `docker.disposable_restart` receipts only. It is not true rollback: Docker restart cannot restore the previous process state. The command may only repeat the exact target from a valid governed receipt after receipt validation, target existence check, production/broad-target refusal, and current labels `shellforgeai.disposable=true` plus `shellforgeai.allow_restart=true`. The executor uses an argv list only: `["docker", "restart", "<target>"]`; it never uses `shell=True`, Docker Compose, cleanup, arbitrary remediation, arbitrary rollback, natural-language execution, or model-driven execution.
+
+No-confirm recovery (`recipes receipt recovery-execute <receipt_ref>`) returns a controlled blocked response with `mutation_performed=false` and no restart. Successful recovery writes a recovery receipt and `verify --receipt <recovery_receipt_id> --json` is the first safe follow-up. `recipes receipt recovery-status` and `recipes receipt recovery-validate` are read-only receipt helpers.
+
 ## Principle
 
 **One golden path, many compatibility paths.**

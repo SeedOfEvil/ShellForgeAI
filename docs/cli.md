@@ -1494,10 +1494,16 @@ shellforgeai recipes receipt validate <receipt_id> --json
 shellforgeai recipes receipt rollback-preview <receipt_id>
 shellforgeai recipes receipt rollback-preview <receipt_id> --json
 shellforgeai rollback-preview --receipt <receipt_id> --json
+shellforgeai recipes receipt recovery-execute <receipt_id> --confirm
+shellforgeai recipes receipt recovery-execute <receipt_id> --confirm --json
+shellforgeai recipes receipt recovery-status <recovery_receipt_id> --json
+shellforgeai recipes receipt recovery-validate <recovery_receipt_id> --json
 
 ```
 
-Receipt rollback-preview is read-only. It inspects an existing governed recipe execution receipt, reports whether rollback is available, blocked, unsupported, or limited, and lists future gates before any recovery lane could exist. For `docker.disposable_restart`, the posture is intentionally limited: there is no true rollback for a restart; a future recovery action may only repeat an exact-target disposable restart after rechecking labels/allowlist, explicit confirmation, receipt creation, and verification. The command never restarts containers, never calls Docker/Compose, never creates a rollback receipt, never calls shell/model, and returns nonzero for missing, malformed, or production-target receipts.
+Receipt rollback-preview is read-only. It inspects an existing governed recipe execution receipt, reports whether rollback is available, blocked, unsupported, or limited, and lists the gates for recovery. For `docker.disposable_restart`, the posture is intentionally limited: there is no true rollback for a restart; recovery can only repeat the exact-target disposable restart after rechecking current target existence, non-production status, labels/allowlist, explicit `--confirm`, receipt creation, and verification. Rollback-preview never restarts containers, never calls Docker/Compose, never creates a rollback receipt, never calls shell/model, and returns nonzero for missing, malformed, or production-target receipts.
+
+`recipes receipt recovery-execute <receipt_id> --confirm` is the only receipt recovery execution lane. It is not natural-language execution and it is not true rollback of prior process state. It loads and validates a `docker.disposable_restart` receipt, resolves the exact target from the receipt, rechecks the target still exists and is labeled `shellforgeai.disposable=true` plus `shellforgeai.allow_restart=true`, refuses production/broad/missing/unlabeled targets, and then performs exactly one argv-list action: `["docker", "restart", "<target>"]`. It writes a recovery receipt under `recipe_receipts/<recovery_receipt_id>/` with `receipt.json`, `receipt.md`, compatibility `recipe-receipt.json`/`recipe-receipt.md`, `manifest.json`, original receipt id, target, pre/post state, action argv, verification, checksums, and safety flags. `verify --receipt <recovery_receipt_id>` and `recipes receipt recovery-status <recovery_receipt_id>` read recorded evidence only and do not rerun recovery.
 
 
 Execution blocks unless the saved preflight is valid and ready, the current target is still an exact non-production container, and labels `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true` are still present. The executor uses only `docker restart <exact-target>` as an argv list and writes a receipt with verification. Do not use this as general remediation; it is disposable-only.

@@ -13,6 +13,7 @@ from typing import Any
 
 from shellforgeai.core.recipe_execution import (
     RECEIPT_MODE,
+    RECOVERY_RECEIPT_MODE,
     SCHEMA_VERSION,
     _resolve_receipt_ref,
     recipe_receipt_root,
@@ -218,6 +219,8 @@ def verify_recipe_receipt(receipt_ref: str, data_dir: Path | str) -> dict[str, A
                 "path": str(receipt_dir) if receipt_dir else None,
                 "receipt_status": receipt_status,
                 "preflight_id": receipt.get("preflight_id"),
+                "original_receipt_id": receipt.get("original_receipt_id"),
+                "recovery_receipt_id": receipt.get("recovery_receipt_id"),
             },
             "recipe": {"recipe_id": recipe_id or None, "supported": recipe_id == SUPPORTED_RECIPE},
             "target": target,
@@ -248,7 +251,10 @@ def verify_recipe_receipt(receipt_ref: str, data_dir: Path | str) -> dict[str, A
             "warnings": warnings,
         }
     )
-    if receipt.get("mode") != RECEIPT_MODE or receipt.get("schema_version") != SCHEMA_VERSION:
+    if (
+        receipt.get("mode") not in {RECEIPT_MODE, RECOVERY_RECEIPT_MODE}
+        or receipt.get("schema_version") != SCHEMA_VERSION
+    ):
         payload["status"] = "failed"
         payload["warnings"] = [*warnings, "receipt schema or mode is invalid"]
     return payload
