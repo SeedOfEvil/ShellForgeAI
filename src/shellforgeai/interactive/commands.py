@@ -75,6 +75,13 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes preflight --recipe docker.disposable_restart --target <target> --save",
     "recipes preflight validate <preflight_id>",
     "recipes execute <preflight_id> --confirm",
+    "recipes receipt history",
+    "recipes receipt history --limit 10",
+    "recipes receipt inspect <receipt_id>",
+    "recipes receipt export <receipt_id>",
+    "recipes receipt export-validate <export_id>",
+    "recipes receipt compare-latest",
+    "recipes receipt compare <before> <after>",
     "recipes receipt validate <receipt_id>",
     "recipes receipt verify <receipt_id>",
     "recipes receipt rollback-preview <receipt_id>",
@@ -258,6 +265,21 @@ _ALLOWED_CLI_DISPATCH.update(
         ("recipes", "--json"): ("recipes", "--json"),
         ("recipes", "list"): ("recipes", "list"),
         ("recipes", "list", "--json"): ("recipes", "list", "--json"),
+        ("recipes", "receipt", "history"): ("recipes", "receipt", "history"),
+        ("recipes", "receipt", "history", "--json"): ("recipes", "receipt", "history", "--json"),
+        ("recipes", "receipt", "compare-latest"): ("recipes", "receipt", "compare-latest"),
+        ("recipes", "receipt", "compare-latest", "--json"): (
+            "recipes",
+            "receipt",
+            "compare-latest",
+            "--json",
+        ),
+        ("recipes", "receipt", "compare-latest", "--only-changed"): (
+            "recipes",
+            "receipt",
+            "compare-latest",
+            "--only-changed",
+        ),
         ("safe-actions",): ("safe-actions",),
         ("safe-actions", "--json"): ("safe-actions", "--json"),
     }
@@ -318,6 +340,11 @@ _QUICK_MUTATION_PHRASES = (
     "run recovery",
     "execute recovery",
     "rerun the receipt",
+    "recover latest receipt now",
+    "rollback latest receipt",
+    "apply the receipt",
+    "cleanup old receipts",
+    "clean up old receipts",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -507,6 +534,48 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
             argv = ("recipes", "execute", original_tokens[2], "--confirm")
             if "--json" in flags:
                 argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {5, 6}
+        and tokens[:4] == ("recipes", "receipt", "history", "--limit")
+        and tokens[4].isdigit()
+    ):
+        json_flag = len(tokens) == 6 and tokens[5] == "--json"
+        if len(tokens) == 5 or json_flag:
+            argv = ("recipes", "receipt", "history", "--limit", original_tokens[4])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {4, 5}
+        and tokens[:3]
+        in {
+            ("recipes", "receipt", "inspect"),
+            ("recipes", "receipt", "export"),
+            ("recipes", "receipt", "export-validate"),
+        }
+        and tokens[3]
+    ):
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("recipes", "receipt", original_tokens[2], original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {5, 6}
+        and tokens[:3] == ("recipes", "receipt", "compare")
+        and tokens[3]
+        and tokens[4]
+    ):
+        json_flag = len(tokens) == 6 and tokens[5] == "--json"
+        only_changed = len(tokens) == 6 and tokens[5] == "--only-changed"
+        if len(tokens) == 5 or json_flag or only_changed:
+            argv = ("recipes", "receipt", "compare", original_tokens[3], original_tokens[4])
+            if json_flag:
+                argv = (*argv, "--json")
+            if only_changed:
+                argv = (*argv, "--only-changed")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     if len(tokens) in {4, 5} and tokens[:3] == ("recipes", "receipt", "validate") and tokens[3]:
         json_flag = len(tokens) == 5 and tokens[4] == "--json"

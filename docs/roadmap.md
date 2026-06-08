@@ -869,3 +869,6 @@ remain future work.
 ## Governed execution milestone
 
 The first V2 governed execution milestone adds `docker.disposable_restart`: an exact-target, disposable-label, allowlist-label Docker restart that requires saved preflight validation, explicit confirmation, receipt creation, post-restart verification, and documented rollback posture. This is not general remediation or production restart support.
+
+
+- Governed receipt audit/history: operators can list, inspect, validate/export, and compare disposable restart execution and recovery receipts without executing anything.

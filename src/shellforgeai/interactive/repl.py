@@ -86,6 +86,7 @@ V2 golden path:
   recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
   recipes preflight validate <id> / recipes execute <id> --confirm [--json]
   recipes receipt validate <id> [--json] / recipes receipt verify <id> [--json]
+  recipes receipt history/inspect/export/export-validate/compare/compare-latest [--json]
   recipes receipt rollback-preview <id> / recovery-execute <id> --confirm / recovery-status <id>
   apply-preview [--brief|--json] / verify [--brief|--json]
   verify --receipt <id> [--json] / handoff [--brief|--json|--save]
@@ -102,8 +103,8 @@ Reports/artifacts:
   ops report --save
   ops report history --limit 5
   ops report compare-latest [--json]
-  handoff --save / handoff validate / handoff export / handoff export-validate <id>
-  handoff history [--limit 5] / handoff compare <a> <b> / compare-latest [--json]
+  handoff --save / handoff validate / handoff export / handoff export-validate
+  handoff history / handoff compare / handoff compare-latest
 
 V1/readiness:
   remediation self-test quick / remediation self-test --profile quick --json
@@ -114,8 +115,7 @@ Follow-ups/session:
   what happened in this session?
   what did you find? / get that info / dig deeper / proceed
   pending / /pending
-  exit
-  /exit
+  exit / /exit
 
 Pressure mode: no novel, what is on fire? / quick status only
 

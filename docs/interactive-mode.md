@@ -492,3 +492,20 @@ Interactive mode may dispatch the explicit CLI form `recipes execute <preflight_
 ## Governed receipt recovery in interactive mode
 
 Interactive mode supports the exact command-form `recipes receipt recovery-execute <receipt_id> --confirm [--json]` and read-only `recipes receipt recovery-status <recovery_receipt_id>` / `recipes receipt recovery-validate <recovery_receipt_id>`. Natural-language recovery requests such as “recover it now”, “rollback now”, and “restart it again” remain refused. Recovery for `docker.disposable_restart` is a bounded repeat exact-target disposable restart, not true rollback, and still requires the same receipt validation, current target labels, non-production gate, argv-list Docker restart, recovery receipt, and verification.
+
+
+## Recipe receipt audit commands
+
+Interactive mode accepts exact read-only receipt audit commands through the safe CLI dispatcher:
+
+```text
+recipes receipt history [--json]
+recipes receipt history --limit 10 [--json]
+recipes receipt inspect <receipt_ref> [--json]
+recipes receipt export <receipt_ref> [--json]
+recipes receipt export-validate <export_ref> [--json]
+recipes receipt compare <a> <b> [--json|--only-changed]
+recipes receipt compare-latest [--json]
+```
+
+Natural-language receipt mutation remains refused. Phrases such as `recover latest receipt now`, `rollback latest receipt`, `restart it again`, `rerun the receipt`, `apply the receipt`, and `cleanup old receipts` do not execute recovery, rollback, restart, cleanup, remediation, shell, Docker, Compose, or model-driven actions.
