@@ -99,6 +99,12 @@ anything.
      `shellforgeai verify --receipt <receipt_ref> --brief`, and
      `shellforgeai verify --receipt <receipt_ref> --json`; the recipe namespace
      also exposes `shellforgeai recipes receipt verify <receipt_ref> [--json]`.
+   - Rollback-preview forms: `shellforgeai recipes receipt rollback-preview
+     <receipt_ref> [--json]` and optional top-level `shellforgeai
+     rollback-preview --receipt <receipt_ref> [--json]`. This is a read-only
+     receipt posture step: it explains whether true rollback exists, the
+     future recovery gates, and the first safe verify command; it never
+     executes rollback or restart.
    - Current-state contract: read-only current-state verification. It
      collects/reuses deterministic status/triage evidence, reports `ok`,
      `degraded`, `blocked`, or `unknown`, lists evidence/limitations, and
@@ -266,4 +272,6 @@ apply-preview, verify, and handoff/receipt — not execution expansion.
 
 `recipes receipt validate <receipt_ref> [--json]` validates receipt files, checksums, recipe/target metadata, verification presence, and safety flags. Receipt validation is read-only. Production restart, Docker Compose mutation, cleanup execution, remediation execution outside this named recipe semantics, rollback execution, arbitrary shell, and natural-language execution remain refused.
 
-Rollback posture for this recipe is not true undo: bounded recovery is a future repeat exact-target restart requiring explicit confirmation; automatic rollback is disabled and this command executes no rollback.
+`recipes receipt rollback-preview <receipt_ref> [--json]` loads an existing governed receipt from ShellForgeAI-owned receipt storage, validates enough receipt structure to trust recipe/target/safety metadata, and renders rollback posture/gates. For `docker.disposable_restart`, it must state that no true state rollback exists for a container restart. A bounded recovery action may only be a future exact-target disposable restart in a separate confirm-gated lane, with disposable/allow_restart labels rechecked at execution time, a rollback/recovery receipt required, and post-rollback verification required. Production targets are blocked. The command is read-only: it does not execute rollback, retry the recipe, restart a container, create a rollback receipt, call Docker/Compose, call shell, call the model, or mutate host/container state.
+
+Rollback posture for this recipe is not true undo: bounded recovery is a future repeat exact-target restart requiring explicit confirmation; automatic rollback is disabled and rollback-preview executes no rollback.

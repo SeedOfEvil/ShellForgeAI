@@ -1491,6 +1491,13 @@ shellforgeai recipes execute <preflight_id> --confirm
 shellforgeai recipes execute <preflight_id> --confirm --json
 shellforgeai recipes receipt validate <receipt_id>
 shellforgeai recipes receipt validate <receipt_id> --json
+shellforgeai recipes receipt rollback-preview <receipt_id>
+shellforgeai recipes receipt rollback-preview <receipt_id> --json
+shellforgeai rollback-preview --receipt <receipt_id> --json
+
 ```
+
+Receipt rollback-preview is read-only. It inspects an existing governed recipe execution receipt, reports whether rollback is available, blocked, unsupported, or limited, and lists future gates before any recovery lane could exist. For `docker.disposable_restart`, the posture is intentionally limited: there is no true rollback for a restart; a future recovery action may only repeat an exact-target disposable restart after rechecking labels/allowlist, explicit confirmation, receipt creation, and verification. The command never restarts containers, never calls Docker/Compose, never creates a rollback receipt, never calls shell/model, and returns nonzero for missing, malformed, or production-target receipts.
+
 
 Execution blocks unless the saved preflight is valid and ready, the current target is still an exact non-production container, and labels `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true` are still present. The executor uses only `docker restart <exact-target>` as an argv list and writes a receipt with verification. Do not use this as general remediation; it is disposable-only.

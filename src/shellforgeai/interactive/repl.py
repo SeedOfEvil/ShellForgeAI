@@ -72,8 +72,7 @@ INTERACTIVE_HELP_TEXT = f"""ShellForgeAI interactive help
 
 Session:
   help / /help / ? / commands
-  pending / /pending / summary / /summary / summary --json
-  exit / /exit
+  pending / /pending / summary / /summary / summary --json / exit / /exit
 
 Fast status:
   status [--brief|--json]
@@ -87,6 +86,7 @@ V2 golden path:
   recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
   recipes preflight validate <id> / recipes execute <id> --confirm [--json]
   recipes receipt validate <id> [--json] / recipes receipt verify <id> [--json]
+  recipes receipt rollback-preview <id> [--json]  # read-only; no rollback
   apply-preview [--brief|--json] / verify [--brief|--json]
   verify --receipt <id> [--json] / handoff [--brief|--json|--save]
   triage/propose/verify/handoff --target <target> [--json] / handoff summary

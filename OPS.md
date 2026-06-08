@@ -23,7 +23,7 @@
 
 Safe V2 path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
 
-Governed disposable recipe path after preflight: `recipes preflight --save -> recipes preflight validate -> recipes execute <preflight_id> --confirm -> recipes receipt validate <receipt_id> -> verify --receipt <receipt_id> -> handoff`. Receipt-aware verify is read-only: it reads the governed execution receipt and reports recorded post-check evidence; it never re-executes the recipe, retries, rolls back, restarts containers, or calls Docker Compose.
+Governed disposable recipe path after preflight: `recipes preflight --save -> recipes preflight validate -> recipes execute <preflight_id> --confirm -> recipes receipt validate <receipt_id> -> verify --receipt <receipt_id> -> recipes receipt rollback-preview <receipt_id> -> handoff`. Receipt-aware verify is read-only: it reads the governed execution receipt and reports recorded post-check evidence; it never re-executes the recipe, retries, rolls back, restarts containers, or calls Docker Compose. Receipt rollback-preview is also read-only: for `docker.disposable_restart` it states that no true rollback exists, describes future confirm-gated exact-target recovery gates, and does not execute rollback, Docker/Compose, shell, model, cleanup, remediation, or restart.
 
 `shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
 `shellforgeai triage docker` / `triage docker --brief` views all share the same
@@ -1872,6 +1872,7 @@ shellforgeai recipes preflight validate <preflight_id>
 shellforgeai recipes execute <preflight_id> --confirm
 shellforgeai recipes receipt validate <receipt_id>
 shellforgeai verify --receipt <receipt_id>
+shellforgeai recipes receipt rollback-preview <receipt_id>
 shellforgeai handoff --json
 docker rm -f sfai-pr167-user-sim
 ```

@@ -416,6 +416,7 @@ shellforgeai recipes preflight validate <preflight_id>
 shellforgeai recipes execute <preflight_id> --confirm
 shellforgeai recipes receipt validate <receipt_id>
 shellforgeai verify --receipt <receipt_id>
+shellforgeai recipes receipt rollback-preview <receipt_id>
 ```
 
-Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback, remediation execution, arbitrary shell, and model-driven execution remain out of scope.
+Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback execution, remediation execution, arbitrary shell, and model-driven execution remain out of scope. Receipt rollback-preview is read-only and explains that `docker.disposable_restart` has no true rollback; it never restarts containers or calls Docker/Compose.

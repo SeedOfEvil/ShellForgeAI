@@ -117,6 +117,7 @@ Debug
   > verify --receipt <receipt_id>
   > verify --receipt <receipt_id> --json
   > recipes receipt verify <receipt_id> --json
+  > recipes receipt rollback-preview <receipt_id> --json
   ```
 - Handoff entries (`handoff`, `handoff --brief`, `handoff --json`,
   `handoff --save`, `handoff summary`, `handoff --target <target>`, and
@@ -486,4 +487,4 @@ These routes build or validate preflight packets only. Dangerous phrases such as
 
 ## Governed recipe execution in interactive mode
 
-Interactive mode may dispatch the explicit CLI form `recipes execute <preflight_id> --confirm [--json]` and `recipes receipt validate <receipt_id> [--json]`. Natural-language mutation phrases such as "execute the recipe", "restart it now", "run that", or "do it" are refused and show the governed workflow instead. Interactive mode is still not a shell and does not run raw Docker, Docker Compose, cleanup, remediation, rollback, or arbitrary commands from natural language.
+Interactive mode may dispatch the explicit CLI form `recipes execute <preflight_id> --confirm [--json]`, `recipes receipt validate <receipt_id> [--json]`, and `recipes receipt rollback-preview <receipt_id> [--json]`. Rollback-preview is read-only and only explains receipt rollback/recovery posture; it does not rollback or restart anything. Natural-language mutation phrases such as "execute the recipe", "restart it now", "rollback now", "execute rollback", "run that", or "do it" are refused and show the governed workflow instead. Interactive mode is still not a shell and does not run raw Docker, Docker Compose, cleanup, remediation, rollback, or arbitrary commands from natural language.

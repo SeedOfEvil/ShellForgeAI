@@ -77,8 +77,11 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes execute <preflight_id> --confirm",
     "recipes receipt validate <receipt_id>",
     "recipes receipt verify <receipt_id>",
+    "recipes receipt rollback-preview <receipt_id>",
+    "recipes receipt rollback-preview <receipt_id> --json",
     "verify --receipt <receipt_id>",
     "safe-actions",
+    "rollback-preview",
     "help",
     "pending",
     "summary",
@@ -104,6 +107,7 @@ _COMMAND_LIKE_STARTS = (
     "remediaton",
     "recipes",
     "safe-actions",
+    "rollback-preview",
     "audit",
 )
 
@@ -300,6 +304,12 @@ _QUICK_MUTATION_PHRASES = (
     "retry it",
     "rerun it",
     "rollback it",
+    "rollback now",
+    "execute rollback",
+    "undo it",
+    "restart it again",
+    "rerun the recipe",
+    "rollback and restart",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -494,6 +504,24 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 5 and tokens[4] == "--json"
         if len(tokens) == 4 or json_flag:
             argv = ("recipes", "receipt", "validate", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {4, 5}
+        and tokens[:3] == ("recipes", "receipt", "rollback-preview")
+        and tokens[3]
+    ):
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("recipes", "receipt", "rollback-preview", original_tokens[3])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:2] == ("rollback-preview", "--receipt") and tokens[2]:
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("rollback-preview", "--receipt", original_tokens[2])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
