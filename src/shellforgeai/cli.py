@@ -184,6 +184,7 @@ from shellforgeai.core.recipe_preflight import (
     save_preflight_packet,
     validate_preflight_packet,
 )
+from shellforgeai.core.recipe_receipt_rollback_preview import preview_receipt_rollback
 from shellforgeai.core.recipe_receipt_verify import verify_recipe_receipt
 from shellforgeai.core.recipe_registry import (
     detail_payload as recipe_detail_payload,
@@ -311,7 +312,9 @@ recipes_preflight_app = typer.Typer(
     no_args_is_help=False,
     help="Read-only governed recipe preflight packets. No execution.",
 )
-recipes_receipt_app = typer.Typer(help="Governed recipe execution receipt validation.")
+recipes_receipt_app = typer.Typer(
+    help="Governed recipe execution receipt validation and read-only rollback preview."
+)
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
 app.add_typer(audit_app, name="audit")
@@ -10958,6 +10961,74 @@ _VERIFY_ASK_CUES = (
     "is it fixed",
     "verify the top suspect",
 )
+_ROLLBACK_PREVIEW_MUTATION_CUES = (
+    "rollback now",
+    "execute rollback",
+    "undo it",
+    "restart it again",
+    "rerun the recipe",
+    "rollback and restart",
+    "then rollback",
+    "and then rollback",
+)
+
+
+def _rollback_preview_ref(question: str) -> str | None:
+    patterns = (
+        r"\brollback\s+preview\s+(?:for\s+)?(?:receipt\s+)?([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        r"\b(?:show\s+)?rollback\s+preview\s+for\s+receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        r"\bwhat\s+would\s+rollback\s+require\s+for\s+receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        r"\bwhat\s+is\s+the\s+recovery\s+path\s+for\s+receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+        r"\bcan\s+(?:this\s+)?receipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\s+be\s+rolled\s+back\b",
+        r"\breceipt\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,127})\b",
+    )
+    low = (question or "").lower()
+    for pattern in patterns:
+        match = re.search(pattern, question or "", flags=re.IGNORECASE)
+        if match and any(cue in low for cue in ("rollback", "rolled back", "recovery path")):
+            candidate = match.group(1)
+            if candidate.lower() not in {"be", "rolled", "back", "for", "this", "the"}:
+                return candidate
+    return None
+
+
+def _is_rollback_preview_ask(question: str) -> bool:
+    q = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    return bool(_rollback_preview_ref(question)) or any(
+        cue in q
+        for cue in (
+            "show rollback preview",
+            "can this receipt be rolled back",
+            "what would rollback require",
+            "rollback preview receipt",
+            "what is the recovery path for receipt",
+        )
+    )
+
+
+def _handle_receipt_rollback_preview_ask(question: str) -> bool:
+    if not _is_rollback_preview_ask(question):
+        return False
+    low = " ".join((question or "").lower().split())
+    mutation_cues = [cue for cue in _ROLLBACK_PREVIEW_MUTATION_CUES if cue in low]
+    ref = _rollback_preview_ref(question)
+    console.print("Read-only rollback-preview guidance (deterministic ask routing):")
+    if ref:
+        console.print(f"  shellforgeai recipes receipt rollback-preview {ref}")
+        console.print(f"  shellforgeai recipes receipt rollback-preview {ref} --json")
+        console.print(f"  shellforgeai verify --receipt {ref} --json")
+    else:
+        console.print("Receipt id/ref required for read-only rollback preview.")
+        console.print("Safe command form:")
+        console.print("  shellforgeai recipes receipt rollback-preview <receipt_id>")
+        console.print("  shellforgeai recipes receipt rollback-preview <receipt_id> --json")
+    if mutation_cues:
+        console.print("Refused rollback execution part of the request.")
+        console.print("Rollback execution is not available; this surface is preview-only.")
+    console.print("No action was taken.")
+    return True
+
+
 _VERIFY_MUTATION_CUES = (
     "verify and restart",
     "verify and rerun",
@@ -12144,6 +12215,72 @@ def _render_recipe_execute_human(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_receipt_rollback_preview_human(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "unknown")
+    receipt_id = payload.get("receipt_id") or payload.get("receipt_ref") or "unknown"
+    recipe_id = payload.get("recipe_id") or "unknown"
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    target_name = target.get("name") or "unknown"
+    warnings = list(payload.get("warnings") or [])
+    status_label = "gated / limited" if status == "limited" else status.replace("_", " ")
+    lines = [
+        f"Rollback preview: {status_label}",
+        f"Receipt: {receipt_id}",
+        f"Recipe: {recipe_id}",
+        f"Target: {target_name}",
+    ]
+    if payload.get("reason"):
+        lines.append(f"Reason: {payload.get('reason')}")
+    if status == "not_found":
+        lines.extend(["", "Warnings:", "- receipt not found"])
+    elif status == "failed":
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"- {warning}" for warning in (warnings or ["receipt could not be trusted"]))
+    elif status == "unsupported_recipe":
+        lines.extend(
+            [
+                "",
+                "Rollback posture:",
+                "* Rollback-preview is not available for this recipe.",
+                "* No rollback was executed.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Rollback posture:",
+                "* No true state rollback is available for a container restart.",
+                (
+                    "* A future confirm-gated recovery action may repeat an exact-target "
+                    "disposable restart only if the target is still disposable and allowlisted."
+                ),
+                "* Verification is required before and after any future recovery action.",
+            ]
+        )
+    lines.extend(["", "Gates:"])
+    for gate in payload.get("gates") or []:
+        name = str(gate.get("name") or "unknown").replace("_", " ")
+        gate_status = str(gate.get("status") or "unknown").replace("_", " ")
+        lines.append(f"* {name}: {gate_status}")
+    lines.extend(["", "First safe command:", str(payload.get("first_safe_command") or "")])
+    if warnings and status not in {"not_found", "failed"}:
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "* Read-only rollback preview.",
+            "* No rollback was executed.",
+            "* No container was restarted.",
+            "* No Docker, Compose, remediation, cleanup, shell, or arbitrary command was executed.",
+            "* No action was taken.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_recipe_receipt_validate_human(payload: dict[str, Any]) -> str:
     lines = [
         f"Recipe receipt validation: {payload.get('status')}",
@@ -12181,6 +12318,42 @@ def recipes_execute(
     else:
         typer.echo(_render_recipe_execute_human(payload), nl=False)
     if payload.get("status") != "executed":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("rollback-preview")
+def recipes_receipt_rollback_preview(
+    ctx: typer.Context,
+    receipt_ref: Annotated[
+        str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Preview rollback/recovery posture for a governed receipt. Read-only."""
+    runtime = _ctx(ctx)
+    payload = preview_receipt_rollback(receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_receipt_rollback_preview_human(payload), nl=False)
+    if payload.get("status") not in {"limited", "preview_ready", "unsupported_recipe"}:
+        raise typer.Exit(1)
+
+
+@app.command("rollback-preview")
+def rollback_preview_receipt(
+    ctx: typer.Context,
+    receipt: Annotated[str, typer.Option("--receipt", help="Receipt id or owned path.")],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Preview rollback/recovery posture for a governed receipt. Read-only."""
+    runtime = _ctx(ctx)
+    payload = preview_receipt_rollback(receipt, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_receipt_rollback_preview_human(payload), nl=False)
+    if payload.get("status") not in {"limited", "preview_ready", "unsupported_recipe"}:
         raise typer.Exit(1)
 
 
@@ -12458,6 +12631,8 @@ def ask(
 ) -> None:
     runtime = _ctx(ctx)
     if not no_evidence:
+        if _handle_receipt_rollback_preview_ask(question):
+            return
         if _handle_recipe_registry_ask(question):
             return
         if _handle_v2_handoff_ask(question):
