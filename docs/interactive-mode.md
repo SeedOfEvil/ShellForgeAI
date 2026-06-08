@@ -513,3 +513,8 @@ recipes receipt compare-latest [--json]
 ```
 
 Natural-language audit phrasing such as `audit recipe receipts`, `show disposable restart audit`, `what happened with the restart recipe?`, `summarize recovery receipts`, and `show receipt chain` routes to read-only audit guidance. Natural-language receipt mutation remains refused. Phrases such as `recover latest receipt now`, `rollback latest receipt`, `restart it again`, `rerun the receipt`, `rerun the last receipt`, `recover it again`, `execute the last recipe`, `rollback the last recovery`, `restart from the receipt`, `apply the receipt`, and `cleanup old receipts` do not execute recovery, rollback, restart, cleanup, remediation, shell, Docker, Compose, or model-driven actions.
+
+
+### Governed receipt audit bundles
+
+Interactive mode allows exact command dispatch for `recipes receipt audit-bundle`, `recipes receipt audit-bundle --json`, filtered bundle creation (`--target`, `--recipe`, `--limit`), and `recipes receipt audit-bundle-validate <bundle_ref> [--json]`. These commands package or validate existing ShellForgeAI-owned receipt audit/history artifacts only. They do not execute recipes, rerun receipts, recover, rollback, restart containers, run Docker/Compose, call the model, or authorize natural-language mutation. Mutation phrases such as “rerun receipt”, “recover it again”, “rollback now”, or “restart from receipt” remain refused.

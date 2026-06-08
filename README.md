@@ -418,8 +418,12 @@ shellforgeai recipes receipt validate <receipt_id>
 shellforgeai verify --receipt <receipt_id>
 shellforgeai recipes receipt rollback-preview <receipt_id>
 shellforgeai recipes receipt audit --json
+shellforgeai recipes receipt audit-bundle --json
+shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json
 shellforgeai recipes receipt recovery-execute <receipt_id> --confirm
 shellforgeai verify --receipt <recovery_receipt_id> --json
 ```
 
 Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback execution, remediation execution, arbitrary shell, and model-driven execution remain out of scope. Receipt audit and rollback-preview are read-only: audit summarizes local execution/recovery receipt chains and flags malformed receipts, missing originals, failed verification, and safety drift without executing anything; rollback-preview explains that `docker.disposable_restart` has no true rollback. Recovery execution is a separate confirm-gated bounded repeat restart of the exact disposable allowlisted target from a valid receipt; it never runs from natural language and never uses Docker Compose.
+
+For support handoff, `shellforgeai recipes receipt audit-bundle` packages existing local receipt audit/history evidence into a bounded ShellForgeAI-owned artifact under `<data_dir>/exports/receipt-audit-bundles/`. Bundles include JSON, Markdown, manifest, checksums, receipt audit, and receipt history files; validation uses `shellforgeai recipes receipt audit-bundle-validate <bundle_id>`. Bundle create/validate do not execute recipes, rerun receipts, recover, rollback, restart containers, call Docker/Compose, call a model, or perform cleanup/remediation.

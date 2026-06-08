@@ -1899,8 +1899,15 @@ shellforgeai recipes receipt history
 shellforgeai recipes receipt inspect <receipt_id>
 shellforgeai recipes receipt export <receipt_id>
 shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id>
+shellforgeai recipes receipt audit-bundle
+shellforgeai recipes receipt audit-bundle --json
+shellforgeai recipes receipt audit-bundle --target <target>
+shellforgeai recipes receipt audit-bundle --recipe docker.disposable_restart
+shellforgeai recipes receipt audit-bundle --limit 20
+shellforgeai recipes receipt audit-bundle-validate <bundle_id>
+shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json
 
 `recipes receipt audit` is read-only. It summarizes governed execution/recovery chains, links recovery receipts to original receipts, reports verification and safety flags, and flags malformed receipts, missing originals, unsupported recipes, production restart flags, Docker Compose flags, `shell_true`, arbitrary command execution, and natural-language execution. It does not execute recipes, rerun receipts, recover, rollback, clean up, remediate, restart containers, call Docker/Compose, call shell, or call a model.
 ```
 
-The receipt audit commands are for history, inspection, portable metadata export, export validation, and comparison. Apart from the owned export bundle write, they are read-only and do not execute Docker/Compose, recovery, rollback, cleanup, remediation, shell commands, or model-driven actions.
+The receipt audit commands are for history, inspection, portable metadata export, export validation, comparison, and governed audit-bundle handoff. `recipes receipt audit-bundle` writes a bounded ShellForgeAI-owned support packet under `<data_dir>/exports/receipt-audit-bundles/<audit_bundle_id>/` with `audit-bundle.json`, `audit-bundle.md`, `receipt-audit.json`, `receipt-history.json`, `manifest.json`, and `checksums.json`; optional local-only summaries include `receipt-compare-summary.json` and `receipt-export-index.json`. `recipes receipt audit-bundle-validate <bundle_ref>` resolves only owned bundle ids/paths, checks required files, parses JSON, verifies manifest consistency, and validates SHA256 checksums. Apart from explicit owned artifact/export writes, these commands are read-only and do not execute Docker/Compose, recovery, rollback, cleanup, remediation, shell commands, or model-driven actions. Audit bundles never execute or rerun receipts and are not recipe/recovery/rollback instructions.
