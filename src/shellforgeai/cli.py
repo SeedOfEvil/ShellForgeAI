@@ -184,6 +184,24 @@ from shellforgeai.core.recipe_preflight import (
     save_preflight_packet,
     validate_preflight_packet,
 )
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_compare as build_receipt_compare,
+)
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_compare_latest as build_receipt_compare_latest,
+)
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_export as build_receipt_export,
+)
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_export_validate as build_receipt_export_validate,
+)
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_history as build_receipt_history,
+)
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_inspect as build_receipt_inspect,
+)
 from shellforgeai.core.recipe_receipt_recovery import execute_receipt_recovery
 from shellforgeai.core.recipe_receipt_rollback_preview import preview_receipt_rollback
 from shellforgeai.core.recipe_receipt_verify import verify_recipe_receipt
@@ -314,7 +332,10 @@ recipes_preflight_app = typer.Typer(
     help="Read-only governed recipe preflight packets. No execution.",
 )
 recipes_receipt_app = typer.Typer(
-    help="Governed recipe receipt validation, verify, rollback preview, and confirm-gated recovery."
+    help=(
+        "Governed recipe receipt history/audit, validation, verify, rollback preview, "
+        "and confirm-gated recovery."
+    )
 )
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(tools_app, name="tools")
@@ -11103,6 +11124,103 @@ def _handle_receipt_rollback_preview_ask(question: str) -> bool:
     return True
 
 
+_RECEIPT_AUDIT_MUTATION_CUES = (
+    "recover latest receipt now",
+    "recover receipt now",
+    "rollback latest receipt",
+    "restart it again",
+    "rerun the receipt",
+    "apply the receipt",
+    "cleanup old receipts",
+    "clean up old receipts",
+)
+
+
+def _receipt_audit_refs(question: str) -> list[str]:
+    return re.findall(
+        r"\b(receipt_[A-Za-z0-9_.-]+|recovery_receipt_[A-Za-z0-9_.-]+)\b", question or ""
+    )
+
+
+def _handle_receipt_audit_ask(question: str) -> bool:
+    normalized = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    if not normalized:
+        return False
+    if any(cue in normalized for cue in _RECEIPT_AUDIT_MUTATION_CUES):
+        console.print("Refused: natural-language mutation is not allowed for receipts.")
+        console.print(
+            "ShellForgeAI did not recover, rollback, restart, rerun, apply, clean up, or remediate."
+        )
+        console.print(
+            "Use read-only audit commands such as `shellforgeai recipes receipt history`."
+        )
+        console.print("No action was taken.")
+        return True
+    refs = _receipt_audit_refs(question)
+    if any(
+        cue in normalized
+        for cue in (
+            "show recipe receipt history",
+            "list governed receipts",
+            "receipt history",
+            "list recipe receipts",
+        )
+    ):
+        console.print("Read-only recipe receipt history guidance (deterministic ask routing):")
+        console.print("  shellforgeai recipes receipt history")
+        console.print("  shellforgeai recipes receipt history --json")
+        console.print("  shellforgeai recipes receipt history --limit 10")
+        console.print("No action was taken.")
+        return True
+    if "compare latest receipts" in normalized or "compare latest receipt" in normalized:
+        console.print(
+            "Read-only recipe receipt compare-latest guidance (deterministic ask routing):"
+        )
+        console.print("  shellforgeai recipes receipt compare-latest")
+        console.print("  shellforgeai recipes receipt compare-latest --json")
+        console.print("No action was taken.")
+        return True
+    if "compare receipts" in normalized or "compare receipt" in normalized:
+        console.print("Read-only recipe receipt compare guidance (deterministic ask routing):")
+        if len(refs) >= 2:
+            console.print(f"  shellforgeai recipes receipt compare {refs[0]} {refs[1]}")
+            console.print(f"  shellforgeai recipes receipt compare {refs[0]} {refs[1]} --json")
+        else:
+            console.print(
+                "  shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id>"
+            )
+            console.print(
+                "  shellforgeai recipes receipt compare "
+                "<before_receipt_id> <after_receipt_id> --json"
+            )
+        console.print("No action was taken.")
+        return True
+    if "export receipt" in normalized:
+        console.print(
+            "Read-only source validation plus owned metadata export guidance "
+            "(deterministic ask routing):"
+        )
+        if refs:
+            console.print(f"  shellforgeai recipes receipt export {refs[0]}")
+            console.print(f"  shellforgeai recipes receipt export {refs[0]} --json")
+        else:
+            console.print("  shellforgeai recipes receipt export <receipt_id>")
+            console.print("  shellforgeai recipes receipt export <receipt_id> --json")
+        console.print("No recovery/restart/remediation action was taken.")
+        return True
+    if "inspect receipt" in normalized or "show receipt" in normalized:
+        console.print("Read-only recipe receipt inspect guidance (deterministic ask routing):")
+        if refs:
+            console.print(f"  shellforgeai recipes receipt inspect {refs[0]}")
+            console.print(f"  shellforgeai recipes receipt inspect {refs[0]} --json")
+        else:
+            console.print("  shellforgeai recipes receipt inspect <receipt_id>")
+            console.print("  shellforgeai recipes receipt inspect <receipt_id> --json")
+        console.print("No action was taken.")
+        return True
+    return False
+
+
 _VERIFY_MUTATION_CUES = (
     "verify and restart",
     "verify and rerun",
@@ -12456,6 +12574,305 @@ def recipes_execute(
         raise typer.Exit(1)
 
 
+def _render_recipe_receipt_history_human(payload: dict[str, Any]) -> str:
+    lines = [
+        "Recipe receipt history",
+        f"Status: {payload.get('status')}",
+        f"Limit: {payload.get('limit')}",
+    ]
+    receipts = payload.get("receipts") or []
+    if not receipts:
+        lines.extend(
+            [
+                "No governed recipe receipts found.",
+                "First safe command:",
+                str(
+                    payload.get("first_safe_command")
+                    or (
+                        "shellforgeai recipes preflight --recipe docker.disposable_restart "
+                        "--target <target> --save"
+                    )
+                ),
+            ]
+        )
+    else:
+        lines.append("Receipts (newest first):")
+        for item in receipts:
+            lineage = ""
+            if item.get("original_receipt_id"):
+                lineage = (
+                    f" original={item.get('original_receipt_id')} "
+                    f"recovery={item.get('recovery_receipt_id') or '-'}"
+                )
+            lines.append(
+                f"- {item.get('receipt_id')} mode={item.get('mode')} "
+                f"recipe={item.get('recipe_id')} "
+                f"target={item.get('target')} status={item.get('status')} "
+                f"verification={item.get('verification_status')} "
+                f"created_at={item.get('created_at')}{lineage}"
+            )
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(
+        [
+            "Safety:",
+            "- read_only: true",
+            "- mutation_performed: false",
+            "- no Docker, Compose, recovery, rollback, remediation, or cleanup execution occurred",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_recipe_receipt_inspect_human(payload: dict[str, Any]) -> str:
+    identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+    lineage = payload.get("lineage") if isinstance(payload.get("lineage"), dict) else {}
+    recipe = payload.get("recipe") if isinstance(payload.get("recipe"), dict) else {}
+    action = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+    verification = (
+        payload.get("verification") if isinstance(payload.get("verification"), dict) else {}
+    )
+    lines = [
+        "Recipe receipt audit inspect",
+        f"Status: {payload.get('status')}",
+        f"Receipt ID: {identity.get('receipt_id') or 'unknown'}",
+        f"Mode: {identity.get('receipt_mode') or 'unknown'}",
+        f"Created at: {identity.get('created_at') or 'unknown'}",
+        f"Recipe: {recipe.get('recipe_id') or 'unknown'}",
+        f"Target: {payload.get('target') or 'unknown'}",
+        "Lineage:",
+        f"- original_receipt_id: {lineage.get('original_receipt_id') or '-'}",
+        f"- recovery_receipt_id: {lineage.get('recovery_receipt_id') or '-'}",
+        "Action as recorded:",
+        "- argv: " + " ".join(str(part) for part in action.get("argv") or []),
+        f"- command_executed: {str(bool(action.get('command_executed'))).lower()}",
+        f"- return_code: {action.get('return_code')}",
+        "Verification:",
+        f"- status: {verification.get('status') or 'not_run'}",
+        "Artifacts:",
+    ]
+    for path in payload.get("artifact_paths") or []:
+        lines.append(f"- {path}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(["First safe commands:"])
+    lines.extend(f"- {cmd}" for cmd in payload.get("safe_next_commands") or [])
+    lines.extend(
+        [
+            "Safety:",
+            "- read_only: true",
+            "- mutation_performed: false",
+            "- no live Docker state was inspected",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_recipe_receipt_export_human(payload: dict[str, Any]) -> str:
+    lines = [
+        "Recipe receipt export",
+        f"Status: {payload.get('status')}",
+        f"Receipt ID: {payload.get('receipt_id') or 'unknown'}",
+        f"Export ID: {payload.get('export_id') or 'none'}",
+        f"Export path: {payload.get('export_path') or 'none'}",
+        "Files:",
+    ]
+    for rel in payload.get("files") or []:
+        lines.append(f"- {rel}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(
+        [
+            "Safety:",
+            "- owned metadata export only: true",
+            "- mutation_performed: false",
+            "- no Docker/Compose command was executed",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_recipe_receipt_export_validate_human(payload: dict[str, Any]) -> str:
+    lines = [
+        "Recipe receipt export validation",
+        f"Status: {payload.get('status')}",
+        f"Export ID: {payload.get('export_id') or 'unknown'}",
+        "Checks:",
+    ]
+    for key, value in (payload.get("checks") or {}).items():
+        lines.append(f"- {key}: {str(bool(value)).lower()}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(["Safety:", "- read_only: true", "- mutation_performed: false"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_recipe_receipt_compare_human(
+    payload: dict[str, Any], *, only_changed: bool = False
+) -> str:
+    lines = ["Recipe receipt compare", f"Status: {payload.get('status')}"]
+    before = payload.get("before") if isinstance(payload.get("before"), dict) else {}
+    after = payload.get("after") if isinstance(payload.get("after"), dict) else {}
+    if before or after:
+        lines.append(f"Before: {before.get('receipt_id') or before.get('ref') or '-'}")
+        lines.append(f"After: {after.get('receipt_id') or after.get('ref') or '-'}")
+    changed = payload.get("changed") if isinstance(payload.get("changed"), dict) else {}
+    stable = payload.get("stable") if isinstance(payload.get("stable"), dict) else {}
+    lines.append("Changed fields:")
+    if changed:
+        for key, value in changed.items():
+            if isinstance(value, dict) and "before" in value and "after" in value:
+                lines.append(f"- {key}: {value.get('before')} -> {value.get('after')}")
+            else:
+                lines.append(f"- {key}: {value}")
+    else:
+        lines.append("- none")
+    if not only_changed:
+        lines.append("Stable fields:")
+        if stable:
+            for key, value in stable.items():
+                lines.append(f"- {key}: {value}")
+        else:
+            lines.append("- none")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(
+        [
+            "Safety:",
+            "- read_only: true",
+            "- mutation_performed: false",
+            "- no verify/recovery/rollback/restart was executed",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@recipes_receipt_app.command("history")
+def recipes_receipt_history(
+    ctx: typer.Context,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    limit: Annotated[int, typer.Option("--limit", help="Maximum receipts to list (1-100).")] = 20,
+) -> None:
+    """List governed recipe execution and recovery receipts newest first. Read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_history(runtime.session.data_dir, limit=limit)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_history_human(payload), nl=False)
+
+
+@recipes_receipt_app.command("inspect")
+def recipes_receipt_inspect(
+    ctx: typer.Context,
+    receipt_ref: Annotated[
+        str, typer.Argument(help="Receipt id or ShellForgeAI-owned receipt path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Inspect a governed execution or recovery receipt. Read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_inspect(receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_inspect_human(payload), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("export")
+def recipes_receipt_export(
+    ctx: typer.Context,
+    receipt_ref: Annotated[
+        str, typer.Argument(help="Receipt id or ShellForgeAI-owned receipt path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Export a validated receipt bundle to ShellForgeAI-owned export metadata."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_export(receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_export_human(payload), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("export-validate")
+def recipes_receipt_export_validate(
+    ctx: typer.Context,
+    export_ref: Annotated[
+        str, typer.Argument(help="Receipt export id or ShellForgeAI-owned export path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Validate an exported receipt bundle. Read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_export_validate(export_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_export_validate_human(payload), nl=False)
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("compare")
+def recipes_receipt_compare(
+    ctx: typer.Context,
+    before_receipt_ref: Annotated[str, typer.Argument(help="Earlier receipt id/ref.")],
+    after_receipt_ref: Annotated[str, typer.Argument(help="Later receipt id/ref.")],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    only_changed: Annotated[
+        bool, typer.Option("--only-changed", help="Hide stable fields in human output.")
+    ] = False,
+) -> None:
+    """Compare two governed receipt artifacts read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_compare(before_receipt_ref, after_receipt_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(
+            _render_recipe_receipt_compare_human(payload, only_changed=only_changed), nl=False
+        )
+    if payload.get("status") != "ok":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("compare-latest")
+def recipes_receipt_compare_latest(
+    ctx: typer.Context,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    only_changed: Annotated[
+        bool, typer.Option("--only-changed", help="Hide stable fields in human output.")
+    ] = False,
+) -> None:
+    """Compare the two newest governed receipt artifacts read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_compare_latest(runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(
+            _render_recipe_receipt_compare_human(payload, only_changed=only_changed), nl=False
+        )
+    if payload.get("status") not in {"ok", "not_enough_history"}:
+        raise typer.Exit(1)
+
+
 @recipes_receipt_app.command("rollback-preview")
 def recipes_receipt_rollback_preview(
     ctx: typer.Context,
@@ -12830,6 +13247,8 @@ def ask(
         if _handle_receipt_recovery_ask(question):
             return
         if _handle_receipt_rollback_preview_ask(question):
+            return
+        if _handle_receipt_audit_ask(question):
             return
         if _handle_recipe_registry_ask(question):
             return

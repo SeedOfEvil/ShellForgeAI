@@ -282,3 +282,19 @@ apply-preview, verify, and handoff/receipt — not execution expansion.
 `recipes receipt rollback-preview <receipt_ref> [--json]` loads an existing governed receipt from ShellForgeAI-owned receipt storage, validates enough receipt structure to trust recipe/target/safety metadata, and renders rollback posture/gates. For `docker.disposable_restart`, it must state that no true state rollback exists for a container restart. A bounded recovery action may only be a future exact-target disposable restart in a separate confirm-gated lane, with disposable/allow_restart labels rechecked at execution time, a rollback/recovery receipt required, and post-rollback verification required. Production targets are blocked. The command is read-only: it does not execute rollback, retry the recipe, restart a container, create a rollback receipt, call Docker/Compose, call shell, call the model, or mutate host/container state.
 
 Rollback posture for this recipe is not true undo: bounded recovery is a future repeat exact-target restart requiring explicit confirmation; automatic rollback is disabled and rollback-preview executes no rollback.
+
+
+### Governed receipt audit/history layer
+
+Governed recipe receipts now have a read-only audit surface after execute, verify, rollback-preview, and recovery-execute:
+
+```bash
+shellforgeai recipes receipt history [--limit 10] [--json]
+shellforgeai recipes receipt inspect <receipt_ref> [--json]
+shellforgeai recipes receipt export <receipt_ref> [--json]
+shellforgeai recipes receipt export-validate <export_ref> [--json]
+shellforgeai recipes receipt compare <before_receipt_ref> <after_receipt_ref> [--json|--only-changed]
+shellforgeai recipes receipt compare-latest [--json]
+```
+
+History, inspect, export-validate, compare, and compare-latest read only ShellForgeAI-owned receipt/export artifacts. Export first validates a ShellForgeAI-owned receipt and writes only a portable receipt export bundle under ShellForgeAI-owned export metadata; it does not inspect Docker, execute verify, recover, rollback, remediate, clean up, restart, call a model, or run shell commands. JSON modes emit strict JSON with `read_only`, `mutation_performed`, safety flags, warnings, and receipt lineage fields for recovery receipts.

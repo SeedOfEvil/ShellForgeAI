@@ -1878,3 +1878,23 @@ docker rm -f sfai-pr167-user-sim
 ```
 
 Expected: only the exact disposable allowlisted target restarts, a receipt is written and verifies, and `shellforgeai` is not restarted. Do not run Docker Compose restart/up/down, cleanup execute, rollback execute, production restart, or raw shell remediation as part of this QA.
+
+
+## Governed receipt audit flow
+
+For the disposable restart recipe, the audit-oriented operator flow is:
+
+```bash
+shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save
+shellforgeai recipes execute <preflight_id> --confirm
+shellforgeai recipes receipt verify <receipt_id>
+shellforgeai recipes receipt rollback-preview <receipt_id>
+shellforgeai recipes receipt recovery-execute <receipt_id> --confirm
+shellforgeai recipes receipt verify <recovery_receipt_id>
+shellforgeai recipes receipt history
+shellforgeai recipes receipt inspect <receipt_id>
+shellforgeai recipes receipt export <receipt_id>
+shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id>
+```
+
+The receipt audit commands are for history, inspection, portable metadata export, export validation, and comparison. Apart from the owned export bundle write, they are read-only and do not execute Docker/Compose, recovery, rollback, cleanup, remediation, shell commands, or model-driven actions.

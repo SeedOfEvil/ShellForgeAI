@@ -1507,3 +1507,24 @@ Receipt rollback-preview is read-only. It inspects an existing governed recipe e
 
 
 Execution blocks unless the saved preflight is valid and ready, the current target is still an exact non-production container, and labels `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true` are still present. The executor uses only `docker restart <exact-target>` as an argv list and writes a receipt with verification. Do not use this as general remediation; it is disposable-only.
+
+
+## Governed recipe receipt audit
+
+Recipe receipt audit commands list, inspect, export, validate exports, and compare existing governed execution/recovery receipts without executing anything:
+
+```bash
+shellforgeai recipes receipt history
+shellforgeai recipes receipt history --limit 10 --json
+shellforgeai recipes receipt inspect <receipt_id>
+shellforgeai recipes receipt inspect <receipt_id> --json
+shellforgeai recipes receipt export <receipt_id>
+shellforgeai recipes receipt export <receipt_id> --json
+shellforgeai recipes receipt export-validate <export_id>
+shellforgeai recipes receipt export-validate <export_id> --json
+shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id>
+shellforgeai recipes receipt compare <before_receipt_id> <after_receipt_id> --only-changed
+shellforgeai recipes receipt compare-latest --json
+```
+
+`history` shows ShellForgeAI-owned execution and recovery receipts newest first, including receipt id, mode, recipe id, target, status, creation time, verification status, and recovery lineage. `inspect` validates the receipt bundle before rendering identity, lineage, recorded argv, verification, safety flags, artifact paths, warnings, and safe next commands. `export` writes only a portable ShellForgeAI-owned metadata bundle under the receipt export area after validation; `export-validate` checks the exported manifest, JSON, checksums, schema, identity, and safety fields. `compare` and `compare-latest` compare recorded fields only and never call Docker, Compose, shell, verify execution, recovery, rollback, cleanup, remediation, or a model.
