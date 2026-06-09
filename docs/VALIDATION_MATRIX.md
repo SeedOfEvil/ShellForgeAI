@@ -19,6 +19,14 @@ docker01`; the doctor is read-only and classifies missing dev dependencies, OS
 tools, Python path mismatches, xdist availability, and cache hygiene before the
 expensive lane runs.
 
+After a full/Lane C run, inspect the recorded heartbeat/status/manifest evidence
+with the read-only viewer `python scripts/validation_status.py --latest`
+(or `--run-dir <run_dir>` / `--json`). It classifies the run as
+passed/failed/incomplete/unknown and reports `pass_eligible` and
+`rerun_required` so an interrupted/incomplete run is never mistaken for merge
+evidence. See [`VALIDATION_LANES.md`](VALIDATION_LANES.md) for the viewer's
+status table and merge rule.
+
 How matching works:
 
 - Patterns are matched **first-match-wins, in order**, against each changed

@@ -294,7 +294,10 @@ explicit CLI lane.
   Lane C `scripts/run_full_pytest.py` full-validation runner, optional
   `scripts/track_pytest_durations.py` slow-test duration tracking, and the
   `scripts/validation_heartbeat.py` heartbeat that flags interrupted/incomplete
-  runs as `rerun_required` instead of a false pass; see
+  runs as `rerun_required` instead of a false pass, and the read-only
+  `scripts/validation_status.py` viewer that classifies a run as
+  passed/failed/incomplete/unknown and reports `pass_eligible`/`rerun_required`
+  from existing evidence; see
   [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
 
 ## Using OpenAI Codex / ChatGPT sign-in

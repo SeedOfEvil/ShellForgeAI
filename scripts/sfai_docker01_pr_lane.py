@@ -1014,6 +1014,11 @@ def main(argv: list[str] | None = None) -> int:
     print(render_plan(plan, no_cache=args.no_cache), flush=True)
     print()
     print(summary, end="", flush=True)
+    # Read-only pointer to the validation evidence status viewer (PR177). The
+    # viewer never executes validation; it only reads this run's evidence files.
+    run_dir = str(Path(manifest_path).parent)
+    print("\nValidation status viewer:")
+    print(f"python scripts/validation_status.py --run-dir {run_dir} --json")
     return return_code
 
 
