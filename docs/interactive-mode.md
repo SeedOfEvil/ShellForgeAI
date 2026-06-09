@@ -503,6 +503,12 @@ recipes receipt audit [--json]
 recipes receipt audit --target <target>
 recipes receipt audit --recipe docker.disposable_restart
 recipes receipt audit --limit 10 [--json]
+recipes receipt integrity [--json]
+recipes receipt integrity --target <target>
+recipes receipt integrity --recipe docker.disposable_restart
+recipes receipt integrity --limit 10
+recipes receipt integrity --include-exports
+recipes receipt integrity --include-audit-bundles
 recipes receipt history [--json]
 recipes receipt history --limit 10 [--json]
 recipes receipt inspect <receipt_ref> [--json]
@@ -514,6 +520,10 @@ recipes receipt compare-latest [--json]
 
 Natural-language audit phrasing such as `audit recipe receipts`, `show disposable restart audit`, `what happened with the restart recipe?`, `summarize recovery receipts`, and `show receipt chain` routes to read-only audit guidance. Natural-language receipt mutation remains refused. Phrases such as `recover latest receipt now`, `rollback latest receipt`, `restart it again`, `rerun the receipt`, `rerun the last receipt`, `recover it again`, `execute the last recipe`, `rollback the last recovery`, `restart from the receipt`, `apply the receipt`, and `cleanup old receipts` do not execute recovery, rollback, restart, cleanup, remediation, shell, Docker, Compose, or model-driven actions.
 
+
+### Governed receipt integrity scan
+
+Interactive mode accepts exact `recipes receipt integrity` commands through the safe CLI dispatcher. The scan is read-only and checks existing ShellForgeAI-owned receipts for required files, JSON parseability, manifest/checksum drift, recovery original linkage, supported shapes, unsafe safety flags, and production restart records. `--include-exports` and `--include-audit-bundles` scan existing owned export and audit-bundle artifacts only; they do not create bundles or exports. Natural-language mutation phrases such as “rerun receipt”, “cleanup old receipts”, “delete bad artifacts”, or “fix corrupt receipts” remain refused. Support-handoff wording that clearly mentions receipts, audit, or recipe receipts routes to receipt audit-bundle guidance instead of generic handoff.
 
 ### Governed receipt audit bundles
 

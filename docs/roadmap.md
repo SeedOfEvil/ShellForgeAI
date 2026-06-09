@@ -875,3 +875,5 @@ The first V2 governed execution milestone adds `docker.disposable_restart`: an e
 - Governed receipt audit/history: operators can list, inspect, validate/export, and compare disposable restart execution and recovery receipts without executing anything.
 
 - Governed receipt audit bundle export: operators can package existing receipt audit/history evidence into a bounded ShellForgeAI-owned support packet with manifest/checksums and validate that packet without recipe execution, receipt rerun, recovery, rollback, Docker/Compose mutation, model calls, or host/container mutation.
+
+- Governed receipt artifact integrity scan: operators can run `recipes receipt integrity` to scan ShellForgeAI-owned receipts, optional receipt exports, and optional audit bundles for missing files, malformed JSON, checksum drift, missing recovery originals, unsupported shapes, unsafe safety flags, and production restart records without creating artifacts, repairing/deleting anything, executing recipes, rerunning receipts, recovery, rollback, Docker/Compose mutation, shell execution, natural-language execution, or model calls.

@@ -80,6 +80,11 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes receipt audit",
     "recipes receipt audit --json",
     "recipes receipt audit --limit 10",
+    "recipes receipt integrity",
+    "recipes receipt integrity --json",
+    "recipes receipt integrity --limit 10",
+    "recipes receipt integrity --include-exports",
+    "recipes receipt integrity --include-audit-bundles",
     "recipes receipt audit-bundle",
     "recipes receipt audit-bundle --json",
     "recipes receipt audit-bundle-validate <bundle_id>",
@@ -275,6 +280,20 @@ _ALLOWED_CLI_DISPATCH.update(
         ("recipes", "receipt", "history", "--json"): ("recipes", "receipt", "history", "--json"),
         ("recipes", "receipt", "audit"): ("recipes", "receipt", "audit"),
         ("recipes", "receipt", "audit", "--json"): ("recipes", "receipt", "audit", "--json"),
+        ("recipes", "receipt", "integrity"): ("recipes", "receipt", "integrity"),
+        ("recipes", "receipt", "integrity", "--json"): (
+            "recipes",
+            "receipt",
+            "integrity",
+            "--json",
+        ),
+        ("audit", "recipes", "integrity"): ("recipes", "receipt", "integrity"),
+        ("audit", "recipes", "integrity", "--json"): (
+            "recipes",
+            "receipt",
+            "integrity",
+            "--json",
+        ),
         ("recipes", "receipt", "audit-bundle"): ("recipes", "receipt", "audit-bundle"),
         ("recipes", "receipt", "audit-bundle", "--json"): (
             "recipes",
@@ -369,6 +388,8 @@ _QUICK_MUTATION_PHRASES = (
     "apply the receipt",
     "cleanup old receipts",
     "clean up old receipts",
+    "delete bad artifacts",
+    "fix corrupt receipts",
 )
 
 _DANGEROUS_COMMAND_PREFIXES = (
@@ -557,6 +578,33 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         if flags == {"--confirm"} or flags == {"--confirm", "--json"}:
             argv = ("recipes", "execute", original_tokens[2], "--confirm")
             if "--json" in flags:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:3] == ("recipes", "receipt", "integrity"):
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        include_flag = len(tokens) == 4 and tokens[3] in {
+            "--include-exports",
+            "--include-audit-bundles",
+        }
+        if len(tokens) == 3 or json_flag or include_flag:
+            argv = ("recipes", "receipt", "integrity")
+            if json_flag or include_flag:
+                argv = (*argv, original_tokens[3])
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {5, 6}
+        and tokens[:4]
+        in {
+            ("recipes", "receipt", "integrity", "--target"),
+            ("recipes", "receipt", "integrity", "--recipe"),
+            ("recipes", "receipt", "integrity", "--limit"),
+        }
+        and tokens[4]
+    ):
+        json_flag = len(tokens) == 6 and tokens[5] == "--json"
+        if len(tokens) == 5 or json_flag:
+            argv = ("recipes", "receipt", "integrity", original_tokens[3], original_tokens[4])
+            if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
     if len(tokens) in {3, 4} and tokens[:3] == ("recipes", "receipt", "audit"):
