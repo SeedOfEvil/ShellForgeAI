@@ -1786,6 +1786,59 @@ python scripts/finalize_validation_manifest.py /tmp/sfai-pr162-manifest.json \
 
 The finalizer reads the existing manifest, parses conservative pass/fail signals from supplied logs, writes `<manifest>.finalized.json` by default, and records `evidence_source=imported_log`, `imported=true`, and `executed_by_helper=false` on imported command statuses. It treats explicit zero-failure summaries such as `failed: 0`, `failed=0`, and `0 failed` as pass-safe evidence instead of conflicts, while real or ambiguous failures remain conservative warnings. Repeated non-blocker notes are trimmed and de-duplicated in first-seen order. Use `--in-place` only when you intentionally want to update the original manifest. Imported evidence is different from helper-executed evidence: the finalizer does not run pytest, Docker, Compose, cleanup, remediation, rollback, deploy, restart, or any arbitrary command. Ambiguous or conflicting logs are recorded as warnings and must not be treated as an automatic pass without an explicit operator `--status` / `--verdict` override.
 
+### Validation heartbeat and interrupted/incomplete runs (PR176)
+
+Long Docker01/full-validation runs can be SIGTERM/SIGINT/timeout-interrupted (or
+SIGKILLed) before the helper records full `pytest` completion — exactly what
+happened on PR175, whose first full-validation helper run was SIGKILLed near the
+end and could not be counted as a pass. When executing validation, the lane
+helper now writes a heartbeat/checkpoint/status JSON
+(`scripts/validation_heartbeat.py`) updated before and after each phase, and the
+manifest/summary carry an explicit run classification:
+
+```bash
+python scripts/sfai_docker01_pr_lane.py --changed-files Dockerfile --pr 176 \
+  --full-validation --full-validation-reason "validation helper changed" \
+  --execute-validation \
+  --manifest-output /tmp/sfai-pr176-manifest.json \
+  --summary-output  /tmp/sfai-pr176-summary.txt \
+  --heartbeat-file  /tmp/sfai-pr176-heartbeat.json \
+  --checkpoint-file /tmp/sfai-pr176-checkpoints.json \
+  --status-file     /tmp/sfai-pr176-status.json
+```
+
+When `--heartbeat-file` / `--checkpoint-file` / `--status-file` are omitted, the
+helper writes default heartbeat/checkpoint/status artifacts next to the manifest.
+The Lane C runner accepts the same `--heartbeat-file` / `--status-file` /
+`--checkpoint-file` for a single-phase `full_pytest` heartbeat.
+
+Interpret the manifest/summary classification as follows:
+
+- **passed** (`pass_eligible=true`, `rerun_required=false`) — every required phase
+  passed **and** a full-`pytest` exit code of `0` was captured. Only this counts
+  as merge evidence.
+- **failed** — `test_failure` (a test phase failed or full `pytest` exited
+  nonzero) or `setup_failure` (a pre-test `ruff`/`compileall` phase failed, or the
+  helper could not set up before tests). `pass_eligible=false`.
+- **incomplete** (`interrupted_or_incomplete`, `pass_eligible=false`,
+  `rerun_required=true`) — the run ended before full-`pytest` completion was
+  recorded. The summary prints `Validation result: INCOMPLETE`, a
+  `*** RERUN REQUIRED ***` banner, and the last active/last-completed phase.
+
+`status=passed` is recorded **only** when full `pytest` exit `0` is captured;
+`full_pytest_result` stays `unknown` if no exit code was captured and is never
+reported as `passed` on an interrupted run. SIGKILL cannot be caught, so no
+finalizing heartbeat is written on `kill -9`; the last heartbeat still shows the
+active phase as `running` (never `passed`), which classifies as incomplete.
+
+Merge rule: **an incomplete validation run is not merge evidence.** Do not merge
+on an interrupted/SIGKILLed run — require a clean rerun that reports
+`Validation result: PASSED` / `Pass eligible: yes`. If a clean rerun later passes,
+that run's manifest reports the clean run as the pass. The helper runs full
+`pytest` once per invocation and never auto-reruns it; it writes evidence JSON
+only and performs no Docker/Compose/service/container mutation, cleanup,
+remediation, rollback, recovery, restart, `shell=True`, or model call.
+
 Every Docker01 PR report should record through the manifest/summary:
 
 - the **selected lane** (A / B / C) and **why**,

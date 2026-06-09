@@ -73,7 +73,9 @@ How matching works:
 | `scripts/v1_validate.sh` | **full** | `test_pr113_*`, `test_pr118_*` + `python scripts/run_full_pytest.py` |
 | `scripts/validate_pr.py` | **full** | `test_pr157_validation_lane_optimizer` + `python scripts/run_full_pytest.py` |
 | `scripts/validation_matrix.json` | **full** | `test_pr157_validation_lane_optimizer` + `python scripts/run_full_pytest.py` |
-| `scripts/sfai_docker01_pr_lane.py` | **full** | validation-lane helper tests + `python scripts/run_full_pytest.py` |
+| `scripts/sfai_docker01_pr_lane.py` | **full** | validation-lane helper tests (`test_pr161_*`, `test_pr176_*`) + `python scripts/run_full_pytest.py` |
+| `scripts/validation_heartbeat.py` | **full** | `test_pr176_validation_heartbeat_incomplete` + `python scripts/run_full_pytest.py` |
+| `scripts/run_full_pytest.py` | **full** | `test_pr160_*`, `test_pr176_*` + `python scripts/run_full_pytest.py` |
 | `scripts/**` (other) | **full** | + `python scripts/run_full_pytest.py` |
 | `tests/conftest.py` | **full** | shared harness → `python scripts/run_full_pytest.py` |
 | `tests/**` | fast | the changed test files are run directly |

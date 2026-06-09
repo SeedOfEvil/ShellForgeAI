@@ -291,8 +291,10 @@ explicit CLI lane.
 - [`docs/roadmap.md`](docs/roadmap.md) — milestone history and next tracks.
 - [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) — PR validation lanes
   (fast / targeted / full), the `scripts/validate_pr.py` lane optimizer, the
-  Lane C `scripts/run_full_pytest.py` full-validation runner, and optional
-  `scripts/track_pytest_durations.py` slow-test duration tracking; see
+  Lane C `scripts/run_full_pytest.py` full-validation runner, optional
+  `scripts/track_pytest_durations.py` slow-test duration tracking, and the
+  `scripts/validation_heartbeat.py` heartbeat that flags interrupted/incomplete
+  runs as `rerun_required` instead of a false pass; see
   [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
 
 ## Using OpenAI Codex / ChatGPT sign-in
