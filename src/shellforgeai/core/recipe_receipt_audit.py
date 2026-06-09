@@ -29,6 +29,7 @@ COMPARE_MODE = "v2_recipe_receipt_compare"
 AUDIT_MODE = "v2_recipe_receipt_audit"
 AUDIT_BUNDLE_MODE = "v2_recipe_receipt_audit_bundle"
 AUDIT_BUNDLE_VALIDATE_MODE = "v2_recipe_receipt_audit_bundle_validate"
+INTEGRITY_MODE = "v2_recipe_receipt_integrity"
 AUDIT_BUNDLE_MANIFEST_KIND = "v2_recipe_receipt_audit_bundle"
 EXPORT_MANIFEST_KIND = "v2_recipe_receipt_export"
 DEFAULT_HISTORY_LIMIT = 20
@@ -494,6 +495,510 @@ def receipt_audit(
     if compare_summary is not None:
         payload["compare_summary"] = compare_summary
     return payload
+
+
+_INTEGRITY_SAFETY_FLAG_KEYS = (
+    "docker_compose_executed",
+    "shell_true",
+    "arbitrary_command_execution",
+    "natural_language_execution",
+    "production_restart_executed",
+)
+
+
+def _integrity_summary() -> dict[str, int]:
+    return {
+        "receipts_scanned": 0,
+        "exports_scanned": 0,
+        "audit_bundles_scanned": 0,
+        "valid_artifacts": 0,
+        "failed_artifacts": 0,
+        "warnings": 0,
+        "checksum_failures": 0,
+        "missing_required_files": 0,
+        "malformed_json": 0,
+        "missing_original_receipts": 0,
+        "unsupported_artifacts": 0,
+        "safety_drift": 0,
+        "production_restart_recorded": 0,
+    }
+
+
+def _integrity_finding(
+    severity: str,
+    artifact_type: str,
+    path: Path,
+    check: str,
+    message: str,
+    *,
+    artifact_ref: str | None = None,
+    first_safe_command: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "severity": severity,
+        "artifact_type": artifact_type,
+        "artifact_ref": artifact_ref or path.name,
+        "path": str(path),
+        "check": check,
+        "message": message,
+        "first_safe_command": first_safe_command or "shellforgeai recipes receipt audit --json",
+    }
+
+
+def _safe_rel_path(base: Path, rel: str) -> Path | None:
+    rel_path = Path(str(rel))
+    if rel_path.is_absolute() or ".." in rel_path.parts:
+        return None
+    path = (base / rel_path).resolve()
+    try:
+        path.relative_to(base.resolve())
+    except ValueError:
+        return None
+    return path
+
+
+def _check_manifest_checksums(
+    base: Path,
+    checksums: dict[str, Any],
+    *,
+    artifact_type: str,
+    artifact_ref: str,
+    skip: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    skip = skip or set()
+    for rel, expected in checksums.items():
+        rel_s = str(rel)
+        if rel_s in skip:
+            continue
+        path = _safe_rel_path(base, rel_s)
+        if path is None:
+            findings.append(
+                _integrity_finding(
+                    "failed",
+                    artifact_type,
+                    base,
+                    "checksum",
+                    f"unsafe checksum path: {rel_s}",
+                    artifact_ref=artifact_ref,
+                )
+            )
+            continue
+        if not path.is_file():
+            findings.append(
+                _integrity_finding(
+                    "warning",
+                    artifact_type,
+                    path,
+                    "required_file",
+                    f"checksum references missing file: {rel_s}",
+                    artifact_ref=artifact_ref,
+                )
+            )
+            continue
+        try:
+            actual = _sha256_file(path)
+        except OSError as exc:
+            findings.append(
+                _integrity_finding(
+                    "warning",
+                    artifact_type,
+                    path,
+                    "checksum",
+                    f"could not hash {rel_s}: {exc}",
+                    artifact_ref=artifact_ref,
+                )
+            )
+            continue
+        if actual != str(expected):
+            findings.append(
+                _integrity_finding(
+                    "failed",
+                    artifact_type,
+                    path,
+                    "checksum",
+                    f"checksum mismatch for {rel_s}",
+                    artifact_ref=artifact_ref,
+                )
+            )
+    return findings
+
+
+def _integrity_checks(summary: dict[str, int]) -> list[dict[str, str]]:
+    return [
+        {
+            "name": "receipt_json_parse",
+            "status": "failed" if summary["malformed_json"] else "passed",
+        },
+        {
+            "name": "manifest_checksum_consistency",
+            "status": "failed" if summary["checksum_failures"] else "passed",
+        },
+        {
+            "name": "recovery_original_links",
+            "status": "failed" if summary["missing_original_receipts"] else "passed",
+        },
+        {"name": "safety_flags", "status": "failed" if summary["safety_drift"] else "passed"},
+        {
+            "name": "production_restart_records",
+            "status": "failed" if summary["production_restart_recorded"] else "passed",
+        },
+    ]
+
+
+def _scan_receipt_integrity(
+    d: Path,
+    data_dir: Path | str,
+    known_ids: set[str],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], bool]:
+    findings: list[dict[str, Any]] = []
+    required = ("recipe-receipt.json", "recipe-receipt.md", "manifest.json")
+    for rel in required:
+        if not (d / rel).exists():
+            findings.append(
+                _integrity_finding(
+                    "warning",
+                    "receipt",
+                    d / rel,
+                    "required_file",
+                    f"missing required receipt file: {rel}",
+                    artifact_ref=d.name,
+                    first_safe_command=f"shellforgeai recipes receipt inspect {d.name} --json",
+                )
+            )
+    receipt, err = _read_json(d / "recipe-receipt.json")
+    if err or receipt is None:
+        findings.append(
+            _integrity_finding(
+                "warning",
+                "receipt",
+                d / "recipe-receipt.json",
+                "json_parse",
+                err or "receipt JSON could not be parsed",
+                artifact_ref=d.name,
+                first_safe_command=f"shellforgeai recipes receipt inspect {d.name} --json",
+            )
+        )
+        return None, findings, False
+    rid = str(receipt.get("receipt_id") or d.name)
+    for field in ("recipe_id", "target", "created_at"):
+        if not receipt.get(field):
+            findings.append(
+                _integrity_finding(
+                    "warning",
+                    "receipt",
+                    d / "recipe-receipt.json",
+                    "required_file",
+                    f"receipt missing expected field: {field}",
+                    artifact_ref=rid,
+                    first_safe_command=f"shellforgeai recipes receipt inspect {rid} --json",
+                )
+            )
+    if receipt.get("mode") not in _SUPPORTED_MODES:
+        findings.append(
+            _integrity_finding(
+                "warning",
+                "receipt",
+                d / "recipe-receipt.json",
+                "required_file",
+                f"unsupported receipt mode: {receipt.get('mode') or 'unknown'}",
+                artifact_ref=rid,
+                first_safe_command=f"shellforgeai recipes receipt inspect {rid} --json",
+            )
+        )
+    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    if not safety:
+        findings.append(
+            _integrity_finding(
+                "warning",
+                "receipt",
+                d / "recipe-receipt.json",
+                "safety_flag",
+                "receipt missing safety block",
+                artifact_ref=rid,
+                first_safe_command=f"shellforgeai recipes receipt inspect {rid} --json",
+            )
+        )
+    for key in _INTEGRITY_SAFETY_FLAG_KEYS:
+        if safety.get(key) is True or receipt.get(key) is True:
+            findings.append(
+                _integrity_finding(
+                    "failed",
+                    "receipt",
+                    d / "recipe-receipt.json",
+                    "safety_flag",
+                    f"unsafe safety flag recorded true: {key}",
+                    artifact_ref=rid,
+                    first_safe_command=f"shellforgeai recipes receipt inspect {rid} --json",
+                )
+            )
+    if receipt.get("mode") == RECOVERY_RECEIPT_MODE and receipt.get("original_receipt_id"):
+        original = str(receipt.get("original_receipt_id"))
+        if original not in known_ids:
+            findings.append(
+                _integrity_finding(
+                    "warning",
+                    "receipt",
+                    d / "recipe-receipt.json",
+                    "linkage",
+                    f"recovery receipt links to missing original receipt: {original}",
+                    artifact_ref=rid,
+                    first_safe_command=f"shellforgeai recipes receipt inspect {rid} --json",
+                )
+            )
+    manifest, manifest_err = _read_json(d / "manifest.json")
+    if manifest_err or manifest is None:
+        findings.append(
+            _integrity_finding(
+                "warning",
+                "receipt",
+                d / "manifest.json",
+                "json_parse",
+                manifest_err or "manifest JSON could not be parsed",
+                artifact_ref=rid,
+                first_safe_command=f"shellforgeai recipes receipt inspect {rid} --json",
+            )
+        )
+    else:
+        checksums = manifest.get("checksums") if isinstance(manifest.get("checksums"), dict) else {}
+        if checksums:
+            findings.extend(
+                _check_manifest_checksums(
+                    d,
+                    checksums,
+                    artifact_type="receipt",
+                    artifact_ref=rid,
+                    skip={"manifest.json"},
+                )
+            )
+    return receipt, findings, not findings
+
+
+def receipt_integrity(
+    data_dir: Path | str,
+    *,
+    target: str | None = None,
+    recipe_id: str | None = None,
+    limit: int = DEFAULT_HISTORY_LIMIT,
+    include_exports: bool = False,
+    include_audit_bundles: bool = False,
+) -> dict[str, Any]:
+    """Scan owned receipt/export/audit-bundle artifacts for drift without executing anything."""
+    bounded_limit, limit_warnings = _coerce_limit(int(limit))
+    summary = _integrity_summary()
+    findings: list[dict[str, Any]] = []
+    warnings: list[str] = [*limit_warnings]
+    root = recipe_receipt_root(data_dir)
+    try:
+        receipt_dirs = [p for p in root.iterdir() if p.is_dir()] if root.exists() else []
+    except OSError as exc:
+        warnings.append(f"could not read receipt data directory: {exc}")
+        summary["warnings"] = len(warnings)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "mode": INTEGRITY_MODE,
+            "status": "failed",
+            "read_only": True,
+            "mutation_performed": False,
+            "filters": {
+                "target": target or None,
+                "recipe_id": recipe_id or None,
+                "limit": bounded_limit,
+                "include_exports": bool(include_exports),
+                "include_audit_bundles": bool(include_audit_bundles),
+            },
+            "summary": summary,
+            "checks": _integrity_checks(summary),
+            "findings": findings,
+            "warnings": warnings,
+            "first_safe_command": "shellforgeai recipes receipt history --json",
+            "safe_next_commands": [
+                "shellforgeai recipes receipt history --json",
+                "shellforgeai recipes receipt audit --json",
+            ],
+            "safety": audit_safety(),
+        }
+
+    known_ids: set[str] = set()
+    sortable: list[tuple[str, float, str, Path, dict[str, Any] | None]] = []
+    for d in receipt_dirs:
+        receipt, _ = _read_json(d / "recipe-receipt.json")
+        if receipt:
+            known_ids.add(str(receipt.get("receipt_id") or d.name))
+        sortable.append(
+            (
+                str((receipt or {}).get("created_at") or (receipt or {}).get("updated_at") or ""),
+                d.stat().st_mtime,
+                d.name,
+                d,
+                receipt,
+            )
+        )
+    sortable.sort(reverse=True)
+
+    selected: list[Path] = []
+    for _, _, _, d, cached in sortable:
+        rec = cached
+        if rec is None:
+            rec, _ = _read_json(d / "recipe-receipt.json")
+        if rec is not None:
+            if target and str(rec.get("target") or "") != target:
+                continue
+            if recipe_id and str(rec.get("recipe_id") or "") != recipe_id:
+                continue
+        selected.append(d)
+        if len(selected) >= bounded_limit:
+            break
+
+    for d in selected:
+        receipt, item_findings, ok = _scan_receipt_integrity(d, data_dir, known_ids)
+        summary["receipts_scanned"] += 1
+        findings.extend(item_findings)
+        if ok:
+            summary["valid_artifacts"] += 1
+        else:
+            summary["failed_artifacts"] += 1
+        if receipt:
+            safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+            if (
+                safety.get("production_restart_executed") is True
+                or receipt.get("production_restart_executed") is True
+            ):
+                summary["production_restart_recorded"] += 1
+
+    if include_exports:
+        export_root = receipt_export_root(data_dir)
+        try:
+            export_dirs = (
+                [p for p in export_root.iterdir() if p.is_dir()] if export_root.exists() else []
+            )
+        except OSError as exc:
+            export_dirs = []
+            warnings.append(f"could not read receipt export directory: {exc}")
+        for d in export_dirs:
+            validation = receipt_export_validate(str(d), data_dir)
+            manifest, _ = _read_json(d / "export-manifest.json")
+            if target and str((manifest or {}).get("target") or "") != target:
+                continue
+            if recipe_id and str((manifest or {}).get("recipe_id") or "") != recipe_id:
+                continue
+            summary["exports_scanned"] += 1
+            if validation.get("status") == "ok":
+                summary["valid_artifacts"] += 1
+            else:
+                summary["failed_artifacts"] += 1
+                for warning in validation.get("warnings") or ["receipt export validation failed"]:
+                    findings.append(
+                        _integrity_finding(
+                            "warning",
+                            "receipt_export",
+                            d,
+                            "checksum" if "checksum" in str(warning) else "required_file",
+                            str(warning),
+                            artifact_ref=str(validation.get("export_id") or d.name),
+                            first_safe_command=(
+                                f"shellforgeai recipes receipt export-validate {d.name} --json"
+                            ),
+                        )
+                    )
+
+    if include_audit_bundles:
+        bundle_root = receipt_audit_bundle_root(data_dir)
+        try:
+            bundle_dirs = (
+                [p for p in bundle_root.iterdir() if p.is_dir()] if bundle_root.exists() else []
+            )
+        except OSError as exc:
+            bundle_dirs = []
+            warnings.append(f"could not read audit bundle directory: {exc}")
+        for d in bundle_dirs:
+            validation = receipt_audit_bundle_validate(str(d), data_dir)
+            manifest, _ = _read_json(d / "manifest.json")
+            filters = (
+                (manifest or {}).get("filters")
+                if isinstance((manifest or {}).get("filters"), dict)
+                else {}
+            )
+            if target and str(filters.get("target") or "") != target:
+                continue
+            if recipe_id and str(filters.get("recipe_id") or "") != recipe_id:
+                continue
+            summary["audit_bundles_scanned"] += 1
+            if validation.get("status") == "ok":
+                summary["valid_artifacts"] += 1
+            else:
+                summary["failed_artifacts"] += 1
+                for warning in validation.get("warnings") or ["audit bundle validation failed"]:
+                    findings.append(
+                        _integrity_finding(
+                            "warning",
+                            "audit_bundle",
+                            d,
+                            "checksum" if "checksum" in str(warning) else "required_file",
+                            str(warning),
+                            artifact_ref=str(validation.get("bundle_id") or d.name),
+                            first_safe_command=(
+                                "shellforgeai recipes receipt audit-bundle-validate "
+                                f"{d.name} --json"
+                            ),
+                        )
+                    )
+
+    for finding in findings:
+        check = str(finding.get("check") or "")
+        msg = str(finding.get("message") or "")
+        if check == "checksum" or "checksum" in msg:
+            summary["checksum_failures"] += 1
+        if check == "required_file" or "missing required" in msg or "missing file" in msg:
+            summary["missing_required_files"] += 1
+        if check == "json_parse" or "malformed" in msg:
+            summary["malformed_json"] += 1
+        if check == "linkage" or "missing original" in msg:
+            summary["missing_original_receipts"] += 1
+        if "unsupported" in msg:
+            summary["unsupported_artifacts"] += 1
+        if check == "safety_flag":
+            summary["safety_drift"] += 1
+    warnings.extend(
+        str(f.get("message")) for f in findings if f.get("severity") in {"warning", "failed"}
+    )
+    warnings = list(dict.fromkeys(warnings))
+    summary["warnings"] = len(warnings)
+
+    scanned = (
+        summary["receipts_scanned"] + summary["exports_scanned"] + summary["audit_bundles_scanned"]
+    )
+    status = "empty" if scanned == 0 else ("ok_with_warnings" if findings or warnings else "ok")
+    first_safe = (
+        "shellforgeai recipes receipt history --json"
+        if status == "empty"
+        else "shellforgeai recipes receipt audit --json"
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": INTEGRITY_MODE,
+        "status": status,
+        "read_only": True,
+        "mutation_performed": False,
+        "filters": {
+            "target": target or None,
+            "recipe_id": recipe_id or None,
+            "limit": bounded_limit,
+            "include_exports": bool(include_exports),
+            "include_audit_bundles": bool(include_audit_bundles),
+        },
+        "summary": summary,
+        "checks": _integrity_checks(summary),
+        "findings": findings,
+        "warnings": warnings,
+        "first_safe_command": first_safe,
+        "safe_next_commands": [
+            "shellforgeai recipes receipt audit --json",
+            "shellforgeai recipes receipt history --json",
+            "shellforgeai recipes receipt audit-bundle --json",
+        ],
+        "safety": audit_safety(),
+    }
 
 
 def _receipt_audit_bundle_summary(audit_payload: dict[str, Any]) -> dict[str, Any]:

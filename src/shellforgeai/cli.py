@@ -211,6 +211,9 @@ from shellforgeai.core.recipe_receipt_audit import (
 from shellforgeai.core.recipe_receipt_audit import (
     receipt_inspect as build_receipt_inspect,
 )
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_integrity as build_receipt_integrity,
+)
 from shellforgeai.core.recipe_receipt_recovery import execute_receipt_recovery
 from shellforgeai.core.recipe_receipt_rollback_preview import preview_receipt_rollback
 from shellforgeai.core.recipe_receipt_verify import verify_recipe_receipt
@@ -11158,6 +11161,12 @@ _RECEIPT_AUDIT_MUTATION_CUES = (
     "export and recover now",
     "export audit and recover now",
     "validate bundle then rollback",
+    "check integrity and rerun receipt",
+    "scan and restart it",
+    "validate bundle then recover now",
+    "fix corrupt receipts",
+    "delete bad artifacts",
+    "create support packet and restart the receipt",
 )
 
 
@@ -11176,7 +11185,13 @@ def _handle_receipt_audit_ask(question: str) -> bool:
         console.print(
             "ShellForgeAI did not recover, rollback, restart, rerun, apply, clean up, or remediate."
         )
-        if "bundle" in normalized or "support packet" in normalized or "export audit" in normalized:
+        if "integrity" in normalized or "corrupt" in normalized or "drift" in normalized:
+            console.print("Safe read-only integrity scan command:")
+            console.print("  shellforgeai recipes receipt integrity")
+            console.print("  shellforgeai recipes receipt integrity --json")
+        elif (
+            "bundle" in normalized or "support packet" in normalized or "export audit" in normalized
+        ):
             console.print("Safe artifact-only bundle command:")
             console.print("  shellforgeai recipes receipt audit-bundle")
             console.print("  shellforgeai recipes receipt audit-bundle --json")
@@ -11191,8 +11206,39 @@ def _handle_receipt_audit_ask(question: str) -> bool:
     if any(
         cue in normalized
         for cue in (
+            "check receipt integrity",
+            "scan receipt artifacts",
+            "check recipe receipt drift",
+            "validate governed receipt artifacts",
+            "check audit bundle integrity",
+            "scan audit bundles",
+            "are my receipt exports valid",
+            "show receipt integrity command",
+            "receipt integrity",
+        )
+    ):
+        console.print("Governed receipt artifact integrity guidance (deterministic ask routing):")
+        console.print("  shellforgeai recipes receipt integrity")
+        console.print("  shellforgeai recipes receipt integrity --json")
+        console.print("  shellforgeai recipes receipt integrity --include-exports")
+        console.print("  shellforgeai recipes receipt integrity --include-audit-bundles")
+        console.print("Read-only integrity scan. No recipe action was taken.")
+        console.print(
+            "No Docker, Compose, recovery, rollback, restart, cleanup, remediation, "
+            "or model call occurred."
+        )
+        console.print("No action was taken.")
+        return True
+
+    if any(
+        cue in normalized
+        for cue in (
             "create receipt audit bundle",
+            "create a receipt audit bundle for support handoff",
+            "create receipt audit bundle for support handoff",
             "create recipe audit support packet",
+            "make a support packet for receipt audit",
+            "support handoff for recipe receipts",
             "bundle the receipt audit",
             "export audit bundle",
             "make a support packet for recipe receipts",
@@ -12665,6 +12711,54 @@ def recipes_execute(
         raise typer.Exit(1)
 
 
+def _render_recipe_receipt_integrity_human(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    lines = [
+        "Governed receipt artifact integrity scan",
+        "",
+        f"Status: {payload.get('status')}",
+        f"Receipts scanned: {summary.get('receipts_scanned', 0)}",
+        f"Exports scanned: {summary.get('exports_scanned', 0)}",
+        f"Audit bundles scanned: {summary.get('audit_bundles_scanned', 0)}",
+        (
+            "Findings: "
+            f"{summary.get('failed_artifacts', 0)} failed, "
+            f"{summary.get('warnings', 0)} warnings, "
+            f"{summary.get('safety_drift', 0)} safety drift"
+        ),
+        "",
+        "Checks:",
+        "",
+    ]
+    for check in payload.get("checks") or []:
+        if isinstance(check, dict):
+            lines.append(f"{str(check.get('name') or '').replace('_', ' ')}: {check.get('status')}")
+    findings = payload.get("findings") or []
+    if findings:
+        lines.extend(["", "Findings:"])
+        for finding in findings[:12]:
+            if isinstance(finding, dict):
+                lines.append(
+                    f"- {finding.get('severity')}: {finding.get('artifact_type')} "
+                    f"{finding.get('artifact_ref')} {finding.get('check')}: "
+                    f"{finding.get('message')}"
+                )
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"- {warning}" for warning in warnings[:12])
+    lines.extend(["", "First safe command:", str(payload.get("first_safe_command") or "")])
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "Read-only integrity scan.",
+            "No recipe, recovery, rollback, cleanup, Docker, or Compose command was executed.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_recipe_receipt_history_human(payload: dict[str, Any]) -> str:
     lines = [
         "Recipe receipt history",
@@ -12976,6 +13070,60 @@ def _render_recipe_receipt_compare_human(
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
+
+
+@recipes_receipt_app.command("integrity")
+def recipes_receipt_integrity(
+    ctx: typer.Context,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    target: Annotated[
+        str | None,
+        typer.Option("--target", help="Only scan artifacts for this target when metadata exists."),
+    ] = None,
+    recipe_id: Annotated[
+        str | None,
+        typer.Option(
+            "--recipe", help="Only scan artifacts for this recipe id when metadata exists."
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            min=1,
+            max=100,
+            help="Maximum recent primary receipt artifacts to scan (1-100).",
+        ),
+    ] = 50,
+    include_exports: Annotated[
+        bool,
+        typer.Option(
+            "--include-exports", help="Also scan existing ShellForgeAI-owned receipt exports."
+        ),
+    ] = False,
+    include_audit_bundles: Annotated[
+        bool,
+        typer.Option(
+            "--include-audit-bundles", help="Also scan existing ShellForgeAI-owned audit bundles."
+        ),
+    ] = False,
+) -> None:
+    """Scan governed receipt/export/audit-bundle artifacts for integrity drift. Read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_integrity(
+        runtime.session.data_dir,
+        target=target,
+        recipe_id=recipe_id,
+        limit=limit,
+        include_exports=include_exports,
+        include_audit_bundles=include_audit_bundles,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_integrity_human(payload), nl=False)
+    if payload.get("status") == "failed":
+        raise typer.Exit(1)
 
 
 @recipes_receipt_app.command("audit")
