@@ -1920,3 +1920,26 @@ shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json
 `recipes receipt audit` is read-only. It summarizes governed execution/recovery chains, links recovery receipts to original receipts, reports verification and safety flags, and flags malformed receipts, missing originals, unsupported recipes, production restart flags, Docker Compose flags, `shell_true`, arbitrary command execution, and natural-language execution. It does not execute recipes, rerun receipts, recover, rollback, clean up, remediate, restart containers, call Docker/Compose, call shell, or call a model.
 
 The receipt audit commands are for history, inspection, portable metadata export, export validation, comparison, and governed audit-bundle handoff. `recipes receipt audit-bundle` writes a bounded ShellForgeAI-owned support packet under `<data_dir>/exports/receipt-audit-bundles/<audit_bundle_id>/` with `audit-bundle.json`, `audit-bundle.md`, `receipt-audit.json`, `receipt-history.json`, `manifest.json`, and `checksums.json`; optional local-only summaries include `receipt-compare-summary.json` and `receipt-export-index.json`. `recipes receipt audit-bundle-validate <bundle_ref>` resolves only owned bundle ids/paths, checks required files, parses JSON, verifies manifest consistency, and validates SHA256 checksums. Apart from explicit owned artifact/export writes, these commands are read-only and do not execute Docker/Compose, recovery, rollback, cleanup, remediation, shell commands, or model-driven actions. Audit bundles never execute or rerun receipts and are not recipe/recovery/rollback instructions. Support-handoff phrasing that clearly mentions receipts, receipt audit, or recipe receipts should use the receipt audit-bundle guidance rather than generic handoff.
+## Governed receipt finding explanation
+
+`shellforgeai recipes receipt explain` is a deterministic, local, read-only explanation surface for governed receipt audit, integrity, audit-bundle, and compare findings. It reads existing ShellForgeAI-owned receipt/audit/integrity artifacts and maps known finding codes (for example `checksum_mismatch`, `missing_original_receipt`, `safety_drift`, and `production_restart_recorded`) to operator-facing meaning, impact, and safe next commands.
+
+Command forms:
+
+```bash
+shellforgeai recipes receipt explain
+shellforgeai recipes receipt explain --json
+shellforgeai recipes receipt explain --source integrity
+shellforgeai recipes receipt explain --source audit
+shellforgeai recipes receipt explain --source audit-bundle
+shellforgeai recipes receipt explain --source compare
+shellforgeai recipes receipt explain --finding checksum_mismatch
+shellforgeai recipes receipt explain --target <target>
+shellforgeai recipes receipt explain --recipe docker.disposable_restart
+shellforgeai recipes receipt explain --limit 20
+```
+
+Supported categories include malformed JSON, missing required files/manifests/checksums, checksum mismatch, unsupported artifacts/receipts, missing original receipts, verification failure, safety drift, production restart records, Docker Compose/shell/arbitrary-command/natural-language execution records, receipt export and audit-bundle validation failures, and compare categories such as status/target/recipe/action/safety-flag changes. Unknown finding codes return controlled `unknown_finding` guidance instead of a traceback.
+
+`recipes receipt explain` never repairs, deletes, cleans up, recovers, rolls back, restarts, reruns receipts, calls Docker/Compose, executes shell, creates exports/bundles, or calls a model. Safe next commands are limited to read-only receipt integrity/audit/history/inspect/validate/compare/verify surfaces. Ask and interactive phrasing such as “explain receipt integrity findings”, “what does checksum_mismatch mean?”, and “what should I do about safety drift?” routes to this explanation guidance; mutation phrasing such as “explain and fix corrupt receipts” refuses the mutation part. Support-handoff phrasing that clearly mentions receipt audit or recipe receipts routes to receipt audit-bundle guidance.
+
