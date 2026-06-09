@@ -86,7 +86,7 @@ V2 golden path:
   recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
   recipes preflight validate <id> / recipes execute <id> --confirm [--json]
   recipes receipt validate <id> [--json] / recipes receipt verify <id> [--json]
-  recipes receipt audit/history/inspect/export/export-validate/compare/compare-latest [--json]
+  recipes receipt explain/integrity/audit/history/inspect/export/export-validate/compare [--json]
   recipes receipt rollback-preview <id> / recovery-execute <id> --confirm / recovery-status <id>
   apply-preview [--brief|--json] / verify [--brief|--json]
   verify --receipt <id> [--json] / handoff [--brief|--json|--save]
@@ -1644,6 +1644,7 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("recipes", "inspect"): "Running read-only recipe inspection...",
     ("recipes", "eligibility"): "Running read-only recipe eligibility...",
     ("recipes", "receipt", "audit"): "Running read-only receipt audit...",
+    ("recipes", "receipt", "explain"): "Running read-only receipt finding explanation...",
     ("recipes", "receipt", "integrity"): "Running read-only receipt integrity scan...",
     ("recipes", "receipt", "audit-bundle"): "Running read-only receipt audit bundle...",
     (

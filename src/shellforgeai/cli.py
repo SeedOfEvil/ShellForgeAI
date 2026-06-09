@@ -214,6 +214,12 @@ from shellforgeai.core.recipe_receipt_audit import (
 from shellforgeai.core.recipe_receipt_audit import (
     receipt_integrity as build_receipt_integrity,
 )
+from shellforgeai.core.recipe_receipt_explain import (
+    known_finding_codes,
+)
+from shellforgeai.core.recipe_receipt_explain import (
+    receipt_explain as build_receipt_explain,
+)
 from shellforgeai.core.recipe_receipt_recovery import execute_receipt_recovery
 from shellforgeai.core.recipe_receipt_rollback_preview import preview_receipt_rollback
 from shellforgeai.core.recipe_receipt_verify import verify_recipe_receipt
@@ -11166,6 +11172,11 @@ _RECEIPT_AUDIT_MUTATION_CUES = (
     "validate bundle then recover now",
     "fix corrupt receipts",
     "delete bad artifacts",
+    "repair checksum mismatch",
+    "recover now",
+    "explain safety drift and recover now",
+    "explain finding and restart from receipt",
+    "explain production restart and rollback",
     "create support packet and restart the receipt",
 )
 
@@ -11176,18 +11187,77 @@ def _receipt_audit_refs(question: str) -> list[str]:
     )
 
 
+def _finding_code_from_question(question: str) -> str | None:
+    normalized = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
+    for code in known_finding_codes():
+        if code in normalized or code.replace("_", " ") in normalized:
+            return code
+    return None
+
+
+def _is_receipt_explain_ask(normalized: str) -> bool:
+    if _finding_code_from_question(normalized):
+        return any(cue in normalized for cue in ("what does", "explain", "mean", "about"))
+    return any(
+        cue in normalized
+        for cue in (
+            "explain receipt integrity findings",
+            "explain integrity findings",
+            "explain audit bundle warning",
+            "explain receipt audit warning",
+            "what should i do about safety drift",
+            "explain compare result",
+            "why did receipt compare flag safety drift",
+            "show safe next steps for receipt findings",
+        )
+    )
+
+
+def _print_receipt_explain_guidance(question: str, *, refused_mutation: bool = False) -> None:
+    code = _finding_code_from_question(question)
+    console.print("Governed receipt finding explanation guidance (deterministic ask routing):")
+    if code:
+        console.print(f"  shellforgeai recipes receipt explain --finding {code}")
+        console.print(f"  shellforgeai recipes receipt explain --finding {code} --json")
+    elif "compare" in question.lower():
+        console.print("  shellforgeai recipes receipt explain --source compare")
+        console.print("  shellforgeai recipes receipt compare <before> <after> --json")
+    elif "audit bundle" in question.lower():
+        console.print("  shellforgeai recipes receipt explain --source audit-bundle")
+        console.print("  shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json")
+    elif "audit" in question.lower():
+        console.print("  shellforgeai recipes receipt explain --source audit")
+        console.print("  shellforgeai recipes receipt audit --json")
+    else:
+        console.print("  shellforgeai recipes receipt explain")
+        console.print("  shellforgeai recipes receipt explain --json")
+        console.print("  shellforgeai recipes receipt integrity --json")
+    if refused_mutation:
+        console.print("Refused repair/delete/recovery/restart/rollback part of the request.")
+    console.print("Read-only explanation guidance only.")
+    console.print(
+        "No repair, delete, recovery, rollback, restart, cleanup, Docker, Compose, "
+        "or model call occurred."
+    )
+    console.print("No action was taken.")
+
+
 def _handle_receipt_audit_ask(question: str) -> bool:
     normalized = " ".join(re.sub(r"[^a-z0-9_.-]+", " ", (question or "").lower()).split())
     if not normalized:
         return False
-    if any(cue in normalized for cue in _RECEIPT_AUDIT_MUTATION_CUES):
+    mutation_requested = any(cue in normalized for cue in _RECEIPT_AUDIT_MUTATION_CUES)
+    if mutation_requested and ("explain" in normalized or _finding_code_from_question(question)):
+        _print_receipt_explain_guidance(question, refused_mutation=True)
+        return True
+    if mutation_requested:
         console.print("Refused: natural-language mutation is not allowed for receipts.")
         console.print(
             "ShellForgeAI did not recover, rollback, restart, rerun, apply, clean up, or remediate."
         )
         if "integrity" in normalized or "corrupt" in normalized or "drift" in normalized:
-            console.print("Safe read-only integrity scan command:")
-            console.print("  shellforgeai recipes receipt integrity")
+            console.print("Safe read-only integrity/explanation command:")
+            console.print("  shellforgeai recipes receipt explain")
             console.print("  shellforgeai recipes receipt integrity --json")
         elif (
             "bundle" in normalized or "support packet" in normalized or "export audit" in normalized
@@ -11200,6 +11270,9 @@ def _handle_receipt_audit_ask(question: str) -> bool:
                 "Use read-only audit commands such as `shellforgeai recipes receipt history`."
             )
         console.print("No action was taken.")
+        return True
+    if _is_receipt_explain_ask(normalized):
+        _print_receipt_explain_guidance(question)
         return True
     refs = _receipt_audit_refs(question)
     bundle_match = re.search(r"\baudit_bundle_[A-Za-z0-9_.-]+\b", question or "")
@@ -12711,6 +12784,64 @@ def recipes_execute(
         raise typer.Exit(1)
 
 
+def _render_recipe_receipt_explain_human(payload: dict[str, Any]) -> str:
+    lines = ["Governed receipt finding explanation", "", f"Status: {payload.get('status')}"]
+    explanations = payload.get("explanations") or []
+    if not explanations or all(
+        isinstance(item, dict) and item.get("code") == "no_findings" for item in explanations
+    ):
+        lines.extend(
+            [
+                "Findings: none",
+                "",
+                "Summary:",
+                "",
+                "No governed receipt integrity findings require action.",
+                "No safety drift was detected.",
+                "No production restart record was detected.",
+            ]
+        )
+    else:
+        for item in explanations:
+            if not isinstance(item, dict):
+                continue
+            lines.extend(
+                [
+                    "",
+                    f"Finding: {item.get('code')}",
+                    f"Severity: {item.get('severity')}",
+                    "",
+                    "Meaning:",
+                    "",
+                    str(item.get("meaning") or ""),
+                    "",
+                    "Why it matters:",
+                    "",
+                    str(item.get("why_it_matters") or ""),
+                    "",
+                    "Safe next commands:",
+                ]
+            )
+            lines.extend(str(command) for command in item.get("safe_next_commands") or [])
+            lines.extend(["", "Not performed:"])
+            lines.extend(str(note) for note in item.get("not_performed") or [])
+    lines.extend(["", "First safe command:", str(payload.get("first_safe_command") or "")])
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"- {warning}" for warning in warnings[:10])
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "Read-only explanation.",
+            "No repair, cleanup, recovery, rollback, Docker, or Compose command was executed.",
+            "No artifact was deleted and no model was called.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_recipe_receipt_integrity_human(payload: dict[str, Any]) -> str:
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     lines = [
@@ -13070,6 +13201,50 @@ def _render_recipe_receipt_compare_human(
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
+
+
+@recipes_receipt_app.command("explain")
+def recipes_receipt_explain(
+    ctx: typer.Context,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    source: Annotated[
+        str,
+        typer.Option(
+            "--source",
+            help="Local source to explain: integrity, audit, audit-bundle, or compare.",
+        ),
+    ] = "integrity",
+    finding: Annotated[
+        str | None,
+        typer.Option("--finding", help="Explain one deterministic finding code without scanning."),
+    ] = None,
+    target: Annotated[
+        str | None,
+        typer.Option("--target", help="Only read findings for this target when available."),
+    ] = None,
+    recipe_id: Annotated[
+        str | None,
+        typer.Option("--recipe", help="Only read findings for this recipe id when available."),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", min=1, max=100, help="Maximum recent receipt artifacts to read."),
+    ] = 20,
+) -> None:
+    """Explain governed receipt audit/integrity findings locally. Read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_explain(
+        runtime.session.data_dir,
+        source=source,
+        finding=finding,
+        target=target,
+        recipe_id=recipe_id,
+        limit=limit,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_explain_human(payload), nl=False)
 
 
 @recipes_receipt_app.command("integrity")

@@ -528,3 +528,26 @@ Interactive mode accepts exact `recipes receipt integrity` commands through the 
 ### Governed receipt audit bundles
 
 Interactive mode allows exact command dispatch for `recipes receipt audit-bundle`, `recipes receipt audit-bundle --json`, filtered bundle creation (`--target`, `--recipe`, `--limit`), and `recipes receipt audit-bundle-validate <bundle_ref> [--json]`. These commands package or validate existing ShellForgeAI-owned receipt audit/history artifacts only. They do not execute recipes, rerun receipts, recover, rollback, restart containers, run Docker/Compose, call the model, or authorize natural-language mutation. Mutation phrases such as “rerun receipt”, “recover it again”, “rollback now”, or “restart from receipt” remain refused.
+## Governed receipt finding explanation
+
+`shellforgeai recipes receipt explain` is a deterministic, local, read-only explanation surface for governed receipt audit, integrity, audit-bundle, and compare findings. It reads existing ShellForgeAI-owned receipt/audit/integrity artifacts and maps known finding codes (for example `checksum_mismatch`, `missing_original_receipt`, `safety_drift`, and `production_restart_recorded`) to operator-facing meaning, impact, and safe next commands.
+
+Command forms:
+
+```bash
+shellforgeai recipes receipt explain
+shellforgeai recipes receipt explain --json
+shellforgeai recipes receipt explain --source integrity
+shellforgeai recipes receipt explain --source audit
+shellforgeai recipes receipt explain --source audit-bundle
+shellforgeai recipes receipt explain --source compare
+shellforgeai recipes receipt explain --finding checksum_mismatch
+shellforgeai recipes receipt explain --target <target>
+shellforgeai recipes receipt explain --recipe docker.disposable_restart
+shellforgeai recipes receipt explain --limit 20
+```
+
+Supported categories include malformed JSON, missing required files/manifests/checksums, checksum mismatch, unsupported artifacts/receipts, missing original receipts, verification failure, safety drift, production restart records, Docker Compose/shell/arbitrary-command/natural-language execution records, receipt export and audit-bundle validation failures, and compare categories such as status/target/recipe/action/safety-flag changes. Unknown finding codes return controlled `unknown_finding` guidance instead of a traceback.
+
+`recipes receipt explain` never repairs, deletes, cleans up, recovers, rolls back, restarts, reruns receipts, calls Docker/Compose, executes shell, creates exports/bundles, or calls a model. Safe next commands are limited to read-only receipt integrity/audit/history/inspect/validate/compare/verify surfaces. Ask and interactive phrasing such as “explain receipt integrity findings”, “what does checksum_mismatch mean?”, and “what should I do about safety drift?” routes to this explanation guidance; mutation phrasing such as “explain and fix corrupt receipts” refuses the mutation part. Support-handoff phrasing that clearly mentions receipt audit or recipe receipts routes to receipt audit-bundle guidance.
+
