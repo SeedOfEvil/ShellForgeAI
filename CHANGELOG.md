@@ -4,6 +4,28 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Validation heartbeat and interrupted-run evidence (PR176)
+
+- Added `scripts/validation_heartbeat.py` and wired heartbeat/checkpoint/status
+  JSON into `scripts/sfai_docker01_pr_lane.py` and `scripts/run_full_pytest.py`.
+  Long Docker01/full-validation runs that are SIGTERM/SIGINT/timeout-interrupted
+  (or SIGKILLed) now leave clear partial evidence instead of a silent false pass:
+  the heartbeat is updated before/after each phase with `active_phase`,
+  `last_completed_phase`, and per-phase `phase_status`.
+- Manifest/summary now carry an explicit `status`
+  (`passed`/`failed`/`incomplete`), `classification`
+  (`passed`/`test_failure`/`setup_failure`/`interrupted_or_incomplete`),
+  `pass_eligible`, `rerun_required`, `full_pytest_exit_code`, and
+  `full_pytest_result`. `status=passed` is recorded only when a full-`pytest`
+  exit code of `0` is captured; an interrupted run is `incomplete` /
+  `pass_eligible=false` / `rerun_required=true` with a `*** RERUN REQUIRED ***`
+  human summary and is never merge evidence (a clean rerun is required).
+- Documentation: `docs/VALIDATION_LANES.md`, `OPS.md`, `docs/roadmap.md`. Process/
+  tooling and validation-evidence only — no runtime recipe execution behavior
+  change, no cleanup/remediation/rollback/recovery execution, no
+  Docker/Compose/service/container mutation, no restart, no `shell=True`, no
+  arbitrary command execution, no natural-language execution, and no model call.
+
 ### Validation lanes (PR157)
 
 - Added the validation-lane optimizer `scripts/validate_pr.py` and the test

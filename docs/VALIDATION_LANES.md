@@ -250,6 +250,83 @@ used to skip or weaken selected tests, selected commands, or safety gates.
 
 ---
 
+## Validation heartbeat and interrupted-run evidence
+
+Long Docker01 / full-validation runs can be SIGTERM/SIGINT/timeout-interrupted
+(or SIGKILLed) before the helper records full `pytest` completion. PR175's first
+full-validation helper run was SIGKILLed near the end and could not be counted as
+a pass; a clean rerun was required. To make that situation obvious in the
+evidence instead of silent, the validation lane writes a lightweight
+**heartbeat / checkpoint / status** JSON file
+([`../scripts/validation_heartbeat.py`](../scripts/validation_heartbeat.py)) that
+is updated **before and after each phase**:
+
+```bash
+# Heartbeat is written automatically when the Docker01 lane executes validation:
+python scripts/sfai_docker01_pr_lane.py --changed-files Dockerfile --pr 176 \
+  --full-validation --full-validation-reason "validation helper changed" \
+  --execute-validation \
+  --manifest-output /tmp/sfai-pr176-manifest.json \
+  --summary-output  /tmp/sfai-pr176-summary.txt \
+  --heartbeat-file  /tmp/sfai-pr176-heartbeat.json \
+  --checkpoint-file /tmp/sfai-pr176-checkpoints.json \
+  --status-file     /tmp/sfai-pr176-status.json
+
+# The Lane C runner can also write its own single-phase heartbeat:
+python scripts/run_full_pytest.py --heartbeat-file /tmp/sfai-pr176-fullpytest.json
+```
+
+The heartbeat records `schema_version`, `run_id`, `pr`, `commit`, `status`
+(`running` / `passed` / `failed` / `incomplete`), `active_phase`,
+`last_completed_phase`, a per-phase `phase_status`
+(`not_started` / `running` / `passed` / `failed` / `interrupted` / `unknown`),
+`full_pytest_exit_code`, `full_pytest_result`
+(`passed` / `failed` / `unknown`), `pass_eligible`, `rerun_required`,
+`started_at`, `last_update`, and `pid`.
+
+**Run classification.** The deterministic classifier turns phase status plus an
+optional captured full-`pytest` exit code into one of:
+
+| Result | When | `pass_eligible` | `rerun_required` |
+| --- | --- | --- | --- |
+| `passed` | every required phase passed **and** full `pytest` exit code `0` was captured | `true` | `false` |
+| `failed` (`test_failure`) | a test phase failed or full `pytest` exited nonzero | `false` | `true` |
+| `failed` (`setup_failure`) | a pre-test phase (`ruff`/`compileall`) failed, or the helper could not set up before tests | `false` | `true` |
+| `incomplete` (`interrupted_or_incomplete`) | the run ended before full `pytest` completion was recorded | `false` | `true` |
+
+- **`pass_eligible`** means this run is allowed to count as merge evidence. It is
+  `true` **only** when `status == passed`. An incomplete or failed run is never
+  pass-eligible.
+- **`rerun_required`** means a clean validation rerun is needed before this change
+  can be treated as validated. It is `true` for anything that is not a clean pass.
+
+A `status == passed` is recorded **only** when every required phase passed and a
+full-`pytest` exit code of `0` was captured. If the helper exits before the
+full-`pytest` result is captured, the run is `incomplete`, not `passed`, and
+`full_pytest_result` stays `unknown` (it is never reported as `passed` without a
+captured exit code).
+
+**SIGKILL caveat.** SIGKILL cannot be caught, so no finalizing heartbeat can be
+written when a run is `kill -9`'d. That is intentional and safe: the *last*
+heartbeat written before the kill still shows the active phase as `running`
+(never `passed`), and the classifier reads that as `incomplete` /
+`rerun_required`. SIGTERM/SIGINT/timeout interruptions are caught: the active
+phase is marked `interrupted`, an `incomplete` manifest/summary is written, and
+the helper exits non-zero.
+
+**Merge rule.** An `incomplete` validation run is **not** merge evidence. The
+human summary prints `Validation result: INCOMPLETE`, `Rerun required: yes`, and
+a `*** RERUN REQUIRED ***` banner with the last active/completed phase. Do not
+merge on an interrupted run; a clean rerun that reports `passed` /
+`pass_eligible: yes` is required. If a clean rerun later passes, that run's
+manifest reports the clean run as a pass.
+
+The helper runs full `pytest` **once** per invocation and never auto-reruns it.
+The heartbeat/classification path is validation evidence only: it writes JSON
+artifacts and never mutates Docker/Compose/services/containers, never runs
+cleanup/remediation/rollback/recovery, never restarts anything, never uses a
+shell or arbitrary commands, and never calls a model.
+
 ## Full `pytest` policy
 
 | Situation | Full `pytest`? |

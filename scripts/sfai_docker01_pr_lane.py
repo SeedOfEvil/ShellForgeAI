@@ -16,7 +16,9 @@ restarts.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import signal
 import subprocess
 import sys
 import tempfile
@@ -24,8 +26,16 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-import track_pytest_durations
-import validate_pr
+HELPER_DIR = Path(__file__).resolve().parent
+
+# Ensure sibling validation helpers are importable whether this file is run as a
+# script or imported by tests via importlib.
+if str(HELPER_DIR) not in sys.path:
+    sys.path.insert(0, str(HELPER_DIR))
+
+import track_pytest_durations  # noqa: E402
+import validate_pr  # noqa: E402
+import validation_heartbeat  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FULL_PYTEST_RUNNER = validate_pr.FULL_PYTEST_RUNNER
@@ -56,6 +66,87 @@ FORBIDDEN_RUNTIME_ACTIONS = (
     "rollback execute",
     "docker volume prune",
 )
+
+# Conventional exit code for an interrupted validation run (128 + SIGINT).
+INTERRUPTED_EXIT_CODE = 130
+
+
+class _ValidationInterrupted(Exception):
+    """Raised when a catchable signal interrupts validation execution."""
+
+    def __init__(self, signal_name: str, exit_code: int = INTERRUPTED_EXIT_CODE) -> None:
+        super().__init__(signal_name)
+        self.signal_name = signal_name
+        self.exit_code = exit_code
+
+
+def _install_interrupt_handlers() -> dict:
+    """Install SIGINT/SIGTERM handlers that surface a controlled interruption.
+
+    Returns the previous handlers so they can be restored. Best-effort: signal
+    handlers can only be installed in the main thread, so failures are ignored.
+    """
+    handlers: dict = {}
+
+    def _handler(signum, _frame):
+        name = signal.Signals(signum).name
+        raise _ValidationInterrupted(name, exit_code=128 + int(signum))
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        # Best-effort: signal handlers can only be set in the main thread.
+        with contextlib.suppress(ValueError, OSError):
+            handlers[sig] = signal.signal(sig, _handler)
+    return handlers
+
+
+def _restore_interrupt_handlers(handlers: dict) -> None:
+    for sig, original in handlers.items():
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(sig, original)
+
+
+def _required_phases_from_plan(plan: dict) -> tuple[str, ...]:
+    """Derive the heartbeat required-phase set from the planned commands."""
+    phases = ["ruff", "compileall"]
+    kinds = {command.get("kind") for command in plan.get("_commands", [])}
+    if "pytest_targeted" in kinds:
+        phases.append("targeted_tests")
+    if "pytest_full_runner" in kinds or plan.get("full_pytest_required"):
+        phases.append("full_pytest")
+    return tuple(phases)
+
+
+def _phase_status_from_validation(validation: dict) -> dict:
+    """Map the validation rollup to heartbeat-style phase status values."""
+
+    def norm(value):
+        if value in (None, "", UNKNOWN, "not_run"):
+            return validation_heartbeat.PHASE_UNKNOWN
+        return value
+
+    return {
+        "ruff": norm(validation.get("ruff")),
+        "compileall": norm(validation.get("compileall")),
+        "targeted_tests": norm(validation.get("targeted_tests")),
+        "full_pytest": norm(validation.get("full_pytest")),
+    }
+
+
+def _derive_classification(status: str | None) -> str:
+    return {
+        "passed": validation_heartbeat.CLASS_PASSED,
+        "failed": validation_heartbeat.CLASS_TEST_FAILURE,
+        "incomplete": validation_heartbeat.CLASS_INTERRUPTED,
+    }.get(status or "", validation_heartbeat.CLASS_UNKNOWN)
+
+
+def _derive_full_pytest_result(full_pytest_exit_code, validation: dict) -> str:
+    if full_pytest_exit_code is not None:
+        return validation_heartbeat.full_pytest_result_from_exit(full_pytest_exit_code)
+    value = (validation or {}).get("full_pytest")
+    if value in ("passed", "failed", "not_required"):
+        return value
+    return validation_heartbeat.FULL_UNKNOWN
 
 
 def _split_changed_files(values: list[str]) -> list[str]:
@@ -115,6 +206,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--manifest-output", help="Write validation manifest JSON to this path.")
     parser.add_argument("--summary-output", help="Write human validation summary to this path.")
+    parser.add_argument(
+        "--heartbeat-file",
+        help=(
+            "Write a validation heartbeat/status JSON updated before and after each phase so an "
+            "interrupted run leaves clear partial evidence. Defaults to a path next to the "
+            "manifest when executing validation."
+        ),
+    )
+    parser.add_argument(
+        "--status-file", help="Mirror the heartbeat JSON to this status path (same content)."
+    )
+    parser.add_argument(
+        "--checkpoint-file", help="Append phase checkpoint events to this JSON path."
+    )
+    parser.add_argument("--run-id", help="Explicit validation run id for the heartbeat/manifest.")
     parser.add_argument(
         "--print-manifest-json",
         action="store_true",
@@ -351,6 +457,17 @@ def build_validation_manifest(
     error_summary: str | None = None,
     created_at: str | None = None,
     duration_report: dict | None = None,
+    classification: str | None = None,
+    pass_eligible: bool | None = None,
+    rerun_required: bool | None = None,
+    last_completed_phase: str | None = None,
+    active_phase_at_last_heartbeat: str | None = None,
+    phase_status: dict | None = None,
+    heartbeat_path: str | None = None,
+    checkpoint_path: str | None = None,
+    status_path: str | None = None,
+    full_pytest_exit_code: int | None = None,
+    full_pytest_result: str | None = None,
 ) -> dict:
     created_at = created_at or _utc_now()
     resolved_head = _optional(head_commit) or _git_value(["rev-parse", "HEAD"])
@@ -372,6 +489,23 @@ def build_validation_manifest(
         status = "failed" if failed else "passed"
     if verdict is None:
         verdict = "fail" if status == "failed" else "pass" if status == "passed" else "hold"
+    if status == "incomplete" and not failed_phase:
+        failed = None
+    validation_rollup = validation_status_from_commands(
+        command_records, full_required=bool(plan.get("full_pytest_required", False))
+    )
+    # Classification / pass-eligibility evidence. A pass is only ever recorded
+    # when status == "passed"; incomplete and failed runs are never pass-eligible.
+    if classification is None:
+        classification = _derive_classification(status)
+    if pass_eligible is None:
+        pass_eligible = status == "passed"
+    if rerun_required is None:
+        rerun_required = status != "passed"
+    if full_pytest_result is None:
+        full_pytest_result = _derive_full_pytest_result(full_pytest_exit_code, validation_rollup)
+    if phase_status is None:
+        phase_status = _phase_status_from_validation(validation_rollup)
     logs = logs or {}
     container = {
         "name": "shellforgeai",
@@ -440,14 +574,25 @@ def build_validation_manifest(
         },
         "final_container": container,
         "disk": disk or {"root_used": None, "root_available": None, "root_percent": None},
-        "validation": validation_status_from_commands(
-            command_records, full_required=bool(plan.get("full_pytest_required", False))
-        ),
+        "validation": validation_rollup,
+        "classification": classification,
+        "pass_eligible": bool(pass_eligible),
+        "rerun_required": bool(rerun_required),
+        "last_completed_phase": last_completed_phase,
+        "active_phase_at_last_heartbeat": active_phase_at_last_heartbeat,
+        "phase_status": phase_status,
+        "full_pytest_exit_code": full_pytest_exit_code,
+        "full_pytest_result": full_pytest_result,
+        "heartbeat_path": heartbeat_path,
+        "checkpoint_path": checkpoint_path,
         "safety": _default_safety(no_cache=no_cache),
         "non_blockers": list(non_blockers or []),
         "artifacts": {
             "manifest_path": manifest_path,
             "human_summary_path": human_summary_path,
+            "heartbeat_path": heartbeat_path,
+            "checkpoint_path": checkpoint_path,
+            "status_path": status_path,
         },
         "created_at": created_at,
     }
@@ -469,6 +614,11 @@ def render_human_summary(manifest: dict) -> str:
     logs = manifest["logs"]
     artifacts = manifest["artifacts"]
     result = str(manifest.get("verdict") or manifest.get("status") or UNKNOWN).upper()
+    status = str(manifest.get("status") or UNKNOWN)
+    classification = str(manifest.get("classification") or UNKNOWN)
+    pass_eligible = bool(manifest.get("pass_eligible"))
+    rerun_required = bool(manifest.get("rerun_required"))
+    full_pytest_result = manifest.get("full_pytest_result") or UNKNOWN
     restart_count = container.get("restart_count")
     restart = restart_count if restart_count is not None else UNKNOWN
     lines = [
@@ -480,6 +630,10 @@ def render_human_summary(manifest: dict) -> str:
         f"Reason: {lane.get('reason') or UNKNOWN}",
         "",
         f"Result: {result}",
+        f"Validation result: {status.upper()}",
+        f"Classification: {classification}",
+        f"Pass eligible: {'yes' if pass_eligible else 'no'}",
+        f"Rerun required: {'yes' if rerun_required else 'no'}",
         "Container: "
         f"{container.get('status') or UNKNOWN} / {container.get('health') or UNKNOWN} / "
         f"restart={restart}",
@@ -487,7 +641,7 @@ def render_human_summary(manifest: dict) -> str:
         f"* ruff: {validation.get('ruff', UNKNOWN)}",
         f"* compileall: {validation.get('compileall', UNKNOWN)}",
         f"* targeted tests: {validation.get('targeted_tests', UNKNOWN)}",
-        f"* full pytest: {validation.get('full_pytest', UNKNOWN)}",
+        f"* full pytest: {validation.get('full_pytest', UNKNOWN)} (result={full_pytest_result})",
         "",
         "Duration tracking:",
         f"* status: {(manifest.get('duration_report') or {}).get('status', UNKNOWN)}",
@@ -517,7 +671,20 @@ def render_human_summary(manifest: dict) -> str:
         f"* deploy: {logs.get('deploy') or UNKNOWN}",
         f"* runner: {logs.get('runner') or UNKNOWN}",
         f"* manifest: {artifacts.get('manifest_path') or UNKNOWN}",
+        f"* heartbeat: {artifacts.get('heartbeat_path') or UNKNOWN}",
     ]
+    if status == "incomplete":
+        lines.extend(
+            [
+                "",
+                "*** RERUN REQUIRED ***",
+                "This run is INCOMPLETE and must not be used as merge evidence "
+                "until a clean rerun passes.",
+                "Last heartbeat:",
+                f"* active phase: {manifest.get('active_phase_at_last_heartbeat') or UNKNOWN}",
+                f"* last completed phase: {manifest.get('last_completed_phase') or UNKNOWN}",
+            ]
+        )
     if manifest.get("failed_phase"):
         lines.extend(["", f"Failed phase: {manifest['failed_phase']}"])
     if manifest.get("error_summary"):
@@ -538,16 +705,31 @@ def write_human_summary(summary: str, path: str | Path) -> None:
 def run_validation(
     plan: dict,
     *,
-    runner=subprocess.run,
+    runner=None,
     return_records: bool = False,
     log_path: str | None = None,
+    heartbeat: validation_heartbeat.ValidationHeartbeat | None = None,
+    record_sink: list[dict] | None = None,
 ):
-    records: list[dict] = []
+    # Resolve the runner at call time so the module-level ``subprocess.run`` can be
+    # patched in tests; production callers get the real ``subprocess.run``.
+    runner = runner or subprocess.run
+    # ``record_sink`` lets the caller observe partial records even if execution is
+    # interrupted mid-phase (the records list is the same object that is appended).
+    records: list[dict] = record_sink if record_sink is not None else []
+    seen_full_runner = False
     for command in plan["_commands"]:
         display = command["display"]
+        phase = validation_heartbeat.COMMAND_KIND_TO_PHASE.get(command["kind"])
         if command["kind"] == "pytest_full_runner":
+            if seen_full_runner:
+                # Defence in depth: the helper never reruns full pytest in one run.
+                continue
+            seen_full_runner = True
             print(f"Full pytest runner: {display}", flush=True)
             print("duration reporting: --durations=25", flush=True)
+        if heartbeat is not None and phase:
+            heartbeat.start_phase(phase)
         print(f"==> {display}", flush=True)
         start = time.monotonic()
         if command["kind"] == "pytest_full_runner":
@@ -576,6 +758,11 @@ def run_validation(
                 log_path=log_path,
             )
         )
+        if heartbeat is not None and phase:
+            if command["kind"] == "pytest_full_runner":
+                heartbeat.record_full_pytest_exit(rc, phase=phase)
+            else:
+                heartbeat.complete_phase(phase, status=_status_from_returncode(rc))
         if rc != 0:
             print(f"Command failed ({rc}): {display}", file=sys.stderr)
             return (rc, records) if return_records else rc
@@ -626,6 +813,34 @@ def main(argv: list[str] | None = None) -> int:
     return_code = 0
     error_summary = None
     duration_report = None
+    snapshot = None
+    executed = bool(args.execute_validation and not args.dry_run)
+
+    heartbeat_path = args.heartbeat_file
+    checkpoint_path = args.checkpoint_file
+    status_path = args.status_file
+    if executed:
+        if heartbeat_path is None:
+            heartbeat_path = _default_artifact_path(
+                suffix="heartbeat.json",
+                pr_number=args.pr_number,
+                short_commit=short_commit,
+                created_at=created_at,
+            )
+        if checkpoint_path is None:
+            checkpoint_path = _default_artifact_path(
+                suffix="checkpoints.json",
+                pr_number=args.pr_number,
+                short_commit=short_commit,
+                created_at=created_at,
+            )
+        if status_path is None:
+            status_path = _default_artifact_path(
+                suffix="status.json",
+                pr_number=args.pr_number,
+                short_commit=short_commit,
+                created_at=created_at,
+            )
 
     duration_log = args.duration_log or args.runner_log
     if duration_log and plan.get("full_pytest_required"):
@@ -642,27 +857,96 @@ def main(argv: list[str] | None = None) -> int:
             baseline_warning=baseline_warning,
         )
 
-    if args.execute_validation and not args.dry_run:
+    if executed:
+        required_phases = _required_phases_from_plan(plan)
+        heartbeat = validation_heartbeat.ValidationHeartbeat(
+            heartbeat_path,
+            checkpoint_path=checkpoint_path,
+            status_path=status_path,
+            run_id=args.run_id,
+            pr=args.pr_number,
+            commit=head_commit,
+            required_phases=required_phases,
+        )
+        heartbeat.start()
+        record_sink: list[dict] = []
+        handlers = _install_interrupt_handlers()
         start = time.monotonic()
-        return_code, command_records = run_validation(
-            plan, return_records=True, log_path=args.validation_log
-        )
-        phases.append(
-            {
-                "name": "validation",
-                "status": "passed" if return_code == 0 else "failed",
-                "duration_seconds": round(time.monotonic() - start, 3),
-            }
-        )
-        if return_code != 0:
-            failed = next(
-                (record for record in command_records if record.get("status") == "failed"), None
+        try:
+            return_code, command_records = run_validation(
+                plan,
+                return_records=True,
+                log_path=args.validation_log,
+                heartbeat=heartbeat,
+                record_sink=record_sink,
+            )
+            snapshot = heartbeat.finalize()
+            phases.append(
+                {
+                    "name": "validation",
+                    "status": "passed" if return_code == 0 else "failed",
+                    "duration_seconds": round(time.monotonic() - start, 3),
+                }
+            )
+            if return_code != 0:
+                failed = next(
+                    (record for record in command_records if record.get("status") == "failed"),
+                    None,
+                )
+                error_summary = (
+                    f"validation command failed: {failed.get('display') or failed.get('name')}"
+                    if failed
+                    else "validation failed"
+                )
+        except (_ValidationInterrupted, KeyboardInterrupt) as exc:
+            signal_name = getattr(exc, "signal_name", None) or "SIGINT"
+            return_code = int(getattr(exc, "exit_code", INTERRUPTED_EXIT_CODE))
+            snapshot = heartbeat.mark_interrupted(signal_name=signal_name)
+            command_records = list(record_sink)
+            phases.append(
+                {
+                    "name": "validation",
+                    "status": "interrupted",
+                    "duration_seconds": round(time.monotonic() - start, 3),
+                }
             )
             error_summary = (
-                f"validation command failed: {failed.get('display') or failed.get('name')}"
-                if failed
-                else "validation failed"
+                f"validation interrupted ({signal_name}) before full pytest completion; "
+                "rerun required"
             )
+            print(
+                f"Validation interrupted ({signal_name}); recorded incomplete evidence. "
+                "Rerun required.",
+                file=sys.stderr,
+                flush=True,
+            )
+        finally:
+            _restore_interrupt_handlers(handlers)
+
+    if snapshot is not None:
+        manifest_status = snapshot["status"]
+        manifest_verdict = None  # let the builder derive pass/fail/hold from status
+        classification = snapshot["classification"]
+        pass_eligible = snapshot["pass_eligible"]
+        rerun_required = snapshot["rerun_required"]
+        full_pytest_exit_code = snapshot["full_pytest_exit_code"]
+        full_pytest_result = snapshot["full_pytest_result"]
+        last_completed_phase = snapshot["last_completed_phase"]
+        active_phase_at_last_heartbeat = snapshot["active_phase_at_last_heartbeat"]
+        phase_status = snapshot["phase_status"]
+        failed_phase = snapshot["failed_phase"]
+    else:
+        manifest_status = "failed" if return_code != 0 else "passed"
+        manifest_verdict = "fail" if return_code != 0 else "pass"
+        classification = None
+        pass_eligible = None
+        rerun_required = None
+        full_pytest_exit_code = None
+        full_pytest_result = None
+        last_completed_phase = None
+        active_phase_at_last_heartbeat = None
+        phase_status = None
+        failed_phase = None
 
     final_container = {
         "name": args.container_name,
@@ -701,11 +985,23 @@ def main(argv: list[str] | None = None) -> int:
         non_blockers=args.non_blocker,
         manifest_path=manifest_path,
         human_summary_path=summary_path,
-        status="failed" if return_code != 0 else "passed",
-        verdict="fail" if return_code != 0 else "pass",
+        status=manifest_status,
+        verdict=manifest_verdict,
+        failed_phase=failed_phase,
         error_summary=error_summary,
         created_at=created_at,
         duration_report=duration_report,
+        classification=classification,
+        pass_eligible=pass_eligible,
+        rerun_required=rerun_required,
+        last_completed_phase=last_completed_phase,
+        active_phase_at_last_heartbeat=active_phase_at_last_heartbeat,
+        phase_status=phase_status,
+        heartbeat_path=heartbeat_path if executed else None,
+        checkpoint_path=checkpoint_path if executed else None,
+        status_path=status_path if executed else None,
+        full_pytest_exit_code=full_pytest_exit_code,
+        full_pytest_result=full_pytest_result,
     )
     summary = render_human_summary(manifest)
     write_manifest(manifest, manifest_path)
