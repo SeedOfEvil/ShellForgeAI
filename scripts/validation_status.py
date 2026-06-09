@@ -90,6 +90,7 @@ _EVIDENCE_GLOBS = {
     "status": ("validation-status.json", "*-status.json", "*status*.json"),
     "summary": ("validation-summary.txt", "*-summary.txt", "*summary*.txt"),
     "checkpoint": ("validation-checkpoints.json", "*checkpoint*.json"),
+    "preflight": ("validation-preflight.json", "*preflight*.json"),
     "log": ("validation.log", "*-full-pytest.log", "*runner*.log", "*.log"),
 }
 
@@ -116,6 +117,8 @@ _STATUS_SEVERITY = {
 }
 
 FIRST_SAFE_COMMAND_TEMPLATE = "python scripts/validation_status.py --run-dir {run_dir} --json"
+PREFLIGHT_SAFE_COMMAND = "python scripts/validation_env_preflight.py --json"
+PREFLIGHT_MODE = "validation_environment_preflight"
 
 SAFETY_BLOCK = {
     "read_only": True,
@@ -341,10 +344,19 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
     if effective_exit is None and (fp_phase == vh.PHASE_PASSED or fp_result == vh.FULL_PASSED):
         effective_exit = 0
 
+    # An evidence document that explicitly recorded a setup failure (for
+    # example a failed environment_preflight phase, which sits outside the
+    # default required test phases) keeps that classification when recomputed,
+    # instead of being misread as merely incomplete.
+    stored_setup_failure = data.get("classification") == CLASS_SETUP_FAILURE
+    stored_reason = data.get("reason") or data.get("error_summary")
+
     recomputed = vh.classify_run(
         phase_status if isinstance(phase_status, dict) else {},
         required_phases=[p for p in required if isinstance(p, str)] or list(REQUIRED_PHASES),
         full_pytest_exit_code=effective_exit,
+        setup_failure=stored_setup_failure,
+        setup_failure_reason=stored_reason if isinstance(stored_reason, str) else None,
         last_completed_phase=last_completed if isinstance(last_completed, str) else None,
         active_phase=active if isinstance(active, str) else None,
     )
@@ -384,6 +396,34 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
         "conflict": conflict,
         "stored_status": stored_status,
         "recomputed_status": recomputed_status,
+    }
+
+
+def preflight_verdict(data: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Derive a verdict from a PR178 environment preflight report.
+
+    Only a *failed* preflight contributes a verdict (a controlled
+    ``setup_failure`` before validation phases). A passed preflight is not run
+    evidence — it only says the environment looked ready — so it never feeds
+    the pass/fail merge.
+    """
+    if not isinstance(data, dict) or data.get("mode") != PREFLIGHT_MODE:
+        return None
+    if data.get("status") != STATUS_FAILED:
+        return None
+    return {
+        "kind": "preflight",
+        "status": STATUS_FAILED,
+        "classification": CLASS_SETUP_FAILURE,
+        "phase_status": {"environment_preflight": vh.PHASE_FAILED},
+        "active_phase": None,
+        "last_completed_phase": None,
+        "full_pytest_exit_code": None,
+        "full_pytest_result": vh.FULL_UNKNOWN,
+        "failed_phase": "environment_preflight",
+        "conflict": False,
+        "stored_status": STATUS_FAILED,
+        "recomputed_status": STATUS_FAILED,
     }
 
 
@@ -627,6 +667,8 @@ def build_report(
     status_doc: dict[str, Any] | None,
     manifest_doc: dict[str, Any] | None,
     warnings: list[str],
+    preflight_path: str | None = None,
+    preflight_doc: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the strict-JSON report dict from loaded evidence documents."""
     verdicts: list[dict[str, Any]] = []
@@ -638,9 +680,13 @@ def build_report(
         verdict = source_verdict(doc, kind=kind)
         if verdict is not None:
             verdicts.append(verdict)
+    pf_verdict = preflight_verdict(preflight_doc)
+    if pf_verdict is not None:
+        verdicts.append(pf_verdict)
 
     any_evidence_present = any(
-        p is not None for p in (heartbeat_path, status_path, manifest_path, summary_path)
+        p is not None
+        for p in (heartbeat_path, status_path, manifest_path, summary_path, preflight_path)
     )
     merged = classify_evidence(verdicts, warnings, any_evidence_present=any_evidence_present)
 
@@ -650,6 +696,18 @@ def build_report(
     resolved_log = log_path or _log_path_from_manifest(manifest_doc)
 
     run_dir_display = run_dir or "<run_dir>"
+
+    # For a setup failure the first safe command is the read-only environment
+    # preflight itself: it tells the operator whether the environment is ready
+    # before any rerun, without installing or executing anything.
+    setup_failure = merged["classification"] == CLASS_SETUP_FAILURE
+    viewer_command = FIRST_SAFE_COMMAND_TEMPLATE.format(run_dir=run_dir_display)
+    first_safe_command = PREFLIGHT_SAFE_COMMAND if setup_failure else viewer_command
+    safe_next_commands = (
+        [PREFLIGHT_SAFE_COMMAND, viewer_command]
+        if setup_failure
+        else [viewer_command, "python scripts/validation_status.py --latest --json"]
+    )
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -666,6 +724,7 @@ def build_report(
             "manifest_path": manifest_path,
             "summary_path": summary_path,
             "log_path": resolved_log,
+            "preflight_path": preflight_path,
         },
         "run": run_meta,
         "phases": {
@@ -679,11 +738,8 @@ def build_report(
         },
         "failed_phase": merged["failed_phase"],
         "warnings": list(warnings),
-        "first_safe_command": FIRST_SAFE_COMMAND_TEMPLATE.format(run_dir=run_dir_display),
-        "safe_next_commands": [
-            FIRST_SAFE_COMMAND_TEMPLATE.format(run_dir=run_dir_display),
-            "python scripts/validation_status.py --latest --json",
-        ],
+        "first_safe_command": first_safe_command,
+        "safe_next_commands": safe_next_commands,
         "safety": dict(SAFETY_BLOCK),
     }
 
@@ -738,6 +794,18 @@ def render_human(report: dict[str, Any]) -> str:
     if status == STATUS_FAILED and report.get("failed_phase"):
         lines.extend(["", "Failed phase:", f"* {report['failed_phase']}"])
 
+    if status == STATUS_FAILED and report["classification"] == CLASS_SETUP_FAILURE:
+        lines.extend(
+            [
+                "",
+                "This is validation environment setup failure, not evidence that "
+                "product tests failed.",
+                "Run validation in the disposable validation container path, or "
+                "prepare the host dev environment outside ShellForgeAI, then "
+                "rerun validation.",
+            ]
+        )
+
     if status == STATUS_INCOMPLETE:
         lines.extend(
             [
@@ -755,6 +823,7 @@ def render_human(report: dict[str, Any]) -> str:
         ("heartbeat", "heartbeat_path"),
         ("status", "status_path"),
         ("summary", "summary_path"),
+        ("preflight", "preflight_path"),
         ("log", "log_path"),
     ):
         value = source.get(key)
@@ -860,6 +929,7 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
         else:
             warnings.append("no validation runs found under known artifact roots")
 
+    preflight_path = None
     if run_dir is not None:
         resolved = resolve_run_dir(run_dir)
         heartbeat_path = heartbeat_path or _as_str(resolved.get("heartbeat"))
@@ -867,6 +937,7 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
         manifest_path = manifest_path or _as_str(resolved.get("manifest"))
         summary_path = summary_path or _as_str(resolved.get("summary"))
         log_path = log_path or _as_str(resolved.get("log"))
+        preflight_path = _as_str(resolved.get("preflight"))
 
     return {
         "latest": latest,
@@ -876,6 +947,7 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
         "manifest_path": manifest_path,
         "summary_path": summary_path,
         "log_path": log_path,
+        "preflight_path": preflight_path,
         "explicit": explicit,
     }
 
@@ -894,6 +966,7 @@ def generate_report(args: argparse.Namespace) -> dict[str, Any]:
     )
     status_doc = load_status(sources["status_path"], warnings, required=bool(args.status_file))
     manifest_doc = load_manifest(sources["manifest_path"], warnings, required=bool(args.manifest))
+    preflight_doc = load_json_evidence(sources["preflight_path"], warnings, label="preflight")
 
     return build_report(
         latest=sources["latest"],
@@ -907,6 +980,8 @@ def generate_report(args: argparse.Namespace) -> dict[str, Any]:
         status_doc=status_doc,
         manifest_doc=manifest_doc,
         warnings=warnings,
+        preflight_path=sources["preflight_path"],
+        preflight_doc=preflight_doc,
     )
 
 

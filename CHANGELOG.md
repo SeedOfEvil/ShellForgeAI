@@ -4,6 +4,40 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Validation environment preflight (PR178)
+
+- Added the read-only validation environment preflight
+  `scripts/validation_env_preflight.py` (human and strict `--json` modes). It
+  checks Python executable/version, `ruff`, `pytest`, `pytest-xdist` (warning
+  unless required), `shellforgeai` importability (spec lookup only), presence of
+  the validation helper scripts, artifact-directory write access, and a
+  heartbeat/status JSON probe write — availability/presence only; it never
+  installs packages, never modifies venvs/host Python, never runs `pytest` or
+  `ruff check`, never runs a subprocess, and never calls Docker/Compose.
+- `scripts/sfai_docker01_pr_lane.py` now runs this preflight as an
+  `environment_preflight` phase before ruff/compileall/pytest when
+  `--execute-validation` is used (plus standalone `--preflight-only` /
+  `--preflight-output`). A failed preflight stops before any validation phase
+  and writes setup-failure evidence (`status=failed`,
+  `classification=setup_failure`, `failed_phase=environment_preflight`,
+  `pass_eligible=false`, `rerun_required=true`) including the preflight JSON;
+  warning-only preflights continue with warnings preserved as non-blockers.
+  Setup failure is never reported as product test failure, never as a pass, and
+  is not merge evidence.
+- `scripts/validation_status.py` now summarizes preflight setup failures
+  (including a run dir with only a failed preflight report), preserves stored
+  `setup_failure` classifications instead of misreading them as incomplete,
+  lists the preflight evidence file, and points its first safe command at the
+  preflight for setup failures. Recommended fix remains the disposable
+  validation container path or preparing dev dependencies outside ShellForgeAI
+  (recommendation text only; nothing is executed).
+- Documentation: `docs/VALIDATION_LANES.md`, `docs/VALIDATION_MATRIX.md`,
+  `OPS.md`, `README.md`, `docs/roadmap.md`. Process/evidence tooling only — no
+  runtime recipe execution behavior change, no package installation, no
+  cleanup/remediation/rollback/recovery execution, no Docker/Compose/service/
+  container mutation, no restart, no `shell=True`, no arbitrary command
+  execution, no natural-language execution, and no model call.
+
 ### Validation heartbeat and interrupted-run evidence (PR176)
 
 - Added `scripts/validation_heartbeat.py` and wired heartbeat/checkpoint/status
