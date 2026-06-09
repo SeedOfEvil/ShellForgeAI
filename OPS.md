@@ -1884,6 +1884,51 @@ Rules of the road:
   lane optimizer touches none of these — it is planning-only.
 
 
+### Validation evidence status viewer (PR177)
+
+After a long Docker01/full-validation run, use the read-only viewer to inspect
+the PR176 heartbeat/status/manifest evidence without rerunning anything:
+
+```bash
+# Most recent run under the known validation artifact roots:
+python scripts/validation_status.py --latest
+python scripts/validation_status.py --latest --json
+
+# A specific run directory or explicit evidence files:
+python scripts/validation_status.py --run-dir /srv/data/shellforgeai/validation-runs/<run>
+python scripts/validation_status.py --run-dir <run_dir> --json
+python scripts/validation_status.py --heartbeat <path> --json
+python scripts/validation_status.py --status-file <path> --json
+python scripts/validation_status.py --manifest <path> --json
+```
+
+The viewer classifies a run and answers the merge question directly:
+
+- **passed** (`pass_eligible=true`, `rerun_required=false`) — every required
+  phase passed and a full-`pytest` exit `0` / passed result was recorded. Only
+  this is merge evidence.
+- **failed** (`test_failure` or `setup_failure`, `pass_eligible=false`) — a phase
+  failed; it reports the failed phase.
+- **incomplete** (`interrupted_or_incomplete`, `pass_eligible=false`,
+  `rerun_required=true`) — the run ended before full-`pytest` completion was
+  recorded. It shows the active and last-completed phase and the last heartbeat
+  update.
+- **unknown** (`no_evidence`, `pass_eligible=false`, `rerun_required=true`) — no
+  heartbeat/status/manifest evidence was found.
+
+`pass_eligible` means the run is usable as merge evidence; `rerun_required` means
+a clean rerun is needed before merge. If evidence sources disagree (for example
+a manifest says passed but a heartbeat says incomplete), the viewer prefers the
+conservative result, emits a warning, and never reports `pass_eligible=true`.
+
+**Merge rule: an incomplete or unknown validation run is not merge evidence.**
+The viewer is read-only — it reads ShellForgeAI validation evidence and renders
+human/JSON status only. It never executes validation, never runs `pytest`, never
+calls Docker/Compose, never restarts/mutates anything, never runs
+cleanup/remediation/rollback/recovery, never uses `shell=True`, and never calls a
+model.
+
+
 ## V1 release handoff (PR120)
 
 ShellForgeAI V1 handoff packet is finalized for operator/admin sign-off.

@@ -327,6 +327,51 @@ artifacts and never mutates Docker/Compose/services/containers, never runs
 cleanup/remediation/rollback/recovery, never restarts anything, never uses a
 shell or arbitrary commands, and never calls a model.
 
+## Validation evidence status viewer (PR177)
+
+To inspect that heartbeat/status/manifest evidence after a run without rerunning
+anything, use the read-only viewer
+[`../scripts/validation_status.py`](../scripts/validation_status.py):
+
+```bash
+# Most recent run under the known validation artifact roots:
+python scripts/validation_status.py --latest
+python scripts/validation_status.py --latest --json
+
+# A specific run directory or explicit evidence files:
+python scripts/validation_status.py --run-dir <run_dir>
+python scripts/validation_status.py --run-dir <run_dir> --json
+python scripts/validation_status.py --heartbeat <path> --json
+python scripts/validation_status.py --status-file <path> --json
+python scripts/validation_status.py --manifest <path> --json
+```
+
+It answers, for a single run: did it **pass / fail / end incomplete / unknown**,
+is it `pass_eligible` (usable as merge evidence), is a `rerun_required`, what
+phase was active when it stopped, and where the heartbeat/status/manifest/log
+files are.
+
+| Status | Meaning | `pass_eligible` | `rerun_required` |
+| --- | --- | --- | --- |
+| `passed` | every required phase passed **and** full `pytest` exit `0` / passed result recorded | `true` | `false` |
+| `failed` | a phase failed (`test_failure` or `setup_failure`); the failed phase is reported | `false` | `true` |
+| `incomplete` (`interrupted_or_incomplete`) | the run ended before full `pytest` completion was recorded | `false` | `true` |
+| `unknown` (`no_evidence`) | no heartbeat/status/manifest evidence was found | `false` | `true` |
+
+`pass_eligible=true` is reported **only** when the status is `passed` and the
+full-`pytest` completion evidence is present. If multiple evidence sources
+disagree (for example a manifest claims `passed` while a heartbeat is
+`incomplete`), the viewer prefers the conservative result, emits a warning, and
+never reports `pass_eligible=true`. **An incomplete or unknown validation run is
+not merge evidence** — require a clean rerun that the viewer reports as
+`passed` / `Pass eligible: yes`.
+
+The viewer is **read-only**. It reads ShellForgeAI validation evidence files and
+renders human/JSON status only. It never executes validation, never runs
+`pytest`, never calls Docker/Compose, never restarts/mutates anything, never runs
+cleanup/remediation/rollback/recovery, never uses a shell, and never calls a
+model.
+
 ## Full `pytest` policy
 
 | Situation | Full `pytest`? |
