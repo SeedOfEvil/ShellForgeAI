@@ -80,6 +80,9 @@ _SAFE_SUGGESTION_COMMANDS = (
     "recipes receipt audit",
     "recipes receipt audit --json",
     "recipes receipt audit --limit 10",
+    "recipes receipt audit-bundle",
+    "recipes receipt audit-bundle --json",
+    "recipes receipt audit-bundle-validate <bundle_id>",
     "recipes receipt inspect <receipt_id>",
     "recipes receipt export <receipt_id>",
     "recipes receipt export-validate <export_id>",
@@ -272,6 +275,13 @@ _ALLOWED_CLI_DISPATCH.update(
         ("recipes", "receipt", "history", "--json"): ("recipes", "receipt", "history", "--json"),
         ("recipes", "receipt", "audit"): ("recipes", "receipt", "audit"),
         ("recipes", "receipt", "audit", "--json"): ("recipes", "receipt", "audit", "--json"),
+        ("recipes", "receipt", "audit-bundle"): ("recipes", "receipt", "audit-bundle"),
+        ("recipes", "receipt", "audit-bundle", "--json"): (
+            "recipes",
+            "receipt",
+            "audit-bundle",
+            "--json",
+        ),
         ("audit", "recipes"): ("recipes", "receipt", "audit"),
         ("audit", "governed", "actions"): ("recipes", "receipt", "audit"),
         ("audit", "recipes", "--json"): ("recipes", "receipt", "audit", "--json"),
@@ -354,6 +364,7 @@ _QUICK_MUTATION_PHRASES = (
     "rollback latest receipt",
     "rollback the last recovery",
     "restart from the receipt",
+    "restart from receipt",
     "recover it again",
     "apply the receipt",
     "cleanup old receipts",
@@ -552,6 +563,40 @@ def _dispatch_safe_cli_command(raw: str) -> RoutedCommand | None:
         json_flag = len(tokens) == 4 and tokens[3] == "--json"
         if len(tokens) == 3 or json_flag:
             argv = ("recipes", "receipt", "audit")
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if len(tokens) in {3, 4} and tokens[:3] == ("recipes", "receipt", "audit-bundle"):
+        json_flag = len(tokens) == 4 and tokens[3] == "--json"
+        if len(tokens) == 3 or json_flag:
+            argv = ("recipes", "receipt", "audit-bundle")
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {5, 6}
+        and tokens[:4]
+        in {
+            ("recipes", "receipt", "audit-bundle", "--target"),
+            ("recipes", "receipt", "audit-bundle", "--recipe"),
+            ("recipes", "receipt", "audit-bundle", "--limit"),
+        }
+        and tokens[4]
+    ):
+        json_flag = len(tokens) == 6 and tokens[5] == "--json"
+        if len(tokens) == 5 or json_flag:
+            argv = ("recipes", "receipt", "audit-bundle", original_tokens[3], original_tokens[4])
+            if json_flag:
+                argv = (*argv, "--json")
+            return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)
+    if (
+        len(tokens) in {4, 5}
+        and tokens[:3] == ("recipes", "receipt", "audit-bundle-validate")
+        and tokens[3]
+    ):
+        json_flag = len(tokens) == 5 and tokens[4] == "--json"
+        if len(tokens) == 4 or json_flag:
+            argv = ("recipes", "receipt", "audit-bundle-validate", original_tokens[3])
             if json_flag:
                 argv = (*argv, "--json")
             return RoutedCommand(name="cli_dispatch", args=raw, argv=argv)

@@ -27,6 +27,9 @@ EXPORT_MODE = "v2_recipe_receipt_export"
 EXPORT_VALIDATE_MODE = "v2_recipe_receipt_export_validate"
 COMPARE_MODE = "v2_recipe_receipt_compare"
 AUDIT_MODE = "v2_recipe_receipt_audit"
+AUDIT_BUNDLE_MODE = "v2_recipe_receipt_audit_bundle"
+AUDIT_BUNDLE_VALIDATE_MODE = "v2_recipe_receipt_audit_bundle_validate"
+AUDIT_BUNDLE_MANIFEST_KIND = "v2_recipe_receipt_audit_bundle"
 EXPORT_MANIFEST_KIND = "v2_recipe_receipt_export"
 DEFAULT_HISTORY_LIMIT = 20
 MAX_HISTORY_LIMIT = 100
@@ -50,6 +53,10 @@ def _sha256_file(path: Path) -> str:
 
 def receipt_export_root(data_dir: Path | str) -> Path:
     return Path(data_dir).expanduser() / "exports" / "receipt_exports"
+
+
+def receipt_audit_bundle_root(data_dir: Path | str) -> Path:
+    return Path(data_dir).expanduser() / "exports" / "receipt-audit-bundles"
 
 
 def audit_safety() -> dict[str, bool]:
@@ -487,6 +494,358 @@ def receipt_audit(
     if compare_summary is not None:
         payload["compare_summary"] = compare_summary
     return payload
+
+
+def _receipt_audit_bundle_summary(audit_payload: dict[str, Any]) -> dict[str, Any]:
+    summary = audit_payload.get("summary") if isinstance(audit_payload.get("summary"), dict) else {}
+    warnings = (
+        audit_payload.get("warnings") if isinstance(audit_payload.get("warnings"), list) else []
+    )
+    return {
+        "receipts_summarized": int(summary.get("receipts_found") or 0),
+        "chains_summarized": len(audit_payload.get("chains") or []),
+        "warnings": len(warnings),
+        "safety_drift": int(summary.get("safety_drift") or 0),
+        "production_restart_recorded": int(summary.get("production_restart_recorded") or 0),
+    }
+
+
+def _render_audit_bundle_markdown(payload: dict[str, Any]) -> str:
+    filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    lines = [
+        "# Governed Recipe Receipt Audit Bundle",
+        "",
+        f"Created at: {payload.get('created_at')}",
+        f"Bundle ID: {payload.get('bundle_id')}",
+        "",
+        "## Filters",
+        "",
+        f"- target: {filters.get('target') or '-'}",
+        f"- recipe_id: {filters.get('recipe_id') or '-'}",
+        f"- limit: {filters.get('limit')}",
+        f"- include_exports: {str(bool(filters.get('include_exports'))).lower()}",
+        f"- include_compare_summary: {str(bool(filters.get('include_compare_summary'))).lower()}",
+        "",
+        "## Summary",
+        "",
+        f"- receipts summarized: {summary.get('receipts_summarized', 0)}",
+        f"- chains summarized: {summary.get('chains_summarized', 0)}",
+        f"- warnings: {summary.get('warnings', 0)}",
+        f"- safety drift: {summary.get('safety_drift', 0)}",
+        f"- production restart recorded: {summary.get('production_restart_recorded', 0)}",
+        "",
+        "## Findings / Warnings",
+        "",
+    ]
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings[:20])
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "## Safety",
+            "",
+            "Artifact export only. No execution was performed.",
+            "No recipe, recovery, rollback, cleanup, Docker, or Compose command was executed.",
+            "No container restart, production restart, arbitrary command execution, "
+            "natural-language execution, or model call occurred.",
+            "",
+            "## First safe command",
+            "",
+            f"`{payload.get('first_safe_command')}`",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _audit_bundle_required_files() -> list[str]:
+    return [
+        "audit-bundle.json",
+        "audit-bundle.md",
+        "receipt-audit.json",
+        "receipt-history.json",
+        "manifest.json",
+        "checksums.json",
+    ]
+
+
+def receipt_audit_bundle(
+    data_dir: Path | str,
+    *,
+    target: str | None = None,
+    recipe_id: str | None = None,
+    limit: int = DEFAULT_HISTORY_LIMIT,
+    include_exports: bool = False,
+    include_compare_summary: bool = False,
+) -> dict[str, Any]:
+    """Package existing local receipt audit/history evidence into an owned support bundle."""
+    bounded_limit, limit_warnings = _coerce_limit(int(limit))
+    created_at = _now_utc()
+    bundle_id = f"audit_bundle_{_now_stamp()}_{uuid.uuid4().hex[:6]}"
+    root = receipt_audit_bundle_root(data_dir).resolve()
+    out = (root / bundle_id).resolve()
+    try:
+        out.relative_to(root)
+    except ValueError:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "mode": AUDIT_BUNDLE_MODE,
+            "status": "failed",
+            "read_only": True,
+            "mutation_performed": False,
+            "artifact_export_only": True,
+            "bundle": {"bundle_id": bundle_id, "path": None, "files": []},
+            "filters": {},
+            "summary": {},
+            "first_safe_command": (
+                "shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json"
+            ),
+            "safe_next_commands": [],
+            "warnings": ["refused unsafe bundle path"],
+            "safety": {**audit_safety(), "artifact_export_only": True},
+        }
+    out.mkdir(parents=True, exist_ok=False)
+
+    audit_payload = receipt_audit(
+        data_dir,
+        target=target,
+        recipe_id=recipe_id,
+        limit=bounded_limit,
+        include_exports=include_exports,
+        include_compare_summary=include_compare_summary,
+    )
+    history_payload = receipt_history(data_dir, limit=bounded_limit)
+    filters = {
+        "target": target or None,
+        "recipe_id": recipe_id or None,
+        "limit": bounded_limit,
+        "include_exports": bool(include_exports),
+        "include_compare_summary": bool(include_compare_summary),
+    }
+    summary = _receipt_audit_bundle_summary(audit_payload)
+    warnings = list(dict.fromkeys([*limit_warnings, *(audit_payload.get("warnings") or [])]))
+    first_safe = f"shellforgeai recipes receipt audit-bundle-validate {bundle_id} --json"
+    safe_next = [
+        first_safe,
+        "shellforgeai recipes receipt audit --json",
+        "shellforgeai recipes receipt history --json",
+    ]
+    files = [*_audit_bundle_required_files()]
+    optional_files: list[str] = []
+    if include_compare_summary:
+        optional_files.append("receipt-compare-summary.json")
+    if include_exports:
+        optional_files.append("receipt-export-index.json")
+    files = [*files, *optional_files]
+
+    _write_json_file(out / "receipt-audit.json", audit_payload)
+    _write_json_file(out / "receipt-history.json", history_payload)
+    if include_compare_summary:
+        _write_json_file(
+            out / "receipt-compare-summary.json",
+            audit_payload.get("compare_summary")
+            if isinstance(audit_payload.get("compare_summary"), dict)
+            else {
+                "available": False,
+                "command": (
+                    "shellforgeai recipes receipt compare "
+                    "<before_receipt_id> <after_receipt_id> --json"
+                ),
+            },
+        )
+    if include_exports:
+        exports: list[dict[str, Any]] = []
+        for chain in audit_payload.get("chains") or []:
+            for receipt in chain.get("receipts") or []:
+                for item in receipt.get("exports") or []:
+                    if isinstance(item, dict):
+                        exports.append(item)
+        _write_json_file(out / "receipt-export-index.json", {"exports": exports})
+
+    bundle_payload: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": AUDIT_BUNDLE_MODE,
+        "status": "created",
+        "read_only": True,
+        "mutation_performed": False,
+        "artifact_export_only": True,
+        "bundle_id": bundle_id,
+        "created_at": created_at,
+        "bundle": {"bundle_id": bundle_id, "path": str(out), "files": files},
+        "path": str(out),
+        "files": files,
+        "filters": filters,
+        "receipt_audit_summary": audit_payload.get("summary") or {},
+        "receipt_history_summary": {
+            "count": history_payload.get("count", 0),
+            "status": history_payload.get("status"),
+        },
+        "summary": summary,
+        "findings": audit_payload.get("findings") or [],
+        "warnings": warnings,
+        "checksum_file": "checksums.json",
+        "first_safe_command": first_safe,
+        "safe_next_commands": safe_next,
+        "safety": {**audit_safety(), "artifact_export_only": True},
+    }
+    _write_json_file(out / "audit-bundle.json", bundle_payload)
+    (out / "audit-bundle.md").write_text(
+        _render_audit_bundle_markdown(bundle_payload), encoding="utf-8"
+    )
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": AUDIT_BUNDLE_MANIFEST_KIND,
+        "mode": "v2_recipe_receipt_audit_bundle_manifest",
+        "bundle_id": bundle_id,
+        "created_at": created_at,
+        "generated_by": "shellforgeai recipes receipt audit-bundle",
+        "source_command": "shellforgeai recipes receipt audit-bundle",
+        "files": files,
+        "checksums": {
+            "stored_in": "checksums.json",
+            "covers": [f for f in files if f != "checksums.json"],
+        },
+        "filters": filters,
+        "safety": {**audit_safety(), "artifact_export_only": True},
+    }
+    _write_json_file(out / "manifest.json", manifest)
+    checksums = {
+        rel: _sha256_file(out / rel)
+        for rel in files
+        if rel != "checksums.json" and (out / rel).is_file()
+    }
+    _write_json_file(out / "checksums.json", {"algorithm": "sha256", "checksums": checksums})
+    bundle_payload["checksums"] = {"stored_in": "checksums.json"}
+    # Update audit-bundle after checksum generation without changing the checksum contract.
+    # checksums.json verifies the support packet files and excludes itself.
+    _write_json_file(out / "audit-bundle.json", bundle_payload)
+    checksums["audit-bundle.json"] = _sha256_file(out / "audit-bundle.json")
+    _write_json_file(out / "checksums.json", {"algorithm": "sha256", "checksums": checksums})
+    return bundle_payload
+
+
+def _resolve_audit_bundle_ref(ref: str, data_dir: Path | str) -> Path | None:
+    raw = str(ref or "").strip()
+    if not raw or ".." in Path(raw).parts:
+        return None
+    root = receipt_audit_bundle_root(data_dir).resolve()
+    p = Path(raw).expanduser()
+    resolved = (
+        p.resolve() if p.is_absolute() or "/" in raw or "\\" in raw else (root / raw).resolve()
+    )
+    if resolved.is_file():
+        resolved = resolved.parent
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return None
+    return resolved
+
+
+def receipt_audit_bundle_validate(ref: str, data_dir: Path | str) -> dict[str, Any]:
+    d = _resolve_audit_bundle_ref(ref, data_dir)
+    required = [{"name": name, "status": "missing"} for name in _audit_bundle_required_files()]
+    base = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": AUDIT_BUNDLE_VALIDATE_MODE,
+        "status": "failed",
+        "read_only": True,
+        "mutation_performed": False,
+        "bundle_id": d.name if d else str(ref or ""),
+        "path": str(d) if d else None,
+        "required_files": required,
+        "checksum_status": "not_checked",
+        "warnings": [],
+        "safety": audit_safety(),
+    }
+    warnings: list[str] = []
+    if d is None or not d.is_dir():
+        return {
+            **base,
+            "status": "not_found",
+            "warnings": ["audit bundle not found or not ShellForgeAI-owned"],
+        }
+    json_ok = True
+    for item in required:
+        path = d / str(item["name"])
+        if not path.is_file():
+            item["status"] = "missing"
+            warnings.append(f"missing required file: {item['name']}")
+            json_ok = False
+            continue
+        item["status"] = "ok"
+        if str(item["name"]).endswith(".json"):
+            parsed, err = _read_json(path)
+            if err or parsed is None:
+                item["status"] = "malformed"
+                warnings.append(f"malformed JSON in {item['name']}: {err}")
+                json_ok = False
+    manifest, manifest_err = _read_json(d / "manifest.json")
+    if manifest_err or manifest is None:
+        warnings.append(manifest_err or "malformed manifest")
+        manifest = {}
+    if manifest and manifest.get("kind") != AUDIT_BUNDLE_MANIFEST_KIND:
+        warnings.append("manifest kind mismatch")
+    if manifest and manifest.get("bundle_id") not in {None, d.name}:
+        warnings.append("manifest bundle id mismatch")
+    manifest_files = manifest.get("files") if isinstance(manifest.get("files"), list) else []
+    missing_from_manifest = [
+        name for name in _audit_bundle_required_files() if name not in set(map(str, manifest_files))
+    ]
+    if manifest and missing_from_manifest:
+        warnings.append(
+            "manifest files missing required entries: " + ", ".join(missing_from_manifest)
+        )
+    checksums_payload, checksums_err = _read_json(d / "checksums.json")
+    checksum_status = "not_checked"
+    if checksums_err or checksums_payload is None:
+        warnings.append(checksums_err or "malformed checksums")
+        checksum_status = "failed"
+    else:
+        checksum_status = "ok"
+        checksums = (
+            checksums_payload.get("checksums")
+            if isinstance(checksums_payload.get("checksums"), dict)
+            else {}
+        )
+        if not checksums:
+            checksum_status = "failed"
+            warnings.append("checksums missing")
+        for rel, expected in checksums.items():
+            rel_path = Path(str(rel))
+            if rel_path.is_absolute() or ".." in rel_path.parts:
+                checksum_status = "failed"
+                warnings.append(f"unsafe path in checksums: {rel}")
+                break
+            path = (d / rel_path).resolve()
+            try:
+                path.relative_to(d.resolve())
+            except ValueError:
+                checksum_status = "failed"
+                warnings.append(f"external path in checksums: {rel}")
+                break
+            if not path.is_file() or _sha256_file(path) != str(expected):
+                checksum_status = "failed"
+                warnings.append(f"checksum failed for {rel}")
+                break
+    status = "ok" if json_ok and not warnings and checksum_status == "ok" else "failed"
+    return {
+        **base,
+        "status": status,
+        "bundle_id": (manifest or {}).get("bundle_id") or d.name,
+        "path": str(d),
+        "required_files": required,
+        "checksum_status": checksum_status,
+        "warnings": warnings,
+    }
 
 
 def _resolve_and_validate_receipt(

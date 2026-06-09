@@ -188,6 +188,12 @@ from shellforgeai.core.recipe_receipt_audit import (
     receipt_audit as build_receipt_audit,
 )
 from shellforgeai.core.recipe_receipt_audit import (
+    receipt_audit_bundle as build_receipt_audit_bundle,
+)
+from shellforgeai.core.recipe_receipt_audit import (
+    receipt_audit_bundle_validate as build_receipt_audit_bundle_validate,
+)
+from shellforgeai.core.recipe_receipt_audit import (
     receipt_compare as build_receipt_compare,
 )
 from shellforgeai.core.recipe_receipt_audit import (
@@ -11146,6 +11152,12 @@ _RECEIPT_AUDIT_MUTATION_CUES = (
     "apply the receipt",
     "cleanup old receipts",
     "clean up old receipts",
+    "bundle audit then restart",
+    "bundle audit then restart it",
+    "create bundle and rerun receipt",
+    "export and recover now",
+    "export audit and recover now",
+    "validate bundle then rollback",
 )
 
 
@@ -11164,12 +11176,57 @@ def _handle_receipt_audit_ask(question: str) -> bool:
         console.print(
             "ShellForgeAI did not recover, rollback, restart, rerun, apply, clean up, or remediate."
         )
-        console.print(
-            "Use read-only audit commands such as `shellforgeai recipes receipt history`."
-        )
+        if "bundle" in normalized or "support packet" in normalized or "export audit" in normalized:
+            console.print("Safe artifact-only bundle command:")
+            console.print("  shellforgeai recipes receipt audit-bundle")
+            console.print("  shellforgeai recipes receipt audit-bundle --json")
+        else:
+            console.print(
+                "Use read-only audit commands such as `shellforgeai recipes receipt history`."
+            )
         console.print("No action was taken.")
         return True
     refs = _receipt_audit_refs(question)
+    bundle_match = re.search(r"\baudit_bundle_[A-Za-z0-9_.-]+\b", question or "")
+    if any(
+        cue in normalized
+        for cue in (
+            "create receipt audit bundle",
+            "create recipe audit support packet",
+            "bundle the receipt audit",
+            "export audit bundle",
+            "make a support packet for recipe receipts",
+            "show command to create audit bundle",
+        )
+    ):
+        console.print("Governed receipt audit bundle guidance (deterministic ask routing):")
+        console.print("  shellforgeai recipes receipt audit-bundle")
+        console.print("  shellforgeai recipes receipt audit-bundle --json")
+        console.print("  shellforgeai recipes receipt audit-bundle --limit 20")
+        console.print("Artifact export only. No recipe action was taken.")
+        console.print(
+            "No Docker, Compose, recovery, rollback, restart, cleanup, or model call occurred."
+        )
+        console.print("No action was taken.")
+        return True
+    if "validate audit bundle" in normalized or "audit bundle validate" in normalized:
+        console.print(
+            "Governed receipt audit bundle validation guidance (deterministic ask routing):"
+        )
+        if bundle_match:
+            console.print(
+                f"  shellforgeai recipes receipt audit-bundle-validate {bundle_match.group(0)}"
+            )
+            console.print(
+                "  shellforgeai recipes receipt audit-bundle-validate "
+                f"{bundle_match.group(0)} --json"
+            )
+        else:
+            console.print("  shellforgeai recipes receipt audit-bundle-validate <bundle_id>")
+            console.print("  shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json")
+        console.print("Read-only validation only. No recipe action was taken.")
+        console.print("No action was taken.")
+        return True
     if any(
         cue in normalized
         for cue in (
@@ -12734,6 +12791,62 @@ def _render_recipe_receipt_audit_human(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_recipe_receipt_audit_bundle_human(payload: dict[str, Any]) -> str:
+    bundle = payload.get("bundle") if isinstance(payload.get("bundle"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    lines = [
+        "Governed recipe audit bundle: created",
+        "",
+        f"Bundle: {bundle.get('bundle_id') or payload.get('bundle_id') or 'unknown'}",
+        f"Path: {bundle.get('path') or payload.get('path') or 'unknown'}",
+        "",
+        "Included:",
+        "",
+        "receipt audit summary",
+        "receipt history summary",
+        "manifest/checksums",
+        "safety summary",
+        "",
+        f"Receipts summarized: {summary.get('receipts_summarized', 0)}",
+        f"Chains summarized: {summary.get('chains_summarized', 0)}",
+        f"Findings: {summary.get('warnings', 0)} warnings, "
+        f"{summary.get('safety_drift', 0)} safety drift",
+        "",
+        "First safe command:",
+        str(payload.get("first_safe_command") or ""),
+        "",
+        "Safety:",
+        "",
+        "Artifact export only.",
+        "No recipe, recovery, rollback, cleanup, Docker, or Compose command was executed.",
+    ]
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"- {warning}" for warning in warnings[:10])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_recipe_receipt_audit_bundle_validate_human(payload: dict[str, Any]) -> str:
+    lines = [
+        "Governed recipe audit bundle validation",
+        f"Status: {payload.get('status')}",
+        f"Bundle: {payload.get('bundle_id') or 'unknown'}",
+        f"Path: {payload.get('path') or 'not found'}",
+        "Required files:",
+    ]
+    for item in payload.get("required_files") or []:
+        if isinstance(item, dict):
+            lines.append(f"- {item.get('name')}: {item.get('status')}")
+    lines.append(f"Checksum status: {payload.get('checksum_status')}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.extend(["Safety:", "- read_only: true", "- mutation_performed: false"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_recipe_receipt_inspect_human(payload: dict[str, Any]) -> str:
     identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
     lineage = payload.get("lineage") if isinstance(payload.get("lineage"), dict) else {}
@@ -12908,6 +13021,71 @@ def recipes_receipt_audit(
     else:
         typer.echo(_render_recipe_receipt_audit_human(payload), nl=False)
     if payload.get("status") == "failed":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("audit-bundle")
+def recipes_receipt_audit_bundle(
+    ctx: typer.Context,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    target: Annotated[
+        str | None, typer.Option("--target", help="Only include receipt chains for this target.")
+    ] = None,
+    recipe_id: Annotated[
+        str | None, typer.Option("--recipe", help="Only include receipt chains for this recipe id.")
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit", min=1, max=100, help="Maximum recent receipt artifacts to inspect (1-100)."
+        ),
+    ] = 20,
+    include_exports: Annotated[
+        bool,
+        typer.Option("--include-exports", help="Include known local export refs if discoverable."),
+    ] = False,
+    include_compare_summary: Annotated[
+        bool,
+        typer.Option(
+            "--include-compare-summary",
+            help="Include read-only compare availability summary; do not run compare.",
+        ),
+    ] = False,
+) -> None:
+    """Create an artifact-only governed receipt audit support bundle."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_audit_bundle(
+        runtime.session.data_dir,
+        target=target,
+        recipe_id=recipe_id,
+        limit=limit,
+        include_exports=include_exports,
+        include_compare_summary=include_compare_summary,
+    )
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_audit_bundle_human(payload), nl=False)
+    if payload.get("status") != "created":
+        raise typer.Exit(1)
+
+
+@recipes_receipt_app.command("audit-bundle-validate")
+def recipes_receipt_audit_bundle_validate(
+    ctx: typer.Context,
+    bundle_ref: Annotated[
+        str, typer.Argument(help="Audit bundle id or ShellForgeAI-owned bundle path.")
+    ],
+    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+) -> None:
+    """Validate a governed receipt audit bundle. Read-only."""
+    runtime = _ctx(ctx)
+    payload = build_receipt_audit_bundle_validate(bundle_ref, runtime.session.data_dir)
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        typer.echo(_render_recipe_receipt_audit_bundle_validate_human(payload), nl=False)
+    if payload.get("status") != "ok":
         raise typer.Exit(1)
 
 

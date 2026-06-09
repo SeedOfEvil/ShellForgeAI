@@ -1643,6 +1643,13 @@ _INTERACTIVE_DISPATCH_LABELS: dict[tuple[str, ...], str] = {
     ("recipes", "list"): "Running read-only recipe registry...",
     ("recipes", "inspect"): "Running read-only recipe inspection...",
     ("recipes", "eligibility"): "Running read-only recipe eligibility...",
+    ("recipes", "receipt", "audit"): "Running read-only receipt audit...",
+    ("recipes", "receipt", "audit-bundle"): "Creating artifact-only receipt audit bundle...",
+    (
+        "recipes",
+        "receipt",
+        "audit-bundle-validate",
+    ): "Running read-only receipt audit bundle validation...",
     ("safe-actions",): "Running read-only safe-actions summary...",
 }
 
