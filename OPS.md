@@ -1890,9 +1890,18 @@ After a long Docker01/full-validation run, use the read-only viewer to inspect
 the PR176 heartbeat/status/manifest evidence without rerunning anything:
 
 ```bash
-# Most recent run under the known validation artifact roots:
+# Most relevant recent run under the known validation artifact roots:
 python scripts/validation_status.py --latest
 python scripts/validation_status.py --latest --json
+
+# Latest-artifact discovery filters / explanation (PR181):
+python scripts/validation_status.py --latest --pr 181
+python scripts/validation_status.py --latest --commit 0b407fa
+python scripts/validation_status.py --latest --pr 181 --commit 0b407fa
+python scripts/validation_status.py --latest --include-legacy
+python scripts/validation_status.py --latest --run-root /srv/data/shellforgeai/validation-runs
+python scripts/validation_status.py --latest --explain-selection
+python scripts/validation_status.py --latest --json --explain-selection
 
 # A specific run directory or explicit evidence files:
 python scripts/validation_status.py --run-dir /srv/data/shellforgeai/validation-runs/<run>
@@ -1901,6 +1910,18 @@ python scripts/validation_status.py --heartbeat <path> --json
 python scripts/validation_status.py --status-file <path> --json
 python scripts/validation_status.py --manifest <path> --json
 ```
+
+`--latest` selects the most relevant artifact deterministically: it prefers
+recent PR-specific run directories (`/tmp/sfai-pr<PR>-<sha>-validation-*`) over
+older persisted `/srv/data/.../validation-runs` manifests, breaking ties by
+newest timestamp, and explains the choice (`selection`/`source.selected_by`,
+plus the selected/skipped candidate list under `--explain-selection`). `--pr`/
+`--commit` filter candidates (an unmatched filter returns a controlled
+`not_found` — no traceback); `--include-legacy` opts into older `/data/...`
+artifacts; `--run-root` scans only one bounded root (broad roots and `..`
+traversal are rejected). Selecting a different artifact never changes pass/fail
+semantics; to force a specific run, pass `--run-dir <path>` (discovery is then
+skipped).
 
 The viewer classifies a run and answers the merge question directly:
 

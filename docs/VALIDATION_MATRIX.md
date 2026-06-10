@@ -24,8 +24,11 @@ with the read-only viewer `python scripts/validation_status.py --latest`
 (or `--run-dir <run_dir>` / `--json`). It classifies the run as
 passed/failed/incomplete/unknown and reports `pass_eligible` and
 `rerun_required` so an interrupted/incomplete run is never mistaken for merge
-evidence. See [`VALIDATION_LANES.md`](VALIDATION_LANES.md) for the viewer's
-status table and merge rule.
+evidence. `--latest` deterministically prefers recent PR-specific run
+directories over older persisted manifests and can be filtered with `--pr`/
+`--commit` or explained with `--explain-selection`; pass `--run-dir <path>` to
+force a specific run. See [`VALIDATION_LANES.md`](VALIDATION_LANES.md) for the
+viewer's status table, merge rule, and latest-discovery priority.
 
 How matching works:
 
