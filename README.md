@@ -114,7 +114,8 @@ asks deterministically, and refuses or gates mutation.
 - V2 command contract: [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md)
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
-  (PR182: `status`, `doctor`) — see [`docs/cli.md`](docs/cli.md).
+  (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`)
+  — see [`docs/cli.md`](docs/cli.md).
 
 ### What this is (V1)
 
@@ -366,7 +367,8 @@ See [`docs/interactive-mode.md`](docs/interactive-mode.md).
 
 ```
 src/shellforgeai/
-  cli.py              Typer entry points
+  cli.py              root Typer app wiring; command handlers are split into commands/
+  commands/           behavior-preserving Typer command modules
   core/               session, config, profiles, diagnose, evidence, plans,
                       approvals, mission, compose_context, rollback_preview,
                       retention, metadata_hygiene, reference_resolver

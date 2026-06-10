@@ -32,6 +32,15 @@ read-only status/report command (`shellforgeai status --json`), never a detail
 command for a missing suspect.
 
 
+## CLI implementation note
+
+`src/shellforgeai/cli.py` remains the root Typer app wiring. The staged
+command-module split keeps behavior unchanged while moving read-only handlers
+into `src/shellforgeai/commands/`: PR182 extracted `status`/`doctor`, and the
+current split also keeps `ops report`/`ops status` and `triage`/`triage docker`
+handlers in command modules. This is an internal layout hardening only; command
+UX, JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
+
 ## Mainline/scheduled validation baseline
 
 Use `scripts/run_mainline_validation.py` when the operator needs an explicit
