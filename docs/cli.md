@@ -13,16 +13,20 @@ into `src/shellforgeai/commands/` one domain at a time, behavior-preserving at
 each step — no command names, aliases, JSON schemas, exit codes, safety flags,
 or refusal behavior change as part of the move.
 
-PR182 is the first slice and extracts only the safest read-only domains:
+The staged split currently covers these behavior-preserving slices:
 
-- `commands/status.py` — the `status` golden-path command.
-- `commands/doctor.py` — `doctor` and `model doctor`.
+- PR182: `commands/status.py` for the `status` golden-path command.
+- PR182: `commands/doctor.py` for `doctor` and `model doctor`.
+- PR183: `commands/ops.py` for the read-only `ops status` and `ops report`
+  report lifecycle handlers.
+- PR183: `commands/triage.py` for the read-only `triage` and compatibility
+  `triage docker` handlers, including snapshot artifact lifecycle commands.
 
 Each module exposes a small `register(app, ...)` function that `cli.py` calls
 at the same position the commands previously occupied (preserving help order),
 and the handlers resolve shared `cli` helpers lazily so monkeypatch hooks and
-output stay identical. Future PRs will migrate further domains (triage,
-validation, audit, compose, mission, etc.) the same way.
+output stay identical. Future PRs will migrate further domains (validation,
+audit, compose, mission, etc.) the same way.
 
 ## Global options
 
