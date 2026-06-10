@@ -112,6 +112,9 @@ asks deterministically, and refuses or gates mutation.
 - Release-candidate checklist/evidence gate: [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md)
 - Command surface audit: [`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md)
 - V2 command contract: [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md)
+- CLI internals: `cli.py` is the root Typer entrypoint; commands are being
+  split into `src/shellforgeai/commands/` one domain at a time
+  (PR182: `status`, `doctor`) — see [`docs/cli.md`](docs/cli.md).
 
 ### What this is (V1)
 

@@ -4,6 +4,26 @@
 
 ShellForgeAI is exposed as `shellforgeai` and `sfai`.
 
+## CLI internals (staged command-module split)
+
+`src/shellforgeai/cli.py` remains the canonical Typer entrypoint and root app
+owner (registered under `[project.scripts]` as `shellforgeai`/`sfai`). Because
+`cli.py` has grown large, command registration/handler glue is being moved out
+into `src/shellforgeai/commands/` one domain at a time, behavior-preserving at
+each step — no command names, aliases, JSON schemas, exit codes, safety flags,
+or refusal behavior change as part of the move.
+
+PR182 is the first slice and extracts only the safest read-only domains:
+
+- `commands/status.py` — the `status` golden-path command.
+- `commands/doctor.py` — `doctor` and `model doctor`.
+
+Each module exposes a small `register(app, ...)` function that `cli.py` calls
+at the same position the commands previously occupied (preserving help order),
+and the handlers resolve shared `cli` helpers lazily so monkeypatch hooks and
+output stay identical. Future PRs will migrate further domains (triage,
+validation, audit, compose, mission, etc.) the same way.
+
 ## Global options
 
 ```

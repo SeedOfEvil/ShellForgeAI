@@ -128,6 +128,13 @@ For V2 command-surface planning and anti-bloat guardrails, use
 [`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md) and
 [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md).
 
+CLI maintainability note (PR182): `src/shellforgeai/cli.py` is being split into
+a `src/shellforgeai/commands/` package one domain at a time, behavior-preserving
+at each step. `cli.py` stays the root Typer entrypoint; the first extracted
+domains are `status` and `doctor`/`model doctor`. Command names, output, exit
+codes, JSON behavior, and safety gates are unchanged. See
+[`docs/cli.md`](docs/cli.md) and [`docs/roadmap.md`](docs/roadmap.md).
+
 ## Current baseline / handoff
 
 The PR78 release/handoff baseline is the current operator reference
