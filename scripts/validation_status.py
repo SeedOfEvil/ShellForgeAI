@@ -128,6 +128,10 @@ FALLBACK_GENERATE_TEMPLATE = (
     "python scripts/validation_container_fallback.py --run-dir {run_dir} --json"
 )
 
+# Lane letters for the explicit QA marker (mirrors scripts/validate_pr.py so the
+# viewer can label targeted-only Lane B runs without re-deriving lane policy).
+LANE_LETTER = {"fast": "A", "targeted_runtime": "B", "full": "C"}
+
 SAFETY_BLOCK = {
     "read_only": True,
     "mutation_performed": False,
@@ -662,6 +666,46 @@ def _log_path_from_manifest(manifest: dict[str, Any] | None) -> str | None:
     return None
 
 
+def lane_qa_marker(
+    manifest_doc: dict[str, Any] | None,
+    *,
+    fallback_packet_present: bool,
+) -> dict[str, Any]:
+    """Build an explicit Lane A/B/C QA marker from manifest lane evidence.
+
+    This makes targeted-only (Lane B) validation legible to reviewers: it records
+    the selected lane, whether full ``pytest`` was run, why, and whether a
+    container fallback packet is present. It is read-only summarization of
+    evidence the lane helper already wrote — it never runs, schedules, or
+    requests validation, and never invents a lane it cannot read.
+    """
+    selected = None
+    full_run = False
+    manifest_reason = None
+    if isinstance(manifest_doc, dict):
+        lane_block = manifest_doc.get("lane")
+        if isinstance(lane_block, dict):
+            selected = lane_block.get("selected")
+            full_run = bool(lane_block.get("full_validation_required"))
+            manifest_reason = lane_block.get("full_validation_reason")
+
+    lane_letter = LANE_LETTER.get(selected) if isinstance(selected, str) else None
+    scope = "full" if full_run else "targeted"
+    if full_run:
+        reason = manifest_reason or "Full validation lane"
+    elif lane_letter:
+        reason = f"Lane {lane_letter} targeted validation"
+    else:
+        reason = "Targeted validation"
+    return {
+        "validation_lane": lane_letter,
+        "validation_scope": scope,
+        "full_pytest_run": full_run,
+        "full_pytest_reason": reason,
+        "fallback_packet_present": bool(fallback_packet_present),
+    }
+
+
 def build_report(
     *,
     latest: bool,
@@ -746,6 +790,7 @@ def build_report(
         },
         "fallback_packet_present": fallback_present,
         "fallback_packet_path": fallback_packet_path,
+        "qa_marker": lane_qa_marker(manifest_doc, fallback_packet_present=fallback_present),
         "run": run_meta,
         "phases": {
             "active_phase": merged["active_phase"],
@@ -875,6 +920,19 @@ def render_human(report: dict[str, Any]) -> str:
                 "",
                 "Unknown/no validation evidence is not merge evidence; rerun required.",
             ]
+        )
+
+    marker = report.get("qa_marker") or {}
+    if marker:
+        lines.append("")
+        lines.append("QA marker:")
+        lines.append(f"* validation lane: {marker.get('validation_lane') or 'unknown'}")
+        lines.append(f"* validation scope: {marker.get('validation_scope')}")
+        lines.append(f"* full pytest run: {'yes' if marker.get('full_pytest_run') else 'no'}")
+        lines.append(f"* full pytest reason: {marker.get('full_pytest_reason')}")
+        lines.append(
+            "* fallback packet present: "
+            f"{'yes' if marker.get('fallback_packet_present') else 'no'}"
         )
 
     lines.extend(
