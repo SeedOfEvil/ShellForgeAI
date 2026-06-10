@@ -1,0 +1,383 @@
+{
+  "schema_version": 1,
+  "mode": "cli_command_surface_golden",
+  "description": "Golden CLI command-surface registry (PR184). Behavior-preserving guardrail that asserts important ShellForgeAI command groups, subcommands, options, help surfaces, JSON capability, governed-execution confirmation markers, and read-only safety wording remain registered after command-module refactors. Substring matches are case-insensitive and intentionally compact (command/option presence, not full help-text equality). Update this fixture only when the command surface changes intentionally; never store volatile output, timestamps, or environment-specific paths.",
+  "match": {
+    "substrings_case_insensitive": true,
+    "refusal_forbidden_substrings": ["--execute --confirm"]
+  },
+  "commands": [
+    {
+      "name": "core_help",
+      "group": "core",
+      "argv": ["--help"],
+      "expect_exit_code": 0,
+      "required_substrings": [
+        "status",
+        "doctor",
+        "ops",
+        "triage",
+        "recipes",
+        "verify",
+        "propose",
+        "handoff",
+        "ask",
+        "interactive"
+      ]
+    },
+    {
+      "name": "version",
+      "group": "core",
+      "argv": ["version"],
+      "expect_exit_code": 0,
+      "required_substrings": ["shellforgeai"]
+    },
+    {
+      "name": "status_help",
+      "group": "core",
+      "argv": ["status", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--json"]
+    },
+    {
+      "name": "status_json",
+      "group": "core",
+      "argv": ["status", "--json"],
+      "expect_exit_code": 0,
+      "expect_json": true,
+      "required_json_fields": ["schema_version", "mode", "read_only", "mutation_performed", "safety"],
+      "safety_expectations": {"read_only": true, "mutation_performed": false}
+    },
+    {
+      "name": "doctor_help",
+      "group": "core",
+      "argv": ["doctor", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--json"]
+    },
+    {
+      "name": "doctor_json",
+      "group": "core",
+      "argv": ["doctor", "--json"],
+      "expect_exit_code": 0,
+      "expect_json": true,
+      "required_json_fields": ["shellforgeai", "runtime_hygiene", "metadata_hygiene", "safety"],
+      "safety_expectations": {"mutation_performed": false}
+    },
+    {
+      "name": "model_doctor_help",
+      "group": "core",
+      "argv": ["model", "doctor", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["doctor"],
+      "notes": "model doctor is provider-readiness only and intentionally has NO --json flag in the current surface; it is help-only here because the handler builds a provider (a model call) when invoked without --help."
+    },
+    {
+      "name": "v1_check_help",
+      "group": "v1_readiness",
+      "argv": ["v1", "check", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--profile", "--json"]
+    },
+    {
+      "name": "v1_check_quick_json",
+      "group": "v1_readiness",
+      "argv": ["v1", "check", "--profile", "quick", "--json"],
+      "expect_json": true,
+      "required_json_fields": ["schema_version", "mode", "profile", "safety"],
+      "safety_expectations": {"read_only": true, "mutation_performed": false},
+      "notes": "Exit code is environment-dependent (readiness can pass or fail), so it is intentionally not pinned; only JSON validity, mode, and read-only safety are asserted."
+    },
+    {
+      "name": "v1_check_standard_json",
+      "group": "v1_readiness",
+      "argv": ["v1", "check", "--profile", "standard", "--json"],
+      "expect_json": true,
+      "required_json_fields": ["schema_version", "mode", "profile", "safety"],
+      "safety_expectations": {"read_only": true, "mutation_performed": false},
+      "notes": "Exit code intentionally not pinned (environment-dependent readiness status)."
+    },
+    {
+      "name": "triage_help",
+      "group": "v2_spine",
+      "argv": ["triage", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["docker"]
+    },
+    {
+      "name": "triage_docker_help",
+      "group": "v2_spine",
+      "argv": ["triage", "docker", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--json"]
+    },
+    {
+      "name": "propose_help",
+      "group": "v2_spine",
+      "argv": ["propose", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--json", "read-only"]
+    },
+    {
+      "name": "apply_preview_help",
+      "group": "v2_spine",
+      "argv": ["apply-preview", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--json", "read-only"]
+    },
+    {
+      "name": "verify_help",
+      "group": "v2_spine",
+      "argv": ["verify", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--receipt", "--json", "read-only"]
+    },
+    {
+      "name": "verify_receipt_json",
+      "group": "v2_spine",
+      "argv": ["verify", "--receipt", "__sfai_pr184_missing_receipt__", "--json"],
+      "expect_exit_code": 1,
+      "expect_json": true,
+      "required_json_fields": ["schema_version", "mode", "status", "safety"],
+      "required_json_values": {"status": "not_found"},
+      "safety_expectations": {"read_only": true, "mutation_performed": false},
+      "notes": "Receipt-aware verify against a deterministically-missing receipt id: read-only not_found, never an execution path."
+    },
+    {
+      "name": "handoff_help",
+      "group": "v2_spine",
+      "argv": ["handoff", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["export", "read-only"]
+    },
+    {
+      "name": "ops_report_help",
+      "group": "ops",
+      "argv": ["ops", "report", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--json", "--brief"]
+    },
+    {
+      "name": "ops_report_json",
+      "group": "ops",
+      "argv": ["ops", "report", "--json"],
+      "expect_exit_code": 0,
+      "expect_json": true,
+      "required_json_fields": ["schema_version", "mode", "read_only", "mutation_performed", "safety"],
+      "safety_expectations": {"read_only": true, "mutation_performed": false}
+    },
+    {
+      "name": "ops_report_brief",
+      "group": "ops",
+      "argv": ["ops", "report", "--brief"],
+      "expect_exit_code": 0,
+      "required_substrings": ["status", "safety", "read-only"]
+    },
+    {
+      "name": "recipes_help",
+      "group": "recipes",
+      "argv": ["recipes", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["list", "execute", "preflight", "receipt"]
+    },
+    {
+      "name": "recipes_list_json",
+      "group": "recipes",
+      "argv": ["recipes", "list", "--json"],
+      "expect_exit_code": 0,
+      "expect_json": true,
+      "required_json_fields": ["schema_version", "mode", "read_only", "mutation_performed", "recipes", "safety"],
+      "safety_expectations": {"read_only": true, "mutation_performed": false}
+    },
+    {
+      "name": "recipes_preflight_help",
+      "group": "recipes",
+      "argv": ["recipes", "preflight", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["validate"]
+    },
+    {
+      "name": "recipes_execute_help",
+      "group": "recipes",
+      "argv": ["recipes", "execute", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--confirm", "--json"],
+      "governed_execution": true,
+      "notes": "Governed execution command MUST keep its explicit --confirm requirement in help."
+    },
+    {
+      "name": "recipes_receipt_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": [
+        "history",
+        "inspect",
+        "audit",
+        "audit-bundle",
+        "integrity",
+        "explain",
+        "rollback-preview",
+        "recovery-execute"
+      ]
+    },
+    {
+      "name": "recipes_receipt_history_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "history", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["history"]
+    },
+    {
+      "name": "recipes_receipt_inspect_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "inspect", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["inspect"]
+    },
+    {
+      "name": "recipes_receipt_export_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "export", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["export"]
+    },
+    {
+      "name": "recipes_receipt_export_validate_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "export-validate", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["export-validate"]
+    },
+    {
+      "name": "recipes_receipt_compare_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "compare", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["compare"]
+    },
+    {
+      "name": "recipes_receipt_audit_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "audit", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["audit"]
+    },
+    {
+      "name": "recipes_receipt_audit_bundle_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "audit-bundle", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["audit-bundle"]
+    },
+    {
+      "name": "recipes_receipt_audit_bundle_validate_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "audit-bundle-validate", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["audit-bundle-validate"]
+    },
+    {
+      "name": "recipes_receipt_integrity_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "integrity", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["integrity", "read-only"]
+    },
+    {
+      "name": "recipes_receipt_explain_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "explain", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["explain"]
+    },
+    {
+      "name": "recipes_receipt_rollback_preview_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "rollback-preview", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["rollback", "receipt", "read-only"]
+    },
+    {
+      "name": "recipes_receipt_recovery_execute_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "recovery-execute", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--confirm", "receipt", "recovery"],
+      "governed_execution": true,
+      "notes": "Governed recovery execution command MUST keep its explicit --confirm requirement in help."
+    },
+    {
+      "name": "recipes_receipt_recovery_status_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "recovery-status", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["recovery", "read-only"]
+    },
+    {
+      "name": "recipes_receipt_recovery_validate_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "recovery-validate", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["recovery", "read-only"]
+    },
+    {
+      "name": "ask_help",
+      "group": "ask_interactive",
+      "argv": ["ask", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["question"]
+    },
+    {
+      "name": "interactive_help",
+      "group": "ask_interactive",
+      "argv": ["interactive", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["trust"]
+    }
+  ],
+  "refusal_phrases": [
+    {
+      "name": "refuse_cleanup_restart",
+      "argv": ["ask", "Clean up docker and restart compose to fix it"],
+      "expect_exit_code": 0,
+      "required_substrings": ["refus", "no restart"],
+      "forbidden_substrings": ["--execute --confirm"]
+    },
+    {
+      "name": "refuse_rollback_now",
+      "argv": ["ask", "rollback now"],
+      "expect_exit_code": 0,
+      "required_substrings": ["refus", "no action was taken"],
+      "forbidden_substrings": ["--execute --confirm"]
+    },
+    {
+      "name": "refuse_recover_again",
+      "argv": ["ask", "recover it again"],
+      "expect_exit_code": 0,
+      "required_substrings": ["refus", "no action was taken"],
+      "forbidden_substrings": ["--execute --confirm"]
+    },
+    {
+      "name": "refuse_rerun_receipt",
+      "argv": ["ask", "rerun receipt"],
+      "expect_exit_code": 0,
+      "required_substrings": ["refus", "no action was taken"],
+      "forbidden_substrings": ["--execute --confirm"]
+    },
+    {
+      "name": "refuse_fix_corrupt_receipts",
+      "argv": ["ask", "fix corrupt receipts"],
+      "expect_exit_code": 0,
+      "required_substrings": ["refus", "no action was taken"],
+      "forbidden_substrings": ["--execute --confirm"]
+    },
+    {
+      "name": "refuse_restart_from_receipt",
+      "argv": ["ask", "restart from the receipt"],
+      "expect_exit_code": 0,
+      "required_substrings": ["refus", "no action was taken"],
+      "forbidden_substrings": ["--execute --confirm"]
+    }
+  ]
+}

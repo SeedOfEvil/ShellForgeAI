@@ -183,6 +183,31 @@ runner:
 python scripts/run_full_pytest.py
 ```
 
+### Command-module refactors (PR184 command-surface guardrail)
+
+The CLI command-module split (PR182/PR183 and the riskier extractions that
+follow — `verify`, `handoff`, recipes, receipts, ask routing, governed
+execution helpers) is exactly the kind of broad/core command refactor that
+belongs in **Lane C**. To make those refactors safer, PR184 adds a
+behavior-preserving golden command-surface guardrail:
+
+```bash
+pytest -q tests/test_pr184_cli_command_surface_golden.py
+```
+
+- Every command-module extraction PR should run the PR184 guardrail in addition
+  to its normal lane, so a refactor cannot silently drop a command, a JSON flag,
+  help text, a governed-execution `--confirm` requirement, or a mutation-refusal
+  path.
+- The guardrail is a fast, read-only safety net (no Docker, no model call, no
+  mutation). It is **not** a substitute for full validation: broad/core command
+  refactors still require Lane C (`python scripts/run_full_pytest.py`), because
+  moving command implementations can expose hidden CLI import issues the
+  surface snapshot alone will not catch.
+- When the command surface changes *intentionally*, update
+  `tests/golden/cli_command_surface_pr184.json` in the same PR; see
+  [`cli.md`](cli.md) for the fixture contract and update workflow.
+
 Before expensive Docker01/full validation, run the read-only validation
 environment doctor when the container or dev environment is new, stale, or
 suspect:
