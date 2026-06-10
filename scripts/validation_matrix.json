@@ -277,6 +277,13 @@
     {"pattern": "scripts/validation_heartbeat.py", "lane": "full", "reason": "validation heartbeat/checkpoint helper changed (broad confidence)", "tests": [
       "tests/test_pr176_validation_heartbeat_incomplete.py"
     ]},
+    {"pattern": "scripts/validation_env_preflight.py", "lane": "full", "reason": "validation environment preflight changed (broad confidence)", "tests": [
+      "tests/test_pr178_validation_env_preflight.py"
+    ]},
+    {"pattern": "scripts/validation_status.py", "lane": "full", "reason": "validation evidence status viewer changed (broad confidence)", "tests": [
+      "tests/test_pr177_validation_status_viewer.py",
+      "tests/test_pr178_validation_env_preflight.py"
+    ]},
     {"pattern": "scripts/run_full_pytest.py", "lane": "full", "reason": "Lane C full pytest runner changed (broad confidence)", "tests": [
       "tests/test_pr160_full_validation_runner_streaming.py",
       "tests/test_pr176_validation_heartbeat_incomplete.py"

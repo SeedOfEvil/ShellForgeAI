@@ -1928,6 +1928,48 @@ calls Docker/Compose, never restarts/mutates anything, never runs
 cleanup/remediation/rollback/recovery, never uses `shell=True`, and never calls a
 model.
 
+### Validation environment preflight (PR178)
+
+Before starting a host validation run, check that the environment actually has
+the dev tools the ruff/compileall/pytest phases need:
+
+```bash
+python scripts/validation_env_preflight.py
+python scripts/validation_env_preflight.py --json
+python scripts/sfai_docker01_pr_lane.py --preflight-only
+```
+
+The Docker01 PR lane helper runs the same preflight automatically as an
+`environment_preflight` phase when `--execute-validation` is used:
+
+- **passed** — validation continues; the preflight result is recorded in the
+  heartbeat/manifest and written as `validation-preflight.json` next to the
+  manifest.
+- **passed_with_warnings** (e.g. missing `pytest-xdist`) — validation continues;
+  warnings are preserved as non-blockers in the final evidence.
+- **failed** — the helper stops **before** any ruff/compileall/pytest phase and
+  writes setup-failure evidence: `status=failed`,
+  `classification=setup_failure`, `failed_phase=environment_preflight`,
+  `pass_eligible=false`, `rerun_required=true`.
+
+**A failed preflight is validation environment setup failure, not evidence that
+product tests failed — and it is never merge evidence.** Rerun validation in the
+disposable validation container path, or prepare the host dev environment
+outside ShellForgeAI, then rerun. The preflight never installs packages, never
+modifies venvs or host Python, never runs `pytest` or `ruff check`, never runs a
+subprocess, and never calls Docker/Compose — the container path is a
+recommendation in text only.
+
+Inspect a preflight setup failure afterwards with the read-only viewer:
+
+```bash
+python scripts/validation_status.py --run-dir <run_dir> --json
+```
+
+It reports `classification=setup_failure` / `failed_phase=environment_preflight`
+with `pass_eligible=false` / `rerun_required=true`, and its first safe command
+points back at the preflight.
+
 
 ## V1 release handoff (PR120)
 

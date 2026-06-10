@@ -35,6 +35,7 @@ if str(HELPER_DIR) not in sys.path:
 
 import track_pytest_durations  # noqa: E402
 import validate_pr  # noqa: E402
+import validation_env_preflight  # noqa: E402
 import validation_heartbeat  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -167,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--changed-files",
         nargs="+",
-        required=True,
+        default=[],
         help="Changed files, space-separated or comma-separated.",
     )
     parser.add_argument("--pr", dest="pr_number", help="PR number for PR-specific tests.")
@@ -190,6 +191,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--execute-validation",
         action="store_true",
         help="Run the planned validation commands. Default is planning/dry-run only.",
+    )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help=(
+            "Run only the read-only validation environment preflight and exit. "
+            "No validation phases are executed and nothing is installed."
+        ),
+    )
+    parser.add_argument(
+        "--preflight-output",
+        help=(
+            "Write the validation environment preflight JSON to this path "
+            "(default: validation-preflight.json next to the manifest)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -468,6 +484,7 @@ def build_validation_manifest(
     status_path: str | None = None,
     full_pytest_exit_code: int | None = None,
     full_pytest_result: str | None = None,
+    preflight: dict | None = None,
 ) -> dict:
     created_at = created_at or _utc_now()
     resolved_head = _optional(head_commit) or _git_value(["rev-parse", "HEAD"])
@@ -585,6 +602,7 @@ def build_validation_manifest(
         "full_pytest_result": full_pytest_result,
         "heartbeat_path": heartbeat_path,
         "checkpoint_path": checkpoint_path,
+        "environment_preflight": preflight,
         "safety": _default_safety(no_cache=no_cache),
         "non_blockers": list(non_blockers or []),
         "artifacts": {
@@ -593,6 +611,7 @@ def build_validation_manifest(
             "heartbeat_path": heartbeat_path,
             "checkpoint_path": checkpoint_path,
             "status_path": status_path,
+            "preflight_path": (preflight or {}).get("path"),
         },
         "created_at": created_at,
     }
@@ -638,6 +657,8 @@ def render_human_summary(manifest: dict) -> str:
         f"{container.get('status') or UNKNOWN} / {container.get('health') or UNKNOWN} / "
         f"restart={restart}",
         "Validation:",
+        "* environment preflight: "
+        f"{(manifest.get('environment_preflight') or {}).get('status', 'not_run')}",
         f"* ruff: {validation.get('ruff', UNKNOWN)}",
         f"* compileall: {validation.get('compileall', UNKNOWN)}",
         f"* targeted tests: {validation.get('targeted_tests', UNKNOWN)}",
@@ -689,6 +710,19 @@ def render_human_summary(manifest: dict) -> str:
         lines.extend(["", f"Failed phase: {manifest['failed_phase']}"])
     if manifest.get("error_summary"):
         lines.append(f"Error: {manifest['error_summary']}")
+    if manifest.get("failed_phase") == "environment_preflight":
+        preflight = manifest.get("environment_preflight") or {}
+        lines.extend(
+            [
+                "",
+                "*** SETUP FAILURE ***",
+                "Validation environment preflight failed. This is setup failure, "
+                "not product test failure. Use the disposable validation container "
+                "path or prepare dev dependencies, then rerun.",
+            ]
+        )
+        for name in preflight.get("failed_checks") or []:
+            lines.append(f"* Required validation dependency missing/failed: {name}")
     return "\n".join(lines) + "\n"
 
 
@@ -775,6 +809,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.print_manifest_json and args.execute_validation and not args.dry_run:
         parser.error("--print-manifest-json cannot be combined with --execute-validation")
     changed_files = _split_changed_files(args.changed_files)
+    if args.preflight_only:
+        # Read-only environment preflight only: no planning, no validation
+        # phases, no installs, no Docker/Compose.
+        preflight_report = validation_env_preflight.run_preflight(
+            artifact_dir=str(Path(args.preflight_output).parent) if args.preflight_output else None
+        )
+        if args.preflight_output:
+            validation_env_preflight.write_report(preflight_report, args.preflight_output)
+        print(validation_env_preflight.render_human(preflight_report), end="", flush=True)
+        return validation_env_preflight.exit_code_for(preflight_report)
+    if not changed_files:
+        parser.error("--changed-files is required unless --preflight-only is used")
     try:
         plan = plan_docker01_lane(
             changed_files=changed_files,
@@ -857,8 +903,9 @@ def main(argv: list[str] | None = None) -> int:
             baseline_warning=baseline_warning,
         )
 
+    preflight_info = None
     if executed:
-        required_phases = _required_phases_from_plan(plan)
+        required_phases = ("environment_preflight", *_required_phases_from_plan(plan))
         heartbeat = validation_heartbeat.ValidationHeartbeat(
             heartbeat_path,
             checkpoint_path=checkpoint_path,
@@ -869,59 +916,115 @@ def main(argv: list[str] | None = None) -> int:
             required_phases=required_phases,
         )
         heartbeat.start()
-        record_sink: list[dict] = []
-        handlers = _install_interrupt_handlers()
-        start = time.monotonic()
-        try:
-            return_code, command_records = run_validation(
-                plan,
-                return_records=True,
-                log_path=args.validation_log,
-                heartbeat=heartbeat,
-                record_sink=record_sink,
+        # Read-only environment preflight before any ruff/compileall/pytest
+        # phase. A failed preflight is a controlled setup failure: stop before
+        # validation phases and leave clear setup_failure evidence instead of
+        # running phases that will obviously fail. Nothing is installed and no
+        # Docker/Compose fallback is executed; the container path is
+        # recommendation text only.
+        preflight_path = args.preflight_output or str(
+            Path(manifest_path).parent / "validation-preflight.json"
+        )
+        heartbeat.start_phase("environment_preflight")
+        preflight_report = validation_env_preflight.run_preflight(
+            artifact_dir=str(Path(manifest_path).parent),
+        )
+        validation_env_preflight.write_report(preflight_report, preflight_path)
+        preflight_info = {
+            "status": preflight_report["status"],
+            "classification": preflight_report["classification"],
+            "failed_checks": list(preflight_report.get("failed_checks") or []),
+            "warning_checks": list(preflight_report.get("warning_checks") or []),
+            "path": preflight_path,
+        }
+        if preflight_report["status"] == validation_env_preflight.STATUS_FAILED:
+            failed_names = ", ".join(preflight_info["failed_checks"]) or "unknown"
+            snapshot = heartbeat.mark_setup_failure(
+                reason=(
+                    "validation environment preflight failed "
+                    f"(missing/failed: {failed_names}); setup failure, "
+                    "not product test failure"
+                ),
+                phase="environment_preflight",
             )
-            snapshot = heartbeat.finalize()
             phases.append(
-                {
-                    "name": "validation",
-                    "status": "passed" if return_code == 0 else "failed",
-                    "duration_seconds": round(time.monotonic() - start, 3),
-                }
-            )
-            if return_code != 0:
-                failed = next(
-                    (record for record in command_records if record.get("status") == "failed"),
-                    None,
-                )
-                error_summary = (
-                    f"validation command failed: {failed.get('display') or failed.get('name')}"
-                    if failed
-                    else "validation failed"
-                )
-        except (_ValidationInterrupted, KeyboardInterrupt) as exc:
-            signal_name = getattr(exc, "signal_name", None) or "SIGINT"
-            return_code = int(getattr(exc, "exit_code", INTERRUPTED_EXIT_CODE))
-            snapshot = heartbeat.mark_interrupted(signal_name=signal_name)
-            command_records = list(record_sink)
-            phases.append(
-                {
-                    "name": "validation",
-                    "status": "interrupted",
-                    "duration_seconds": round(time.monotonic() - start, 3),
-                }
+                {"name": "environment_preflight", "status": "failed", "duration_seconds": None}
             )
             error_summary = (
-                f"validation interrupted ({signal_name}) before full pytest completion; "
-                "rerun required"
+                "validation environment preflight failed "
+                f"(missing/failed: {failed_names}); this is setup failure, not "
+                "product test failure; rerun in the disposable validation "
+                "container or a prepared dev environment"
             )
+            return_code = 1
             print(
-                f"Validation interrupted ({signal_name}); recorded incomplete evidence. "
-                "Rerun required.",
+                "Validation environment preflight failed; stopping before "
+                "validation phases (setup failure, not product test failure).",
                 file=sys.stderr,
                 flush=True,
             )
-        finally:
-            _restore_interrupt_handlers(handlers)
+        else:
+            heartbeat.complete_phase("environment_preflight")
+            phases.append(
+                {"name": "environment_preflight", "status": "passed", "duration_seconds": None}
+            )
+            # Warning-only preflight continues; preserve the warnings as
+            # known non-blockers in the final evidence.
+            for name in preflight_info["warning_checks"]:
+                args.non_blocker.append(f"environment preflight warning: {name}")
+            record_sink: list[dict] = []
+            handlers = _install_interrupt_handlers()
+            start = time.monotonic()
+            try:
+                return_code, command_records = run_validation(
+                    plan,
+                    return_records=True,
+                    log_path=args.validation_log,
+                    heartbeat=heartbeat,
+                    record_sink=record_sink,
+                )
+                snapshot = heartbeat.finalize()
+                phases.append(
+                    {
+                        "name": "validation",
+                        "status": "passed" if return_code == 0 else "failed",
+                        "duration_seconds": round(time.monotonic() - start, 3),
+                    }
+                )
+                if return_code != 0:
+                    failed = next(
+                        (record for record in command_records if record.get("status") == "failed"),
+                        None,
+                    )
+                    error_summary = (
+                        f"validation command failed: {failed.get('display') or failed.get('name')}"
+                        if failed
+                        else "validation failed"
+                    )
+            except (_ValidationInterrupted, KeyboardInterrupt) as exc:
+                signal_name = getattr(exc, "signal_name", None) or "SIGINT"
+                return_code = int(getattr(exc, "exit_code", INTERRUPTED_EXIT_CODE))
+                snapshot = heartbeat.mark_interrupted(signal_name=signal_name)
+                command_records = list(record_sink)
+                phases.append(
+                    {
+                        "name": "validation",
+                        "status": "interrupted",
+                        "duration_seconds": round(time.monotonic() - start, 3),
+                    }
+                )
+                error_summary = (
+                    f"validation interrupted ({signal_name}) before full pytest completion; "
+                    "rerun required"
+                )
+                print(
+                    f"Validation interrupted ({signal_name}); recorded incomplete evidence. "
+                    "Rerun required.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            finally:
+                _restore_interrupt_handlers(handlers)
 
     if snapshot is not None:
         manifest_status = snapshot["status"]
@@ -1002,6 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
         status_path=status_path if executed else None,
         full_pytest_exit_code=full_pytest_exit_code,
         full_pytest_result=full_pytest_result,
+        preflight=preflight_info,
     )
     summary = render_human_summary(manifest)
     write_manifest(manifest, manifest_path)

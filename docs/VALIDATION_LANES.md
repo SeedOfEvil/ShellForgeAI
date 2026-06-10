@@ -372,6 +372,69 @@ renders human/JSON status only. It never executes validation, never runs
 cleanup/remediation/rollback/recovery, never uses a shell, and never calls a
 model.
 
+## Validation environment preflight (PR178)
+
+Before any ruff/compileall/pytest phase runs on a host, the validation
+environment itself must have the dev tools those phases need. PR177 QA showed
+the failure mode: a host without dev dependencies produced a real ruff
+setup-failure artifact mid-run. The read-only preflight
+[`../scripts/validation_env_preflight.py`](../scripts/validation_env_preflight.py)
+detects that *before* validation phases start:
+
+```bash
+python scripts/validation_env_preflight.py
+python scripts/validation_env_preflight.py --json
+
+# Through the Docker01 PR lane helper:
+python scripts/sfai_docker01_pr_lane.py --preflight-only
+```
+
+It checks (availability/presence only — nothing is executed or installed):
+Python executable/version, `ruff`, `pytest`, `pytest-xdist` (warning unless
+required), `shellforgeai` package importability (spec lookup only), presence of
+`scripts/run_full_pytest.py` / `scripts/validation_heartbeat.py` /
+`scripts/validation_status.py`, write access to the validation artifact
+directory, and the ability to create a heartbeat/status-style JSON probe file.
+
+| Preflight result | Meaning | `pass_eligible` | `rerun_required` |
+| --- | --- | --- | --- |
+| `passed` | all required tools/checks present; validation can continue | — | `false` |
+| `passed_with_warnings` | validation can continue; warnings (e.g. missing `pytest-xdist`) are preserved in the final evidence | — | `false` |
+| `failed` (`setup_failure`) | a required dev tool/check is missing; validation must not start | `false` | `true` |
+
+When `--execute-validation` is used, the Docker01 PR lane helper runs this
+preflight as an `environment_preflight` phase **before** ruff/compileall/pytest:
+
+- **Preflight passed** — validation continues normally; the preflight result is
+  recorded in the heartbeat, manifest (`environment_preflight`), and the
+  preflight JSON (`validation-preflight.json` next to the manifest, or
+  `--preflight-output <path>`).
+- **Preflight failed** — the helper stops *before* any validation phase, writes
+  the full evidence set (manifest/summary/heartbeat/status/checkpoint plus the
+  preflight JSON), and classifies the run as `status=failed`,
+  `classification=setup_failure`, `failed_phase=environment_preflight`,
+  `pass_eligible=false`, `rerun_required=true`. The human summary states
+  explicitly: this is **setup failure, not product test failure**.
+- **Warnings only** — validation continues and the warnings are kept as
+  non-blocker notes in the manifest.
+
+**Setup failure is not product test failure, and it is not merge evidence.**
+The recommended next step on a failed preflight is to run validation in the
+disposable validation container path, or prepare the host dev environment
+outside ShellForgeAI, then rerun validation. The preflight never installs
+packages, never modifies venvs or host Python, never runs `pytest` or
+`ruff check`, never runs a subprocess, never calls Docker/Compose (the
+container path is recommendation text only), and never mutates anything beyond
+one tiny probe file written and removed inside the artifact directory.
+
+Use `python scripts/validation_status.py --run-dir <run_dir> --json` to inspect
+a preflight setup-failure run afterwards; the viewer reports
+`classification=setup_failure`, `failed_phase=environment_preflight`,
+`pass_eligible=false`, `rerun_required=true`, and points its first safe command
+at the preflight. (The broader environment doctor
+[`../scripts/check_validation_env.py`](../scripts/check_validation_env.py)
+remains available for deeper, standalone environment inspection.)
+
 ## Full `pytest` policy
 
 | Situation | Full `pytest`? |
