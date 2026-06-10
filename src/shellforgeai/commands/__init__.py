@@ -14,6 +14,8 @@ The behavior-preserving extraction slices currently cover read-only domains:
   report lifecycle handlers.
 * :mod:`shellforgeai.commands.triage` — ``triage`` and compatibility
   ``triage docker`` handlers.
+* :mod:`shellforgeai.commands.verify` — the read-only top-level ``verify``
+  current-state and receipt-aware handler.
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -22,4 +24,4 @@ Future PRs will migrate additional domains (validation, audit, compose,
 mission, etc.) one domain at a time, behavior-preserving each step.
 """
 
-__all__ = ["doctor", "ops", "status", "triage"]
+__all__ = ["doctor", "ops", "status", "triage", "verify"]

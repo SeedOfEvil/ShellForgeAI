@@ -128,6 +128,11 @@ anything.
      execute remediation/rollback/cleanup, run Docker/Compose, restart
      containers, call the model, retry, roll back, or perform natural-language
      mutation.
+   - Command ownership: the top-level Typer handler is registered from
+     `shellforgeai.commands.verify`; `cli.py` remains the root app and shared
+     helper owner. This is a behavior-preserving module split, not a new verify
+     mode. Future command-module refactors should run the PR184
+     command-surface golden guardrail.
 6. **handoff**
    - Sixth command: `shellforgeai handoff`.
    - Brief/JSON/save/source forms: `shellforgeai handoff --brief`,

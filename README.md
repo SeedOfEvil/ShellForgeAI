@@ -133,7 +133,9 @@ asks deterministically, and refuses or gates mutation.
   executes. `verify` checks current observed state by default; `verify --receipt
   <receipt_id>` performs read-only governed execution receipt verification for
   an existing recipe receipt without retrying, rolling back, restarting, or
-  running Docker/Compose. `handoff` is a read-only
+  running Docker/Compose. The top-level `verify` surface is unchanged while its
+  handler lives in the CLI command-module split; future CLI refactors should run
+  the PR184 command-surface golden guardrail. `handoff` is a read-only
   operator handoff packet that summarizes the golden-path posture and first safe
   command; it does not execute fixes or imply remediation happened, and
   `handoff --save` writes only a ShellForgeAI-owned artifact under

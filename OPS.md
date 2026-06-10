@@ -23,6 +23,12 @@
 
 Safe V2 path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
 
+CLI refactor guardrail: `verify` is implemented as a command module while keeping
+its surface unchanged. For future CLI command moves, run the PR184
+command-surface golden guardrail plus targeted module tests so read-only verify,
+receipt-aware verify, JSON flags, help text, and mutation-refusal paths remain
+protected.
+
 Governed disposable recipe path after preflight: `recipes preflight --save -> recipes preflight validate -> recipes execute <preflight_id> --confirm -> recipes receipt validate <receipt_id> -> verify --receipt <receipt_id> -> recipes receipt audit -> recipes receipt rollback-preview <receipt_id> -> recipes receipt recovery-execute <receipt_id> --confirm -> verify --receipt <recovery_receipt_id> -> handoff`. Receipt-aware verify is read-only: it reads the governed execution or recovery receipt and reports recorded post-check evidence; it never re-executes the recipe, retries, rolls back, restarts containers, or calls Docker Compose. Receipt rollback-preview is also read-only: for `docker.disposable_restart` it states that no true rollback exists. Receipt recovery-execute is the only recovery execution lane and can only repeat the exact disposable restart target from a valid receipt after current label/production/broad-target gates and explicit `--confirm`; it does not execute Docker Compose, shell, model, cleanup, remediation, or arbitrary rollback.
 
 `shellforgeai triage` (full), `shellforgeai triage --json`, and the compatibility
