@@ -164,6 +164,12 @@ remediation, creates a new execution receipt, calls a model, or treats natural
 language as authorization to mutate. Missing, malformed, unsupported, failed, or
 safety-drift receipts fail cleanly with strict JSON in `--json` mode.
 
+Implementation note: the top-level `verify` Typer handler is registered from
+`src/shellforgeai/commands/verify.py` as part of the behavior-preserving CLI
+command-module split. The command surface is unchanged; future CLI refactors
+should run the PR184 command-surface golden guardrail to protect `--json`,
+`--brief`, `--receipt`, help text, and read-only safety fields.
+
 ## V2 governed recipe registry
 
 The recipe registry is the read-only locked-toolbox map for future governed execution.

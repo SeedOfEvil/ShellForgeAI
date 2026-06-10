@@ -27,6 +27,7 @@ from shellforgeai.commands import doctor as doctor_commands
 from shellforgeai.commands import ops as ops_commands
 from shellforgeai.commands import status as status_commands
 from shellforgeai.commands import triage as triage_commands
+from shellforgeai.commands import verify as verify_commands
 from shellforgeai.core import incident_index as incident_index_mod
 from shellforgeai.core import lab_restart as lab_restart_mod
 from shellforgeai.core import rollback_preview as rollback_preview_mod
@@ -11759,65 +11760,7 @@ def propose(
     typer.echo(_render_v2_propose_human(payload), nl=False)
 
 
-@app.command("verify")
-def verify(
-    ctx: typer.Context,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-    brief: Annotated[bool, typer.Option("--brief", help="Emit bounded verify output.")] = False,
-    target: Annotated[
-        str | None, typer.Option("--target", help="Verify one exact visible target.")
-    ] = None,
-    from_status: Annotated[
-        bool, typer.Option("--from-status", help="Use current deterministic status context.")
-    ] = False,
-    from_triage: Annotated[
-        bool, typer.Option("--from-triage", help="Use current deterministic triage context.")
-    ] = False,
-    from_propose: Annotated[
-        bool,
-        typer.Option("--from-propose", help="Verify current state after proposal context only."),
-    ] = False,
-    from_apply_preview: Annotated[
-        bool,
-        typer.Option(
-            "--from-apply-preview",
-            help="Verify current state after apply-preview context only; no apply is assumed.",
-        ),
-    ] = False,
-    receipt: Annotated[
-        str | None,
-        typer.Option(
-            "--receipt", help="Verify a governed recipe execution receipt by id or owned path."
-        ),
-    ] = None,
-) -> None:
-    """Read-only V2 verification. Current-state by default; receipt-aware with --receipt."""
-    runtime = _ctx(ctx)
-    if receipt:
-        payload = verify_recipe_receipt(receipt, runtime.session.data_dir)
-        if json_output:
-            typer.echo(json.dumps(payload))
-        elif brief:
-            typer.echo(_render_v2_verify_brief(payload), nl=False)
-        else:
-            typer.echo(_render_v2_receipt_verify_human(payload), nl=False)
-        if payload.get("status") != "passed":
-            raise typer.Exit(1)
-        return
-    payload = _build_v2_verify_payload(
-        target=target,
-        from_status=from_status,
-        from_triage=from_triage,
-        from_propose=from_propose,
-        from_apply_preview=from_apply_preview,
-    )
-    if json_output:
-        typer.echo(json.dumps(payload))
-        return
-    if brief:
-        typer.echo(_render_v2_verify_brief(payload), nl=False)
-        return
-    typer.echo(_render_v2_verify_human(payload), nl=False)
+verify_commands.register(app)
 
 
 @app.command("apply-preview")
