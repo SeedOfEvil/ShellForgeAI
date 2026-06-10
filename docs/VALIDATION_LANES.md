@@ -435,6 +435,60 @@ at the preflight. (The broader environment doctor
 [`../scripts/check_validation_env.py`](../scripts/check_validation_env.py)
 remains available for deeper, standalone environment inspection.)
 
+## Validation container fallback packet (PR179)
+
+When a run stops on a preflight `setup_failure` (missing host `ruff`/`pytest`/
+etc.), the fallback packet generator
+[`../scripts/validation_container_fallback.py`](../scripts/validation_container_fallback.py)
+turns that evidence into a safe, copy-pasteable **disposable validation
+container** path — without installing anything on the host:
+
+```bash
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir>
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir> --json
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir> --lane full
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir> --pr 179 --commit <sha>
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir> --image lab/shellforgeai:pr179-<sha>
+```
+
+It reads `validation-preflight.json` / `validation-status.json` / the manifest
+in the run directory and, when they record a `setup_failure`, writes a packet
+into the same run directory:
+
+- `validation-container-fallback.json` — strict-JSON packet evidence
+- `validation-container-fallback.md` — why host validation stopped, missing
+  tools, recommended container approach, expected phases, safety notes
+- `validation-container-command.txt` — the exact operator-run command
+- `validation-container-command.argv.json` — the same command as an argv list
+
+The generated command starts a disposable container (`--rm`), mounts the repo
+read-only, mounts the run dir for artifacts, installs dev dependencies *inside
+the container only*, and runs ruff/compileall/pytest there. Inspect it first:
+
+```bash
+cat <validation_run_dir>/validation-container-command.txt
+```
+
+| Run-dir state | Packet result | Exit code |
+| --- | --- | --- |
+| `setup_failure` evidence present | `created` (packet files written) | 0 |
+| clean/passed run | `not_needed` (no files written; `--force` overrides) | 0 |
+| run dir missing | `not_found` | nonzero |
+| evidence present but malformed | `failed` (controlled warning) | nonzero |
+
+The Docker01 PR lane helper generates this packet automatically when its
+`environment_preflight` phase fails, records the packet path in the manifest
+(`environment_preflight.fallback_packet_path`) and human summary, and the
+PR177 viewer reports `fallback_packet_present` / `fallback_packet_path` and
+adds the packet command to `safe_next_commands` for setup failures.
+
+**The generator is packet-only.** It never runs Docker or Docker Compose,
+never restarts containers, never runs `pytest` or `ruff`, never installs host
+packages, never runs a subprocess, and never executes the generated command —
+the operator must run container validation explicitly if they choose to. A
+setup-failure run, with or without a packet, is **not merge evidence**; only a
+clean validation rerun can pass.
+
 ## Full `pytest` policy
 
 | Situation | Full `pytest`? |

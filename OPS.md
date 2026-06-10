@@ -1970,6 +1970,40 @@ It reports `classification=setup_failure` / `failed_phase=environment_preflight`
 with `pass_eligible=false` / `rerun_required=true`, and its first safe command
 points back at the preflight.
 
+### Validation container fallback packet (PR179)
+
+After a preflight `setup_failure`, generate a disposable validation-container
+fallback packet from the run's evidence (the Docker01 PR lane helper also does
+this automatically when its `environment_preflight` phase fails):
+
+```bash
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir>
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir> --json
+python scripts/validation_container_fallback.py --run-dir <validation_run_dir> --lane full --pr <n> --commit <sha>
+```
+
+It writes `validation-container-fallback.json` / `.md`,
+`validation-container-command.txt`, and `validation-container-command.argv.json`
+into the run directory. The packet explains why host validation stopped (setup
+failure, **not** product test failure), lists the missing dev tools, and gives
+an exact operator-run command that runs validation in a disposable container
+(`--rm`, read-only repo mount, dev dependencies installed inside the container
+only — the host package set is never changed). Inspect the command first:
+
+```bash
+cat <validation_run_dir>/validation-container-command.txt
+```
+
+The generator is packet-only: it never runs Docker/Compose, never restarts
+containers, never runs `pytest`/`ruff`, never installs host packages, and never
+executes the generated command — the operator must run container validation
+explicitly if they choose to. Clean/passed runs return `not_needed` (no files
+written; `--force` overrides), a missing run dir returns `not_found`, and
+malformed evidence fails with a controlled warning. The PR177 viewer reports
+`fallback_packet_present` / `fallback_packet_path` and adds the packet command
+to `safe_next_commands` for setup failures. A setup-failure run — with or
+without a packet — is not merge evidence until a clean validation rerun passes.
+
 
 ## V1 release handoff (PR120)
 

@@ -120,6 +120,14 @@ FIRST_SAFE_COMMAND_TEMPLATE = "python scripts/validation_status.py --run-dir {ru
 PREFLIGHT_SAFE_COMMAND = "python scripts/validation_env_preflight.py --json"
 PREFLIGHT_MODE = "validation_environment_preflight"
 
+# PR179 validation container fallback packet (read-only pointer; the viewer
+# never generates or executes anything).
+FALLBACK_PACKET_NAME = "validation-container-fallback.json"
+FALLBACK_COMMAND_NAME = "validation-container-command.txt"
+FALLBACK_GENERATE_TEMPLATE = (
+    "python scripts/validation_container_fallback.py --run-dir {run_dir} --json"
+)
+
 SAFETY_BLOCK = {
     "read_only": True,
     "mutation_performed": False,
@@ -669,6 +677,7 @@ def build_report(
     warnings: list[str],
     preflight_path: str | None = None,
     preflight_doc: dict[str, Any] | None = None,
+    fallback_packet_path: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the strict-JSON report dict from loaded evidence documents."""
     verdicts: list[dict[str, Any]] = []
@@ -702,12 +711,20 @@ def build_report(
     # before any rerun, without installing or executing anything.
     setup_failure = merged["classification"] == CLASS_SETUP_FAILURE
     viewer_command = FIRST_SAFE_COMMAND_TEMPLATE.format(run_dir=run_dir_display)
-    first_safe_command = PREFLIGHT_SAFE_COMMAND if setup_failure else viewer_command
-    safe_next_commands = (
-        [PREFLIGHT_SAFE_COMMAND, viewer_command]
-        if setup_failure
-        else [viewer_command, "python scripts/validation_status.py --latest --json"]
-    )
+    fallback_present = fallback_packet_path is not None
+    if setup_failure:
+        # Setup failures also point at the PR179 container fallback packet:
+        # the operator either inspects an existing packet's command text or
+        # generates one (both packet-only paths; nothing is executed).
+        if fallback_present:
+            fallback_command = f"cat {Path(fallback_packet_path).parent / FALLBACK_COMMAND_NAME}"
+        else:
+            fallback_command = FALLBACK_GENERATE_TEMPLATE.format(run_dir=run_dir_display)
+        first_safe_command = PREFLIGHT_SAFE_COMMAND
+        safe_next_commands = [PREFLIGHT_SAFE_COMMAND, fallback_command, viewer_command]
+    else:
+        first_safe_command = viewer_command
+        safe_next_commands = [viewer_command, "python scripts/validation_status.py --latest --json"]
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -725,7 +742,10 @@ def build_report(
             "summary_path": summary_path,
             "log_path": resolved_log,
             "preflight_path": preflight_path,
+            "fallback_packet_path": fallback_packet_path,
         },
+        "fallback_packet_present": fallback_present,
+        "fallback_packet_path": fallback_packet_path,
         "run": run_meta,
         "phases": {
             "active_phase": merged["active_phase"],
@@ -805,6 +825,8 @@ def render_human(report: dict[str, Any]) -> str:
                 "rerun validation.",
             ]
         )
+        if report.get("fallback_packet_present"):
+            lines.append(f"Container fallback packet: {report.get('fallback_packet_path')}")
 
     if status == STATUS_INCOMPLETE:
         lines.extend(
@@ -824,6 +846,7 @@ def render_human(report: dict[str, Any]) -> str:
         ("status", "status_path"),
         ("summary", "summary_path"),
         ("preflight", "preflight_path"),
+        ("fallback packet", "fallback_packet_path"),
         ("log", "log_path"),
     ):
         value = source.get(key)
@@ -930,6 +953,7 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
             warnings.append("no validation runs found under known artifact roots")
 
     preflight_path = None
+    fallback_packet_path = None
     if run_dir is not None:
         resolved = resolve_run_dir(run_dir)
         heartbeat_path = heartbeat_path or _as_str(resolved.get("heartbeat"))
@@ -938,6 +962,9 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
         summary_path = summary_path or _as_str(resolved.get("summary"))
         log_path = log_path or _as_str(resolved.get("log"))
         preflight_path = _as_str(resolved.get("preflight"))
+        fallback_candidate = Path(run_dir) / FALLBACK_PACKET_NAME
+        if fallback_candidate.is_file():
+            fallback_packet_path = str(fallback_candidate)
 
     return {
         "latest": latest,
@@ -948,6 +975,7 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
         "summary_path": summary_path,
         "log_path": log_path,
         "preflight_path": preflight_path,
+        "fallback_packet_path": fallback_packet_path,
         "explicit": explicit,
     }
 
@@ -982,6 +1010,7 @@ def generate_report(args: argparse.Namespace) -> dict[str, Any]:
         warnings=warnings,
         preflight_path=sources["preflight_path"],
         preflight_doc=preflight_doc,
+        fallback_packet_path=sources["fallback_packet_path"],
     )
 
 
