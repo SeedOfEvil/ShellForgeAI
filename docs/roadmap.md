@@ -905,3 +905,22 @@ Supported categories include malformed JSON, missing required files/manifests/ch
 
 `recipes receipt explain` never repairs, deletes, cleans up, recovers, rolls back, restarts, reruns receipts, calls Docker/Compose, executes shell, creates exports/bundles, or calls a model. Safe next commands are limited to read-only receipt integrity/audit/history/inspect/validate/compare/verify surfaces. Ask and interactive phrasing such as “explain receipt integrity findings”, “what does checksum_mismatch mean?”, and “what should I do about safety drift?” routes to this explanation guidance; mutation phrasing such as “explain and fix corrupt receipts” refuses the mutation part. Support-handoff phrasing that clearly mentions receipt audit or recipe receipts routes to receipt audit-bundle guidance.
 
+## PR182 milestone: CLI command-module split begins
+
+`src/shellforgeai/cli.py` had grown too large, so PR182 starts a staged,
+behavior-preserving modularization. `cli.py` remains the canonical Typer
+entrypoint and root app owner; it now imports and registers command modules
+from the new `src/shellforgeai/commands/` package.
+
+The first slice extracts only the safest read-only domains:
+
+- `commands/status.py` — the `status` golden-path command.
+- `commands/doctor.py` — `doctor` and `model doctor`.
+
+This is a pure code-move: command names, aliases, help order, JSON schemas,
+exit codes, strict-JSON behavior, advisory wording, refusal behavior, and all
+safety gates are unchanged, and no new execution, mutation, Docker/Compose
+call, shell, natural-language execution, or model call is introduced. Future
+PRs will migrate further domains (triage, validation, audit, compose, mission,
+governed receipts, etc.) one domain at a time, the same way.
+

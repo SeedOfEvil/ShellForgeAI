@@ -7,7 +7,6 @@ import platform
 import re
 import shlex
 import subprocess
-import sys
 import tarfile
 import tempfile
 import uuid
@@ -24,6 +23,8 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.commands import doctor as doctor_commands
+from shellforgeai.commands import status as status_commands
 from shellforgeai.core import incident_index as incident_index_mod
 from shellforgeai.core import lab_restart as lab_restart_mod
 from shellforgeai.core import rollback_preview as rollback_preview_mod
@@ -139,7 +140,7 @@ from shellforgeai.core.intent_nuance import (
     classify_intent_nuance,
     render_intent_nuance,
 )
-from shellforgeai.core.metadata_hygiene import human_bytes, scan_metadata_hygiene
+from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
 from shellforgeai.core.mission import (
     apply_delegation_command as mission_apply_delegation_command,
 )
@@ -272,7 +273,6 @@ from shellforgeai.llm.prompts import build_contextual_prompt, build_model_prompt
 from shellforgeai.llm.schemas import ModelRequest
 from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import containers, host, journal, registry, systemd
-from shellforgeai.util.subprocess import run_command
 from shellforgeai.version import get_build_info
 
 app = typer.Typer(
@@ -796,141 +796,7 @@ def version_cmd() -> None:
         console.print(build.build_line())
 
 
-@app.command()
-def doctor(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")) -> None:
-    runtime = _ctx(ctx)
-    audit = AuditStorage(runtime.session.data_dir)
-    build = get_build_info()
-    pid1 = "unknown"
-    with suppress(Exception):
-        pid1 = Path("/proc/1/comm").read_text(encoding="utf-8").strip()
-    ps = run_command(["ps", "-eo", "stat=,comm="], timeout=5)
-    defunct_codex = 0
-    if ps.exit_code == 0:
-        for line in ps.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2 and "Z" in parts[0] and parts[1] == "codex":
-                defunct_codex += 1
-    init_reaper = "yes" if pid1 in {"tini", "dumb-init", "systemd", "init"} else "no"
-    hygiene: dict[str, Any] = scan_metadata_hygiene(Path(runtime.session.data_dir))
-    hygiene_attention = hygiene["severity"] in {"warning", "critical"}
-    hygiene["human_context"] = (
-        "ShellForgeAI-owned historical artifacts exceed advisory threshold."
-        if hygiene_attention
-        else "ShellForgeAI-owned artifacts are within advisory thresholds."
-    )
-    hygiene["active_runtime_failure"] = False
-    hygiene["cleanup_performed"] = False
-    hygiene["first_safe_command"] = "shellforgeai audit cleanup review"
-    hygiene["cleanup_execution_gated"] = True
-    payload: dict[str, Any] = {
-        "shellforgeai": {
-            "version": build.display_version,
-            "python": sys.version.split()[0],
-            "platform": platform.system(),
-            "profile": runtime.profile.name,
-            "mode": runtime.session.mode,
-            "data_dir": str(runtime.session.data_dir),
-            "audit_dir": str(audit.sessions_dir),
-            "tools": len(registry.list_tools()),
-            "model": f"{runtime.settings.model.provider}/{runtime.settings.model.model}",
-        },
-        "runtime_hygiene": {
-            "pid1": pid1,
-            "init_reaper": init_reaper,
-            "defunct_codex": defunct_codex,
-        },
-        "metadata_hygiene": hygiene,
-        "safety": {
-            "cleanup_executed": False,
-            "mutation_performed": False,
-            "docker_compose_executed": False,
-            "remediation_executed": False,
-            "rollback_executed": False,
-        },
-    }
-    if json_output:
-        console.print_json(data=payload)
-        return
-
-    console.print("ShellForgeAI")
-    console.print(
-        " ".join(
-            [
-                f"version={build.display_version}",
-                f"python={sys.version.split()[0]}",
-                f"platform={platform.system()}",
-            ]
-        )
-    )
-    if build.build_line():
-        console.print(build.build_line())
-    console.print(f"profile={runtime.profile.name} mode={runtime.session.mode}")
-    console.print(f"data_dir={runtime.session.data_dir} audit_dir={audit.sessions_dir}")
-    console.print(
-        " ".join(
-            [
-                f"tools={len(registry.list_tools())}",
-                f"model={runtime.settings.model.provider}/{runtime.settings.model.model}",
-            ]
-        )
-    )
-    console.print(
-        f"runtime_hygiene pid1={pid1} init_reaper={init_reaper} defunct_codex={defunct_codex}"
-    )
-    console.print("Metadata hygiene")
-    runtime_ok = "OK" if defunct_codex == 0 else "needs attention"
-    metadata_attention = "attention needed" if hygiene_attention else "OK"
-    console.print(f"- Runtime: {runtime_ok}")
-    console.print(f"- Metadata hygiene: {metadata_attention}")
-    if hygiene_attention:
-        console.print("- Note:")
-        console.print("  - ShellForgeAI-owned historical artifacts exceed the advisory threshold.")
-        console.print("  - This is not an active Docker/system failure by itself.")
-        console.print("  - No cleanup was performed.")
-        console.print("- First safe command: shellforgeai audit cleanup review")
-        console.print("- Cleanup remains gated:")
-        console.print("  review -> plan -> archive -> validate -> execute --confirm")
-    console.print(
-        "- severity: "
-        f"{hygiene['severity']} | ShellForgeAI metadata: "
-        f"{hygiene['total_human']} across {hygiene['total_items']} items"
-    )
-    reasons = hygiene.get("reasons") or []
-    if reasons:
-        console.print("- Reasons:")
-        for reason in reasons[:5]:
-            console.print(
-                "  - "
-                f"{reason['category']}: {reason['count']} items, "
-                f"estimated_size={human_bytes(int(reason['estimated_bytes']))}, "
-                f"threshold={reason['threshold']}, "
-                f"oldest={reason['oldest_created_at'] or 'unknown'}"
-            )
-    else:
-        cats = sorted(
-            hygiene["categories"].items(), key=lambda kv: int(kv[1]["bytes"]), reverse=True
-        )
-        console.print("- Largest categories:")
-        for name, row in cats[:3]:
-            console.print(f"  - {name}: {row['human']} / {row['count']} items")
-    if hygiene["warnings"]:
-        console.print(f"- Warning: {hygiene['warnings'][0]}")
-    if hygiene["recommendations"]:
-        console.print("- Suggested safe next steps:")
-        for cmd in hygiene["recommendations"][:5]:
-            console.print(f"  - {cmd}")
-
-
-@model_app.command("doctor")
-def model_doctor(ctx: typer.Context) -> None:
-    runtime = _ctx(ctx)
-    provider = build_provider(runtime.settings)
-    info = provider.doctor()
-    for k, v in info.items():
-        console.print(f"{k}={v}")
-    if not info.get("auth_cache_present"):
-        console.print("Suggested login: codex login (or codex login --device-auth)")
+doctor_commands.register(app, model_app)
 
 
 @model_app.command("test")
@@ -11860,44 +11726,7 @@ def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool 
     }
 
 
-@app.command()
-def status(
-    ctx: typer.Context,
-    json_output: bool = typer.Option(False, "--json"),
-    brief: bool = typer.Option(False, "--brief", help="Mirror ops report --brief output."),
-    top: int = typer.Option(5, "--top", min=1, help="Maximum ranked Docker suspects to inspect."),
-    verbose: bool = typer.Option(
-        False, "--verbose", help="Accepted for compatibility; status stays concise."
-    ),
-    since: str | None = typer.Option(None, "--since", help="Accepted for compatibility."),
-    include_retention: bool = typer.Option(
-        False, "--include-retention", help="Accepted for compatibility; no artifacts are written."
-    ),
-    include_index: bool = typer.Option(
-        False, "--include-index", help="Accepted for compatibility."
-    ),
-    include_audit: bool = typer.Option(
-        False, "--include-audit", help="Accepted for compatibility."
-    ),
-    include_approvals: bool = typer.Option(
-        False, "--include-approvals", help="Accepted for compatibility."
-    ),
-) -> None:
-    """Read-only V2 golden-path status entrypoint.
-
-    This is a small deterministic wrapper around the concise ops-report path.
-    It does not call the model, write artifacts, create proposals/missions, or
-    execute cleanup/remediation/rollback/Docker/Compose actions.
-    """
-    _ = (ctx, verbose, since, include_retention, include_index, include_audit, include_approvals)
-    payload = _build_status_payload(top=top)
-    if json_output:
-        typer.echo(json.dumps(payload))
-        return
-    if brief:
-        typer.echo(_render_ops_report_brief(payload), nl=False)
-        return
-    typer.echo(_render_status_human(payload), nl=False)
+status_commands.register(app)
 
 
 @app.command()
