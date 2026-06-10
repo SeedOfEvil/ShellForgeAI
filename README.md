@@ -297,7 +297,9 @@ explicit CLI lane.
   runs as `rerun_required` instead of a false pass, the read-only
   `scripts/validation_status.py` viewer that classifies a run as
   passed/failed/incomplete/unknown and reports `pass_eligible`/`rerun_required`
-  from existing evidence, and the read-only
+  from existing evidence (its `--latest` deterministically prefers recent
+  PR-specific run dirs over older persisted manifests, with `--pr`/`--commit`
+  filters and `--explain-selection`), and the read-only
   `scripts/validation_env_preflight.py` environment preflight that detects
   missing host dev tools (ruff/pytest/etc.) before validation phases run and
   classifies that as `setup_failure`, never as product test failure, plus the

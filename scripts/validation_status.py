@@ -37,7 +37,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,7 @@ STATUS_PASSED = "passed"
 STATUS_FAILED = "failed"
 STATUS_INCOMPLETE = "incomplete"
 STATUS_UNKNOWN = "unknown"
+STATUS_NOT_FOUND = "not_found"
 
 # Classification values surfaced by the viewer.
 CLASS_PASSED = "passed"
@@ -67,20 +70,50 @@ CLASS_SETUP_FAILURE = "setup_failure"
 CLASS_INTERRUPTED = "interrupted_or_incomplete"
 CLASS_NO_EVIDENCE = "no_evidence"
 CLASS_UNKNOWN = "unknown"
+CLASS_NOT_FOUND = "not_found"
 
 # Required phases shown in the human/JSON output, in display order.
 REQUIRED_PHASES: tuple[str, ...] = vh.REQUIRED_PHASES
 
-# Environment override (primarily for tests) pointing at a directory of runs.
-RUNS_DIR_ENV = "SFAI_VALIDATION_RUNS_DIR"
+# Environment overrides (primarily for tests) pointing at directories of runs.
+# Each maps an injected root to a deterministic candidate ``kind`` so tests can
+# exercise the run-dir / persisted-manifest / legacy priority without writing to
+# the real ShellForgeAI-owned locations.
+RUNS_DIR_ENV = "SFAI_VALIDATION_RUNS_DIR"  # -> run_dir candidates
+PERSISTED_DIR_ENV = "SFAI_VALIDATION_PERSISTED_DIR"  # -> persisted manifest
+LEGACY_DIR_ENV = "SFAI_VALIDATION_LEGACY_DIR"  # -> legacy manifest
 
 # Known, ShellForgeAI-owned validation artifact roots scanned by ``--latest``.
-# Only these directories are scanned; no arbitrary filesystem roots.
+# Only these directories are scanned; no arbitrary filesystem roots. They are
+# module-level so tests can redirect them away from the real host filesystem.
+#
+# Priority intent (most preferred first): recent PR-specific run directories in
+# the temp dir, then mainline temp runs, then persisted validation-runs
+# manifests, then (only with ``--include-legacy``) an older persisted layout.
+TMP_ROOT = Path(tempfile.gettempdir())
+MAINLINE_TMP_ROOT = Path("/tmp/shellforgeai-validation-runs")
+PERSISTED_ROOT = Path("/srv/data/shellforgeai/validation-runs")
+LEGACY_ROOT = Path("/data/validation-runs")
+
+# Bounded glob for PR-specific temp run directories. Only entries matching this
+# ShellForgeAI naming convention are considered; the temp dir is never crawled.
+TMP_PR_RUN_GLOB = "sfai-pr*-validation-*"
+
+# Back-compat list used by the legacy ``discover_latest`` helper.
 DEFAULT_SEARCH_DIRS: tuple[str, ...] = (
     "/tmp/shellforgeai-validation-runs",
     "/srv/data/shellforgeai/validation-runs",
     "/data/validation-runs",
 )
+
+# Candidate kinds for ``--latest`` discovery.
+KIND_RUN_DIR = "run_dir"
+KIND_MANIFEST = "manifest"
+KIND_LEGACY_MANIFEST = "legacy_manifest"
+
+# Parses a ShellForgeAI run-directory name of the form
+# ``sfai-pr<PR>-<sha>-<suffix>-<stamp>`` (see sfai_docker01_pr_lane.py).
+_RUN_NAME_RE = re.compile(r"^sfai-pr(?P<pr>[^-]+)-(?P<sha>[^-]+)-(?P<rest>.+)$")
 
 # Filename suffixes used to group flat (non-subdirectory) run artifacts and to
 # discover evidence files inside a run directory.
@@ -137,6 +170,7 @@ SAFETY_BLOCK = {
     "mutation_performed": False,
     "validation_executed": False,
     "pytest_executed": False,
+    "ruff_executed": False,
     "cleanup_executed": False,
     "remediation_executed": False,
     "rollback_executed": False,
@@ -148,6 +182,8 @@ SAFETY_BLOCK = {
     "arbitrary_command_execution": False,
     "natural_language_execution": False,
     "model_called": False,
+    "artifact_repaired": False,
+    "artifact_deleted": False,
 }
 
 
@@ -288,12 +324,395 @@ def default_search_dirs() -> list[str]:
 def discover_latest(
     search_dirs: list[str | os.PathLike[str]] | None = None,
 ) -> Path | None:
-    """Return the most recent run directory across the known search roots."""
+    """Return the most recent run directory across the known search roots.
+
+    Retained for backward compatibility. The ``--latest`` CLI path now uses the
+    richer :func:`select_latest` pipeline (PR181), which adds PR/commit filters,
+    deterministic kind priority, and selection explanation.
+    """
     roots = default_search_dirs() if search_dirs is None else list(search_dirs)
     candidates = candidate_run_dirs(roots)
     if not candidates:
         return None
     return max(candidates, key=_run_mtime)
+
+
+# --------------------------------------------------------------------------- #
+# PR181: deterministic latest-artifact discovery + selection explanation
+# --------------------------------------------------------------------------- #
+def _parse_run_name(name: str) -> tuple[Any, str | None]:
+    """Extract ``(pr, commit)`` from a ``sfai-pr<PR>-<sha>-...`` directory name.
+
+    Returns ``(None, None)`` when the name does not follow the convention. ``pr``
+    is an ``int`` when numeric, otherwise ``None``; ``commit`` is the short sha
+    segment unless it is the ``unknown`` placeholder.
+    """
+    match = _RUN_NAME_RE.match(name)
+    if not match:
+        return None, None
+    pr_raw = match.group("pr")
+    sha_raw = match.group("sha")
+    pr: Any = int(pr_raw) if pr_raw.isdigit() else None
+    commit = sha_raw if sha_raw and sha_raw != "unknown" else None
+    return pr, commit
+
+
+def _candidate_pr_commit(path: Path) -> tuple[Any, str | None]:
+    """Best-effort ``(pr, commit)`` for a candidate run directory.
+
+    The directory name is parsed first (cheap, no I/O). When that yields nothing
+    usable, the run's manifest/status/heartbeat evidence is read (read-only) and
+    its recorded ``pr``/``commit`` metadata is used. Never raises.
+    """
+    pr, commit = _parse_run_name(path.name)
+    if pr is not None and commit is not None:
+        return pr, commit
+    try:
+        resolved = resolve_run_dir(path)
+    except ViewerError:
+        return pr, commit
+    docs: list[dict[str, Any]] = []
+    for kind in ("manifest", "status", "heartbeat"):
+        candidate = resolved.get(kind)
+        if candidate is not None:
+            doc = load_json_evidence(candidate, [], label=kind)
+            if isinstance(doc, dict):
+                docs.append(doc)
+    if docs:
+        meta = _run_metadata(docs)
+        if pr is None:
+            pr = meta.get("pr")
+        if commit is None:
+            commit = meta.get("commit")
+    return pr, commit
+
+
+def _safe_run_root(raw: str, warnings: list[str]) -> Path | None:
+    """Validate a user-supplied ``--run-root``; reject broad/traversal roots.
+
+    Returns the resolved directory, or ``None`` (with a warning) when the root is
+    a path-traversal attempt, the filesystem root (too broad), unresolvable, or
+    not an existing directory. Only this bounded root is scanned by the caller.
+    """
+    if ".." in Path(raw).parts:
+        warnings.append(f"run root rejected (path traversal not allowed): {raw}")
+        return None
+    try:
+        resolved = Path(raw).expanduser().resolve()
+    except OSError:
+        warnings.append(f"run root rejected (unresolvable): {raw}")
+        return None
+    if str(resolved) == resolved.anchor:
+        warnings.append(f"run root rejected (too broad to scan safely): {raw}")
+        return None
+    if not resolved.is_dir():
+        warnings.append(f"run root does not exist or is not a directory: {raw}")
+        return None
+    return resolved
+
+
+def _kind_rank(candidate: dict[str, Any]) -> int:
+    """Deterministic preference rank for a candidate (higher is preferred)."""
+    kind = candidate["kind"]
+    if kind == KIND_RUN_DIR:
+        return 3 if candidate.get("container") else 4
+    if kind == KIND_MANIFEST:
+        return 2
+    return 1  # legacy_manifest
+
+
+def _kind_reason(candidate: dict[str, Any]) -> str:
+    """Human/JSON reason describing why this candidate kind was selected."""
+    kind = candidate["kind"]
+    if kind == KIND_RUN_DIR:
+        if candidate.get("container"):
+            return "latest matching PR-specific validation container run"
+        return "latest matching PR-specific validation run"
+    if kind == KIND_MANIFEST:
+        return "latest persisted validation-runs manifest"
+    return "latest legacy validation manifest"
+
+
+def _pr_matches(candidate_pr: Any, wanted: Any) -> bool:
+    return candidate_pr is not None and str(candidate_pr) == str(wanted)
+
+
+def _commit_matches(candidate_commit: str | None, wanted: str) -> bool:
+    """Unambiguous prefix match (either side a prefix of the other)."""
+    if not candidate_commit:
+        return False
+    have = candidate_commit.lower()
+    want = wanted.lower()
+    return have.startswith(want) or want.startswith(have)
+
+
+def _iso_from_mtime(mtime: float) -> str:
+    return (
+        datetime.fromtimestamp(mtime, UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+
+
+def _add_root_candidates(
+    root: Path,
+    kind: str,
+    *,
+    container: bool,
+    legacy: bool,
+    seen: set[str],
+    out: list[dict[str, Any]],
+) -> None:
+    """Append the root (flat layout) and its immediate run subdirectories."""
+    if not root.is_dir():
+        return
+    targets = [root, *(c for c in sorted(root.iterdir()) if c.is_dir())]
+    for target in targets:
+        key = str(target)
+        if key in seen:
+            continue
+        mtime = _run_mtime(target)
+        if mtime <= 0:
+            continue
+        seen.add(key)
+        pr, commit = _candidate_pr_commit(target)
+        out.append(
+            {
+                "path": key,
+                "kind": kind,
+                "container": container,
+                "legacy": legacy,
+                "pr": pr,
+                "commit": commit,
+                "mtime": mtime,
+            }
+        )
+
+
+def discover_candidates(
+    *,
+    run_root: str | None = None,
+    include_legacy: bool = False,
+    warnings: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Discover validation evidence candidates from bounded, known locations.
+
+    Returns a list of candidate dicts (``path``/``kind``/``container``/``legacy``/
+    ``pr``/``commit``/``mtime``). When ``run_root`` is supplied, only that bounded
+    root is scanned. Otherwise the env overrides and the known ShellForgeAI-owned
+    roots are scanned; legacy roots are only included with ``include_legacy``.
+    No arbitrary filesystem traversal is performed.
+    """
+    warnings = warnings if warnings is not None else []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    if run_root is not None:
+        safe = _safe_run_root(run_root, warnings)
+        if safe is not None:
+            _add_root_candidates(
+                safe, KIND_RUN_DIR, container=False, legacy=False, seen=seen, out=out
+            )
+        return out
+
+    # Test/CI injection overrides (each maps to a deterministic kind).
+    run_override = os.environ.get(RUNS_DIR_ENV)
+    if run_override:
+        _add_root_candidates(
+            Path(run_override), KIND_RUN_DIR, container=False, legacy=False, seen=seen, out=out
+        )
+    persisted_override = os.environ.get(PERSISTED_DIR_ENV)
+    if persisted_override:
+        _add_root_candidates(
+            Path(persisted_override),
+            KIND_MANIFEST,
+            container=False,
+            legacy=False,
+            seen=seen,
+            out=out,
+        )
+    if include_legacy:
+        legacy_override = os.environ.get(LEGACY_DIR_ENV)
+        if legacy_override:
+            _add_root_candidates(
+                Path(legacy_override),
+                KIND_LEGACY_MANIFEST,
+                container=False,
+                legacy=True,
+                seen=seen,
+                out=out,
+            )
+
+    # Recent PR-specific temp run directories (bounded glob, never a crawl).
+    if TMP_ROOT.is_dir():
+        for entry in sorted(TMP_ROOT.glob(TMP_PR_RUN_GLOB)):
+            if not entry.is_dir():
+                continue
+            key = str(entry)
+            if key in seen:
+                continue
+            mtime = _run_mtime(entry)
+            if mtime <= 0:
+                continue
+            seen.add(key)
+            container = "-validation-container-" in entry.name
+            pr, commit = _candidate_pr_commit(entry)
+            out.append(
+                {
+                    "path": key,
+                    "kind": KIND_RUN_DIR,
+                    "container": container,
+                    "legacy": False,
+                    "pr": pr,
+                    "commit": commit,
+                    "mtime": mtime,
+                }
+            )
+
+    # Mainline temp runs, then persisted manifests, then (optional) legacy.
+    _add_root_candidates(
+        MAINLINE_TMP_ROOT, KIND_RUN_DIR, container=False, legacy=False, seen=seen, out=out
+    )
+    _add_root_candidates(
+        PERSISTED_ROOT, KIND_MANIFEST, container=False, legacy=False, seen=seen, out=out
+    )
+    if include_legacy:
+        _add_root_candidates(
+            LEGACY_ROOT, KIND_LEGACY_MANIFEST, container=False, legacy=True, seen=seen, out=out
+        )
+
+    return out
+
+
+def _selected_by(pr: Any, commit: str | None) -> str:
+    if pr is not None and commit is not None:
+        return "pr_commit"
+    if pr is not None:
+        return "pr"
+    if commit is not None:
+        return "commit"
+    return "latest"
+
+
+def _skipped_reason(candidate: dict[str, Any], selected: dict[str, Any]) -> str:
+    if not candidate["eligible"]:
+        return candidate["skipped_reason"]
+    selected_rank = _kind_rank(selected)
+    candidate_rank = _kind_rank(candidate)
+    if candidate_rank < selected_rank:
+        if candidate["kind"] == KIND_MANIFEST:
+            return "older persisted manifest (PR-specific run preferred)"
+        if candidate["kind"] == KIND_LEGACY_MANIFEST:
+            return "legacy artifact (recent run preferred)"
+        if candidate["kind"] == KIND_RUN_DIR and candidate.get("container"):
+            return "non-preferred validation container run"
+        return "lower-priority artifact"
+    return "older candidate (newer selected)"
+
+
+def select_latest(
+    *,
+    pr: Any = None,
+    commit: str | None = None,
+    include_legacy: bool = False,
+    run_root: str | None = None,
+    explain: bool = False,
+    warnings: list[str],
+) -> dict[str, Any]:
+    """Select the most relevant validation candidate and explain the choice.
+
+    Returns a dict with the chosen ``run_dir`` path (or ``None``), a
+    ``selected_meta`` block for the report ``source``, and a ``selection`` block
+    (with a candidate list when ``explain`` is set). Read-only: it never executes
+    or mutates anything; it only ranks discovered evidence directories.
+    """
+    candidates = discover_candidates(
+        run_root=run_root, include_legacy=include_legacy, warnings=warnings
+    )
+
+    annotated: list[dict[str, Any]] = []
+    for candidate in candidates:
+        eligible = True
+        skip: str | None = None
+        if pr is not None and not _pr_matches(candidate["pr"], pr):
+            eligible = False
+            skip = "PR mismatch"
+        elif commit is not None and not _commit_matches(candidate["commit"], commit):
+            eligible = False
+            skip = "commit mismatch"
+        entry = dict(candidate)
+        entry["eligible"] = eligible
+        entry["skipped_reason"] = skip
+        annotated.append(entry)
+
+    eligible_candidates = [c for c in annotated if c["eligible"]]
+    selected: dict[str, Any] | None = None
+    if eligible_candidates:
+        ordered = sorted(
+            eligible_candidates, key=lambda c: (_kind_rank(c), c["mtime"]), reverse=True
+        )
+        selected = ordered[0]
+        top_rank = _kind_rank(selected)
+        ties = [c for c in eligible_candidates if _kind_rank(c) == top_rank]
+        if len(ties) >= 2:
+            warnings.append("multiple matching candidates, newest selected")
+
+    selected_by = _selected_by(pr, commit)
+    if run_root is not None and pr is None and commit is None:
+        selected_by = "run_root"
+
+    candidate_entries: list[dict[str, Any]] = []
+    if explain:
+        for candidate in annotated:
+            is_selected = selected is not None and candidate["path"] == selected["path"]
+            candidate_entries.append(
+                {
+                    "path": candidate["path"],
+                    "kind": candidate["kind"],
+                    "container": candidate["container"],
+                    "pr": candidate["pr"],
+                    "commit": candidate["commit"],
+                    "timestamp": _iso_from_mtime(candidate["mtime"]),
+                    "selected": is_selected,
+                    "reason": _kind_reason(candidate) if is_selected else None,
+                    "skipped_reason": (
+                        None
+                        if is_selected
+                        else (
+                            _skipped_reason(candidate, selected)
+                            if selected is not None
+                            else "no candidate selected"
+                        )
+                    ),
+                }
+            )
+
+    selection = {
+        "latest": True,
+        "filters": {
+            "pr": pr,
+            "commit": commit,
+            "include_legacy": bool(include_legacy),
+            "run_root": str(run_root) if run_root is not None else None,
+        },
+        "candidate_count": len(annotated),
+        "selected_path": selected["path"] if selected else None,
+        "selected_reason": _kind_reason(selected) if selected else None,
+        "selected_by": selected_by,
+        "candidates": candidate_entries,
+    }
+
+    selected_meta = {
+        "kind": selected["kind"] if selected else KIND_RUN_DIR,
+        "selected_by": selected_by,
+        "selection_reason": _kind_reason(selected) if selected else None,
+        "pr": selected["pr"] if selected else None,
+        "commit": selected["commit"] if selected else None,
+    }
+
+    return {
+        "run_dir": selected["path"] if selected else None,
+        "selected_meta": selected_meta,
+        "selection": selection,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -706,6 +1125,69 @@ def lane_qa_marker(
     }
 
 
+def _not_found_report(selection: dict[str, Any] | None, warnings: list[str]) -> dict[str, Any]:
+    """Controlled report when ``--latest`` discovery finds no candidate at all.
+
+    Never a pass, never a traceback. The first safe command suggests a read-only
+    re-scan with selection explanation; nothing is executed automatically.
+    """
+    known_locations = ", ".join(
+        str(p) for p in (TMP_ROOT, MAINLINE_TMP_ROOT, PERSISTED_ROOT, LEGACY_ROOT)
+    )
+    rescan = "python scripts/validation_status.py --latest --explain-selection"
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": MODE,
+        "status": STATUS_NOT_FOUND,
+        "classification": CLASS_NOT_FOUND,
+        "pass_eligible": False,
+        "rerun_required": True,
+        "source": {
+            "latest": True,
+            "run_dir": None,
+            "heartbeat_path": None,
+            "status_path": None,
+            "manifest_path": None,
+            "summary_path": None,
+            "log_path": None,
+            "preflight_path": None,
+            "fallback_packet_path": None,
+            "kind": "unknown",
+            "selected_by": (selection or {}).get("selected_by"),
+            "selection_reason": None,
+            "pr": (selection or {}).get("filters", {}).get("pr"),
+            "commit": (selection or {}).get("filters", {}).get("commit"),
+        },
+        "selection": selection,
+        "fallback_packet_present": False,
+        "fallback_packet_path": None,
+        "qa_marker": lane_qa_marker(None, fallback_packet_present=False),
+        "run": {
+            "run_id": None,
+            "pr": (selection or {}).get("filters", {}).get("pr"),
+            "commit": (selection or {}).get("filters", {}).get("commit"),
+            "started_at": None,
+            "last_update": None,
+            "heartbeat_age_seconds": None,
+        },
+        "phases": {
+            "active_phase": None,
+            "last_completed_phase": None,
+            "phase_status": _phase_status_for_output({}),
+        },
+        "full_pytest": {"exit_code": None, "result": vh.FULL_UNKNOWN},
+        "failed_phase": None,
+        "warnings": list(warnings),
+        "known_locations": known_locations,
+        "first_safe_command": rescan,
+        "safe_next_commands": [
+            rescan,
+            f"# check known artifact locations: {known_locations}",
+        ],
+        "safety": dict(SAFETY_BLOCK),
+    }
+
+
 def build_report(
     *,
     latest: bool,
@@ -722,6 +1204,8 @@ def build_report(
     preflight_path: str | None = None,
     preflight_doc: dict[str, Any] | None = None,
     fallback_packet_path: str | None = None,
+    selection: dict[str, Any] | None = None,
+    selected_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the strict-JSON report dict from loaded evidence documents."""
     verdicts: list[dict[str, Any]] = []
@@ -770,6 +1254,15 @@ def build_report(
         first_safe_command = viewer_command
         safe_next_commands = [viewer_command, "python scripts/validation_status.py --latest --json"]
 
+    meta = selected_meta or {}
+    source_kind = meta.get("kind") if run_dir is not None else None
+    source_pr = meta.get("pr")
+    if source_pr is None:
+        source_pr = run_meta.get("pr")
+    source_commit = meta.get("commit")
+    if source_commit is None:
+        source_commit = run_meta.get("commit")
+
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": MODE,
@@ -787,7 +1280,13 @@ def build_report(
             "log_path": resolved_log,
             "preflight_path": preflight_path,
             "fallback_packet_path": fallback_packet_path,
+            "kind": source_kind,
+            "selected_by": meta.get("selected_by"),
+            "selection_reason": meta.get("selection_reason"),
+            "pr": source_pr,
+            "commit": source_commit,
         },
+        "selection": selection,
         "fallback_packet_present": fallback_present,
         "fallback_packet_path": fallback_packet_path,
         "qa_marker": lane_qa_marker(manifest_doc, fallback_packet_present=fallback_present),
@@ -829,6 +1328,35 @@ def _phase_display(value: str) -> str:
     return value
 
 
+def _render_selection(report: dict[str, Any], lines: list[str]) -> None:
+    """Append the latest-discovery selection summary to the human output."""
+    selection = report.get("selection")
+    if not isinstance(selection, dict):
+        return
+    source = report.get("source") or {}
+    selected_path = selection.get("selected_path")
+    if selected_path:
+        lines.append("")
+        lines.append(f"Selected artifact: {selected_path}")
+        lines.append("Selection reason:")
+        lines.append(f"* {selection.get('selected_reason')}")
+        lines.append(f"* selected by: {selection.get('selected_by')}")
+        if source.get("kind"):
+            lines.append(f"* artifact kind: {source.get('kind')}")
+        if source.get("pr") is not None:
+            lines.append(f"* matched PR: {source.get('pr')}")
+        if source.get("commit"):
+            lines.append(f"* matched commit: {source.get('commit')}")
+    candidates = selection.get("candidates") or []
+    if candidates:
+        lines.append("")
+        lines.append("Candidate summary:")
+        for candidate in candidates:
+            label = "selected" if candidate.get("selected") else "skipped"
+            reason = candidate.get("reason") or candidate.get("skipped_reason")
+            lines.append(f"* {label}: {candidate.get('path')} reason: {reason}")
+
+
 def render_human(report: dict[str, Any]) -> str:
     status = report["status"]
     source = report["source"]
@@ -841,6 +1369,33 @@ def render_human(report: dict[str, Any]) -> str:
         f"Pass eligible: {'yes' if report['pass_eligible'] else 'no'}",
         f"Rerun required: {'yes' if report['rerun_required'] else 'no'}",
     ]
+
+    if status == STATUS_NOT_FOUND:
+        lines.extend(
+            [
+                "",
+                "No validation evidence artifact was found under the known "
+                "ShellForgeAI-owned locations.",
+                f"Known locations: {report.get('known_locations', '')}",
+            ]
+        )
+        _render_selection(report, lines)
+        if report["warnings"]:
+            lines.append("")
+            lines.append("Warnings:")
+            lines.extend(f"* {warning}" for warning in report["warnings"])
+        lines.extend(
+            [
+                "",
+                "No validation evidence is not merge evidence; rerun required.",
+                "",
+                "First safe command:",
+                report["first_safe_command"],
+            ]
+        )
+        return "\n".join(lines) + "\n"
+
+    _render_selection(report, lines)
 
     if status == STATUS_UNKNOWN and report["classification"] == CLASS_NO_EVIDENCE:
         lines.extend(
@@ -931,8 +1486,7 @@ def render_human(report: dict[str, Any]) -> str:
         lines.append(f"* full pytest run: {'yes' if marker.get('full_pytest_run') else 'no'}")
         lines.append(f"* full pytest reason: {marker.get('full_pytest_reason')}")
         lines.append(
-            "* fallback packet present: "
-            f"{'yes' if marker.get('fallback_packet_present') else 'no'}"
+            f"* fallback packet present: {'yes' if marker.get('fallback_packet_present') else 'no'}"
         )
 
     lines.extend(
@@ -969,7 +1523,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--latest",
         action="store_true",
-        help="Discover the most recent run dir from known validation artifact roots.",
+        help="Discover the most relevant run dir from known validation artifact roots.",
+    )
+    parser.add_argument(
+        "--pr",
+        type=int,
+        default=None,
+        help="With --latest: only consider candidates for this PR number.",
+    )
+    parser.add_argument(
+        "--commit",
+        default=None,
+        help="With --latest: only consider candidates whose commit prefix-matches.",
+    )
+    parser.add_argument(
+        "--run-root",
+        default=None,
+        help="With --latest: scan only within this bounded run root (no host crawl).",
+    )
+    parser.add_argument(
+        "--include-legacy",
+        action="store_true",
+        help="With --latest: also consider older legacy/persisted-only artifacts.",
+    )
+    parser.add_argument(
+        "--explain-selection",
+        action="store_true",
+        help="With --latest: include the selected/skipped candidate list in output.",
     )
     parser.add_argument("--run-dir", help="Run directory containing validation evidence files.")
     parser.add_argument("--heartbeat", help="Explicit heartbeat JSON path.")
@@ -993,21 +1573,29 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
 
     explicit = any((heartbeat_path, status_path, manifest_path, summary_path, log_path))
 
-    if latest and run_dir is None and not explicit:
-        discovered = discover_latest()
-        if discovered is not None:
-            run_dir = str(discovered)
-        else:
-            warnings.append("no validation runs found under known artifact roots")
-
-    # If neither latest, run-dir, nor explicit files were requested, default to a
-    # latest scan so a bare invocation is still useful.
-    if not latest and run_dir is None and not explicit:
+    # An explicit --run-dir (or explicit evidence files) takes priority over
+    # discovery. Otherwise we run the deterministic latest-selection pipeline,
+    # both for an explicit --latest and for a bare invocation.
+    selection: dict[str, Any] | None = None
+    selected_meta: dict[str, Any] | None = None
+    not_found = False
+    do_latest = run_dir is None and not explicit
+    if do_latest:
         latest = True
-        discovered = discover_latest()
-        if discovered is not None:
-            run_dir = str(discovered)
+        result = select_latest(
+            pr=getattr(args, "pr", None),
+            commit=getattr(args, "commit", None),
+            include_legacy=bool(getattr(args, "include_legacy", False)),
+            run_root=getattr(args, "run_root", None),
+            explain=bool(getattr(args, "explain_selection", False)),
+            warnings=warnings,
+        )
+        selection = result["selection"]
+        selected_meta = result["selected_meta"]
+        if result["run_dir"] is not None:
+            run_dir = result["run_dir"]
         else:
+            not_found = True
             warnings.append("no validation runs found under known artifact roots")
 
     preflight_path = None
@@ -1035,6 +1623,9 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
         "preflight_path": preflight_path,
         "fallback_packet_path": fallback_packet_path,
         "explicit": explicit,
+        "selection": selection,
+        "selected_meta": selected_meta,
+        "not_found": not_found,
     }
 
 
@@ -1045,6 +1636,11 @@ def _as_str(value: Path | None) -> str | None:
 def generate_report(args: argparse.Namespace) -> dict[str, Any]:
     warnings: list[str] = []
     sources = _resolve_sources(args, warnings)
+
+    # ``--latest`` discovery found no candidate at all: emit a controlled
+    # not_found report (no traceback, never a pass) instead of loading evidence.
+    if sources["not_found"]:
+        return _not_found_report(sources["selection"], warnings)
 
     # Explicit paths must exist (controlled error); discovered paths are optional.
     heartbeat_doc = load_heartbeat(
@@ -1069,6 +1665,8 @@ def generate_report(args: argparse.Namespace) -> dict[str, Any]:
         preflight_path=sources["preflight_path"],
         preflight_doc=preflight_doc,
         fallback_packet_path=sources["fallback_packet_path"],
+        selection=sources["selection"],
+        selected_meta=sources["selected_meta"],
     )
 
 

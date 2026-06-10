@@ -334,7 +334,7 @@ anything, use the read-only viewer
 [`../scripts/validation_status.py`](../scripts/validation_status.py):
 
 ```bash
-# Most recent run under the known validation artifact roots:
+# Most relevant recent run under the known validation artifact roots:
 python scripts/validation_status.py --latest
 python scripts/validation_status.py --latest --json
 
@@ -350,6 +350,71 @@ It answers, for a single run: did it **pass / fail / end incomplete / unknown**,
 is it `pass_eligible` (usable as merge evidence), is a `rerun_required`, what
 phase was active when it stopped, and where the heartbeat/status/manifest/log
 files are.
+
+### Latest-artifact discovery and selection (PR181)
+
+`--latest` selects the **most relevant** validation artifact deterministically
+and explains why. It no longer just picks the newest file across every root —
+which could surface an older persisted `/srv/data/.../validation-runs` manifest
+even when a newer PR-specific run directory existed. Discovery is now ordered:
+
+1. An explicit `--run-dir <path>` (or explicit `--heartbeat`/`--status-file`/
+   `--manifest`) always wins — discovery is skipped entirely.
+2. Recent PR-specific run directories
+   (`/tmp/sfai-pr<PR>-<sha>-validation-*`).
+3. Recent PR-specific validation-**container** run directories
+   (`/tmp/sfai-pr<PR>-<sha>-validation-container-*`).
+4. Recent mainline temp runs (`/tmp/shellforgeai-validation-runs/*`).
+5. ShellForgeAI-owned persisted manifests
+   (`/srv/data/shellforgeai/validation-runs/*`).
+6. Legacy/persisted-only artifacts (`/data/validation-runs/*`) — **only** when
+   `--include-legacy` is passed.
+
+Within an eligible set, a more-preferred **kind** wins first (a recent
+PR-specific run dir outranks an older persisted manifest even if the manifest is
+newer), then the **newest timestamp** breaks ties. A legacy artifact never
+outranks a recent PR-specific run directory. Only these bounded, ShellForgeAI-owned
+locations are scanned — there is no arbitrary host crawl and no path traversal.
+
+```bash
+# Filter to a PR and/or commit (commit accepts an unambiguous prefix):
+python scripts/validation_status.py --latest --pr 181
+python scripts/validation_status.py --latest --commit 0b407fa
+python scripts/validation_status.py --latest --pr 181 --commit 0b407fa
+
+# Include older legacy/persisted-only artifacts in the search:
+python scripts/validation_status.py --latest --include-legacy
+
+# Scan only within one bounded run root (no host crawl; traversal rejected):
+python scripts/validation_status.py --latest --run-root /srv/data/shellforgeai/validation-runs
+
+# Explain which candidate was selected and why the others were skipped:
+python scripts/validation_status.py --latest --explain-selection
+python scripts/validation_status.py --latest --json --explain-selection
+```
+
+Both human and JSON output carry the **selected artifact path**, the
+**selection reason** (e.g. `latest matching PR-specific validation run`), the
+matched PR/commit, and `source.selected_by`
+(`latest`/`pr`/`commit`/`pr_commit`/`run_root`/`run_dir`). `--explain-selection`
+adds a `selection.candidates` list marking the selected candidate and the
+`skipped_reason` for each other candidate (for example `older persisted manifest
+(PR-specific run preferred)`, `PR mismatch`, `commit mismatch`). When several
+eligible candidates tie at the top, the newest is chosen and a
+`multiple matching candidates, newest selected` warning is emitted.
+
+When no candidate is found at all (including for an unmatched `--pr`/`--commit`),
+the viewer returns a controlled `status=not_found` / `classification=not_found`,
+`pass_eligible=false`, `rerun_required=true` report — no traceback — and its
+first safe command suggests a read-only re-scan
+(`--latest --explain-selection`) and lists the known artifact locations to
+check. Nothing is executed automatically.
+
+**Forcing a specific run dir.** Because `--latest` is conservative, it may
+report `failed`/`incomplete` for the most relevant artifact (that is the point —
+a setup failure or interrupted run is not merge evidence). To inspect a
+different run, pass `--run-dir <path>` explicitly; that bypasses discovery and
+the latest-selection block is omitted.
 
 | Status | Meaning | `pass_eligible` | `rerun_required` |
 | --- | --- | --- | --- |
