@@ -28,6 +28,46 @@ and the handlers resolve shared `cli` helpers lazily so monkeypatch hooks and
 output stay identical. Future PRs will migrate further domains (validation,
 audit, compose, mission, etc.) the same way.
 
+### Command-surface golden guardrail (PR184)
+
+Before more handlers move out of `cli.py`, PR184 adds a behavior-preserving
+**golden command-surface guardrail** so refactors cannot silently drop
+commands, JSON flags, help text, governed-execution confirmation markers, or
+mutation-refusal paths.
+
+- Fixture: [`tests/golden/cli_command_surface_pr184.json`](../tests/golden/cli_command_surface_pr184.json)
+  records, per command, the `argv`, expected `--help` exit code, required help
+  substrings, JSON-capability marker, required JSON/safety fields, and
+  governed-execution `--confirm` / read-only markers where relevant. It is
+  intentionally compact: it checks command/option *presence* via
+  case-insensitive substrings, never full help-text equality, and it stores no
+  timestamps, durations, or environment-specific paths.
+- Helper: [`tests/helpers/cli_surface.py`](../tests/helpers/cli_surface.py)
+  loads/validates the fixture and invokes the CLI in-process via `CliRunner`
+  with the model/provider factory blocked.
+- Tests: [`tests/test_pr184_cli_command_surface_golden.py`](../tests/test_pr184_cli_command_surface_golden.py)
+  assert every listed command is invokable, help exits cleanly, JSON-capable
+  commands still emit strict JSON with their read-only safety fields, governed
+  execution still advertises `--confirm`, and the six mutation-refusal smoke
+  phrases still refuse with no execution flag.
+- Optional read-only aid:
+  [`scripts/cli_surface_snapshot.py`](../scripts/cli_surface_snapshot.py)
+  prints a compact snapshot of the current surface (exit code + JSON validity)
+  to help when updating the fixture. It is read-only, blocks model calls, and
+  only writes when given an explicit `--output` path under a temp/test
+  directory.
+
+This guardrail is test infrastructure, **not** a runtime feature: it adds no
+product command and no execution behavior. When the command surface changes
+intentionally, update the fixture in the same PR. It does not replace full
+validation when core command surfaces move — future command-module extraction
+PRs should run it *in addition to* their normal lane (see
+[`VALIDATION_LANES.md`](VALIDATION_LANES.md)).
+
+`model doctor` is included as help-only on purpose: it has no `--json` flag in
+the current surface and builds a provider when invoked, so the guardrail covers
+its `--help` surface without making a model call.
+
 ## Global options
 
 ```

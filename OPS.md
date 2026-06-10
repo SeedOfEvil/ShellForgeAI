@@ -41,6 +41,22 @@ current split also keeps `ops report`/`ops status` and `triage`/`triage docker`
 handlers in command modules. This is an internal layout hardening only; command
 UX, JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
 
+PR184 adds a behavior-preserving **command-surface golden guardrail** to protect
+this split as it continues onto riskier surfaces. Run it on every CLI
+command-module extraction PR, in addition to the change's normal lane:
+
+```bash
+pytest -q tests/test_pr184_cli_command_surface_golden.py
+```
+
+It asserts important commands, `--help` surfaces, JSON flags, governed-execution
+`--confirm` requirements, and mutation-refusal phrases stay registered (read-only,
+no Docker, no model call). When the surface changes intentionally, update
+`tests/golden/cli_command_surface_pr184.json` in the same PR. It does not replace
+full validation — broad/core command refactors still require Lane C
+(`python scripts/run_full_pytest.py`). See [`docs/cli.md`](docs/cli.md) and
+[`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md).
+
 ## Mainline/scheduled validation baseline
 
 Use `scripts/run_mainline_validation.py` when the operator needs an explicit

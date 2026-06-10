@@ -114,7 +114,9 @@ asks deterministically, and refuses or gates mutation.
 - V2 command contract: [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md)
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
-  (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`)
+  (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`),
+  protected by the PR184 command-surface golden guardrail
+  (`tests/test_pr184_cli_command_surface_golden.py`)
   — see [`docs/cli.md`](docs/cli.md).
 
 ### What this is (V1)

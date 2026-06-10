@@ -155,7 +155,22 @@
     {"pattern": "src/shellforgeai/cli.py", "lane": "targeted_runtime", "reason": "command surface wiring changed (broad router rewrites should use --profile full)", "tests": [
       "tests/test_cli.py",
       "tests/test_pr114_v1_command_surface.py",
-      "tests/test_pr143_command_surface_audit.py"
+      "tests/test_pr143_command_surface_audit.py",
+      "tests/test_pr184_cli_command_surface_golden.py"
+    ]},
+    {"pattern": "src/shellforgeai/commands/**", "lane": "targeted_runtime", "reason": "CLI command module (handler extraction) changed; run the command-surface guardrail", "tests": [
+      "tests/test_pr182_cli_module_scaffold_status_doctor.py",
+      "tests/test_pr183_cli_module_split_ops_triage.py",
+      "tests/test_pr184_cli_command_surface_golden.py"
+    ]},
+    {"pattern": "tests/golden/cli_command_surface_pr184.json", "lane": "targeted_runtime", "reason": "golden CLI command-surface fixture changed", "tests": [
+      "tests/test_pr184_cli_command_surface_golden.py"
+    ]},
+    {"pattern": "tests/helpers/cli_surface.py", "lane": "targeted_runtime", "reason": "command-surface guardrail helper changed", "tests": [
+      "tests/test_pr184_cli_command_surface_golden.py"
+    ]},
+    {"pattern": "scripts/cli_surface_snapshot.py", "lane": "fast", "reason": "read-only command-surface snapshot aid changed", "tests": [
+      "tests/test_pr184_cli_command_surface_golden.py"
     ]},
     {"pattern": "src/shellforgeai/app.py", "lane": "targeted_runtime", "reason": "application wiring changed", "tests": [
       "tests/test_cli.py"
