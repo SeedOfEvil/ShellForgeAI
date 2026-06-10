@@ -4,6 +4,26 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Fallback packet non-execution contract + Lane B QA marker (PR180)
+
+- Added durable regression coverage (`tests/test_pr180_fallback_packet_safety.py`)
+  that locks down the PR179 disposable validation-container fallback packet
+  contract: on missing host tooling (`ruff`/`pytest`) the generator reports a
+  `setup_failure`, writes an **inert** packet (the container command exists only
+  as an argv list / copy-paste string inside the packet object), and never
+  auto-executes it. The tests prove no subprocess/shell execution path is
+  triggered (static import check plus monkeypatched `subprocess`/`os.system`
+  boundaries), and assert no cleanup/remediation/rollback/recovery/restart, no
+  Docker/Compose mutation, no package install, no `shell=True`, no artifact
+  repair/delete, and no model call.
+- `scripts/validation_status.py` now emits an explicit Lane A/B/C QA marker
+  (`qa_marker`) in its JSON and human output, derived read-only from the
+  manifest lane evidence: `validation_lane`, `validation_scope`,
+  `full_pytest_run`, `full_pytest_reason`, and `fallback_packet_present`. This
+  makes targeted-only Lane B validation legible to reviewers (full `pytest`
+  intentionally not run) without re-deriving lane policy. The viewer remains
+  read-only — no execution, no mutation, no model call.
+
 ### Validation environment preflight (PR178)
 
 - Added the read-only validation environment preflight
