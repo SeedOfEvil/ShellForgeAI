@@ -272,7 +272,8 @@
     {"pattern": "scripts/sfai_docker01_pr_lane.py", "lane": "full", "reason": "Docker01 PR deploy lane helper changed", "tests": [
       "tests/test_pr157_validation_lane_optimizer.py",
       "tests/test_pr161_docker01_validation_manifest.py",
-      "tests/test_pr176_validation_heartbeat_incomplete.py"
+      "tests/test_pr176_validation_heartbeat_incomplete.py",
+      "tests/test_pr179_validation_container_fallback_packet.py"
     ]},
     {"pattern": "scripts/validation_heartbeat.py", "lane": "full", "reason": "validation heartbeat/checkpoint helper changed (broad confidence)", "tests": [
       "tests/test_pr176_validation_heartbeat_incomplete.py"
@@ -280,9 +281,13 @@
     {"pattern": "scripts/validation_env_preflight.py", "lane": "full", "reason": "validation environment preflight changed (broad confidence)", "tests": [
       "tests/test_pr178_validation_env_preflight.py"
     ]},
+    {"pattern": "scripts/validation_container_fallback.py", "lane": "full", "reason": "validation container fallback packet generator changed (broad confidence)", "tests": [
+      "tests/test_pr179_validation_container_fallback_packet.py"
+    ]},
     {"pattern": "scripts/validation_status.py", "lane": "full", "reason": "validation evidence status viewer changed (broad confidence)", "tests": [
       "tests/test_pr177_validation_status_viewer.py",
-      "tests/test_pr178_validation_env_preflight.py"
+      "tests/test_pr178_validation_env_preflight.py",
+      "tests/test_pr179_validation_container_fallback_packet.py"
     ]},
     {"pattern": "scripts/run_full_pytest.py", "lane": "full", "reason": "Lane C full pytest runner changed (broad confidence)", "tests": [
       "tests/test_pr160_full_validation_runner_streaming.py",

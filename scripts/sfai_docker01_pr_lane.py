@@ -35,6 +35,7 @@ if str(HELPER_DIR) not in sys.path:
 
 import track_pytest_durations  # noqa: E402
 import validate_pr  # noqa: E402
+import validation_container_fallback  # noqa: E402
 import validation_env_preflight  # noqa: E402
 import validation_heartbeat  # noqa: E402
 
@@ -723,6 +724,16 @@ def render_human_summary(manifest: dict) -> str:
         )
         for name in preflight.get("failed_checks") or []:
             lines.append(f"* Required validation dependency missing/failed: {name}")
+        if preflight.get("fallback_packet_path"):
+            run_dir = Path(preflight["fallback_packet_path"]).parent
+            lines.extend(
+                [
+                    "Container fallback packet (generated; NOT executed):",
+                    f"* {preflight['fallback_packet_path']}",
+                    "First safe command:",
+                    f"* cat {run_dir / 'validation-container-command.txt'}",
+                ]
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -957,6 +968,28 @@ def main(argv: list[str] | None = None) -> int:
                 "container or a prepared dev environment"
             )
             return_code = 1
+            # PR179: write the disposable validation-container fallback packet
+            # next to the manifest. Evidence files only — no Docker/Compose is
+            # executed, no packages are installed, and the lane never runs the
+            # generated command. Best-effort: packet failure never changes the
+            # setup-failure outcome.
+            try:
+                packet = validation_container_fallback.generate_packet(
+                    run_dir=Path(manifest_path).parent,
+                    lane="full" if plan.get("full_pytest_required") else "targeted_runtime",
+                    image=args.new_image,
+                    pr=args.pr_number,
+                    commit=head_commit,
+                    preflight=preflight_report,
+                )
+            except OSError:
+                packet = None
+            if packet is not None and packet.get("status") == "created":
+                preflight_info["fallback_packet_path"] = str(
+                    Path(manifest_path).parent / validation_container_fallback.FALLBACK_JSON_NAME
+                )
+            else:
+                preflight_info["fallback_packet_path"] = None
             print(
                 "Validation environment preflight failed; stopping before "
                 "validation phases (setup failure, not product test failure).",

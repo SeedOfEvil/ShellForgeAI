@@ -300,7 +300,10 @@ explicit CLI lane.
   from existing evidence, and the read-only
   `scripts/validation_env_preflight.py` environment preflight that detects
   missing host dev tools (ruff/pytest/etc.) before validation phases run and
-  classifies that as `setup_failure`, never as product test failure; see
+  classifies that as `setup_failure`, never as product test failure, plus the
+  `scripts/validation_container_fallback.py` packet generator that turns a
+  setup failure into a copy-pasteable disposable validation-container command
+  (packet files only — it never runs Docker or installs host packages); see
   [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
 
 ## Using OpenAI Codex / ChatGPT sign-in
