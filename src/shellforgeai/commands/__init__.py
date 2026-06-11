@@ -22,6 +22,8 @@ The behavior-preserving extraction slices currently cover read-only domains:
   proposal preview handler.
 * :mod:`shellforgeai.commands.apply_preview` — the read-only V2
   execution-boundary (apply) preview handler; preview-only, never executes.
+* :mod:`shellforgeai.commands.receipt_audit` — governed receipt audit,
+  integrity, finding explanation, and artifact-only audit-bundle handlers.
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -30,4 +32,14 @@ Future PRs will migrate additional domains (validation, audit, compose,
 mission, etc.) one domain at a time, behavior-preserving each step.
 """
 
-__all__ = ["apply_preview", "doctor", "handoff", "ops", "propose", "status", "triage", "verify"]
+__all__ = [
+    "apply_preview",
+    "doctor",
+    "handoff",
+    "ops",
+    "propose",
+    "receipt_audit",
+    "status",
+    "triage",
+    "verify",
+]
