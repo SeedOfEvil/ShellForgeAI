@@ -24,6 +24,10 @@ The behavior-preserving extraction slices currently cover read-only domains:
   execution-boundary (apply) preview handler; preview-only, never executes.
 * :mod:`shellforgeai.commands.receipt_audit` — governed receipt audit,
   integrity, finding explanation, and artifact-only audit-bundle handlers.
+* :mod:`shellforgeai.commands.recipes` — the read-only governed recipe
+  registry, list, inspect, eligibility, and preflight (build/save/validate)
+  handlers; governed recipe execution and recovery execution stay in
+  ``cli.py``.
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -39,6 +43,7 @@ __all__ = [
     "ops",
     "propose",
     "receipt_audit",
+    "recipes",
     "status",
     "triage",
     "verify",

@@ -39,6 +39,15 @@ The staged split currently covers these behavior-preserving slices:
   audit/integrity/explain/validate remain read-only, and audit-bundle remains
   bounded ShellForgeAI-owned artifact export only. Governed recipe execution and
   recovery execution remain in `cli.py`.
+- PR189: `commands/recipes.py` for the read-only governed recipe registry and
+  preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
+  inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and
+  `recipes preflight validate`. The command surfaces are unchanged (`--json`,
+  `--recipe`, `--target`, `--save` where present); registry/list/eligibility
+  remain read-only and preflight remains read-only packet generation that
+  never executes. Governed `recipes execute`, `recipes receipt
+  recovery-execute`, recovery status/validate, and rollback-preview remain in
+  `cli.py` unchanged.
 
 Each module exposes a small `register(app, ...)` function that `cli.py` calls
 at the same position the commands previously occupied (preserving help order),

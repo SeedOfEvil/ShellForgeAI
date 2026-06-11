@@ -47,12 +47,18 @@ extracted `ops report`/`ops status` and `triage`/`triage docker`, PR185
 extracted the read-only top-level `verify` handler, PR186 extracted the
 unchanged read-only/artifact-oriented `handoff` handler, PR187 extracted the
 unchanged read-only `propose` and preview-only `apply-preview` handlers, and
-PR188 extracts the governed receipt audit/reporting handlers (`recipes receipt
+PR188 extracted the governed receipt audit/reporting handlers (`recipes receipt
 audit`, `audit-bundle`, `audit-bundle-validate`, `integrity`, and `explain`)
-into `commands/receipt_audit.py`. This is an internal layout hardening only;
-command UX, JSON schemas, safety flags, ask routing, and mutation refusal are
-unchanged. Receipt audit, integrity, explain, and audit-bundle validation stay
-read-only; audit-bundle stays bounded ShellForgeAI-owned artifact export only.
+into `commands/receipt_audit.py`, and PR189 extracts the read-only recipe
+registry/preflight handlers (`recipes`, `recipes list`, `recipes inspect`,
+`recipes eligibility`, `recipes preflight`, `recipes preflight validate`) into
+`commands/recipes.py`. This is an internal layout hardening only; command UX,
+JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
+Receipt audit, integrity, explain, and audit-bundle validation stay read-only;
+audit-bundle stays bounded ShellForgeAI-owned artifact export only. Recipe
+list/eligibility/preflight stay read-only and never execute; governed
+`recipes execute` and receipt recovery execution remain separately guarded in
+`cli.py` and unchanged.
 
 PR184 adds a behavior-preserving **command-surface golden guardrail** to protect
 this split as it continues onto riskier surfaces. Run it on every CLI

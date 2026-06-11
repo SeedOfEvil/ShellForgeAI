@@ -232,6 +232,17 @@ planning/read-only, apply-preview stays preview-only and never applies or
 executes, and all JSON/brief/safety surfaces are unchanged. Future CLI
 refactors should run the PR184 command-surface golden guardrail.
 
+Implementation note: the read-only recipe registry/preflight Typer
+registrations/handlers (`recipes` root listing, `recipes list`, `recipes
+inspect`, `recipes eligibility`, `recipes preflight`, and `recipes preflight
+validate`) now live in `src/shellforgeai/commands/recipes.py` (PR189).
+Behavior-preserving only: registry/list/eligibility stay read-only, preflight
+stays read-only packet generation that never executes, and all JSON/safety
+surfaces are unchanged. Governed `recipes execute`, `recipes receipt
+recovery-execute`, recovery status/validate, and rollback-preview remain in
+`cli.py` unchanged. Future CLI refactors should run the PR184 command-surface
+golden guardrail.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:
