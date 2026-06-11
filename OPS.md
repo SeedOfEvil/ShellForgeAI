@@ -44,9 +44,11 @@ command for a missing suspect.
 command-module split keeps behavior unchanged while moving read-only handlers
 into `src/shellforgeai/commands/`: PR182 extracted `status`/`doctor`, PR183
 extracted `ops report`/`ops status` and `triage`/`triage docker`, PR185
-extracted the read-only top-level `verify` handler, and PR186 extracts the
+extracted the read-only top-level `verify` handler, PR186 extracted the
 unchanged read-only/artifact-oriented `handoff` handler into
-`commands/handoff.py`. This is an internal layout hardening only; command UX,
+`commands/handoff.py`, and PR187 extracts the unchanged read-only `propose`
+and preview-only `apply-preview` handlers into `commands/propose.py` and
+`commands/apply_preview.py`. This is an internal layout hardening only; command UX,
 JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
 
 PR184 adds a behavior-preserving **command-surface golden guardrail** to protect

@@ -23,9 +23,11 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.commands import apply_preview as apply_preview_commands
 from shellforgeai.commands import doctor as doctor_commands
 from shellforgeai.commands import handoff as handoff_commands
 from shellforgeai.commands import ops as ops_commands
+from shellforgeai.commands import propose as propose_commands
 from shellforgeai.commands import status as status_commands
 from shellforgeai.commands import triage as triage_commands
 from shellforgeai.commands import verify as verify_commands
@@ -11232,69 +11234,10 @@ def _collect_status_payload(runtime: RuntimeContext, *, include_retention: bool 
 
 
 status_commands.register(app)
-
-
-@app.command()
-def propose(
-    ctx: typer.Context,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-    brief: Annotated[bool, typer.Option("--brief", help="Emit bounded proposal preview.")] = False,
-    target: Annotated[
-        str | None, typer.Option("--target", help="Preview next action for one target.")
-    ] = None,
-    from_triage: Annotated[
-        bool,
-        typer.Option(
-            "--from-triage",
-            help="Use current deterministic triage ranking as proposal input.",
-        ),
-    ] = False,
-) -> None:
-    """Read-only V2 next-action proposal preview. No plan or action is created."""
-    _ = ctx
-    payload = _build_v2_propose_payload(target=target, from_triage=from_triage)
-    if json_output:
-        typer.echo(json.dumps(payload))
-        return
-    if brief:
-        typer.echo(_render_v2_propose_brief(payload), nl=False)
-        return
-    typer.echo(_render_v2_propose_human(payload), nl=False)
-
-
+propose_commands.register(app)
 verify_commands.register(app)
 handoff_commands.register(handoff_app)
-
-
-@app.command("apply-preview")
-def apply_preview(
-    ctx: typer.Context,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-    brief: Annotated[bool, typer.Option("--brief", help="Emit bounded apply preview.")] = False,
-    target: Annotated[
-        str | None, typer.Option("--target", help="Preview gates for one exact target.")
-    ] = None,
-    from_propose: Annotated[
-        bool,
-        typer.Option("--from-propose", help="Use current deterministic proposal context."),
-    ] = False,
-    from_triage: Annotated[
-        bool,
-        typer.Option("--from-triage", help="Use current deterministic triage context."),
-    ] = False,
-) -> None:
-    """Read-only V2 execution-boundary preview. Does not apply or execute."""
-    _ = ctx
-    payload = _build_v2_apply_preview_payload(
-        target=target, from_propose=from_propose, from_triage=from_triage
-    )
-    if json_output:
-        typer.echo(json.dumps(payload))
-        return
-    if brief:
-        typer.echo(_render_v2_apply_preview_brief(payload), nl=False)
-        return
-    typer.echo(_render_v2_apply_preview_human(payload), nl=False)
+apply_preview_commands.register(app)
 
 
 def _render_recipe_groups_human(payload: dict[str, Any]) -> str:

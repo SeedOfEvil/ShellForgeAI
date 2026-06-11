@@ -27,6 +27,12 @@ The staged split currently covers these behavior-preserving slices:
   and the existing ShellForgeAI-owned handoff artifact lifecycle. The command
   surface is unchanged (`handoff`, `--json`, `--brief`, `--save`, and
   validate/export/history/compare subcommands where present).
+- PR187: `commands/propose.py` for the read-only V2 `propose` next-action
+  proposal preview and `commands/apply_preview.py` for the read-only V2
+  `apply-preview` execution-boundary preview. Both surfaces are unchanged
+  (`--json`, `--brief`, `--target`, `--from-triage`, and `--from-propose`
+  where present); propose remains planning-only and apply-preview remains
+  preview-only — neither executes anything.
 
 Each module exposes a small `register(app, ...)` function that `cli.py` calls
 at the same position the commands previously occupied (preserving help order),
