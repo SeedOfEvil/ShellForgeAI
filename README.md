@@ -136,7 +136,8 @@ asks deterministically, and refuses or gates mutation.
   running Docker/Compose. The top-level `verify` surface is unchanged while its
   handler lives in the CLI command-module split; future CLI refactors should run
   the PR184 command-surface golden guardrail. `handoff` is a read-only
-  operator handoff packet that summarizes the golden-path posture and first safe
+  operator handoff packet whose unchanged surface now lives in the CLI
+  command-module split. It summarizes the golden-path posture and first safe
   command; it does not execute fixes or imply remediation happened, and
   `handoff --save` writes only a ShellForgeAI-owned artifact under
   `<data_dir>/v2_handoffs/`.

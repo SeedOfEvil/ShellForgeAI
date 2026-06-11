@@ -16,6 +16,8 @@ The behavior-preserving extraction slices currently cover read-only domains:
   ``triage docker`` handlers.
 * :mod:`shellforgeai.commands.verify` — the read-only top-level ``verify``
   current-state and receipt-aware handler.
+* :mod:`shellforgeai.commands.handoff` — the read-only V2 operator handoff
+  packet and ShellForgeAI-owned handoff artifact lifecycle handlers.
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -24,4 +26,4 @@ Future PRs will migrate additional domains (validation, audit, compose,
 mission, etc.) one domain at a time, behavior-preserving each step.
 """
 
-__all__ = ["doctor", "ops", "status", "triage", "verify"]
+__all__ = ["doctor", "handoff", "ops", "status", "triage", "verify"]

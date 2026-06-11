@@ -21,6 +21,12 @@ The staged split currently covers these behavior-preserving slices:
   report lifecycle handlers.
 - PR183: `commands/triage.py` for the read-only `triage` and compatibility
   `triage docker` handlers, including snapshot artifact lifecycle commands.
+- PR185: `commands/verify.py` for the read-only top-level `verify` current-state
+  and receipt-aware handler.
+- PR186: `commands/handoff.py` for the read-only V2 operator `handoff` packet
+  and the existing ShellForgeAI-owned handoff artifact lifecycle. The command
+  surface is unchanged (`handoff`, `--json`, `--brief`, `--save`, and
+  validate/export/history/compare subcommands where present).
 
 Each module exposes a small `register(app, ...)` function that `cli.py` calls
 at the same position the commands previously occupied (preserving help order),

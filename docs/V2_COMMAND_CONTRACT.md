@@ -218,6 +218,12 @@ receipts, and validation reports.
 | Gate | Existing/future approval and guard lanes | Explicit, auditable, not natural-language approval. |
 | Receipt/export | report export, session summary, receipts | Portable evidence and receipts without mutation. |
 
+Implementation note: the `handoff` Typer registration/handler now lives in
+`src/shellforgeai/commands/handoff.py` as part of the staged CLI command-module
+split. This is behavior-preserving only: the handoff command surface,
+JSON/artifact behavior, read-only posture, and safety flags remain unchanged.
+Future CLI refactors should run the PR184 command-surface golden guardrail.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:

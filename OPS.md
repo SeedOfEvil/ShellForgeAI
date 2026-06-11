@@ -42,10 +42,12 @@ command for a missing suspect.
 
 `src/shellforgeai/cli.py` remains the root Typer app wiring. The staged
 command-module split keeps behavior unchanged while moving read-only handlers
-into `src/shellforgeai/commands/`: PR182 extracted `status`/`doctor`, and the
-current split also keeps `ops report`/`ops status` and `triage`/`triage docker`
-handlers in command modules. This is an internal layout hardening only; command
-UX, JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
+into `src/shellforgeai/commands/`: PR182 extracted `status`/`doctor`, PR183
+extracted `ops report`/`ops status` and `triage`/`triage docker`, PR185
+extracted the read-only top-level `verify` handler, and PR186 extracts the
+unchanged read-only/artifact-oriented `handoff` handler into
+`commands/handoff.py`. This is an internal layout hardening only; command UX,
+JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
 
 PR184 adds a behavior-preserving **command-surface golden guardrail** to protect
 this split as it continues onto riskier surfaces. Run it on every CLI
