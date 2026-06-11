@@ -243,6 +243,15 @@ recovery-execute`, recovery status/validate, and rollback-preview remain in
 `cli.py` unchanged. Future CLI refactors should run the PR184 command-surface
 golden guardrail.
 
+Implementation note: the top-level deterministic `ask` Typer
+registration/handler now lives in `src/shellforgeai/commands/ask.py` (PR190).
+Behavior-preserving only: the ask surface is unchanged, deterministic
+read-only routing and broad/freeform mutation refusal are unchanged, natural
+language still never executes governed fixes, and the shared deterministic
+routing/refusal helpers plus interactive mode and governed execution handlers
+remain in `cli.py`. Future CLI refactors should run the PR184 command-surface
+golden guardrail.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:

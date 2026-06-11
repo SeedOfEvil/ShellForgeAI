@@ -52,7 +52,11 @@ audit`, `audit-bundle`, `audit-bundle-validate`, `integrity`, and `explain`)
 into `commands/receipt_audit.py`, and PR189 extracts the read-only recipe
 registry/preflight handlers (`recipes`, `recipes list`, `recipes inspect`,
 `recipes eligibility`, `recipes preflight`, `recipes preflight validate`) into
-`commands/recipes.py`. This is an internal layout hardening only; command UX,
+`commands/recipes.py`, and PR190 extracts the top-level deterministic `ask`
+command into `commands/ask.py` with its surface, deterministic read-only
+routing, and broad/freeform mutation refusal unchanged (natural language still
+never executes governed fixes; interactive mode and the shared deterministic
+routing helpers stay in `cli.py`). This is an internal layout hardening only; command UX,
 JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
 Receipt audit, integrity, explain, and audit-bundle validation stay read-only;
 audit-bundle stays bounded ShellForgeAI-owned artifact export only. Recipe

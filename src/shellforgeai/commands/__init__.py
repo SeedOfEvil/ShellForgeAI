@@ -28,6 +28,10 @@ The behavior-preserving extraction slices currently cover read-only domains:
   registry, list, inspect, eligibility, and preflight (build/save/validate)
   handlers; governed recipe execution and recovery execution stay in
   ``cli.py``.
+* :mod:`shellforgeai.commands.ask` — the top-level deterministic ``ask``
+  command; deterministic read-only routing, mutation refusal, and the
+  evidence-backed model path delegate to the existing ``cli.py`` helpers,
+  which stay in ``cli.py`` (interactive mode and other surfaces share them).
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -38,6 +42,7 @@ mission, etc.) one domain at a time, behavior-preserving each step.
 
 __all__ = [
     "apply_preview",
+    "ask",
     "doctor",
     "handoff",
     "ops",

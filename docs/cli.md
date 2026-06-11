@@ -48,6 +48,15 @@ The staged split currently covers these behavior-preserving slices:
   never executes. Governed `recipes execute`, `recipes receipt
   recovery-execute`, recovery status/validate, and rollback-preview remain in
   `cli.py` unchanged.
+- PR190: `commands/ask.py` for the top-level deterministic `ask` command. The
+  command surface is unchanged (`ask "<question>"` with `--context`,
+  `--full-context`, `--raw`, `--no-evidence`, `--since`). Deterministic
+  read-only routing (status/triage/ops report/receipt audit/registry
+  guidance), broad/freeform mutation refusal, no-action-taken wording, and the
+  evidence-backed model path are all preserved by delegating to the existing
+  `cli.py` helpers, which stay in `cli.py` because interactive mode and other
+  surfaces share them. Natural language still never executes governed fixes;
+  interactive mode and governed execution handlers did not move.
 
 Each module exposes a small `register(app, ...)` function that `cli.py` calls
 at the same position the commands previously occupied (preserving help order),
