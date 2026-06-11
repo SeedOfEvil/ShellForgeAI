@@ -115,8 +115,9 @@ asks deterministically, and refuses or gates mutation.
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
   (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`;
-  PR185-PR188: `verify`, `handoff`, `propose`, `apply-preview`, and governed
-  receipt audit/reporting), protected by the PR184 command-surface golden guardrail
+  PR185-PR189: `verify`, `handoff`, `propose`, `apply-preview`, governed
+  receipt audit/reporting, and read-only recipe registry/preflight),
+  protected by the PR184 command-surface golden guardrail
   (`tests/test_pr184_cli_command_surface_golden.py`)
   — see [`docs/cli.md`](docs/cli.md).
 
