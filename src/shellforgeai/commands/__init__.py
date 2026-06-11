@@ -18,6 +18,10 @@ The behavior-preserving extraction slices currently cover read-only domains:
   current-state and receipt-aware handler.
 * :mod:`shellforgeai.commands.handoff` — the read-only V2 operator handoff
   packet and ShellForgeAI-owned handoff artifact lifecycle handlers.
+* :mod:`shellforgeai.commands.propose` — the read-only V2 next-action
+  proposal preview handler.
+* :mod:`shellforgeai.commands.apply_preview` — the read-only V2
+  execution-boundary (apply) preview handler; preview-only, never executes.
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -26,4 +30,4 @@ Future PRs will migrate additional domains (validation, audit, compose,
 mission, etc.) one domain at a time, behavior-preserving each step.
 """
 
-__all__ = ["doctor", "handoff", "ops", "status", "triage", "verify"]
+__all__ = ["apply_preview", "doctor", "handoff", "ops", "propose", "status", "triage", "verify"]

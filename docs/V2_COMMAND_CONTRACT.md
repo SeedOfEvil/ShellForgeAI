@@ -224,6 +224,14 @@ split. This is behavior-preserving only: the handoff command surface,
 JSON/artifact behavior, read-only posture, and safety flags remain unchanged.
 Future CLI refactors should run the PR184 command-surface golden guardrail.
 
+Implementation note: the `propose` and `apply-preview` Typer
+registrations/handlers now live in `src/shellforgeai/commands/propose.py` and
+`src/shellforgeai/commands/apply_preview.py` (PR187), with `cli.py` keeping the
+payload/render helpers. Behavior-preserving only: propose stays
+planning/read-only, apply-preview stays preview-only and never applies or
+executes, and all JSON/brief/safety surfaces are unchanged. Future CLI
+refactors should run the PR184 command-surface golden guardrail.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:
