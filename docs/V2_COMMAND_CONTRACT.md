@@ -303,6 +303,16 @@ apply-preview, verify, and handoff/receipt — not execution expansion.
 Rollback posture for this recipe is not true undo: bounded recovery is a future repeat exact-target restart requiring explicit confirmation; automatic rollback is disabled and rollback-preview executes no rollback.
 
 
+
+The governed receipt audit/reporting surfaces (`recipes receipt audit`,
+`audit-bundle`, `audit-bundle-validate`, `integrity`, and `explain`) are owned
+by `src/shellforgeai/commands/receipt_audit.py` as part of the staged CLI
+command-module split. This is an implementation-only move: command names,
+options, JSON fields, read-only/artifact-only safety posture, and refusal
+behavior are unchanged. Governed recipe execution and receipt recovery execution
+remain outside this module. Future CLI refactors should run the PR184
+command-surface golden guardrail.
+
 ### Governed receipt audit/history layer
 
 Governed recipe receipts now have a read-only audit surface after execute, verify, rollback-preview, and recovery-execute:

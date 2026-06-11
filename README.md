@@ -114,8 +114,9 @@ asks deterministically, and refuses or gates mutation.
 - V2 command contract: [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md)
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
-  (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`),
-  protected by the PR184 command-surface golden guardrail
+  (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`;
+  PR185-PR188: `verify`, `handoff`, `propose`, `apply-preview`, and governed
+  receipt audit/reporting), protected by the PR184 command-surface golden guardrail
   (`tests/test_pr184_cli_command_surface_golden.py`)
   — see [`docs/cli.md`](docs/cli.md).
 
@@ -140,7 +141,11 @@ asks deterministically, and refuses or gates mutation.
   command-module split. It summarizes the golden-path posture and first safe
   command; it does not execute fixes or imply remediation happened, and
   `handoff --save` writes only a ShellForgeAI-owned artifact under
-  `<data_dir>/v2_handoffs/`.
+  `<data_dir>/v2_handoffs/`. Governed receipt audit/reporting surfaces
+  (`recipes receipt audit`, `integrity`, `explain`, `audit-bundle`, and
+  `audit-bundle-validate`) are also split into a command module with unchanged
+  behavior: audit/integrity/explain/validate remain read-only, and
+  audit-bundle remains bounded ShellForgeAI-owned artifact export only.
 - Read-only handoff artifact lifecycle (`handoff --save`, `handoff validate
   <handoff_ref>`, `handoff export <handoff_ref>`, `handoff export-validate
   <export_ref>`, each with `--json`). Save/export write only ShellForgeAI-owned

@@ -33,12 +33,18 @@ The staged split currently covers these behavior-preserving slices:
   (`--json`, `--brief`, `--target`, `--from-triage`, and `--from-propose`
   where present); propose remains planning-only and apply-preview remains
   preview-only — neither executes anything.
+- PR188: `commands/receipt_audit.py` for governed receipt audit/reporting:
+  `recipes receipt audit`, `audit-bundle`, `audit-bundle-validate`,
+  `integrity`, and `explain`. The command surfaces are unchanged;
+  audit/integrity/explain/validate remain read-only, and audit-bundle remains
+  bounded ShellForgeAI-owned artifact export only. Governed recipe execution and
+  recovery execution remain in `cli.py`.
 
 Each module exposes a small `register(app, ...)` function that `cli.py` calls
 at the same position the commands previously occupied (preserving help order),
 and the handlers resolve shared `cli` helpers lazily so monkeypatch hooks and
-output stay identical. Future PRs will migrate further domains (validation,
-audit, compose, mission, etc.) the same way.
+output stay identical. Future PRs will migrate further domains (validation, compose, mission, etc.) the
+same way.
 
 ### Command-surface golden guardrail (PR184)
 
