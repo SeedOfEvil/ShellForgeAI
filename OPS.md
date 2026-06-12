@@ -56,7 +56,9 @@ receipt rollback-preview`, and the top-level `rollback-preview --receipt`
 alias) into `commands/receipt_safety.py`, PR193 extracts the read-only
 recovery receipt status/validate handlers (`recipes receipt recovery-status`
 and `recipes receipt recovery-validate`) into
-`commands/receipt_recovery_readonly.py`, and PR189 extracts the read-only recipe
+`commands/receipt_recovery_readonly.py`, PR194 extracts the governed,
+confirm-gated `recipes receipt recovery-execute` handler into
+`commands/receipt_recovery_execute.py`, and PR189 extracts the read-only recipe
 registry/preflight handlers (`recipes`, `recipes list`, `recipes inspect`,
 `recipes eligibility`, `recipes preflight`, `recipes preflight validate`) into
 `commands/recipes.py`, and PR190 extracts the top-level deterministic `ask`
@@ -71,8 +73,11 @@ audit-bundle stay bounded ShellForgeAI-owned artifact-only writes;
 rollback-preview and recovery status/validate still never execute rollback,
 recovery, cleanup, remediation, Docker/Compose, shell, or model calls. Recipe
 list/eligibility/preflight stay read-only and never execute; governed `recipes
-execute` and receipt recovery execution remain separately guarded in `cli.py`
-and unchanged.
+execute` remains separately guarded in `cli.py` and unchanged. Receipt
+recovery execution (`recipes receipt recovery-execute`) keeps its exact
+command surface and stays exact-target, disposable-only, allowlisted, and
+explicit `--confirm` gated after the PR194 move; no-confirm and all blocked
+cases still perform no restart and write no successful recovery receipt.
 
 PR184 adds a behavior-preserving **command-surface golden guardrail** to protect
 this split as it continues onto riskier surfaces. Run it on every CLI
