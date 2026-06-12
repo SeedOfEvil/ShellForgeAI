@@ -19,6 +19,13 @@ runs Docker/Compose, and never runs remediation, rollback, cleanup, or restart.
 It only runs validation commands when you explicitly pass `--execute`, and even
 then only the recommended `ruff` / `compileall` / `pytest` commands.
 
+CLI command-module splits must also consult the read-only refactor inventory in
+[`CLI_REFACTOR_MAP.md`](CLI_REFACTOR_MAP.md). Every split must run the PR184
+golden command-surface guardrail. Use Lane B only for narrow read-only moves;
+use Lane C/full validation for broad command-surface moves, ask/refusal routing,
+interactive mode, rollback/recovery/recipe/mission execution surfaces, or any
+mutation-capable governed handler.
+
 ---
 
 ## TL;DR

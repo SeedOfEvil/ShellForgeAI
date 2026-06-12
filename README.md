@@ -121,7 +121,9 @@ asks deterministically, and refuses or gates mutation.
   status/validate, the confirm-gated receipt recovery-execute lane (surface
   and gates unchanged), read-only recipe registry/preflight, deterministic
   `ask`, the read-only `v1 check` readiness handler, and the `model` command
-  group — `model doctor` stays read-only and still makes no model call). The PR184
+  group — `model doctor` stays read-only and still makes no model call). PR198
+  adds the read-only CLI refactor inventory and remaining-handler map at
+  [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md). The PR184
   command-surface golden guardrail protects these moves; `v1 check`
   quick/standard readiness behavior and JSON/human output remain unchanged
   after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —
