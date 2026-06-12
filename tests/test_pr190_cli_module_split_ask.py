@@ -130,10 +130,12 @@ def _forbid_execution(monkeypatch) -> None:
     monkeypatch.setattr(cli_mod, "build_provider", fail_provider)
     monkeypatch.setattr(cli_mod, "execute_disposable_restart", fail_execute, raising=False)
     monkeypatch.setattr(cli_mod, "execute_receipt_recovery", fail_execute, raising=False)
+    from shellforgeai.commands import receipt_recovery_execute as recovery_execute_commands
     from shellforgeai.core import recipe_execution, recipe_receipt_recovery
 
     monkeypatch.setattr(recipe_execution, "execute_disposable_restart", fail_execute)
     monkeypatch.setattr(recipe_receipt_recovery, "execute_receipt_recovery", fail_execute)
+    monkeypatch.setattr(recovery_execute_commands, "execute_receipt_recovery", fail_execute)
 
 
 def _deterministic_ask(monkeypatch, tmp_path: Path, phrase: str):
@@ -185,7 +187,6 @@ def test_deterministic_routing_helpers_remain_in_cli() -> None:
         "_is_status_ask",
         "interactive",
         "recipes_execute",
-        "recipes_receipt_recovery_execute",
     ):
         assert kept in function_names, kept
 

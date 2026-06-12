@@ -39,8 +39,9 @@ The staged split currently covers these behavior-preserving slices:
   command surfaces are unchanged; history/inspect/compare/audit/integrity/
   explain/validate remain read-only, while export and
   audit-bundle remain bounded ShellForgeAI-owned artifact-only writes. Governed
-  recipe execution and receipt recovery execution remain separately guarded in
-  `cli.py`.
+  recipe execution remains separately guarded in `cli.py`; confirm-gated
+  receipt recovery execution is owned by `commands/receipt_recovery_execute.py`
+  since PR194, unchanged.
 - PR192: `commands/receipt_safety.py` for the read-only governed receipt
   safety surfaces: `recipes receipt verify`, `recipes receipt validate`,
   `recipes receipt rollback-preview`, and the existing top-level
@@ -57,17 +58,25 @@ The staged split currently covers these behavior-preserving slices:
   recovery receipt evidence/artifacts only, do not rerun recovery, do not
   repair or delete artifacts, and do not execute Docker/Compose, cleanup,
   remediation, rollback, shell, natural-language, or model-driven actions.
-  Governed `recipes receipt recovery-execute` remains separately guarded in
-  `cli.py` behind explicit `--confirm`, unchanged.
+- PR194: `commands/receipt_recovery_execute.py` for the governed, confirm-gated
+  `recipes receipt recovery-execute` command. The command surface is unchanged
+  (`RECEIPT_REF` argument, explicit `--confirm`, `--json`); the explicit
+  `--confirm` requirement, exact-target disposable/allowlist/production gates,
+  blocked-case JSON safety contract, exact `docker restart <target>` argv,
+  recovery receipt writing, and verification recording are all preserved. It
+  still never runs Docker Compose, cleanup, remediation, rollback, shell,
+  natural-language, or model-driven execution, and never restarts production
+  or broad targets.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and
   `recipes preflight validate`. The command surfaces are unchanged (`--json`,
   `--recipe`, `--target`, `--save` where present); registry/list/eligibility
   remain read-only and preflight remains read-only packet generation that
-  never executes. Governed `recipes execute` and `recipes receipt
-  recovery-execute` remain in `cli.py` unchanged; read-only recovery
-  status/validate live in `commands/receipt_recovery_readonly.py` unchanged.
+  never executes. Governed `recipes execute` remains in `cli.py` unchanged;
+  read-only recovery status/validate live in
+  `commands/receipt_recovery_readonly.py` and confirm-gated recovery execution
+  lives in `commands/receipt_recovery_execute.py`, both unchanged.
 - PR190: `commands/ask.py` for the top-level deterministic `ask` command. The
   command surface is unchanged (`ask "<question>"` with `--context`,
   `--full-context`, `--raw`, `--no-evidence`, `--since`). Deterministic
@@ -1636,9 +1645,10 @@ Implementation note: the `recipes receipt verify`, `recipes receipt validate`,
 handlers are registered from `src/shellforgeai/commands/receipt_safety.py` as
 part of the behavior-preserving CLI command-module split (PR192). The
 read-only recovery receipt status/validate handlers are registered from
-`src/shellforgeai/commands/receipt_recovery_readonly.py` (PR193). The command
-surfaces are unchanged, and the governed `recipes receipt recovery-execute`
-lane stays in `cli.py` behind its explicit `--confirm` gate. Future CLI
+`src/shellforgeai/commands/receipt_recovery_readonly.py` (PR193), and the
+governed `recipes receipt recovery-execute` lane is registered from
+`src/shellforgeai/commands/receipt_recovery_execute.py` (PR194), still behind
+its explicit `--confirm` gate. The command surfaces are unchanged. Future CLI
 refactors should run the PR184 command-surface golden guardrail.
 
 `recipes receipt recovery-execute <receipt_id> --confirm` is the only receipt recovery execution lane. It is not natural-language execution and it is not true rollback of prior process state. It loads and validates a `docker.disposable_restart` receipt, resolves the exact target from the receipt, rechecks the target still exists and is labeled `shellforgeai.disposable=true` plus `shellforgeai.allow_restart=true`, refuses production/broad/missing/unlabeled targets, and then performs exactly one argv-list action: `["docker", "restart", "<target>"]`. It writes a recovery receipt under `recipe_receipts/<recovery_receipt_id>/` with `receipt.json`, `receipt.md`, compatibility `recipe-receipt.json`/`recipe-receipt.md`, `manifest.json`, original receipt id, target, pre/post state, action argv, verification, checksums, and safety flags. `verify --receipt <recovery_receipt_id>` and `recipes receipt recovery-status <recovery_receipt_id>` read recorded evidence only and do not rerun recovery.

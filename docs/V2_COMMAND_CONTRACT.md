@@ -238,10 +238,13 @@ inspect`, `recipes eligibility`, `recipes preflight`, and `recipes preflight
 validate`) now live in `src/shellforgeai/commands/recipes.py` (PR189).
 Behavior-preserving only: registry/list/eligibility stay read-only, preflight
 stays read-only packet generation that never executes, and all JSON/safety
-surfaces are unchanged. Governed `recipes execute` and `recipes receipt recovery-execute` remain in
-`cli.py` unchanged; read-only recovery status/validate live in
-`src/shellforgeai/commands/receipt_recovery_readonly.py` unchanged. Future CLI
-refactors should run the PR184 command-surface golden guardrail.
+surfaces are unchanged. Governed `recipes execute` remains in `cli.py`
+unchanged; read-only recovery status/validate live in
+`src/shellforgeai/commands/receipt_recovery_readonly.py` and the confirm-gated
+`recipes receipt recovery-execute` lane lives in
+`src/shellforgeai/commands/receipt_recovery_execute.py` (PR194), both
+unchanged. Future CLI refactors should run the PR184 command-surface golden
+guardrail.
 
 Implementation note: the top-level deterministic `ask` Typer
 registration/handler now lives in `src/shellforgeai/commands/ask.py` (PR190).
@@ -341,8 +344,13 @@ names, options, JSON fields, read-only/artifact-only safety posture, and
 refusal behavior are unchanged; rollback-preview still executes no rollback or
 recovery, and recovery-status/recovery-validate still read recorded recovery
 receipt evidence/artifacts only without rerunning recovery, repairing, or
-deleting artifacts. Governed recipe execution and receipt recovery execution
-(`recipes receipt recovery-execute --confirm`) remain outside these modules in
+deleting artifacts. The governed, confirm-gated receipt recovery execution
+lane (`recipes receipt recovery-execute --confirm`) is owned by
+`src/shellforgeai/commands/receipt_recovery_execute.py` (PR194) as the same
+implementation-only move: the explicit `--confirm` requirement, exact-target
+disposable/allowlist/production gates, exact `docker restart <target>` argv,
+JSON safety contract, and recovery receipt behavior are unchanged. Governed
+recipe execution (`recipes execute`) remains outside these modules in
 `cli.py`, unchanged. Future CLI refactors should run the PR184 command-surface
 golden guardrail.
 

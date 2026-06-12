@@ -156,8 +156,10 @@ def test_receipt_audit_module_owns_read_only_receipt_commands_and_cli_wires_it()
         assert f'command("{command}")' in module_source
     assert "from shellforgeai.commands import receipt_audit as receipt_audit_commands" in cli_source
     assert "receipt_audit_commands.register(recipes_receipt_app)" in cli_source
-    assert '@recipes_receipt_app.command("recovery-execute")' in cli_source
-    assert "execute_receipt_recovery(" in cli_source
+    # PR194: governed recovery execution moved to its own command module, not
+    # into receipt_audit; cli.py wires it and stays free of the executor call.
+    assert "receipt_recovery_execute_commands.register(recipes_receipt_app)" in cli_source
+    assert "execute_receipt_recovery" not in module_source
 
 
 def test_cli_no_longer_owns_large_read_only_receipt_handler_bodies() -> None:

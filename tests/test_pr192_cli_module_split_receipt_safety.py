@@ -207,9 +207,9 @@ def test_receipt_safety_module_owns_verify_validate_rollback_preview() -> None:
         "from shellforgeai.commands import receipt_safety as receipt_safety_commands" in cli_source
     )
     assert "receipt_safety_commands.register(recipes_receipt_app, app)" in cli_source
-    # Mutation-capable governed recovery execution stays in cli.py, untouched.
-    assert '@recipes_receipt_app.command("recovery-execute")' in cli_source
-    assert "execute_receipt_recovery(" in cli_source
+    # Mutation-capable governed recovery execution stays out of receipt_safety;
+    # PR194 moved it to its own command module, wired from cli.py untouched.
+    assert "receipt_recovery_execute_commands.register(recipes_receipt_app)" in cli_source
     assert "execute_receipt_recovery" not in module_source
 
 

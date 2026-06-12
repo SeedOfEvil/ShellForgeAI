@@ -3,7 +3,8 @@
 These tests prove ``recipes receipt recovery-status`` and
 ``recipes receipt recovery-validate`` are registered from
 ``shellforgeai.commands.receipt_recovery_readonly`` while mutation-capable
-``recipes receipt recovery-execute`` remains in ``cli.py``. The extraction is
+``recipes receipt recovery-execute`` stays outside this module (since PR194 it
+lives in ``shellforgeai.commands.receipt_recovery_execute``). The extraction is
 behavior-preserving: help surfaces, JSON contracts, read-only safety fields,
 missing/malformed failures, artifact immutability, and the execution boundary
 are unchanged.
@@ -160,9 +161,13 @@ def _forbid_readonly_runtime_execution(monkeypatch) -> None:
     def fail_recovery_execute(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("status/validate must not rerun governed recovery execution")
 
+    from shellforgeai.commands import receipt_recovery_execute as recovery_execute_commands
+
     monkeypatch.setattr(cli_mod.subprocess, "run", fail_run)
     monkeypatch.setattr(cli_mod, "build_provider", fail_provider)
-    monkeypatch.setattr(cli_mod, "execute_receipt_recovery", fail_recovery_execute)
+    monkeypatch.setattr(
+        recovery_execute_commands, "execute_receipt_recovery", fail_recovery_execute
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +187,10 @@ def test_recovery_readonly_module_owns_status_and_validate_wiring() -> None:
         "receipt_recovery_readonly_commands"
     ) in cli_source
     assert "receipt_recovery_readonly_commands.register(recipes_receipt_app)" in cli_source
-    assert '@recipes_receipt_app.command("recovery-execute")' in cli_source
-    assert "execute_receipt_recovery(" in cli_source
+    # PR194: governed recovery execution moved to its own command module, not
+    # into the read-only module; cli.py wires it and no longer calls the
+    # executor directly.
+    assert "receipt_recovery_execute_commands.register(recipes_receipt_app)" in cli_source
     assert "execute_receipt_recovery" not in module_source
 
 

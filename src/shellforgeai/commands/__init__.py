@@ -29,11 +29,14 @@ The behavior-preserving extraction slices currently cover read-only domains:
   receipt verify, validate, and rollback-preview handlers (including the
   top-level ``rollback-preview`` alias).
 * :mod:`shellforgeai.commands.receipt_recovery_readonly` — the read-only
-  recovery receipt status and validate handlers; governed recovery execution
-  stays in ``cli.py``.
+  recovery receipt status and validate handlers.
+* :mod:`shellforgeai.commands.receipt_recovery_execute` — the governed,
+  confirm-gated ``recipes receipt recovery-execute`` handler; the explicit
+  ``--confirm`` gate, exact-target disposable/allowlist/production gates,
+  JSON contract, and recovery receipt behavior are unchanged.
 * :mod:`shellforgeai.commands.recipes` — the read-only governed recipe
   registry, list, inspect, eligibility, and preflight (build/save/validate)
-  handlers; governed recipe execution and recovery execution stay in
+  handlers; governed recipe execution (``recipes execute``) stays in
   ``cli.py``.
 * :mod:`shellforgeai.commands.ask` — the top-level deterministic ``ask``
   command; deterministic read-only routing, mutation refusal, and the
@@ -55,6 +58,7 @@ __all__ = [
     "ops",
     "propose",
     "receipt_audit",
+    "receipt_recovery_execute",
     "receipt_recovery_readonly",
     "receipt_safety",
     "recipes",

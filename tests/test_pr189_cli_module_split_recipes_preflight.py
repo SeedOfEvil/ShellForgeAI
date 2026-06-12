@@ -155,11 +155,14 @@ def test_governed_execution_handlers_remain_in_cli() -> None:
     """Execution boundary: mutation-capable execute/recovery stays out of recipes.py."""
     tree = ast.parse(CLI_PATH.read_text(encoding="utf-8"))
     function_names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
-    for kept in (
-        "recipes_execute",
-        "recipes_receipt_recovery_execute",
-    ):
+    for kept in ("recipes_execute",):
         assert kept in function_names, kept
+    # PR194: governed receipt recovery execution moved to its own command
+    # module, still outside recipes.py and still confirm-gated.
+    recovery_module = Path("src/shellforgeai/commands/receipt_recovery_execute.py").read_text(
+        encoding="utf-8"
+    )
+    assert '@recipes_receipt_app.command("recovery-execute")' in recovery_module
 
 
 def test_recipes_module_does_not_import_execution_surfaces() -> None:
@@ -427,6 +430,7 @@ def test_preflight_and_list_perform_no_execution_of_any_kind(monkeypatch, tmp_pa
     _forbid_execution(monkeypatch)
     _patch_scene(monkeypatch)
 
+    from shellforgeai.commands import receipt_recovery_execute as recovery_execute_commands
     from shellforgeai.core import recipe_execution, recipe_receipt_recovery
 
     def fail_execute(*args, **kwargs):  # noqa: ANN002, ANN003
@@ -435,7 +439,7 @@ def test_preflight_and_list_perform_no_execution_of_any_kind(monkeypatch, tmp_pa
     monkeypatch.setattr(recipe_execution, "execute_disposable_restart", fail_execute)
     monkeypatch.setattr(recipe_receipt_recovery, "execute_receipt_recovery", fail_execute)
     monkeypatch.setattr(cli_mod, "execute_disposable_restart", fail_execute)
-    monkeypatch.setattr(cli_mod, "execute_receipt_recovery", fail_execute)
+    monkeypatch.setattr(recovery_execute_commands, "execute_receipt_recovery", fail_execute)
 
     for argv in (
         ["recipes", "list", "--json"],
