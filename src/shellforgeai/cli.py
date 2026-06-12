@@ -36,6 +36,7 @@ from shellforgeai.commands import receipt_safety as receipt_safety_commands
 from shellforgeai.commands import recipes as recipes_commands
 from shellforgeai.commands import status as status_commands
 from shellforgeai.commands import triage as triage_commands
+from shellforgeai.commands import v1 as v1_commands
 from shellforgeai.commands import verify as verify_commands
 from shellforgeai.core import incident_index as incident_index_mod
 from shellforgeai.core import lab_restart as lab_restart_mod
@@ -330,6 +331,7 @@ session_app.add_typer(session_summary_app, name="summary")
 app.add_typer(self_test_app, name="self-test")
 app.add_typer(v1_app, name="v1")
 v1_app.add_typer(v1_packet_app, name="packet")
+v1_commands.register(v1_app, app)
 app.add_typer(triage_app, name="triage")
 app.add_typer(handoff_app, name="handoff")
 app.add_typer(remediation_app, name="remediation")
@@ -12748,60 +12750,6 @@ def v1_packet_compare_latest(
             for c in (payload.get("changes") or [])[: max(1, top)]:
                 console.print(f"- {c['field']}: {c['before']} -> {c['after']}")
     raise typer.Exit(0 if payload.get("status") == "ok" else 1)
-
-
-@v1_app.command("check")
-def v1_check(
-    profile: Annotated[str, typer.Option("--profile")] = "standard",
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-    fail_on_warn: Annotated[bool, typer.Option("--fail-on-warn")] = False,
-) -> None:
-    from shellforgeai.core.v1_readiness import run_v1_readiness_check
-
-    try:
-        payload = run_v1_readiness_check(app, profile=profile)
-    except ValueError as exc:
-        if json_output:
-            typer.echo(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "mode": "v1_readiness_check",
-                        "status": "failed",
-                        "error": str(exc),
-                    }
-                )
-            )
-        else:
-            console.print(f"Error: {exc}")
-        raise typer.Exit(1) from None
-
-    if fail_on_warn and payload.get("status") == "warn" and payload.get("ci_status") != "failed":
-        payload["ci_status"] = "failed_on_warn"
-
-    if json_output:
-        typer.echo(json.dumps(payload))
-    else:
-        console.print("ShellForgeAI V1 readiness check")
-        console.print("")
-        console.print(f"Profile: {payload['profile']}")
-        console.print(f"Status: {payload['status']}")
-        console.print("\nPassed:")
-        for c in payload["checks"]:
-            if c["status"] == "passed":
-                console.print(f"- {c['name']}")
-        if payload.get("warnings"):
-            console.print("\nWarnings:")
-            for w in payload["warnings"]:
-                console.print(f"- {w}")
-        console.print("\nSafety:")
-        for k, v in payload["safety"].items():
-            console.print(f"- {k}: {str(v).lower()}")
-
-    exit_code = 1 if payload.get("status") == "failed" else 0
-    if fail_on_warn and payload.get("status") == "warn":
-        exit_code = 1
-    raise typer.Exit(exit_code)
 
 
 @self_test_app.command("commands")

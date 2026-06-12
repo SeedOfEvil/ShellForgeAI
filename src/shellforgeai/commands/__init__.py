@@ -38,6 +38,9 @@ The behavior-preserving extraction slices currently cover read-only domains:
   registry, list, inspect, eligibility, and preflight (build/save/validate)
   handlers; governed recipe execution (``recipes execute``) stays in
   ``cli.py``.
+* :mod:`shellforgeai.commands.v1` — the read-only ``v1 check`` readiness
+  handler; quick/standard/full profiles, JSON/human output, counts, and safety
+  fields delegate to the existing V1 readiness core unchanged.
 * :mod:`shellforgeai.commands.ask` — the top-level deterministic ``ask``
   command; deterministic read-only routing, mutation refusal, and the
   evidence-backed model path delegate to the existing ``cli.py`` helpers,

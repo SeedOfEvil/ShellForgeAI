@@ -151,10 +151,13 @@ No casual execution steps are part of this path.
 - `shellforgeai v1 check --profile quick --json`
 - `shellforgeai v1 check --profile standard --json`
 - `shellforgeai v1 check --profile full --json`
+
 - `shellforgeai ops report --json`
 - deterministic ask-route check (`2AM operator report` / `what is on fire`)
 - mutation refusal check (`restart/delete/prune` prompts)
 - `pytest -q`
+
+Implementation note: the `v1 check` Typer handler lives in `src/shellforgeai/commands/v1.py` as part of the behavior-preserving CLI command-module split. The V1 quick/standard/full readiness behavior, JSON/human output, counts, and safety fields are unchanged; future CLI refactors should run the PR184 command-surface golden guardrail.
 
 
 ## V2 support: governed recipe registry
