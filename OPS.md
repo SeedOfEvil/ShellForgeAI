@@ -186,11 +186,15 @@ For V2 command-surface planning and anti-bloat guardrails, use
 [`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md) and
 [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md).
 
-CLI maintainability note (PR182): `src/shellforgeai/cli.py` is being split into
-a `src/shellforgeai/commands/` package one domain at a time, behavior-preserving
-at each step. `cli.py` stays the root Typer entrypoint; the first extracted
-domains are `status` and `doctor`/`model doctor`. Command names, output, exit
-codes, JSON behavior, and safety gates are unchanged. See
+CLI maintainability note (PR182-PR198): `src/shellforgeai/cli.py` is being
+split into a `src/shellforgeai/commands/` package one domain at a time,
+behavior-preserving at each step. `cli.py` stays the root Typer entrypoint;
+extracted domains include `status`, `doctor`, `ops`/`triage`, `verify`,
+`handoff`, `propose`, `apply-preview`, `ask`, governed recipe/receipt safety
+surfaces, `v1 check`, and `model`. Command names, output, exit codes, JSON
+behavior, and safety gates are unchanged. Before moving more handlers, use the
+read-only inventory map in [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md)
+and run the PR184 command-surface golden guardrail for every split. See
 [`docs/cli.md`](docs/cli.md) and [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Current baseline / handoff
