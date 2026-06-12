@@ -57,7 +57,11 @@ quick/standard/full V1 readiness behavior, JSON schemas, safety flags, ask
 routing, and mutation refusal are unchanged. `model doctor` remains the
 read-only provider-readiness report after the move: it does not call model
 inference, start Codex tasks, or mutate anything; `model test` remains the
-group's only explicit one-shot model call, unchanged.
+group's only explicit one-shot model call, unchanged. PR197 fixes
+pre-existing guidance drift: V1 readiness `next_safe_commands` no longer
+suggests the invalid `shellforgeai model doctor --json`; it suggests
+`shellforgeai model doctor` (human-output only) instead, and
+machine-readable general health remains `shellforgeai doctor --json`.
 Receipt history/inspect/compare/audit/integrity/explain/verify/validate/
 rollback-preview and audit-bundle/export validation stay read-only; export and
 audit-bundle stay bounded ShellForgeAI-owned artifact-only writes;

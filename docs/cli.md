@@ -1630,6 +1630,13 @@ When `shellforgeai diagnose <target>` matches a known Docker/battle-lab containe
 
 Read-only command that verifies the documented V1 command-surface contract without executing remediation/rollback/cleanup.
 
+The JSON payload's `next_safe_commands` guidance suggests only valid
+commands (PR197): model readiness guidance is `shellforgeai model doctor`
+(human-output only — `model doctor` has no `--json` under the current
+contract), and machine-readable general health remains
+`shellforgeai doctor --json`. The previously suggested
+`shellforgeai model doctor --json` was invalid and is no longer emitted.
+
 - `shellforgeai v1 packet history [--limit N] [--json]` lists saved V1 readiness packets (newest first).
 - `shellforgeai v1 packet compare <before-packet-id-or-path> <after-packet-id-or-path> [--json] [--only-changed] [--include-stable] [--top N]` compares two saved V1 packets read-only.
 - `shellforgeai v1 packet compare-latest [--json] [--only-changed] [--include-stable] [--top N]` compares the latest two saved V1 packets.

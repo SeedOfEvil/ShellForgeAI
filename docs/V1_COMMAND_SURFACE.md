@@ -159,6 +159,13 @@ No casual execution steps are part of this path.
 
 Implementation note: the `v1 check` Typer handler lives in `src/shellforgeai/commands/v1.py` as part of the behavior-preserving CLI command-module split. The V1 quick/standard/full readiness behavior, JSON/human output, counts, and safety fields are unchanged; future CLI refactors should run the PR184 command-surface golden guardrail.
 
+Safe-next-command guidance note (PR197): the `v1 check` JSON
+`next_safe_commands` list suggests only valid commands. Model readiness
+guidance is `shellforgeai model doctor`, which is human-output only (no
+`--json` under the current contract); machine-readable general health is
+`shellforgeai doctor --json`. Guidance suggesting `model doctor --json` was
+invalid drift and is no longer emitted.
+
 
 ## V2 support: governed recipe registry
 
