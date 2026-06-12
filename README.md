@@ -115,15 +115,16 @@ asks deterministically, and refuses or gates mutation.
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
   (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`;
-  PR185-PR194: `verify`, `handoff`, `propose`, `apply-preview`, governed
+  PR185-PR195: `verify`, `handoff`, `propose`, `apply-preview`, governed
   receipt history/audit/export/compare reporting, read-only receipt
   verify/validate/rollback-preview safety surfaces, read-only recovery receipt
   status/validate, the confirm-gated receipt recovery-execute lane (surface
-  and gates unchanged), read-only recipe registry/preflight, and the
-  deterministic `ask` command),
-  protected by the PR184 command-surface golden guardrail
-  (`tests/test_pr184_cli_command_surface_golden.py`)
-  — see [`docs/cli.md`](docs/cli.md).
+  and gates unchanged), read-only recipe registry/preflight, deterministic
+  `ask`, and the read-only `v1 check` readiness handler). The PR184
+  command-surface golden guardrail protects these moves; `v1 check`
+  quick/standard readiness behavior and JSON/human output remain unchanged
+  after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —
+  see [`docs/cli.md`](docs/cli.md).
 
 ### What this is (V1)
 

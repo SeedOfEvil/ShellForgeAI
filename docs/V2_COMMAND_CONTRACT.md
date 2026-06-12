@@ -255,11 +255,19 @@ routing/refusal helpers plus interactive mode and governed execution handlers
 remain in `cli.py`. Future CLI refactors should run the PR184 command-surface
 golden guardrail.
 
+Implementation note: the read-only `v1 check` Typer registration/handler now
+lives in `src/shellforgeai/commands/v1.py` (PR195). Behavior-preserving only:
+`v1 check --profile quick|standard|full`, `--json`, and `--fail-on-warn` keep
+their existing readiness semantics, JSON/human output, counts, status fields,
+and safety fields. The V1 packet lifecycle remains in `cli.py` for a later
+focused move. Future CLI refactors should run the PR184 command-surface golden
+guardrail.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:
 
-- V1 readiness and packet lifecycle.
+- V1 packet lifecycle (`v1 check` registration lives in `commands/v1.py`).
 - Interactive summary save/validate/history/compare/export lifecycle.
 - Remediation self-test and eligibility explanations.
 - Audit retention and cleanup review/plan/archive/validate/report/readiness.

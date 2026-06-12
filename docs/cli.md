@@ -67,6 +67,11 @@ The staged split currently covers these behavior-preserving slices:
   still never runs Docker Compose, cleanup, remediation, rollback, shell,
   natural-language, or model-driven execution, and never restarts production
   or broad targets.
+- PR195: `commands/v1.py` for the read-only `v1 check` readiness handler.
+  The command surface is unchanged (`--profile`, `--json`, `--fail-on-warn`);
+  quick/standard/full profile behavior, JSON/human output, pass/fail/warn/skip
+  counts, and safety fields still delegate to the existing V1 readiness core.
+  `v1 packet` lifecycle commands remain in `cli.py` for a later focused move.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and
@@ -95,8 +100,8 @@ same way.
 
 ### Command-surface golden guardrail (PR184)
 
-Before more handlers move out of `cli.py`, PR184 adds a behavior-preserving
-**golden command-surface guardrail** so refactors cannot silently drop
+Before more handlers move out of `cli.py` (including V1 readiness moves such as
+PR195), PR184 adds a behavior-preserving **golden command-surface guardrail** so refactors cannot silently drop
 commands, JSON flags, help text, governed-execution confirmation markers, or
 mutation-refusal paths.
 
