@@ -347,7 +347,8 @@ def test_doctor_human_never_suggests_mutation_terms(tmp_path: Path, monkeypatch)
 
 
 def test_model_test_command_still_registered_in_cli() -> None:
-    # model test intentionally stays in cli.py; only model doctor was moved.
+    # The model group surface must stay intact (since PR196 both model doctor
+    # and model test are registered from shellforgeai.commands.model).
     result = runner.invoke(app, ["model", "--help"])
     assert result.exit_code == 0
     assert "doctor" in result.stdout
