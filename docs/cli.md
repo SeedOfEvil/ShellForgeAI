@@ -33,12 +33,14 @@ The staged split currently covers these behavior-preserving slices:
   (`--json`, `--brief`, `--target`, `--from-triage`, and `--from-propose`
   where present); propose remains planning-only and apply-preview remains
   preview-only — neither executes anything.
-- PR188: `commands/receipt_audit.py` for governed receipt audit/reporting:
-  `recipes receipt audit`, `audit-bundle`, `audit-bundle-validate`,
-  `integrity`, and `explain`. The command surfaces are unchanged;
-  audit/integrity/explain/validate remain read-only, and audit-bundle remains
-  bounded ShellForgeAI-owned artifact export only. Governed recipe execution and
-  recovery execution remain in `cli.py`.
+- PR191: `commands/receipt_audit.py` for governed receipt history, inspect,
+  export, export-validate, compare, audit, audit-bundle,
+  audit-bundle-validate, integrity, explain, and rollback-preview surfaces. The
+  command surfaces are unchanged; history/inspect/compare/audit/integrity/
+  explain/validate/rollback-preview remain read-only, while export and
+  audit-bundle remain bounded ShellForgeAI-owned artifact-only writes. Governed
+  recipe execution and receipt recovery execution remain separately guarded in
+  `cli.py`.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and
@@ -46,8 +48,7 @@ The staged split currently covers these behavior-preserving slices:
   `--recipe`, `--target`, `--save` where present); registry/list/eligibility
   remain read-only and preflight remains read-only packet generation that
   never executes. Governed `recipes execute`, `recipes receipt
-  recovery-execute`, recovery status/validate, and rollback-preview remain in
-  `cli.py` unchanged.
+  recovery-execute`, and recovery status/validate remain in `cli.py` unchanged.
 - PR190: `commands/ask.py` for the top-level deterministic `ask` command. The
   command surface is unchanged (`ask "<question>"` with `--context`,
   `--full-context`, `--raw`, `--no-evidence`, `--since`). Deterministic
