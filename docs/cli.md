@@ -35,12 +35,23 @@ The staged split currently covers these behavior-preserving slices:
   preview-only — neither executes anything.
 - PR191: `commands/receipt_audit.py` for governed receipt history, inspect,
   export, export-validate, compare, audit, audit-bundle,
-  audit-bundle-validate, integrity, explain, and rollback-preview surfaces. The
+  audit-bundle-validate, integrity, and explain surfaces. The
   command surfaces are unchanged; history/inspect/compare/audit/integrity/
-  explain/validate/rollback-preview remain read-only, while export and
+  explain/validate remain read-only, while export and
   audit-bundle remain bounded ShellForgeAI-owned artifact-only writes. Governed
   recipe execution and receipt recovery execution remain separately guarded in
   `cli.py`.
+- PR192: `commands/receipt_safety.py` for the read-only governed receipt
+  safety surfaces: `recipes receipt verify`, `recipes receipt validate`,
+  `recipes receipt rollback-preview`, and the existing top-level
+  `rollback-preview --receipt <receipt_ref>` alias (all with `--json` where
+  previously present). The command surfaces are unchanged: verify and validate
+  remain read-only receipt evidence checks that never rerun recipes, repair, or
+  delete artifacts; rollback-preview remains read-only, still truthfully
+  reports that `docker.disposable_restart` has no true rollback, and never
+  executes rollback or recovery. Governed `recipes receipt recovery-execute`
+  and the recovery status/validate handlers remain separately guarded in
+  `cli.py`, unchanged.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and
@@ -1611,6 +1622,14 @@ shellforgeai recipes receipt recovery-validate <recovery_receipt_id> --json
 ```
 
 Receipt rollback-preview is read-only. It inspects an existing governed recipe execution receipt, reports whether rollback is available, blocked, unsupported, or limited, and lists the gates for recovery. For `docker.disposable_restart`, the posture is intentionally limited: there is no true rollback for a restart; recovery can only repeat the exact-target disposable restart after rechecking current target existence, non-production status, labels/allowlist, explicit `--confirm`, receipt creation, and verification. Rollback-preview never restarts containers, never calls Docker/Compose, never creates a rollback receipt, never calls shell/model, and returns nonzero for missing, malformed, or production-target receipts.
+
+Implementation note: the `recipes receipt verify`, `recipes receipt validate`,
+`recipes receipt rollback-preview`, and top-level `rollback-preview` Typer
+handlers are registered from `src/shellforgeai/commands/receipt_safety.py` as
+part of the behavior-preserving CLI command-module split (PR192). The command
+surfaces are unchanged, and the governed `recipes receipt recovery-execute`
+lane stays in `cli.py` behind its explicit `--confirm` gate. Future CLI
+refactors should run the PR184 command-surface golden guardrail.
 
 `recipes receipt recovery-execute <receipt_id> --confirm` is the only receipt recovery execution lane. It is not natural-language execution and it is not true rollback of prior process state. It loads and validates a `docker.disposable_restart` receipt, resolves the exact target from the receipt, rechecks the target still exists and is labeled `shellforgeai.disposable=true` plus `shellforgeai.allow_restart=true`, refuses production/broad/missing/unlabeled targets, and then performs exactly one argv-list action: `["docker", "restart", "<target>"]`. It writes a recovery receipt under `recipe_receipts/<recovery_receipt_id>/` with `receipt.json`, `receipt.md`, compatibility `recipe-receipt.json`/`recipe-receipt.md`, `manifest.json`, original receipt id, target, pre/post state, action argv, verification, checksums, and safety flags. `verify --receipt <recovery_receipt_id>` and `recipes receipt recovery-status <recovery_receipt_id>` read recorded evidence only and do not rerun recovery.
 

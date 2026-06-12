@@ -23,8 +23,12 @@ The behavior-preserving extraction slices currently cover read-only domains:
 * :mod:`shellforgeai.commands.apply_preview` — the read-only V2
   execution-boundary (apply) preview handler; preview-only, never executes.
 * :mod:`shellforgeai.commands.receipt_audit` — governed receipt history,
-  inspect, export, compare, audit, integrity, finding explanation,
-  rollback-preview, and artifact-only receipt export/audit-bundle handlers.
+  inspect, export, compare, audit, integrity, finding explanation, and
+  artifact-only receipt export/audit-bundle handlers.
+* :mod:`shellforgeai.commands.receipt_safety` — the read-only governed
+  receipt verify, validate, and rollback-preview handlers (including the
+  top-level ``rollback-preview`` alias); governed recovery execution stays
+  in ``cli.py``.
 * :mod:`shellforgeai.commands.recipes` — the read-only governed recipe
   registry, list, inspect, eligibility, and preflight (build/save/validate)
   handlers; governed recipe execution and recovery execution stay in
@@ -49,6 +53,7 @@ __all__ = [
     "ops",
     "propose",
     "receipt_audit",
+    "receipt_safety",
     "recipes",
     "status",
     "triage",

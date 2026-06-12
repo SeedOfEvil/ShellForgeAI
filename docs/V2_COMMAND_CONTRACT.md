@@ -323,15 +323,21 @@ Rollback posture for this recipe is not true undo: bounded recovery is a future 
 
 
 
-The governed receipt history/audit/export/compare/integrity/explain/
-rollback-preview surfaces (`recipes receipt history`, `inspect`, `export`,
+The governed receipt history/audit/export/compare/integrity/explain surfaces
+(`recipes receipt history`, `inspect`, `export`,
 `export-validate`, `compare`, `compare-latest`, `audit`, `audit-bundle`,
-`audit-bundle-validate`, `integrity`, `explain`, and `rollback-preview`) are
-owned by `src/shellforgeai/commands/receipt_audit.py` as part of the staged CLI
-command-module split. This is an implementation-only move: command names,
+`audit-bundle-validate`, `integrity`, and `explain`) are
+owned by `src/shellforgeai/commands/receipt_audit.py`, and the read-only
+receipt safety surfaces (`recipes receipt verify`, `recipes receipt validate`,
+`recipes receipt rollback-preview`, and the top-level `rollback-preview
+--receipt <receipt_ref>` alias) are owned by
+`src/shellforgeai/commands/receipt_safety.py`, both as part of the staged CLI
+command-module split. These are implementation-only moves: command names,
 options, JSON fields, read-only/artifact-only safety posture, and refusal
-behavior are unchanged. Governed recipe execution and receipt recovery execution
-remain outside this module. Future CLI refactors should run the PR184
+behavior are unchanged; rollback-preview still executes no rollback or
+recovery. Governed recipe execution and receipt recovery execution
+(`recipes receipt recovery-execute --confirm`) remain outside these modules in
+`cli.py`, unchanged. Future CLI refactors should run the PR184
 command-surface golden guardrail.
 
 ### Governed receipt audit/history layer

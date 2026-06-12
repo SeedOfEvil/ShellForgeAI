@@ -3,9 +3,11 @@
 Behavior-preserving extraction of read-only/artifact-only ``recipes receipt``
 audit/history/export/compare handlers from ``shellforgeai.cli``. The module attaches commands to
 the existing receipt Typer group and delegates to the same core builders and
-human renderers. It does not move governed recipe execution or recovery
-execution, and it introduces no Docker/Compose, shell, model, cleanup,
-remediation, rollback execution, recovery execution, repair, or delete behavior.
+human renderers. The receipt verify/validate/rollback-preview safety surfaces
+live in :mod:`shellforgeai.commands.receipt_safety` (PR192). It does not move
+governed recipe execution or recovery execution, and it introduces no
+Docker/Compose, shell, model, cleanup, remediation, rollback execution,
+recovery execution, repair, or delete behavior.
 """
 
 from __future__ import annotations
@@ -35,14 +37,13 @@ from shellforgeai.core.recipe_receipt_audit import receipt_history as build_rece
 from shellforgeai.core.recipe_receipt_audit import receipt_inspect as build_receipt_inspect
 from shellforgeai.core.recipe_receipt_audit import receipt_integrity as build_receipt_integrity
 from shellforgeai.core.recipe_receipt_explain import receipt_explain as build_receipt_explain
-from shellforgeai.core.recipe_receipt_rollback_preview import preview_receipt_rollback
 
 
 def _cli():
     return sys.modules["shellforgeai.cli"]
 
 
-def register(recipes_receipt_app: typer.Typer, app: typer.Typer | None = None) -> None:
+def register(recipes_receipt_app: typer.Typer) -> None:
     """Register read-only/artifact-only governed receipt audit/history commands."""
 
     @recipes_receipt_app.command("explain")
@@ -396,43 +397,3 @@ def register(recipes_receipt_app: typer.Typer, app: typer.Typer | None = None) -
             )
         if payload.get("status") not in {"ok", "not_enough_history"}:
             raise typer.Exit(1)
-
-    @recipes_receipt_app.command("rollback-preview")
-    def recipes_receipt_rollback_preview(
-        ctx: typer.Context,
-        receipt_ref: Annotated[
-            str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
-        ],
-        json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-    ) -> None:
-        """Preview rollback/recovery posture for a governed receipt. Read-only."""
-        cli = _cli()
-        runtime = cli._ctx(ctx)
-        payload = preview_receipt_rollback(receipt_ref, runtime.session.data_dir)
-        if json_out:
-            typer.echo(json.dumps(payload))
-        else:
-            typer.echo(cli._render_receipt_rollback_preview_human(payload), nl=False)
-        if payload.get("status") not in {"limited", "preview_ready", "unsupported_recipe"}:
-            raise typer.Exit(1)
-
-    if app is not None:
-
-        @app.command("rollback-preview")
-        def rollback_preview_receipt(
-            ctx: typer.Context,
-            receipt: Annotated[str, typer.Option("--receipt", help="Receipt id or owned path.")],
-            json_out: Annotated[
-                bool, typer.Option("--json", help="Emit strict JSON only.")
-            ] = False,
-        ) -> None:
-            """Preview rollback/recovery posture for a governed receipt. Read-only."""
-            cli = _cli()
-            runtime = cli._ctx(ctx)
-            payload = preview_receipt_rollback(receipt, runtime.session.data_dir)
-            if json_out:
-                typer.echo(json.dumps(payload))
-            else:
-                typer.echo(cli._render_receipt_rollback_preview_human(payload), nl=False)
-            if payload.get("status") not in {"limited", "preview_ready", "unsupported_recipe"}:
-                raise typer.Exit(1)

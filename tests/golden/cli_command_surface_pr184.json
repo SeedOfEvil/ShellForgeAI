@@ -217,6 +217,8 @@
         "audit-bundle",
         "integrity",
         "explain",
+        "verify",
+        "validate",
         "rollback-preview",
         "recovery-execute"
       ]
@@ -292,11 +294,32 @@
       "required_substrings": ["explain"]
     },
     {
+      "name": "recipes_receipt_verify_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "verify", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["verify", "receipt", "read-only", "--json"]
+    },
+    {
+      "name": "recipes_receipt_validate_help",
+      "group": "recipes_receipt",
+      "argv": ["recipes", "receipt", "validate", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["validate", "receipt", "read-only", "--json"]
+    },
+    {
       "name": "recipes_receipt_rollback_preview_help",
       "group": "recipes_receipt",
       "argv": ["recipes", "receipt", "rollback-preview", "--help"],
       "expect_exit_code": 0,
       "required_substrings": ["rollback", "receipt", "read-only"]
+    },
+    {
+      "name": "rollback_preview_alias_help",
+      "group": "recipes_receipt",
+      "argv": ["rollback-preview", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--receipt", "rollback", "read-only"]
     },
     {
       "name": "recipes_receipt_recovery_execute_help",

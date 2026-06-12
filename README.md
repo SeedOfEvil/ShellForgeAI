@@ -115,8 +115,9 @@ asks deterministically, and refuses or gates mutation.
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
   (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`;
-  PR185-PR191: `verify`, `handoff`, `propose`, `apply-preview`, governed
-  receipt history/audit/export/compare/rollback-preview reporting, read-only
+  PR185-PR192: `verify`, `handoff`, `propose`, `apply-preview`, governed
+  receipt history/audit/export/compare reporting, read-only receipt
+  verify/validate/rollback-preview safety surfaces, read-only
   recipe registry/preflight, and the deterministic `ask` command),
   protected by the PR184 command-surface golden guardrail
   (`tests/test_pr184_cli_command_surface_golden.py`)
@@ -143,12 +144,15 @@ asks deterministically, and refuses or gates mutation.
   command-module split. It summarizes the golden-path posture and first safe
   command; it does not execute fixes or imply remediation happened, and
   `handoff --save` writes only a ShellForgeAI-owned artifact under
-  `<data_dir>/v2_handoffs/`. Governed receipt history/audit/export/compare/rollback-preview surfaces
+  `<data_dir>/v2_handoffs/`. Governed receipt history/audit/export/compare surfaces
   (`recipes receipt history`, `inspect`, `export`, `export-validate`, `compare`,
-  `audit`, `integrity`, `explain`, `audit-bundle`, `audit-bundle-validate`, and
-  `rollback-preview`) are also split into a command module with unchanged
-  behavior: read-only surfaces remain read-only, and export/audit-bundle remain
-  bounded ShellForgeAI-owned artifact-only writes.
+  `audit`, `integrity`, `explain`, `audit-bundle`, and `audit-bundle-validate`)
+  and the read-only receipt safety surfaces (`recipes receipt verify`,
+  `validate`, `rollback-preview`, and the top-level `rollback-preview
+  --receipt` alias) are also split into command modules with unchanged
+  behavior: read-only surfaces remain read-only, export/audit-bundle remain
+  bounded ShellForgeAI-owned artifact-only writes, and rollback-preview still
+  never executes rollback or recovery.
 - Read-only handoff artifact lifecycle (`handoff --save`, `handoff validate
   <handoff_ref>`, `handoff export <handoff_ref>`, `handoff export-validate
   <export_ref>`, each with `--json`). Save/export write only ShellForgeAI-owned
