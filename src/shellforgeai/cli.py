@@ -27,6 +27,7 @@ from shellforgeai.commands import apply_preview as apply_preview_commands
 from shellforgeai.commands import ask as ask_commands
 from shellforgeai.commands import doctor as doctor_commands
 from shellforgeai.commands import handoff as handoff_commands
+from shellforgeai.commands import model as model_commands
 from shellforgeai.commands import ops as ops_commands
 from shellforgeai.commands import propose as propose_commands
 from shellforgeai.commands import receipt_audit as receipt_audit_commands
@@ -756,36 +757,8 @@ def version_cmd() -> None:
         console.print(build.build_line())
 
 
-doctor_commands.register(app, model_app)
-
-
-@model_app.command("test")
-def model_test(
-    ctx: typer.Context,
-    prompt: Annotated[str, typer.Argument()] = "Reply with: Hello.",
-    raw: bool = typer.Option(False, "--raw"),
-    timeout: int | None = typer.Option(None, "--timeout"),
-    model: str | None = typer.Option(None, "--model"),
-) -> None:
-    runtime = _ctx(ctx)
-    provider = build_provider(runtime.settings)
-    req = ModelRequest(
-        prompt=prompt,
-        model=model or runtime.settings.model.model,
-        provider=runtime.settings.model.provider,
-        timeout_seconds=timeout or runtime.settings.model.timeout_seconds,
-        metadata={"raw": raw},
-    )
-    resp = provider.complete(req)
-    console.print(resp.text)
-    console.print(
-        f"\nProvider: {resp.provider}\n"
-        f"Model: {resp.model}\n"
-        f"OK: {str(resp.ok).lower()}\n"
-        f"{_usage_line(resp)}"
-    )
-    if raw and resp.raw and resp.raw.get("stdout_jsonl"):
-        console.print(resp.raw["stdout_jsonl"])
+doctor_commands.register(app)
+model_commands.register(model_app)
 
 
 @inspect_app.command("host")

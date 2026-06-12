@@ -49,11 +49,15 @@ command-module split keeps behavior unchanged while moving handlers into
 surfaces, PR190 extracted deterministic `ask`, PR191 extracted governed receipt
 history/audit/export/compare surfaces, PR192 extracted read-only receipt safety
 surfaces, PR193 extracted read-only recovery receipt status/validate, PR194
-extracted confirm-gated receipt recovery-execute, and PR195 extracts the
-read-only `v1 check` readiness handler into `commands/v1.py`. This is an
-internal layout hardening only: command UX, quick/standard/full V1 readiness
-behavior, JSON schemas, safety flags, ask routing, and mutation refusal are
-unchanged.
+extracted confirm-gated receipt recovery-execute, PR195 extracted the
+read-only `v1 check` readiness handler into `commands/v1.py`, and PR196
+extracts the `model` command group (`model doctor` and `model test`) into
+`commands/model.py`. This is an internal layout hardening only: command UX,
+quick/standard/full V1 readiness behavior, JSON schemas, safety flags, ask
+routing, and mutation refusal are unchanged. `model doctor` remains the
+read-only provider-readiness report after the move: it does not call model
+inference, start Codex tasks, or mutate anything; `model test` remains the
+group's only explicit one-shot model call, unchanged.
 Receipt history/inspect/compare/audit/integrity/explain/verify/validate/
 rollback-preview and audit-bundle/export validation stay read-only; export and
 audit-bundle stay bounded ShellForgeAI-owned artifact-only writes;

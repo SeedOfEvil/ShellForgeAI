@@ -16,7 +16,8 @@ or refusal behavior change as part of the move.
 The staged split currently covers these behavior-preserving slices:
 
 - PR182: `commands/status.py` for the `status` golden-path command.
-- PR182: `commands/doctor.py` for `doctor` and `model doctor`.
+- PR182: `commands/doctor.py` for `doctor` (it also carried `model doctor`
+  until that handler moved unchanged to `commands/model.py` in PR196).
 - PR183: `commands/ops.py` for the read-only `ops status` and `ops report`
   report lifecycle handlers.
 - PR183: `commands/triage.py` for the read-only `triage` and compatibility
@@ -72,6 +73,17 @@ The staged split currently covers these behavior-preserving slices:
   quick/standard/full profile behavior, JSON/human output, pass/fail/warn/skip
   counts, and safety fields still delegate to the existing V1 readiness core.
   `v1 packet` lifecycle commands remain in `cli.py` for a later focused move.
+- PR196: `commands/model.py` for the `model` command group: `model doctor`
+  (moved from `commands/doctor.py`, where it had lived since PR182) and
+  `model test` (moved from `cli.py`). The command surface is unchanged:
+  `model doctor` remains the read-only provider-readiness report
+  (provider/model/fallback, `shutil.which`-based codex binary detection,
+  auth cache presence with `status_unknown` readiness and the
+  `codex login --device-auth` recovery hint, sandbox/approval mode) with no
+  `--json` flag in the current surface; it still makes no model inference
+  call, starts no Codex task, and mutates nothing. `model test` keeps its
+  positional prompt and `--raw`/`--timeout`/`--model` options and remains the
+  group's only explicit one-shot model call, unchanged.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and

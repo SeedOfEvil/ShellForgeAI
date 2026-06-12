@@ -9,7 +9,11 @@ Typer app(s).
 The behavior-preserving extraction slices currently cover read-only domains:
 
 * :mod:`shellforgeai.commands.status` — the ``status`` golden-path command.
-* :mod:`shellforgeai.commands.doctor` — ``doctor`` and ``model doctor``.
+* :mod:`shellforgeai.commands.doctor` — the read-only ``doctor`` command.
+* :mod:`shellforgeai.commands.model` — the ``model`` command group:
+  the read-only ``model doctor`` provider-readiness report (no model
+  inference, no Codex task execution) and the existing explicit one-shot
+  ``model test`` surface, both unchanged.
 * :mod:`shellforgeai.commands.ops` — ``ops status`` and the ``ops report``
   report lifecycle handlers.
 * :mod:`shellforgeai.commands.triage` — ``triage`` and compatibility
@@ -58,6 +62,7 @@ __all__ = [
     "ask",
     "doctor",
     "handoff",
+    "model",
     "ops",
     "propose",
     "receipt_audit",

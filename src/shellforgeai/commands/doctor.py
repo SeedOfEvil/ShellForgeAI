@@ -1,13 +1,15 @@
-"""``doctor`` and ``model doctor`` command registration (extracted in PR182).
+"""``doctor`` command registration (extracted in PR182).
 
 Behavior-preserving move of the read-only ``doctor`` health/metadata-hygiene
-command and the ``model doctor`` provider-readiness command. All shared
-helpers, the console, the tool registry, the provider factory, and the
+command. All shared helpers, the console, the tool registry, and the
 subprocess wrapper remain owned by ``shellforgeai.cli`` and are resolved
 lazily at call time, so monkeypatching, output, exit codes, JSON strictness,
 advisory wording, and safety behavior are preserved exactly. No cleanup,
 remediation, rollback, recovery, Docker/Compose mutation, restart, shell
 execution, or arbitrary/model-driven execution is introduced here.
+
+The ``model doctor`` provider-readiness command originally registered here
+moved (unchanged) to :mod:`shellforgeai.commands.model` in PR196.
 """
 
 from __future__ import annotations
@@ -24,12 +26,12 @@ from shellforgeai.core.metadata_hygiene import human_bytes
 from shellforgeai.util.subprocess import run_command
 
 
-def register(app: typer.Typer, model_app: typer.Typer) -> None:
-    """Register ``doctor`` on the root app and ``doctor`` on ``model_app``.
+def register(app: typer.Typer) -> None:
+    """Register ``doctor`` on the root app.
 
-    Both handlers delegate to existing ``shellforgeai.cli`` module attributes
+    The handler delegates to existing ``shellforgeai.cli`` module attributes
     (resolved at call time) to preserve monkeypatch hooks used by the test
-    suite (for example ``cli.build_provider``) and the exact current behavior.
+    suite and the exact current behavior.
     """
 
     cli = sys.modules["shellforgeai.cli"]
@@ -160,13 +162,3 @@ def register(app: typer.Typer, model_app: typer.Typer) -> None:
             cli.console.print("- Suggested safe next steps:")
             for cmd in hygiene["recommendations"][:5]:
                 cli.console.print(f"  - {cmd}")
-
-    @model_app.command("doctor")
-    def model_doctor(ctx: typer.Context) -> None:
-        runtime = cli._ctx(ctx)
-        provider = cli.build_provider(runtime.settings)
-        info = provider.doctor()
-        for k, v in info.items():
-            cli.console.print(f"{k}={v}")
-        if not info.get("auth_cache_present"):
-            cli.console.print("Suggested login: codex login (or codex login --device-auth)")
