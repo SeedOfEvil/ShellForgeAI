@@ -152,7 +152,7 @@ def test_cli_no_longer_owns_read_only_recipe_handler_bodies() -> None:
 
 
 def test_governed_execution_handlers_remain_in_cli() -> None:
-    """Execution boundary: execute/recovery handlers must NOT move in PR189."""
+    """Execution boundary: execute/recovery handlers must stay out of recipes.py."""
     tree = ast.parse(CLI_PATH.read_text(encoding="utf-8"))
     function_names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     for kept in (
@@ -160,7 +160,6 @@ def test_governed_execution_handlers_remain_in_cli() -> None:
         "recipes_receipt_recovery_execute",
         "recipes_receipt_recovery_status",
         "recipes_receipt_recovery_validate",
-        "recipes_receipt_rollback_preview",
     ):
         assert kept in function_names, kept
 

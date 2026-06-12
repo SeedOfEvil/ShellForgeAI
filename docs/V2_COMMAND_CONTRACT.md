@@ -239,9 +239,8 @@ validate`) now live in `src/shellforgeai/commands/recipes.py` (PR189).
 Behavior-preserving only: registry/list/eligibility stay read-only, preflight
 stays read-only packet generation that never executes, and all JSON/safety
 surfaces are unchanged. Governed `recipes execute`, `recipes receipt
-recovery-execute`, recovery status/validate, and rollback-preview remain in
-`cli.py` unchanged. Future CLI refactors should run the PR184 command-surface
-golden guardrail.
+recovery-execute`, and recovery status/validate remain in `cli.py` unchanged.
+Future CLI refactors should run the PR184 command-surface golden guardrail.
 
 Implementation note: the top-level deterministic `ask` Typer
 registration/handler now lives in `src/shellforgeai/commands/ask.py` (PR190).
@@ -324,9 +323,11 @@ Rollback posture for this recipe is not true undo: bounded recovery is a future 
 
 
 
-The governed receipt audit/reporting surfaces (`recipes receipt audit`,
-`audit-bundle`, `audit-bundle-validate`, `integrity`, and `explain`) are owned
-by `src/shellforgeai/commands/receipt_audit.py` as part of the staged CLI
+The governed receipt history/audit/export/compare/integrity/explain/
+rollback-preview surfaces (`recipes receipt history`, `inspect`, `export`,
+`export-validate`, `compare`, `compare-latest`, `audit`, `audit-bundle`,
+`audit-bundle-validate`, `integrity`, `explain`, and `rollback-preview`) are
+owned by `src/shellforgeai/commands/receipt_audit.py` as part of the staged CLI
 command-module split. This is an implementation-only move: command names,
 options, JSON fields, read-only/artifact-only safety posture, and refusal
 behavior are unchanged. Governed recipe execution and receipt recovery execution
