@@ -238,9 +238,10 @@ inspect`, `recipes eligibility`, `recipes preflight`, and `recipes preflight
 validate`) now live in `src/shellforgeai/commands/recipes.py` (PR189).
 Behavior-preserving only: registry/list/eligibility stay read-only, preflight
 stays read-only packet generation that never executes, and all JSON/safety
-surfaces are unchanged. Governed `recipes execute`, `recipes receipt
-recovery-execute`, and recovery status/validate remain in `cli.py` unchanged.
-Future CLI refactors should run the PR184 command-surface golden guardrail.
+surfaces are unchanged. Governed `recipes execute` and `recipes receipt recovery-execute` remain in
+`cli.py` unchanged; read-only recovery status/validate live in
+`src/shellforgeai/commands/receipt_recovery_readonly.py` unchanged. Future CLI
+refactors should run the PR184 command-surface golden guardrail.
 
 Implementation note: the top-level deterministic `ask` Typer
 registration/handler now lives in `src/shellforgeai/commands/ask.py` (PR190).
@@ -331,14 +332,19 @@ owned by `src/shellforgeai/commands/receipt_audit.py`, and the read-only
 receipt safety surfaces (`recipes receipt verify`, `recipes receipt validate`,
 `recipes receipt rollback-preview`, and the top-level `rollback-preview
 --receipt <receipt_ref>` alias) are owned by
-`src/shellforgeai/commands/receipt_safety.py`, both as part of the staged CLI
-command-module split. These are implementation-only moves: command names,
-options, JSON fields, read-only/artifact-only safety posture, and refusal
-behavior are unchanged; rollback-preview still executes no rollback or
-recovery. Governed recipe execution and receipt recovery execution
+`src/shellforgeai/commands/receipt_safety.py`, and the read-only recovery
+receipt inspection surfaces (`recipes receipt recovery-status` and
+`recipes receipt recovery-validate`) are owned by
+`src/shellforgeai/commands/receipt_recovery_readonly.py`, all as part of the
+staged CLI command-module split. These are implementation-only moves: command
+names, options, JSON fields, read-only/artifact-only safety posture, and
+refusal behavior are unchanged; rollback-preview still executes no rollback or
+recovery, and recovery-status/recovery-validate still read recorded recovery
+receipt evidence/artifacts only without rerunning recovery, repairing, or
+deleting artifacts. Governed recipe execution and receipt recovery execution
 (`recipes receipt recovery-execute --confirm`) remain outside these modules in
-`cli.py`, unchanged. Future CLI refactors should run the PR184
-command-surface golden guardrail.
+`cli.py`, unchanged. Future CLI refactors should run the PR184 command-surface
+golden guardrail.
 
 ### Governed receipt audit/history layer
 

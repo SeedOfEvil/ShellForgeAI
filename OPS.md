@@ -53,8 +53,10 @@ history`, `inspect`, `export`, `export-validate`, `compare`, `compare-latest`,
 into `commands/receipt_audit.py`, PR192 extracts the read-only receipt safety
 handlers (`recipes receipt verify`, `recipes receipt validate`, `recipes
 receipt rollback-preview`, and the top-level `rollback-preview --receipt`
-alias) into `commands/receipt_safety.py`, and PR189 extracts the
-read-only recipe
+alias) into `commands/receipt_safety.py`, PR193 extracts the read-only
+recovery receipt status/validate handlers (`recipes receipt recovery-status`
+and `recipes receipt recovery-validate`) into
+`commands/receipt_recovery_readonly.py`, and PR189 extracts the read-only recipe
 registry/preflight handlers (`recipes`, `recipes list`, `recipes inspect`,
 `recipes eligibility`, `recipes preflight`, `recipes preflight validate`) into
 `commands/recipes.py`, and PR190 extracts the top-level deterministic `ask`
@@ -66,7 +68,8 @@ JSON schemas, safety flags, ask routing, and mutation refusal are unchanged.
 Receipt history/inspect/compare/audit/integrity/explain/verify/validate/
 rollback-preview and audit-bundle/export validation stay read-only; export and
 audit-bundle stay bounded ShellForgeAI-owned artifact-only writes;
-rollback-preview still never executes rollback or recovery. Recipe
+rollback-preview and recovery status/validate still never execute rollback,
+recovery, cleanup, remediation, Docker/Compose, shell, or model calls. Recipe
 list/eligibility/preflight stay read-only and never execute; governed `recipes
 execute` and receipt recovery execution remain separately guarded in `cli.py`
 and unchanged.

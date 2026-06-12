@@ -49,17 +49,25 @@ The staged split currently covers these behavior-preserving slices:
   remain read-only receipt evidence checks that never rerun recipes, repair, or
   delete artifacts; rollback-preview remains read-only, still truthfully
   reports that `docker.disposable_restart` has no true rollback, and never
-  executes rollback or recovery. Governed `recipes receipt recovery-execute`
-  and the recovery status/validate handlers remain separately guarded in
-  `cli.py`, unchanged.
+  executes rollback or recovery.
+- PR193: `commands/receipt_recovery_readonly.py` for the read-only recovery
+  receipt inspection surfaces: `recipes receipt recovery-status` and
+  `recipes receipt recovery-validate` (both with `--json` where previously
+  present). The command surfaces are unchanged; both commands read recorded
+  recovery receipt evidence/artifacts only, do not rerun recovery, do not
+  repair or delete artifacts, and do not execute Docker/Compose, cleanup,
+  remediation, rollback, shell, natural-language, or model-driven actions.
+  Governed `recipes receipt recovery-execute` remains separately guarded in
+  `cli.py` behind explicit `--confirm`, unchanged.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and
   `recipes preflight validate`. The command surfaces are unchanged (`--json`,
   `--recipe`, `--target`, `--save` where present); registry/list/eligibility
   remain read-only and preflight remains read-only packet generation that
-  never executes. Governed `recipes execute`, `recipes receipt
-  recovery-execute`, and recovery status/validate remain in `cli.py` unchanged.
+  never executes. Governed `recipes execute` and `recipes receipt
+  recovery-execute` remain in `cli.py` unchanged; read-only recovery
+  status/validate live in `commands/receipt_recovery_readonly.py` unchanged.
 - PR190: `commands/ask.py` for the top-level deterministic `ask` command. The
   command surface is unchanged (`ask "<question>"` with `--context`,
   `--full-context`, `--raw`, `--no-evidence`, `--since`). Deterministic
@@ -1626,7 +1634,9 @@ Receipt rollback-preview is read-only. It inspects an existing governed recipe e
 Implementation note: the `recipes receipt verify`, `recipes receipt validate`,
 `recipes receipt rollback-preview`, and top-level `rollback-preview` Typer
 handlers are registered from `src/shellforgeai/commands/receipt_safety.py` as
-part of the behavior-preserving CLI command-module split (PR192). The command
+part of the behavior-preserving CLI command-module split (PR192). The
+read-only recovery receipt status/validate handlers are registered from
+`src/shellforgeai/commands/receipt_recovery_readonly.py` (PR193). The command
 surfaces are unchanged, and the governed `recipes receipt recovery-execute`
 lane stays in `cli.py` behind its explicit `--confirm` gate. Future CLI
 refactors should run the PR184 command-surface golden guardrail.

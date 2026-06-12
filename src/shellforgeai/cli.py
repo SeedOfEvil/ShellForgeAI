@@ -30,6 +30,7 @@ from shellforgeai.commands import handoff as handoff_commands
 from shellforgeai.commands import ops as ops_commands
 from shellforgeai.commands import propose as propose_commands
 from shellforgeai.commands import receipt_audit as receipt_audit_commands
+from shellforgeai.commands import receipt_recovery_readonly as receipt_recovery_readonly_commands
 from shellforgeai.commands import receipt_safety as receipt_safety_commands
 from shellforgeai.commands import recipes as recipes_commands
 from shellforgeai.commands import status as status_commands
@@ -178,9 +179,6 @@ from shellforgeai.core.profiles import load_profile
 from shellforgeai.core.recipe_execution import (
     execute_disposable_restart,
 )
-from shellforgeai.core.recipe_execution import (
-    validate_receipt as validate_recipe_receipt,
-)
 from shellforgeai.core.recipe_preflight import (
     build_preflight_packet,
 )
@@ -188,7 +186,6 @@ from shellforgeai.core.recipe_receipt_explain import (
     known_finding_codes,
 )
 from shellforgeai.core.recipe_receipt_recovery import execute_receipt_recovery
-from shellforgeai.core.recipe_receipt_verify import verify_recipe_receipt
 from shellforgeai.core.recipe_registry import (
     eligibility_payload as recipe_eligibility_payload,
 )
@@ -11854,42 +11851,7 @@ def recipes_receipt_recovery_execute(
         raise typer.Exit(1)
 
 
-@recipes_receipt_app.command("recovery-status")
-def recipes_receipt_recovery_status(
-    ctx: typer.Context,
-    recovery_receipt_ref: Annotated[
-        str, typer.Argument(help="Recovery receipt id or ShellForgeAI-owned path.")
-    ],
-    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-) -> None:
-    """Read-only status for a recovery receipt via receipt-aware verify."""
-    runtime = _ctx(ctx)
-    payload = verify_recipe_receipt(recovery_receipt_ref, runtime.session.data_dir)
-    if json_out:
-        typer.echo(json.dumps(payload))
-    else:
-        typer.echo(_render_v2_receipt_verify_human(payload), nl=False)
-    if payload.get("status") != "passed":
-        raise typer.Exit(1)
-
-
-@recipes_receipt_app.command("recovery-validate")
-def recipes_receipt_recovery_validate(
-    ctx: typer.Context,
-    recovery_receipt_ref: Annotated[
-        str, typer.Argument(help="Recovery receipt id or ShellForgeAI-owned path.")
-    ],
-    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-) -> None:
-    """Validate a recovery receipt. Read-only."""
-    runtime = _ctx(ctx)
-    payload = validate_recipe_receipt(recovery_receipt_ref, runtime.session.data_dir)
-    if json_out:
-        typer.echo(json.dumps(payload))
-    else:
-        typer.echo(_render_recipe_receipt_validate_human(payload), nl=False)
-    if payload.get("status") != "ok":
-        raise typer.Exit(1)
+receipt_recovery_readonly_commands.register(recipes_receipt_app)
 
 
 @app.command("safe-actions")

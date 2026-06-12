@@ -115,10 +115,11 @@ asks deterministically, and refuses or gates mutation.
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
   (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`;
-  PR185-PR192: `verify`, `handoff`, `propose`, `apply-preview`, governed
+  PR185-PR193: `verify`, `handoff`, `propose`, `apply-preview`, governed
   receipt history/audit/export/compare reporting, read-only receipt
-  verify/validate/rollback-preview safety surfaces, read-only
-  recipe registry/preflight, and the deterministic `ask` command),
+  verify/validate/rollback-preview safety surfaces, read-only recovery receipt
+  status/validate, read-only recipe registry/preflight, and the deterministic
+  `ask` command),
   protected by the PR184 command-surface golden guardrail
   (`tests/test_pr184_cli_command_surface_golden.py`)
   — see [`docs/cli.md`](docs/cli.md).
@@ -458,10 +459,12 @@ shellforgeai recipes receipt integrity --include-exports --include-audit-bundles
 shellforgeai recipes receipt audit-bundle --json
 shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json
 shellforgeai recipes receipt recovery-execute <receipt_id> --confirm
+shellforgeai recipes receipt recovery-status <recovery_receipt_id> --json
+shellforgeai recipes receipt recovery-validate <recovery_receipt_id> --json
 shellforgeai verify --receipt <recovery_receipt_id> --json
 ```
 
-Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback execution, remediation execution, arbitrary shell, and model-driven execution remain out of scope. Receipt audit and rollback-preview are read-only: audit summarizes local execution/recovery receipt chains and flags malformed receipts, missing originals, failed verification, and safety drift without executing anything; rollback-preview explains that `docker.disposable_restart` has no true rollback. Recovery execution is a separate confirm-gated bounded repeat restart of the exact disposable allowlisted target from a valid receipt; it never runs from natural language and never uses Docker Compose.
+Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback execution, remediation execution, arbitrary shell, and model-driven execution remain out of scope. Receipt audit, rollback-preview, recovery-status, and recovery-validate are read-only: audit summarizes local execution/recovery receipt chains and flags malformed receipts, missing originals, failed verification, and safety drift without executing anything; rollback-preview explains that `docker.disposable_restart` has no true rollback; recovery-status and recovery-validate read recorded recovery receipt evidence/artifacts only and do not rerun recovery, repair, or delete artifacts. Recovery execution is a separate confirm-gated bounded repeat restart of the exact disposable allowlisted target from a valid receipt; it never runs from natural language and never uses Docker Compose.
 
 
 `shellforgeai recipes receipt explain` converts governed receipt integrity/audit findings into deterministic local guidance with safe read-only next commands. It supports `--json`, `--source integrity|audit|audit-bundle|compare`, `--finding <code>`, `--target`, `--recipe`, and `--limit`; it never repairs/deletes artifacts, executes recipes, restarts containers, calls Docker/Compose, or calls a model.
