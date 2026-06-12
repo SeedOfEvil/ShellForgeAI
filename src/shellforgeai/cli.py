@@ -30,6 +30,7 @@ from shellforgeai.commands import handoff as handoff_commands
 from shellforgeai.commands import ops as ops_commands
 from shellforgeai.commands import propose as propose_commands
 from shellforgeai.commands import receipt_audit as receipt_audit_commands
+from shellforgeai.commands import receipt_safety as receipt_safety_commands
 from shellforgeai.commands import recipes as recipes_commands
 from shellforgeai.commands import status as status_commands
 from shellforgeai.commands import triage as triage_commands
@@ -11826,7 +11827,8 @@ def _render_recipe_receipt_compare_human(
     return "\n".join(lines).rstrip() + "\n"
 
 
-receipt_audit_commands.register(recipes_receipt_app, app)
+receipt_audit_commands.register(recipes_receipt_app)
+receipt_safety_commands.register(recipes_receipt_app, app)
 
 
 @recipes_receipt_app.command("recovery-execute")
@@ -11882,44 +11884,6 @@ def recipes_receipt_recovery_validate(
     """Validate a recovery receipt. Read-only."""
     runtime = _ctx(ctx)
     payload = validate_recipe_receipt(recovery_receipt_ref, runtime.session.data_dir)
-    if json_out:
-        typer.echo(json.dumps(payload))
-    else:
-        typer.echo(_render_recipe_receipt_validate_human(payload), nl=False)
-    if payload.get("status") != "ok":
-        raise typer.Exit(1)
-
-
-@recipes_receipt_app.command("verify")
-def recipes_receipt_verify(
-    ctx: typer.Context,
-    receipt_ref: Annotated[
-        str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
-    ],
-    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-) -> None:
-    """Verify a governed recipe execution receipt. Read-only; no retry or rollback."""
-    runtime = _ctx(ctx)
-    payload = verify_recipe_receipt(receipt_ref, runtime.session.data_dir)
-    if json_out:
-        typer.echo(json.dumps(payload))
-    else:
-        typer.echo(_render_v2_receipt_verify_human(payload), nl=False)
-    if payload.get("status") != "passed":
-        raise typer.Exit(1)
-
-
-@recipes_receipt_app.command("validate")
-def recipes_receipt_validate(
-    ctx: typer.Context,
-    receipt_ref: Annotated[
-        str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
-    ],
-    json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
-) -> None:
-    """Validate a governed recipe execution receipt. Read-only."""
-    runtime = _ctx(ctx)
-    payload = validate_recipe_receipt(receipt_ref, runtime.session.data_dir)
     if json_out:
         typer.echo(json.dumps(payload))
     else:

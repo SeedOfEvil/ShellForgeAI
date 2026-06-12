@@ -2,8 +2,12 @@
 
 These tests prove the read-only/artifact-only receipt history, inspect, export,
 export-validate, compare, audit, audit-bundle, integrity, explain, and
-rollback-preview handlers are registered from ``shellforgeai.commands.receipt_audit``
-while governed execution/recovery handlers remain in ``cli.py``.
+rollback-preview handlers are registered from command modules while governed
+execution/recovery handlers remain in ``cli.py``. Since PR192 the
+rollback-preview handlers live in ``shellforgeai.commands.receipt_safety``;
+the remaining read-only surfaces stay owned by
+``shellforgeai.commands.receipt_audit``. The user-facing command surface and
+behavior covered here are unchanged.
 """
 
 from __future__ import annotations
@@ -41,6 +45,9 @@ READ_ONLY_COMMANDS = (
     "explain",
     "rollback-preview",
 )
+# PR192 moved rollback-preview ownership to commands/receipt_safety.py; the
+# command surface itself is unchanged and stays covered below.
+AUDIT_MODULE_COMMANDS = tuple(c for c in READ_ONLY_COMMANDS if c != "rollback-preview")
 SAFETY_FALSE_FLAGS = (
     "mutation_performed",
     "cleanup_executed",
@@ -145,10 +152,10 @@ def test_receipt_audit_module_owns_read_only_receipt_commands_and_cli_wires_it()
     module_source = MODULE_PATH.read_text(encoding="utf-8")
     cli_source = CLI_PATH.read_text(encoding="utf-8")
     assert "def register(" in module_source
-    for command in READ_ONLY_COMMANDS:
+    for command in AUDIT_MODULE_COMMANDS:
         assert f'command("{command}")' in module_source
     assert "from shellforgeai.commands import receipt_audit as receipt_audit_commands" in cli_source
-    assert "receipt_audit_commands.register(recipes_receipt_app, app)" in cli_source
+    assert "receipt_audit_commands.register(recipes_receipt_app)" in cli_source
     assert '@recipes_receipt_app.command("recovery-execute")' in cli_source
     assert "execute_receipt_recovery(" in cli_source
 

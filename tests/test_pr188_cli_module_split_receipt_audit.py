@@ -164,7 +164,7 @@ def test_receipt_audit_module_exists_and_cli_wires_registration() -> None:
     ):
         assert command in module_source
     assert "from shellforgeai.commands import receipt_audit as receipt_audit_commands" in cli_source
-    assert "receipt_audit_commands.register(recipes_receipt_app, app)" in cli_source
+    assert "receipt_audit_commands.register(recipes_receipt_app)" in cli_source
 
 
 def test_cli_no_longer_owns_large_inline_receipt_audit_handler_bodies() -> None:
