@@ -38,6 +38,7 @@ KNOWN_EXTRACTED = {
     "receipt recovery execute",
     "v1",
     "model",
+    "interactive",
 }
 
 
@@ -140,7 +141,10 @@ def test_remaining_handlers_are_listed_with_conservative_categories() -> None:
     handlers = payload["remaining_inline_handlers"]
     assert handlers
     by_function = {row["function"]: row for row in handlers}
-    assert by_function["interactive"]["category"] == "read_only"
+    # ``interactive`` was extracted to commands/interactive.py in PR200, so it is
+    # no longer an inline handler; the root callback's interactive fallback stays.
+    assert "interactive" not in by_function
+    assert by_function["main"]["category"] == "read_only"
     assert by_function["apply"]["risk"] == "high"
     assert by_function["recipes_execute"]["category"] == "confirm_gated_mutation"
     assert by_function["remediation_rollback_execute"]["recommended_validation_lane"] == "Lane C"
@@ -156,6 +160,7 @@ def test_unknown_unclassified_handlers_warn_instead_of_claiming_certainty(tmp_pa
         "ask.py",
         "doctor.py",
         "handoff.py",
+        "interactive.py",
         "model.py",
         "ops.py",
         "propose.py",

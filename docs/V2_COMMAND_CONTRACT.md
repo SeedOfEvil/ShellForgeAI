@@ -275,6 +275,20 @@ All other remediation handlers (eligibility/plan/validate/preflight/execute/
 report/bundle/audit/status/rollback/receipt) remain in `cli.py`. Future CLI
 refactors should run the PR184 command-surface golden guardrail.
 
+Implementation note: the top-level `interactive` Typer registration/launcher
+now lives in `src/shellforgeai/commands/interactive.py` (PR200). The launcher
+is Typer wiring only: it resolves the runtime context and hands off to the
+existing `shellforgeai.interactive.start_interactive` REPL, which was not moved
+or redesigned. Behavior-preserving only: the `interactive --help` surface,
+`--no-trust-cache`/`--yes-trust` options, startup/exit behavior, deterministic
+read-only routing, and broad/freeform mutation refusal are unchanged;
+interactive mode remains not-a-shell and natural language still never executes
+governed fixes. The `--yes-trust` flag only gates the workspace trust prompt;
+it does not grant mutation, shell execution, or bypass any safety refusal. The
+REPL internals and the root callback's no-subcommand interactive fallback
+remain in their current homes. Future CLI refactors should run the PR184
+command-surface golden guardrail.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:

@@ -32,6 +32,7 @@ EXTRACTED_MODULES: dict[str, dict[str, Any]] = {
     "ask": {"module": "ask.py", "category": "read_only", "known_pr": 190},
     "doctor": {"module": "doctor.py", "category": "read_only", "known_pr": 182},
     "handoff": {"module": "handoff.py", "category": "artifact_only", "known_pr": 186},
+    "interactive": {"module": "interactive.py", "category": "read_only", "known_pr": 200},
     "model": {"module": "model.py", "category": "read_only", "known_pr": 196},
     "ops": {"module": "ops.py", "category": "read_only", "known_pr": 183},
     "propose": {"module": "propose.py", "category": "artifact_only", "known_pr": 187},
@@ -70,16 +71,6 @@ INLINE_CLASSIFICATIONS: dict[str, dict[str, Any]] = {
         "suggested_next_pr": None,
         "notes": [
             "Root no-subcommand behavior is CLI-surface sensitive; move only with full guardrails."
-        ],
-    },
-    "interactive": {
-        "name": "interactive mode",
-        "category": "read_only",
-        "risk": "high",
-        "lane": "Lane C",
-        "suggested_next_pr": None,
-        "notes": [
-            "Interactive routing/refusal semantics are safety-critical and should move late."
         ],
     },
     "version_cmd": {

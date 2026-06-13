@@ -57,7 +57,14 @@ readiness/testing handler into `commands/remediation.py` (quick/standard/full
 profiles, JSON/human output, and safety flags unchanged; live
 docker-disposable execute stays skipped by default behind its explicit
 lab-only opt-in/confirm gate; no cleanup/remediation/rollback/recovery
-execution added; the other remediation handlers stay in `cli.py`).
+execution added; the other remediation handlers stay in `cli.py`), and PR200
+extracts the top-level `interactive` launcher into `commands/interactive.py`
+(Typer wiring only that hands off to the existing
+`shellforgeai.interactive.start_interactive` REPL; the `interactive` command
+surface, `--no-trust-cache`/`--yes-trust` options, deterministic read-only
+routing, and mutation refusal are unchanged; interactive mode remains
+not-a-shell and natural language never executes governed fixes; the root
+callback's no-subcommand interactive fallback stays in `cli.py`).
 This is an internal layout hardening only: command UX,
 quick/standard/full V1 readiness behavior, JSON schemas, safety flags, ask
 routing, and mutation refusal are unchanged. `model doctor` remains the
@@ -192,12 +199,13 @@ For V2 command-surface planning and anti-bloat guardrails, use
 [`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md) and
 [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md).
 
-CLI maintainability note (PR182-PR198): `src/shellforgeai/cli.py` is being
+CLI maintainability note (PR182-PR200): `src/shellforgeai/cli.py` is being
 split into a `src/shellforgeai/commands/` package one domain at a time,
 behavior-preserving at each step. `cli.py` stays the root Typer entrypoint;
 extracted domains include `status`, `doctor`, `ops`/`triage`, `verify`,
 `handoff`, `propose`, `apply-preview`, `ask`, governed recipe/receipt safety
-surfaces, `v1 check`, and `model`. Command names, output, exit codes, JSON
+surfaces, `v1 check`, `model`, the `remediation self-test` readiness handler,
+and the top-level `interactive` launcher. Command names, output, exit codes, JSON
 behavior, and safety gates are unchanged. Before moving more handlers, use the
 read-only inventory map in [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md)
 and run the PR184 command-surface golden guardrail for every split. See

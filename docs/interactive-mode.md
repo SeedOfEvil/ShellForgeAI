@@ -551,3 +551,18 @@ Supported categories include malformed JSON, missing required files/manifests/ch
 
 `recipes receipt explain` never repairs, deletes, cleans up, recovers, rolls back, restarts, reruns receipts, calls Docker/Compose, executes shell, creates exports/bundles, or calls a model. Safe next commands are limited to read-only receipt integrity/audit/history/inspect/validate/compare/verify surfaces. Ask and interactive phrasing such as “explain receipt integrity findings”, “what does checksum_mismatch mean?”, and “what should I do about safety drift?” routes to this explanation guidance; mutation phrasing such as “explain and fix corrupt receipts” refuses the mutation part. Support-handoff phrasing that clearly mentions receipt audit or recipe receipts routes to receipt audit-bundle guidance.
 
+
+## Implementation note: command-module split (PR200)
+
+The top-level `interactive` launcher is registered from
+`src/shellforgeai/commands/interactive.py` as part of the behavior-preserving
+CLI command-module split. The launcher is Typer wiring only: it resolves the
+runtime context and hands off to the existing
+`shellforgeai.interactive.start_interactive` REPL, which was not moved or
+redesigned. The interactive command surface is unchanged
+(`interactive --help`, `--no-trust-cache`, `--yes-trust`, startup/exit
+behavior). Interactive mode remains not-a-shell: deterministic read-only
+routing is unchanged, broad/freeform mutation phrases stay refused, and natural
+language never executes governed fixes. The root callback's no-subcommand
+interactive fallback intentionally stays in `cli.py`. Future CLI refactors
+should keep running the PR184 command-surface golden guardrail.
