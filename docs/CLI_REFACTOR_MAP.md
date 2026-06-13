@@ -9,6 +9,12 @@ This map is an inventory aid for command-module extraction planning. It is not a
 - Remaining inline CLI handlers: 99
 - Unknown inline handlers: 0
 
+## cli.py inline-handler debt
+
+- `src/shellforgeai/cli.py` line count: 13964 (threshold 14500, within: true)
+- Inline Typer handlers in cli.py: 99 (threshold 105, within: true)
+- `cli.py` remains Typer/app wiring plus the explicitly inventoried remaining inline handlers below; the PR202 enforcement guardrail (`tests/test_pr202_cli_refactor_inventory_enforcement.py`) fails if a new large inline handler is added without lowering the debt or updating these thresholds and docs.
+
 ## How to run the inventory
 
 ```bash

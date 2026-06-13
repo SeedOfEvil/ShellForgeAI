@@ -221,7 +221,7 @@ For V2 command-surface planning and anti-bloat guardrails, use
 [`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md) and
 [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md).
 
-CLI maintainability note (PR182-PR200): `src/shellforgeai/cli.py` is being
+CLI maintainability note (PR182-PR202): `src/shellforgeai/cli.py` is being
 split into a `src/shellforgeai/commands/` package one domain at a time,
 behavior-preserving at each step. `cli.py` stays the root Typer entrypoint;
 extracted domains include `status`, `doctor`, `ops`/`triage`, `verify`,
@@ -232,6 +232,19 @@ behavior, and safety gates are unchanged. Before moving more handlers, use the
 read-only inventory map in [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md)
 and run the PR184 command-surface golden guardrail for every split. See
 [`docs/cli.md`](docs/cli.md) and [`docs/roadmap.md`](docs/roadmap.md).
+
+PR202 turns the read-only `scripts/cli_refactor_inventory.py` inventory into a
+regression guardrail (`tests/test_pr202_cli_refactor_inventory_enforcement.py`).
+The inventory's `--json` now exposes a `cli_py` block (line count, inline
+Typer-handler count, and documented debt thresholds); the guardrail fails if a
+large new inline `@app.command` body is added to `cli.py` without extracting a
+handler or deliberately updating the thresholds and docs, and it checks that
+every PR182–PR201 command module exists and is imported/registered (not owned
+inline). When you intentionally extract or add a command module, update the
+inventory helper's module list/thresholds, regenerate `docs/CLI_REFACTOR_MAP.md`
+with `--write-doc`, and run the PR184 golden command-surface guardrail plus the
+appropriate validation lane. The inventory guardrail is read-only process tooling
+and adds no runtime command or execution behavior.
 
 ## Current baseline / handoff
 

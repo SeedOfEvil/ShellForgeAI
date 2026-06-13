@@ -128,7 +128,11 @@ asks deterministically, and refuses or gates mutation.
   the command surface, deterministic read-only routing, and mutation refusal
   unchanged — interactive mode remains not-a-shell). PR198
   adds the read-only CLI refactor inventory and remaining-handler map at
-  [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md). The PR184
+  [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md), and PR202 turns that
+  inventory into a regression guardrail
+  (`tests/test_pr202_cli_refactor_inventory_enforcement.py`) that fails if a
+  large new inline handler is reintroduced into `cli.py` without extracting it
+  or updating the documented debt thresholds. The PR184
   command-surface golden guardrail protects these moves; `v1 check`
   quick/standard readiness behavior and JSON/human output remain unchanged
   after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —

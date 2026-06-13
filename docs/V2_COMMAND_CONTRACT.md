@@ -397,7 +397,12 @@ disposable/allowlist/production gates, exact `docker restart <target>` argv,
 JSON safety contract, and recovery receipt behavior are unchanged. Governed
 recipe execution (`recipes execute`) remains outside these modules in
 `cli.py`, unchanged. Future CLI refactors should run the PR184 command-surface
-golden guardrail.
+golden guardrail. The PR202 CLI refactor inventory enforcement guardrail
+(`tests/test_pr202_cli_refactor_inventory_enforcement.py`) additionally checks
+that each extracted module stays imported/registered by `cli.py` rather than
+re-owned inline, and that `cli.py` stays at or below its documented
+inline-handler debt thresholds; it is read-only process tooling and changes no
+command contract.
 
 ### Governed receipt audit/history layer
 
