@@ -137,7 +137,11 @@ asks deterministically, and refuses or gates mutation.
   Typer-wiring role, the intentional inline glue (Typer callbacks) allowed to
   stay, what is not allowed inline, and a `closure_status` that never reports a
   false OK when an unexpected inline handler appears
-  (`tests/test_pr203_cli_refactor_closure.py`). The PR184
+  (`tests/test_pr203_cli_refactor_closure.py`). PR204 adds a strict wiring-only
+  enforcement mode (`python scripts/cli_refactor_inventory.py --check`) that
+  fails if an unapproved inline command handler appears in `cli.py`, backed by a
+  tiny reasoned allowlist of intentional root/bootstrap callables
+  (`tests/test_pr204_cli_wiring_only_enforcement.py`). The PR184
   command-surface golden guardrail protects these moves; `v1 check`
   quick/standard readiness behavior and JSON/human output remain unchanged
   after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —

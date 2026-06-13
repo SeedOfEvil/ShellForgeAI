@@ -265,6 +265,23 @@ classified future-extraction candidates, and 0 unexpected inline handlers.
 Closure is verification only — no handler was moved and no runtime/execution
 behavior was added (see `tests/test_pr203_cli_refactor_closure.py`).
 
+PR204 adds a strict wiring-only enforcement mode:
+`python scripts/cli_refactor_inventory.py --check` (and `--check --json`). It
+treats `cli.py` as wiring-only and sorts every inline Typer callable into one of
+three buckets: explicitly allowlisted wiring/bootstrap (a tiny, reasoned
+`INLINE_ALLOWLIST` — `main`, `version_cmd`, and the `audit index`/`v1 packet`
+group callbacks; every entry must carry a reason), documented
+remaining-extraction candidates (classified debt, reported as the tracked
+extraction map rather than silently allowed), and unapproved inline handlers
+(unclassified handlers or non-allowlisted callbacks). An unapproved handler fails
+the check with a nonzero exit and names the offending handler. A future PR that
+wants to keep a new inline callable in `cli.py` must add an allowlist entry with
+a reason; if the allowlist would grow beyond a few genuine wiring/bootstrap
+items, extract the handler into `src/shellforgeai/commands/` instead, and run the
+PR184 command-surface golden guardrail. The check is read-only AST inspection —
+no command/Docker/Compose/model execution and no file mutation — and is enforced
+by `tests/test_pr204_cli_wiring_only_enforcement.py`.
+
 ## Current baseline / handoff
 
 The PR78 release/handoff baseline is the current operator reference

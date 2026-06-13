@@ -27,6 +27,32 @@ This map is an inventory aid for command-module extraction planning. It is not a
 - Unexpected (unclassified) inline handlers: none
 - Recommendation: cli split enforced and behavior-preserving: 18 command modules extracted; 96 classified inline command handlers remain as documented future-extraction candidates; 3 Typer callbacks intentionally remain as wiring; 0 unexpected inline handlers; PR184/PR202 guardrails present
 
+## CLI wiring-only enforcement (`--check`)
+
+`src/shellforgeai/cli.py` is treated as **wiring-only**: Typer app/group creation, command-module registration, shared app metadata, and thin root/bootstrap helpers. The split is guarded by a strict check that fails if an unapproved inline command handler appears in `cli.py`.
+
+```bash
+python scripts/cli_refactor_inventory.py --check
+python scripts/cli_refactor_inventory.py --check --json
+```
+
+The check is read-only (AST inspection only) and sorts every inline Typer callable in `cli.py` into one of three buckets:
+
+- **Allowed** — explicitly allowlisted Typer wiring / root bootstrap. Every allowlist entry must carry a reason.
+- **Remaining extraction candidate** — a classified inline command handler documented as future-extraction debt (tracked, not silently allowlisted).
+- **Unapproved** — an unclassified inline command handler or a non-allowlisted Typer callback. These fail the check and must move into `src/shellforgeai/commands/` or earn an explicit allowlist reason.
+
+### Allowlist (intentional remaining inline callables)
+
+| Symbol | Reason |
+| --- | --- |
+| `main` | Typer root @app.callback() / app bootstrap and no-subcommand interactive fallback (intentional Typer entrypoint). |
+| `version_cmd` | Intentional tiny read-only `version` root command kept inline. |
+| `audit_index_main` | Typer `audit index` group @*.callback() registration glue. |
+| `v1_packet` | Typer `v1 packet` group @*.callback() registration glue. |
+
+The allowlist is deliberately tiny and must stay reasoned. A future PR that needs to keep a new inline callable in `cli.py` must add an explicit entry **with a reason**; an entry without a reason is rejected. If the allowlist would grow beyond a few genuine wiring/bootstrap items, extract the handler into `src/shellforgeai/commands/` instead — new command handlers belong in a command module, not inline in `cli.py`. The PR184 golden command-surface guardrail remains required for any command refactor.
+
 ## Intentional `cli.py` responsibilities (allowed Typer wiring/glue)
 
 `src/shellforgeai/cli.py` is intended to remain the Typer app entrypoint and registration glue. The following are allowed to stay:

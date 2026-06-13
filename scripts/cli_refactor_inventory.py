@@ -18,6 +18,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 MODE = "cli_refactor_inventory"
+CHECK_MODE = "cli_refactor_inventory_check"
 CLI_PATH = Path("src/shellforgeai/cli.py")
 COMMANDS_DIR = Path("src/shellforgeai/commands")
 
@@ -72,6 +73,71 @@ NOT_ALLOWED_IN_CLI_NOTES = [
     "Model/Codex call logic.",
     "Large JSON response builders.",
 ]
+
+# Explicit, reasoned allowlist of inline callables that are intentionally kept in
+# cli.py as Typer wiring / root bootstrap. Every entry MUST carry a non-empty
+# reason. This list is deliberately tiny: it is the closure boundary for the CLI
+# command-module split. Anything not on this list is either a documented
+# remaining-extraction candidate (classified debt, tracked by the inventory) or
+# an unapproved inline handler (which fails ``--check``).
+#
+# Growing this list is a smell: if a future PR needs to add a substantial command
+# handler here, it should extract the handler into src/shellforgeai/commands/
+# instead. Only genuine Typer entrypoint/registration glue or a tiny read-only
+# root command belongs here, and only with an explicit reason.
+INLINE_ALLOWLIST: tuple[dict[str, str], ...] = (
+    {
+        "name": "main",
+        "reason": (
+            "Typer root @app.callback() / app bootstrap and no-subcommand "
+            "interactive fallback (intentional Typer entrypoint)."
+        ),
+    },
+    {
+        "name": "version_cmd",
+        "reason": "Intentional tiny read-only `version` root command kept inline.",
+    },
+    {
+        "name": "audit_index_main",
+        "reason": "Typer `audit index` group @*.callback() registration glue.",
+    },
+    {
+        "name": "v1_packet",
+        "reason": "Typer `v1 packet` group @*.callback() registration glue.",
+    },
+)
+
+
+def validate_allowlist(allowlist: Any) -> list[str]:
+    """Return a list of human-readable errors for a malformed allowlist.
+
+    An allowlist entry is only acceptable when it is a mapping carrying a
+    non-empty ``name`` and a non-empty ``reason``. An empty error list means the
+    allowlist is well-formed. This is the data-integrity guard behind the rule
+    that the allowlist must stay explicit and reasoned: an entry without a reason
+    is rejected rather than silently honored.
+    """
+
+    errors: list[str] = []
+    if not isinstance(allowlist, (list, tuple)):
+        return ["allowlist must be a list/tuple of {name, reason} entries"]
+    seen: set[str] = set()
+    for index, entry in enumerate(allowlist):
+        if not isinstance(entry, dict):
+            errors.append(f"allowlist entry {index} is not a mapping")
+            continue
+        name = entry.get("name")
+        reason = entry.get("reason")
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"allowlist entry {index} is missing a non-empty 'name'")
+            continue
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append(f"allowlist entry for {name!r} is missing a non-empty 'reason'")
+        if name in seen:
+            errors.append(f"allowlist entry for {name!r} is duplicated")
+        seen.add(name)
+    return errors
+
 
 EXTRACTED_MODULES: dict[str, dict[str, Any]] = {
     "apply-preview": {"module": "apply_preview.py", "category": "preview_only", "known_pr": 187},
@@ -993,6 +1059,199 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
     }
 
 
+def build_check(
+    repo_root: Path, allowlist: tuple[dict[str, str], ...] | list[dict[str, str]] | None = None
+) -> dict[str, Any]:
+    """Strict wiring-only enforcement view for ``cli.py``.
+
+    Every inline Typer callable in ``cli.py`` is sorted into exactly one bucket:
+
+    * ``allowed`` — explicitly allowlisted Typer wiring / root bootstrap
+      (each allowlist entry must carry a reason);
+    * ``remaining_extraction_candidate`` — a *classified* inline command handler
+      that is documented in the inventory as future-extraction debt (tracked, not
+      silently allowed away);
+    * ``unapproved`` — an unclassified inline command handler, or a non-allowlisted
+      Typer callback. These fail the check: they must move into
+      ``src/shellforgeai/commands/`` or earn an explicit allowlist reason.
+
+    The check passes only when there are no unapproved inline handlers, the
+    allowlist is well-formed (reasoned), ``cli.py`` parses, and the documented
+    inline-handler debt stays within thresholds. It never claims literal
+    wiring-only closure while classified handlers remain: ``cli_py_role`` reports
+    ``wiring_with_tracked_remaining`` and the remaining extraction map is surfaced
+    rather than folded into the allowlist.
+    """
+
+    repo_root = repo_root.resolve()
+    if allowlist is None:
+        allowlist = INLINE_ALLOWLIST
+    cli_path = repo_root / CLI_PATH
+    commands_dir = repo_root / COMMANDS_DIR
+
+    allowlist_errors = validate_allowlist(allowlist)
+    allowlist_names = {
+        entry["name"]
+        for entry in allowlist
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    }
+
+    handlers, handler_warnings = discover_inline_handlers(cli_path)
+    cli_py, cli_py_warnings = build_cli_py_block(cli_path, repo_root, handlers)
+
+    allowed: list[str] = []
+    remaining_candidates: list[str] = []
+    unapproved: list[str] = []
+    for handler in handlers:
+        if handler.function in allowlist_names:
+            allowed.append(handler.function)
+        elif _is_callback_decorator(handler.decorator):
+            # Typer callbacks are wiring glue, but they must still be explicitly
+            # allowlisted; an unlisted callback is unapproved by design.
+            unapproved.append(handler.function)
+        elif _classification_for(handler.function) is None:
+            unapproved.append(handler.function)
+        else:
+            remaining_candidates.append(handler.function)
+
+    allowed.sort()
+    remaining_candidates.sort()
+    unapproved.sort()
+
+    present_module_stems = sorted(
+        path.stem for path in commands_dir.glob("*.py") if path.name != "__init__.py"
+    )
+    guardrail_present = all((repo_root / rel).exists() for rel in COMMAND_SURFACE_GUARDRAIL_FILES)
+
+    warnings = handler_warnings + cli_py_warnings
+    if allowlist_errors:
+        warnings.append("allowlist is malformed: " + "; ".join(allowlist_errors))
+    if unapproved:
+        warnings.append(
+            "unapproved inline handlers must move to src/shellforgeai/commands/ or be "
+            "allowlisted with a reason: " + ", ".join(unapproved)
+        )
+
+    cli_exists = cli_path.exists()
+    within_threshold = bool(cli_py["within_threshold"])
+    passed = cli_exists and not unapproved and not allowlist_errors and within_threshold
+    status = "passed" if passed else "failed"
+
+    if not cli_exists:
+        cli_py_role = "missing"
+    elif unapproved or allowlist_errors or not within_threshold:
+        cli_py_role = "needs_attention"
+    elif remaining_candidates:
+        cli_py_role = "wiring_with_tracked_remaining"
+    else:
+        cli_py_role = "wiring_only"
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": CHECK_MODE,
+        "status": status,
+        "read_only": True,
+        "mutation_performed": False,
+        "cli_py_role": cli_py_role,
+        "source": {
+            "cli_path": _rel(cli_path, repo_root),
+            "commands_dir": _rel(commands_dir, repo_root),
+        },
+        "allowlist": [dict(entry) for entry in allowlist if isinstance(entry, dict)],
+        "allowlist_errors": allowlist_errors,
+        "allowed_inline_handlers": allowed,
+        "unapproved_inline_handlers": unapproved,
+        "remaining_extraction_candidates": remaining_candidates,
+        "command_modules": present_module_stems,
+        "command_surface_guardrail": "present" if guardrail_present else "missing",
+        "summary": {
+            "allowed_inline_count": len(allowed),
+            "unapproved_inline_count": len(unapproved),
+            "remaining_extraction_candidate_count": len(remaining_candidates),
+            "command_modules_count": len(present_module_stems),
+            "cli_line_count": cli_py["line_count"],
+            "cli_inline_handler_count": cli_py["inline_handler_count"],
+            "cli_within_threshold": within_threshold,
+        },
+        "cli_py": cli_py,
+        "warnings": warnings,
+        "first_safe_command": "python scripts/cli_refactor_inventory.py --markdown",
+        "safe_next_commands": [
+            "python scripts/cli_refactor_inventory.py --check --json",
+            "pytest -q tests/test_pr184_cli_command_surface_golden.py",
+        ],
+        "safety": dict(SAFETY_BLOCK),
+    }
+
+
+def render_check_human(payload: dict[str, Any]) -> str:
+    status = payload["status"]
+    lines = [f"CLI refactor inventory check: {status}", ""]
+    if status == "passed":
+        lines.extend(
+            [
+                "cli.py role:",
+                "",
+                "* Typer app wiring",
+                "* command module registration",
+                "* root/bootstrap helpers only",
+                "",
+                "Remaining inline allowlist:",
+                "",
+            ]
+        )
+        for entry in payload["allowlist"]:
+            lines.append(f"* {entry['name']}: {entry['reason']}")
+        remaining = payload["summary"]["remaining_extraction_candidate_count"]
+        lines.extend(
+            [
+                "",
+                (
+                    f"Tracked remaining extraction candidates: {remaining} "
+                    "(documented in docs/CLI_REFACTOR_MAP.md; not silently allowlisted)."
+                ),
+                "",
+                "No unapproved inline command handlers found.",
+            ]
+        )
+    else:
+        if payload["allowlist_errors"]:
+            lines.extend(["Allowlist errors:", ""])
+            for err in payload["allowlist_errors"]:
+                lines.append(f"* {err}")
+            lines.append("")
+        lines.extend(["Unapproved inline handlers:", ""])
+        for name in payload["unapproved_inline_handlers"]:
+            lines.append(f"* {name}")
+        if not payload["unapproved_inline_handlers"]:
+            lines.append("* (none — see warnings below)")
+        lines.extend(
+            [
+                "",
+                (
+                    "Move these handlers into src/shellforgeai/commands/ or add an "
+                    "explicit allowlist reason."
+                ),
+            ]
+        )
+    if payload["warnings"]:
+        lines.extend(["", "Warnings:", ""])
+        for warning in payload["warnings"]:
+            lines.append(f"* {warning}")
+    lines.extend(
+        [
+            "",
+            "Safety:",
+            "",
+            "* Inventory check only; read-only AST inspection.",
+            "* No command execution.",
+            "* No Docker/Compose operation.",
+            "* No file mutation.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def render_human(payload: dict[str, Any]) -> str:
     lines = [
         "ShellForgeAI CLI refactor inventory",
@@ -1113,6 +1372,55 @@ def render_markdown(payload: dict[str, Any]) -> str:
             )
         ),
         f"- Recommendation: {payload['closure']['recommendation']}",
+        "",
+        "## CLI wiring-only enforcement (`--check`)",
+        "",
+        (
+            "`src/shellforgeai/cli.py` is treated as **wiring-only**: Typer app/group "
+            "creation, command-module registration, shared app metadata, and thin "
+            "root/bootstrap helpers. The split is guarded by a strict check that fails "
+            "if an unapproved inline command handler appears in `cli.py`."
+        ),
+        "",
+        "```bash",
+        "python scripts/cli_refactor_inventory.py --check",
+        "python scripts/cli_refactor_inventory.py --check --json",
+        "```",
+        "",
+        (
+            "The check is read-only (AST inspection only) and sorts every inline Typer "
+            "callable in `cli.py` into one of three buckets:"
+        ),
+        "",
+        (
+            "- **Allowed** — explicitly allowlisted Typer wiring / root bootstrap. Every "
+            "allowlist entry must carry a reason."
+        ),
+        (
+            "- **Remaining extraction candidate** — a classified inline command handler "
+            "documented as future-extraction debt (tracked, not silently allowlisted)."
+        ),
+        (
+            "- **Unapproved** — an unclassified inline command handler or a "
+            "non-allowlisted Typer callback. These fail the check and must move into "
+            "`src/shellforgeai/commands/` or earn an explicit allowlist reason."
+        ),
+        "",
+        "### Allowlist (intentional remaining inline callables)",
+        "",
+        "| Symbol | Reason |",
+        "| --- | --- |",
+        *[f"| `{entry['name']}` | {entry['reason']} |" for entry in INLINE_ALLOWLIST],
+        "",
+        (
+            "The allowlist is deliberately tiny and must stay reasoned. A future PR that "
+            "needs to keep a new inline callable in `cli.py` must add an explicit entry "
+            "**with a reason**; an entry without a reason is rejected. If the allowlist "
+            "would grow beyond a few genuine wiring/bootstrap items, extract the handler "
+            "into `src/shellforgeai/commands/` instead — new command handlers belong in a "
+            "command module, not inline in `cli.py`. The PR184 golden command-surface "
+            "guardrail remains required for any command refactor."
+        ),
         "",
         "## Intentional `cli.py` responsibilities (allowed Typer wiring/glue)",
         "",
@@ -1244,6 +1552,14 @@ def parse_args() -> argparse.Namespace:
     mode.add_argument("--json", action="store_true", help="Emit strict JSON only.")
     mode.add_argument("--markdown", action="store_true", help="Emit Markdown suitable for docs.")
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "Strict wiring-only enforcement: fail if cli.py contains unapproved "
+            "inline command handlers. Read-only. Combine with --json for strict JSON."
+        ),
+    )
+    parser.add_argument(
         "--write-doc",
         type=Path,
         help="Write Markdown inventory to this explicit path. This is the only writing mode.",
@@ -1259,6 +1575,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.check:
+        check_payload = build_check(args.repo_root)
+        if args.json:
+            print(json.dumps(check_payload, sort_keys=True))
+        else:
+            print(render_check_human(check_payload), end="")
+        return 0 if check_payload["status"] == "passed" else 1
+
     payload = build_inventory(args.repo_root)
     if args.json:
         print(json.dumps(payload, sort_keys=True))
