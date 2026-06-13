@@ -162,6 +162,31 @@ count, and the documented debt thresholds), the `extracted_modules` list, the
 explicitly classified `remaining_inline_handlers`, and a read-only `safety`
 block.
 
+The JSON/Markdown output also includes a `closure` block (PR203) that gives the
+refactor-closure verification view:
+
+- `cli_py_role`: the intended role for `cli.py` (`typer_wiring`).
+- `command_surface_guardrail`: `present`/`missing` for the PR184 golden files.
+- `command_modules`/`expected_modules`/`missing_expected_modules`: which command
+  modules exist versus which are expected.
+- `allowed_inline_glue`: the inline Typer wiring/glue that is allowed to stay,
+  detected from `@*.callback()` decorators (for example the root `main` callback
+  and the `audit index`/`v1 packet` group callbacks).
+- `remaining_command_handlers`: the count of classified `@*.command()` handlers
+  that are documented future-extraction candidates (not glue).
+- `unexpected_inline_handlers`: any *unclassified* inline handler. A non-empty
+  list means the split is not closed.
+- `closure_status`: `ok` only when there are no unexpected handlers, no missing
+  expected modules, the command-surface guardrail is present, and `cli.py` is
+  within its thresholds; otherwise `needs_attention`. It never reports a false
+  OK. The top-level `status` (`ok`/`failed`) is unchanged.
+
+`docs/CLI_REFACTOR_MAP.md` renders this as a closure-status section, an
+"Intentional `cli.py` responsibilities (allowed Typer wiring/glue)" section, and
+a "Not allowed in `cli.py`" section. Read `unexpected_inline_handlers` first: if
+it is empty, the remaining inline handlers are all classified, documented
+extraction candidates and continued extraction is optional, not a regression.
+
 PR202 turns that inventory into a regression guardrail
 ([`tests/test_pr202_cli_refactor_inventory_enforcement.py`](../tests/test_pr202_cli_refactor_inventory_enforcement.py)).
 It verifies that:

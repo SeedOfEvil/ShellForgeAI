@@ -15,6 +15,43 @@ This map is an inventory aid for command-module extraction planning. It is not a
 - Inline Typer handlers in cli.py: 99 (threshold 105, within: true)
 - `cli.py` remains Typer/app wiring plus the explicitly inventoried remaining inline handlers below; the PR202 enforcement guardrail (`tests/test_pr202_cli_refactor_inventory_enforcement.py`) fails if a new large inline handler is added without lowering the debt or updating these thresholds and docs.
 
+## CLI refactor closure status
+
+- Closure status: `ok`
+- `cli.py` role: `typer_wiring`
+- Command-surface guardrail (PR184): `present`
+- Extracted command modules: 18
+- Missing expected modules: none
+- Intentional Typer wiring/glue (callbacks) left in cli.py: `audit_index_main`, `main`, `v1_packet`
+- Classified inline command handlers remaining (future-extraction candidates): 96
+- Unexpected (unclassified) inline handlers: none
+- Recommendation: cli split enforced and behavior-preserving: 18 command modules extracted; 96 classified inline command handlers remain as documented future-extraction candidates; 3 Typer callbacks intentionally remain as wiring; 0 unexpected inline handlers; PR184/PR202 guardrails present
+
+## Intentional `cli.py` responsibilities (allowed Typer wiring/glue)
+
+`src/shellforgeai/cli.py` is intended to remain the Typer app entrypoint and registration glue. The following are allowed to stay:
+
+- Typer `app`/group creation and shared app wiring (`typer.Typer(...)`).
+- Root `@app.callback()` (`main`) including the no-subcommand interactive fallback.
+- Typer group `@*.callback()` glue (for example `audit index` and `v1 packet`).
+- `from shellforgeai.commands import <module> as <module>_commands` imports.
+- `<module>_commands.register(...)` registration calls for extracted modules.
+- Compatibility command/alias registration that preserves the public surface.
+- Minimal bootstrap constants and shared option/context helpers.
+
+## Not allowed in `cli.py`
+
+The following belong in command modules, not inline in `cli.py`:
+
+- Large command handler bodies (extract into `src/shellforgeai/commands/`).
+- Docker/Compose mutation or restart logic.
+- Remediation/recovery/rollback execution logic.
+- Ask deterministic routing/refusal decision bodies.
+- Receipt artifact business logic.
+- Interactive REPL loop internals.
+- Model/Codex call logic.
+- Large JSON response builders.
+
 ## How to run the inventory
 
 ```bash

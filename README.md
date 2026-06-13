@@ -132,7 +132,12 @@ asks deterministically, and refuses or gates mutation.
   inventory into a regression guardrail
   (`tests/test_pr202_cli_refactor_inventory_enforcement.py`) that fails if a
   large new inline handler is reintroduced into `cli.py` without extracting it
-  or updating the documented debt thresholds. The PR184
+  or updating the documented debt thresholds. PR203 adds a refactor-closure
+  view: the inventory emits a `closure` block and the map documents `cli.py`'s
+  Typer-wiring role, the intentional inline glue (Typer callbacks) allowed to
+  stay, what is not allowed inline, and a `closure_status` that never reports a
+  false OK when an unexpected inline handler appears
+  (`tests/test_pr203_cli_refactor_closure.py`). The PR184
   command-surface golden guardrail protects these moves; `v1 check`
   quick/standard readiness behavior and JSON/human output remain unchanged
   after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —

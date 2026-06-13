@@ -246,6 +246,25 @@ with `--write-doc`, and run the PR184 golden command-surface guardrail plus the
 appropriate validation lane. The inventory guardrail is read-only process tooling
 and adds no runtime command or execution behavior.
 
+PR203 closes the loop with a refactor-closure view. The inventory `--json`/
+`--markdown` now emit a `closure` block and `docs/CLI_REFACTOR_MAP.md` documents:
+`cli.py`'s intended role (`typer_wiring`), the intentional Typer wiring/glue that
+is allowed to stay (Typer app/group creation, the root `@app.callback()` and
+group `@*.callback()` glue such as `audit index`/`v1 packet`, command-module
+imports/`register(...)` calls, compatibility aliases, and minimal bootstrap),
+what is *not* allowed inline (large handler bodies, Docker/Compose mutation,
+remediation/recovery/rollback execution, ask routing bodies, receipt artifact
+logic, interactive REPL internals, model calls, large JSON builders), and the
+closure status. Glue is detected from `@*.callback()` decorators; every other
+inline handler is a classified future-extraction candidate. The closure never
+claims a false OK: an unexpected (unclassified) inline handler, a missing
+expected module, a missing command-surface guardrail, or a threshold breach
+downgrades `closure_status` to `needs_attention`. Current state:
+`closure_status: ok` with 18 extracted modules, 3 intentional callbacks, 96
+classified future-extraction candidates, and 0 unexpected inline handlers.
+Closure is verification only — no handler was moved and no runtime/execution
+behavior was added (see `tests/test_pr203_cli_refactor_closure.py`).
+
 ## Current baseline / handoff
 
 The PR78 release/handoff baseline is the current operator reference
