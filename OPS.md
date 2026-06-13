@@ -87,6 +87,28 @@ command surface and stays exact-target, disposable-only, allowlisted, and
 explicit `--confirm` gated after the PR194 move; no-confirm and all blocked
 cases still perform no restart and write no successful recovery receipt.
 
+PR201 adds a focused **interactive "not-a-shell" guardrail and wording polish**.
+Interactive mode routes known ShellForgeAI read-only commands and deterministic
+read-only operator asks; it is not a shell and never executes typed text as a
+shell command. Shell-shaped input is refused with explicit wording ("Interactive
+mode is not a shell.", "No command was executed.", "No action was taken.") plus
+safe read-only alternatives: arbitrary shell commands, filesystem mutation
+(`touch`/`rm`/`mv`/`cp`/`chmod`/`chown`), arbitrary file reads
+(`cat /etc/passwd`, `cat ~/.ssh/id_rsa`), Docker/Compose mutation
+(`docker restart`, `docker compose restart`/`up`/`down`, `docker volume prune`),
+cleanup/remediation/rollback/recovery execution, network/download commands
+(`curl`/`wget`), package installs (`apt install`/`pip install`), cloud/VCS
+mutation (`git push`, `gh pr merge`, `codex apply`, `kubectl apply`), and shell
+metacharacters/pipelines/redirections (`|`, `>`, `>>`, `&&`, `;`). Bare
+host-evidence shell invocations such as `uname -a` are refused as not-a-shell
+rather than answered, since interactive cannot guarantee a non-shell evidence
+path for them; use `status`/`ops report`/`diagnose health` instead. This PR is
+behavior-preserving except for clearer wording and stricter tests: it adds no
+shell execution, no new interactive execution lane, no Docker/Compose mutation,
+no `shell=True`, no model call, and does not weaken read-only command routing
+(legitimate subcommands with flags/arguments still dispatch). Tests live in
+`tests/test_pr201_interactive_not_a_shell_policy.py`.
+
 PR184 adds a behavior-preserving **command-surface golden guardrail** to protect
 this split as it continues onto riskier surfaces. Run it on every CLI
 command-module extraction PR, in addition to the change's normal lane:
