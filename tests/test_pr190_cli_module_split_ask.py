@@ -185,10 +185,13 @@ def test_deterministic_routing_helpers_remain_in_cli() -> None:
         "_handle_v2_triage_ask",
         "_handle_command_help_ask",
         "_is_status_ask",
-        "interactive",
         "recipes_execute",
     ):
         assert kept in function_names, kept
+    # ``interactive`` was extracted to commands/interactive.py in PR200, so it is
+    # intentionally no longer defined in cli.py; the shared deterministic
+    # routing/refusal helpers above still must remain.
+    assert "interactive" not in function_names
 
 
 def test_ask_module_does_not_import_execution_surfaces() -> None:

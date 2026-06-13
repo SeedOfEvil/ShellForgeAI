@@ -55,6 +55,12 @@ The behavior-preserving extraction slices currently cover read-only domains:
   unchanged. All other remediation handlers (eligibility/plan/validate/
   preflight/execute/report/bundle/audit/status/rollback/receipt) stay in
   ``cli.py``.
+* :mod:`shellforgeai.commands.interactive` — the top-level ``interactive``
+  launcher; it is Typer wiring only, resolving the runtime context and handing
+  off to the existing ``shellforgeai.interactive.start_interactive`` REPL. The
+  ``--no-trust-cache``/``--yes-trust`` options, startup/exit behavior,
+  deterministic read-only routing, mutation refusal, and not-a-shell posture
+  are unchanged. The REPL internals stay in ``shellforgeai.interactive``.
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -68,6 +74,7 @@ __all__ = [
     "ask",
     "doctor",
     "handoff",
+    "interactive",
     "model",
     "ops",
     "propose",

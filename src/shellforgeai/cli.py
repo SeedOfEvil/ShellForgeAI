@@ -25,6 +25,7 @@ from shellforgeai.commands import apply_preview as apply_preview_commands
 from shellforgeai.commands import ask as ask_commands
 from shellforgeai.commands import doctor as doctor_commands
 from shellforgeai.commands import handoff as handoff_commands
+from shellforgeai.commands import interactive as interactive_commands
 from shellforgeai.commands import model as model_commands
 from shellforgeai.commands import ops as ops_commands
 from shellforgeai.commands import propose as propose_commands
@@ -729,25 +730,6 @@ def main(
         raise typer.Exit()
 
 
-@app.command("interactive")
-def interactive(
-    ctx: typer.Context,
-    no_trust_cache: bool = typer.Option(False, "--no-trust-cache"),
-    yes_trust: bool = typer.Option(
-        False,
-        "--yes-trust",
-        help=(
-            "Trust the current workspace for this interactive session and skip the "
-            "trust prompt. Only gates the workspace prompt; does not grant mutation, "
-            "shell execution, or bypass safety refusals."
-        ),
-    ),
-) -> None:
-    from shellforgeai.interactive import start_interactive
-
-    start_interactive(_ctx(ctx), no_trust_cache=no_trust_cache, yes_trust=yes_trust)
-
-
 @app.command("version")
 def version_cmd() -> None:
     build = get_build_info()
@@ -758,6 +740,7 @@ def version_cmd() -> None:
 
 doctor_commands.register(app)
 model_commands.register(model_app)
+interactive_commands.register(app)
 
 
 @inspect_app.command("host")

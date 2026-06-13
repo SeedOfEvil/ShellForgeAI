@@ -97,6 +97,19 @@ The staged split currently covers these behavior-preserving slices:
   model call. All other remediation handlers
   (eligibility/plan/validate/preflight/execute/report/bundle/audit/status/
   rollback/receipt) remain in `cli.py` for later focused moves.
+- PR200: `commands/interactive.py` for the top-level `interactive` launcher.
+  The launcher is Typer wiring only: it resolves the runtime context and hands
+  off to the existing `shellforgeai.interactive.start_interactive` REPL, which
+  is not moved or redesigned. The command surface is unchanged
+  (`interactive --help`, `--no-trust-cache`, `--yes-trust`, including the
+  trust-prompt help text and startup/exit behavior). Interactive mode remains
+  not-a-shell: deterministic read-only routing is unchanged, broad/freeform
+  mutation phrases (clean up/restart compose, rollback now, recover it again,
+  rerun receipt, restart from receipt) are still refused, and natural language
+  never executes governed fixes. The `--yes-trust` flag only gates the
+  workspace trust prompt; it does not grant mutation, shell execution, or
+  bypass any safety refusal. The root callback's no-subcommand interactive
+  fallback intentionally stays in `cli.py`.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and
