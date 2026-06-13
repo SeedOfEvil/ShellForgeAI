@@ -164,6 +164,7 @@ def test_unknown_unclassified_handlers_warn_instead_of_claiming_certainty(tmp_pa
         "receipt_recovery_readonly.py",
         "receipt_safety.py",
         "recipes.py",
+        "remediation.py",
         "status.py",
         "triage.py",
         "v1.py",

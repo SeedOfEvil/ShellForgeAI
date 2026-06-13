@@ -345,6 +345,66 @@
       "required_substrings": ["recovery", "read-only"]
     },
     {
+      "name": "remediation_help",
+      "group": "remediation",
+      "argv": ["remediation", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["self-test", "eligibility", "plan", "preflight", "audit", "receipt"],
+      "notes": "Added in PR199 when remediation self-test moved to commands/remediation.py; the group surface itself is unchanged."
+    },
+    {
+      "name": "remediation_self_test_help",
+      "group": "remediation",
+      "argv": ["remediation", "self-test", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": [
+        "--profile",
+        "--json",
+        "--fail-on-warn",
+        "--include-live-disposable-exec",
+        "--target",
+        "--confirm-live-disposable"
+      ],
+      "notes": "The long live-disposable opt-in flag renders truncated in 80-col help, so only its stable prefix is asserted. The explicit opt-in/confirm gate MUST stay present."
+    },
+    {
+      "name": "remediation_self_test_quick_json",
+      "group": "remediation",
+      "argv": ["remediation", "self-test", "--profile", "quick", "--json"],
+      "expect_exit_code": 0,
+      "expect_json": true,
+      "required_json_fields": [
+        "schema_version",
+        "mode",
+        "profile",
+        "status",
+        "ci_status",
+        "summary",
+        "checks",
+        "safety",
+        "live_disposable_proof",
+        "next_safe_commands"
+      ],
+      "required_json_values": {
+        "mode": "remediation_self_test",
+        "profile": "quick"
+      },
+      "safety_expectations": {
+        "read_only": true,
+        "mutation_performed": false,
+        "remediation_executed": false,
+        "rollback_executed": false,
+        "cleanup_executed": false,
+        "docker_compose_executed": false,
+        "container_restarted": false,
+        "shell_true": false,
+        "arbitrary_command_execution": false,
+        "natural_language_execution": false,
+        "live_disposable_execute": false
+      },
+      "notes": "Quick profile is deterministic and non-mutating; live disposable execute stays skipped/false by default."
+    },
+    {
       "name": "ask_help",
       "group": "ask_interactive",
       "argv": ["ask", "--help"],

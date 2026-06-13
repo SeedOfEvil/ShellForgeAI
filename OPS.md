@@ -50,9 +50,15 @@ surfaces, PR190 extracted deterministic `ask`, PR191 extracted governed receipt
 history/audit/export/compare surfaces, PR192 extracted read-only receipt safety
 surfaces, PR193 extracted read-only recovery receipt status/validate, PR194
 extracted confirm-gated receipt recovery-execute, PR195 extracted the
-read-only `v1 check` readiness handler into `commands/v1.py`, and PR196
+read-only `v1 check` readiness handler into `commands/v1.py`, PR196
 extracts the `model` command group (`model doctor` and `model test`) into
-`commands/model.py`. This is an internal layout hardening only: command UX,
+`commands/model.py`, and PR199 extracts the `remediation self-test`
+readiness/testing handler into `commands/remediation.py` (quick/standard/full
+profiles, JSON/human output, and safety flags unchanged; live
+docker-disposable execute stays skipped by default behind its explicit
+lab-only opt-in/confirm gate; no cleanup/remediation/rollback/recovery
+execution added; the other remediation handlers stay in `cli.py`).
+This is an internal layout hardening only: command UX,
 quick/standard/full V1 readiness behavior, JSON schemas, safety flags, ask
 routing, and mutation refusal are unchanged. `model doctor` remains the
 read-only provider-readiness report after the move: it does not call model

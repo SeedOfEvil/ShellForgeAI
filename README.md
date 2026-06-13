@@ -115,13 +115,15 @@ asks deterministically, and refuses or gates mutation.
 - CLI internals: `cli.py` is the root Typer entrypoint; commands are being
   split into `src/shellforgeai/commands/` one domain at a time
   (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`;
-  PR185-PR196: `verify`, `handoff`, `propose`, `apply-preview`, governed
+  PR185-PR199: `verify`, `handoff`, `propose`, `apply-preview`, governed
   receipt history/audit/export/compare reporting, read-only receipt
   verify/validate/rollback-preview safety surfaces, read-only recovery receipt
   status/validate, the confirm-gated receipt recovery-execute lane (surface
   and gates unchanged), read-only recipe registry/preflight, deterministic
-  `ask`, the read-only `v1 check` readiness handler, and the `model` command
-  group — `model doctor` stays read-only and still makes no model call). PR198
+  `ask`, the read-only `v1 check` readiness handler, the `model` command
+  group — `model doctor` stays read-only and still makes no model call — and
+  the `remediation self-test` readiness handler, which stays testing-only with
+  live disposable execute skipped by default). PR198
   adds the read-only CLI refactor inventory and remaining-handler map at
   [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md). The PR184
   command-surface golden guardrail protects these moves; `v1 check`
