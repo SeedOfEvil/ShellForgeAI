@@ -136,6 +136,52 @@ and the handlers resolve shared `cli` helpers lazily so monkeypatch hooks and
 output stay identical. Future PRs will migrate further domains (validation, compose, mission, etc.) the
 same way.
 
+After PR201 the split covers 18 command modules under
+`src/shellforgeai/commands/`; `cli.py` remains Typer/app wiring plus the
+explicitly inventoried remaining inline handlers (audit/cleanup, mission,
+compose, V1 packet, remediation execute/rollback, recipes execute, apply, and a
+handful of read-only helpers). The remaining debt is enumerated in
+[`docs/CLI_REFACTOR_MAP.md`](CLI_REFACTOR_MAP.md).
+
+### CLI refactor inventory and enforcement (PR198 / PR202)
+
+`scripts/cli_refactor_inventory.py` is read-only process tooling that inventories
+the command-module split. It parses source with `ast` and never imports the
+ShellForgeAI runtime app, runs Docker/Compose, calls a model, executes any
+command, or mutates source files.
+
+```bash
+python scripts/cli_refactor_inventory.py            # human summary
+python scripts/cli_refactor_inventory.py --json     # strict JSON contract
+python scripts/cli_refactor_inventory.py --markdown # docs-ready Markdown
+python scripts/cli_refactor_inventory.py --write-doc docs/CLI_REFACTOR_MAP.md
+```
+
+The JSON contract includes a `cli_py` block (line count, inline Typer-handler
+count, and the documented debt thresholds), the `extracted_modules` list, the
+explicitly classified `remaining_inline_handlers`, and a read-only `safety`
+block.
+
+PR202 turns that inventory into a regression guardrail
+([`tests/test_pr202_cli_refactor_inventory_enforcement.py`](../tests/test_pr202_cli_refactor_inventory_enforcement.py)).
+It verifies that:
+
+- the JSON/Markdown/`--write-doc` contract stays stable and parseable,
+- every command module from PR182–PR201 exists and is imported/registered by
+  `cli.py` (rather than owned inline),
+- `cli.py` stays at or below the documented inline-handler debt threshold
+  (line count and inline-handler count), and
+- remaining inline handlers stay explicitly inventoried.
+
+If a future PR adds a large new inline `@app.command` body to `cli.py` without
+either extracting a handler or deliberately updating the thresholds and docs, the
+guardrail fails. When you intentionally extract or add a command module, update
+`EXTRACTED_MODULES`/thresholds in the inventory helper, regenerate
+`docs/CLI_REFACTOR_MAP.md` with `--write-doc`, and run the PR184 golden
+command-surface guardrail plus the appropriate validation lane. The inventory
+guardrail is test/process tooling only — it adds no runtime command and no
+execution behavior.
+
 ### Command-surface golden guardrail (PR184)
 
 Before more handlers move out of `cli.py` (including V1 readiness moves such as

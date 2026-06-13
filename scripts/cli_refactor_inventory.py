@@ -21,6 +21,16 @@ MODE = "cli_refactor_inventory"
 CLI_PATH = Path("src/shellforgeai/cli.py")
 COMMANDS_DIR = Path("src/shellforgeai/commands")
 
+# Documented inline-handler debt thresholds. These are deliberately pragmatic:
+# they are the post-PR201 state plus a small buffer so routine formatting or a
+# tiny import-only wiring change does not trip the guardrail, while an obvious
+# regression (a large new inline ``@app.command`` body, or many new inline
+# handlers) reintroduced directly into ``cli.py`` does fail the enforcement
+# test. Lower these whenever a handler is intentionally extracted, never raise
+# them without explicitly recording the new debt here and in the docs.
+CLI_LINE_COUNT_THRESHOLD = 14500
+CLI_INLINE_HANDLER_THRESHOLD = 105
+
 REGRESSION_REQUIREMENTS = [
     "PR184 command-surface golden guardrail",
     "targeted module-split tests",
@@ -740,6 +750,53 @@ def discover_extracted_modules(
     return rows, warnings
 
 
+def _count_lines(cli_path: Path) -> int:
+    try:
+        text = cli_path.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    if not text:
+        return 0
+    # Count physical lines; a trailing newline should not inflate the count.
+    return text.count("\n") + (0 if text.endswith("\n") else 1)
+
+
+def build_cli_py_block(
+    cli_path: Path, repo_root: Path, handlers: list[Handler]
+) -> tuple[dict[str, Any], list[str]]:
+    """Summarize cli.py inline-handler debt against documented thresholds."""
+
+    warnings: list[str] = []
+    line_count = _count_lines(cli_path)
+    inline_handler_count = len(handlers)
+    line_within = line_count <= CLI_LINE_COUNT_THRESHOLD
+    handlers_within = inline_handler_count <= CLI_INLINE_HANDLER_THRESHOLD
+    if not line_within:
+        warnings.append(
+            f"cli.py line count {line_count} exceeds documented threshold "
+            f"{CLI_LINE_COUNT_THRESHOLD}; extract a handler or update the inventory/docs"
+        )
+    if not handlers_within:
+        warnings.append(
+            f"cli.py inline handler count {inline_handler_count} exceeds documented "
+            f"threshold {CLI_INLINE_HANDLER_THRESHOLD}; extract a handler or update "
+            "the inventory/docs"
+        )
+    block = {
+        "path": _rel(cli_path, repo_root),
+        "line_count": line_count,
+        "line_count_threshold": CLI_LINE_COUNT_THRESHOLD,
+        "line_count_within_threshold": line_within,
+        "inline_handler_count": inline_handler_count,
+        "inline_handler_threshold": CLI_INLINE_HANDLER_THRESHOLD,
+        "inline_handler_within_threshold": handlers_within,
+        "within_threshold": line_within and handlers_within,
+        "allowed_inline_wiring": True,
+        "remaining_inline_handler_functions": [handler.function for handler in handlers],
+    }
+    return block, warnings
+
+
 def build_inventory(repo_root: Path) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     cli_path = repo_root / CLI_PATH
@@ -747,9 +804,14 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
     extracted, extracted_warnings = discover_extracted_modules(commands_dir, repo_root)
     handlers, handler_warnings = discover_inline_handlers(cli_path)
     remaining, classification_warnings = classify_handlers(handlers)
-    warnings = extracted_warnings + handler_warnings + classification_warnings
+    cli_py, cli_py_warnings = build_cli_py_block(cli_path, repo_root, handlers)
+    warnings = extracted_warnings + handler_warnings + classification_warnings + cli_py_warnings
     unknown_handlers = sum(1 for row in remaining if row["category"] == "unknown")
-    status = "ok" if not extracted_warnings and cli_path.exists() else "failed"
+    status = (
+        "ok"
+        if not extracted_warnings and cli_path.exists() and cli_py["within_threshold"]
+        else "failed"
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": MODE,
@@ -765,7 +827,11 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
             "remaining_inline_handlers": len(remaining),
             "unknown_handlers": unknown_handlers,
             "recommended_next_count": len(RECOMMENDED_GROUPS),
+            "cli_line_count": cli_py["line_count"],
+            "cli_inline_handler_count": cli_py["inline_handler_count"],
+            "cli_within_threshold": cli_py["within_threshold"],
         },
+        "cli_py": cli_py,
         "extracted_modules": extracted,
         "remaining_inline_handlers": remaining,
         "recommended_next_extractions": RECOMMENDED_GROUPS,
@@ -841,6 +907,28 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Extracted command modules: {payload['summary']['extracted_modules']}",
         f"- Remaining inline CLI handlers: {payload['summary']['remaining_inline_handlers']}",
         f"- Unknown inline handlers: {payload['summary']['unknown_handlers']}",
+        "",
+        "## cli.py inline-handler debt",
+        "",
+        (
+            f"- `{payload['cli_py']['path']}` line count: "
+            f"{payload['cli_py']['line_count']} "
+            f"(threshold {payload['cli_py']['line_count_threshold']}, "
+            f"within: {str(payload['cli_py']['line_count_within_threshold']).lower()})"
+        ),
+        (
+            f"- Inline Typer handlers in cli.py: "
+            f"{payload['cli_py']['inline_handler_count']} "
+            f"(threshold {payload['cli_py']['inline_handler_threshold']}, "
+            f"within: {str(payload['cli_py']['inline_handler_within_threshold']).lower()})"
+        ),
+        (
+            "- `cli.py` remains Typer/app wiring plus the explicitly inventoried "
+            "remaining inline handlers below; the PR202 enforcement guardrail "
+            "(`tests/test_pr202_cli_refactor_inventory_enforcement.py`) fails if a "
+            "new large inline handler is added without lowering the debt or "
+            "updating these thresholds and docs."
+        ),
         "",
         "## How to run the inventory",
         "",
