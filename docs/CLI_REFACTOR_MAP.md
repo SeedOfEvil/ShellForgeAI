@@ -53,6 +53,51 @@ The check is read-only (AST inspection only) and sorts every inline Typer callab
 
 The allowlist is deliberately tiny and must stay reasoned. A future PR that needs to keep a new inline callable in `cli.py` must add an explicit entry **with a reason**; an entry without a reason is rejected. If the allowlist would grow beyond a few genuine wiring/bootstrap items, extract the handler into `src/shellforgeai/commands/` instead — new command handlers belong in a command module, not inline in `cli.py`. The PR184 golden command-surface guardrail remains required for any command refactor.
 
+## Import side-effect guardrail (PR205)
+
+The command-module split closes two ways, not one. The PR184 golden
+command-surface guardrail protects **user-visible commands**; the PR205 import
+side-effect guardrail protects against **hidden import-time behavior**.
+
+Importing `src/shellforgeai/cli.py`, `src/shellforgeai/commands/__init__.py`, and
+every module under `src/shellforgeai/commands/` must be **import-safe**:
+
+- Allowed at import: defining Typer apps/functions/classes, importing local
+  modules, defining constants and option metadata, registering commands, and
+  harmless pure-Python setup.
+- Not allowed at import: calling Docker/Compose, restarting containers, running
+  subprocesses, `os.system`, `shell=True`, calling a model/Codex client, network
+  requests, cleanup/remediation/rollback/recovery execution, writing/repairing/
+  deleting artifacts, or any other operational mutation. Those belong only inside
+  the command's execution path (the handler body), which runs when the command is
+  invoked — never at import.
+
+The guardrail lives in
+`tests/test_pr205_command_module_import_side_effects.py` and combines:
+
+- a **static** AST scan that rejects top-level subprocess/`shell=True`/cleanup/
+  remediation/rollback/recovery/model calls while leaving harmless help text and
+  command strings untouched, and
+- a **runtime** check that purges the audited modules from `sys.modules` and
+  reimports them under monkeypatched recording stubs over the dangerous
+  primitives (subprocess, `os.system`, network sockets, the model/provider
+  factory, the Docker/restart executors, and artifact write/delete), asserting
+  none fired at import time.
+
+A read-only helper runs the same audit in a fresh process and reports per-module
+import status plus any blocked side-effect attempts:
+
+```bash
+python scripts/cli_import_audit.py
+python scripts/cli_import_audit.py --json
+python scripts/cli_import_audit.py --markdown
+```
+
+The helper is read-only and local-only: it executes no ShellForgeAI command and
+performs no Docker/Compose/subprocess/model/network call and no artifact/`/data`
+mutation. Run this guardrail (and the PR184 command-surface guardrail) for any
+future command-module change.
+
 ## Intentional `cli.py` responsibilities (allowed Typer wiring/glue)
 
 `src/shellforgeai/cli.py` is intended to remain the Typer app entrypoint and registration glue. The following are allowed to stay:

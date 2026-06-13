@@ -282,6 +282,27 @@ PR184 command-surface golden guardrail. The check is read-only AST inspection �
 no command/Docker/Compose/model execution and no file mutation — and is enforced
 by `tests/test_pr204_cli_wiring_only_enforcement.py`.
 
+PR205 protects the *other* face of the closed command-module split: hidden
+import-time behavior. Where the PR184 golden command-surface guardrail protects
+user-visible commands, the PR205 import side-effect guardrail proves that
+importing `shellforgeai.cli` and every `shellforgeai.commands.*` module is
+import-safe — definitions, local imports, constants/option metadata, and Typer
+registration only. Importing a command module must never execute operational
+logic: no subprocess/`os.system`/`shell=True` execution, no Docker/Compose call
+or container/production restart, no cleanup/remediation/rollback/recovery
+execution, no model/Codex call, no network call, and no artifact
+write/repair/delete. The guardrail lives in
+`tests/test_pr205_command_module_import_side_effects.py` and combines a static
+AST scan (no top-level operational calls; harmless help text is not flagged) with
+a runtime check that purges the audited modules from `sys.modules` and reimports
+them under monkeypatched recording stubs over the dangerous primitives, asserting
+none fired at import time. A read-only helper,
+`python scripts/cli_import_audit.py [--json|--markdown]`, runs the same audit in a
+fresh process and reports per-module import status and any blocked side-effect
+attempts; it is read-only and local-only (no command/Docker/Compose/model/network
+execution and no artifact/`/data` mutation). Run this guardrail for any future
+command-module change.
+
 ## Current baseline / handoff
 
 The PR78 release/handoff baseline is the current operator reference

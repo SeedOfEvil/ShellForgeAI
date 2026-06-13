@@ -300,6 +300,21 @@ REPL internals and the root callback's no-subcommand interactive fallback
 remain in their current homes. Future CLI refactors should run the PR184
 command-surface golden guardrail.
 
+Implementation note: with the command-module split closed (PR182–PR204), PR205
+adds an import side-effect guardrail. Importing `shellforgeai.cli` and every
+`shellforgeai.commands.*` module is import-safe: it only defines Typer
+apps/functions/classes, imports local modules, defines constants/option
+metadata, and registers commands. Importing a command module never calls
+Docker/Compose, restarts containers, runs a subprocess/`shell=True`, calls a
+model/Codex client, performs a network request, executes cleanup/remediation/
+rollback/recovery, or writes/repairs/deletes artifacts — those happen only inside
+the command's execution path when the command is actually invoked. The PR184
+golden command-surface guardrail protects user-visible commands; the PR205
+import side-effect guardrail
+(`tests/test_pr205_command_module_import_side_effects.py`, plus the read-only
+`scripts/cli_import_audit.py` helper) protects against hidden import-time
+behavior. Future command-module changes should run both.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:
