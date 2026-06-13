@@ -37,6 +37,42 @@ REGRESSION_REQUIREMENTS = [
     "full pytest if command registration/safety surface changes",
 ]
 
+# Files that constitute the PR184 golden command-surface guardrail. Their
+# presence is a read-only signal that the protective regression harness is in
+# place; the inventory never executes them.
+COMMAND_SURFACE_GUARDRAIL_FILES = (
+    Path("tests/test_pr184_cli_command_surface_golden.py"),
+    Path("tests/golden/cli_command_surface_pr184.json"),
+    Path("tests/helpers/cli_surface.py"),
+)
+
+# Narrative allowlist of what is intentionally allowed to remain in cli.py as
+# Typer wiring/glue. This is documentation-only; the concrete glue functions are
+# detected from the AST (Typer ``@*.callback()`` decorators) rather than guessed.
+ALLOWED_INLINE_GLUE_NOTES = [
+    "Typer `app`/group creation and shared app wiring (`typer.Typer(...)`).",
+    "Root `@app.callback()` (`main`) including the no-subcommand interactive fallback.",
+    "Typer group `@*.callback()` glue (for example `audit index` and `v1 packet`).",
+    "`from shellforgeai.commands import <module> as <module>_commands` imports.",
+    "`<module>_commands.register(...)` registration calls for extracted modules.",
+    "Compatibility command/alias registration that preserves the public surface.",
+    "Minimal bootstrap constants and shared option/context helpers.",
+]
+
+# What must never be (re)introduced into cli.py. The PR202 enforcement guardrail
+# backs this up by failing if inline-handler debt grows past the documented
+# thresholds.
+NOT_ALLOWED_IN_CLI_NOTES = [
+    "Large command handler bodies (extract into `src/shellforgeai/commands/`).",
+    "Docker/Compose mutation or restart logic.",
+    "Remediation/recovery/rollback execution logic.",
+    "Ask deterministic routing/refusal decision bodies.",
+    "Receipt artifact business logic.",
+    "Interactive REPL loop internals.",
+    "Model/Codex call logic.",
+    "Large JSON response builders.",
+]
+
 EXTRACTED_MODULES: dict[str, dict[str, Any]] = {
     "apply-preview": {"module": "apply_preview.py", "category": "preview_only", "known_pr": 187},
     "ask": {"module": "ask.py", "category": "read_only", "known_pr": 190},
@@ -641,6 +677,12 @@ def _is_typer_command_decorator(text: str) -> bool:
     return ".command(" in text or ".callback(" in text
 
 
+def _is_callback_decorator(text: str) -> bool:
+    """Typer ``@*.callback()`` glue, as opposed to a ``@*.command()`` handler."""
+
+    return ".callback(" in text
+
+
 def discover_inline_handlers(cli_path: Path) -> tuple[list[Handler], list[str]]:
     warnings: list[str] = []
     try:
@@ -797,6 +839,99 @@ def build_cli_py_block(
     return block, warnings
 
 
+def build_closure_block(
+    repo_root: Path,
+    cli_path: Path,
+    commands_dir: Path,
+    handlers: list[Handler],
+    remaining: list[dict[str, Any]],
+    cli_py: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Summarize CLI-refactor closure: glue vs handlers, modules, guardrail.
+
+    This is the read-only verification view for the refactor-closure step. It
+    distinguishes intentional Typer wiring/glue (``@*.callback()``) from
+    business-logic command handlers (``@*.command()``), confirms the expected
+    extracted modules exist, checks that the PR184 command-surface guardrail
+    files are present, and reports any *unexpected* (unclassified) inline
+    handlers. It never claims a false OK: missing modules, unexpected handlers,
+    a missing guardrail, or threshold breaches downgrade ``closure_status``.
+    """
+
+    warnings: list[str] = []
+
+    glue_functions = sorted(h.function for h in handlers if _is_callback_decorator(h.decorator))
+    command_handler_functions = sorted(
+        h.function for h in handlers if not _is_callback_decorator(h.decorator)
+    )
+    unexpected = sorted(row["function"] for row in remaining if row["category"] == "unknown")
+
+    present_module_stems = sorted(
+        path.stem for path in commands_dir.glob("*.py") if path.name != "__init__.py"
+    )
+    expected_modules = sorted(
+        {str(meta["module"]).removesuffix(".py") for meta in EXTRACTED_MODULES.values()}
+    )
+    missing_expected = [
+        module for module in expected_modules if not (commands_dir / f"{module}.py").exists()
+    ]
+
+    guardrail_present = all((repo_root / rel).exists() for rel in COMMAND_SURFACE_GUARDRAIL_FILES)
+    missing_guardrail = [
+        rel.as_posix() for rel in COMMAND_SURFACE_GUARDRAIL_FILES if not (repo_root / rel).exists()
+    ]
+
+    if not cli_path.exists():
+        warnings.append("closure: cli.py is missing; cannot verify Typer wiring role")
+        closure_status = "needs_attention"
+    elif unexpected or missing_expected or not cli_py["within_threshold"] or not guardrail_present:
+        closure_status = "needs_attention"
+    else:
+        closure_status = "ok"
+
+    if missing_expected:
+        warnings.append("closure: expected command modules missing: " + ", ".join(missing_expected))
+    if unexpected:
+        warnings.append(
+            "closure: unexpected (unclassified) inline handlers present: " + ", ".join(unexpected)
+        )
+    if not guardrail_present:
+        warnings.append(
+            "closure: PR184 command-surface guardrail files missing: "
+            + ", ".join(missing_guardrail)
+        )
+
+    if closure_status == "ok":
+        recommendation = (
+            f"cli split enforced and behavior-preserving: {len(present_module_stems)} command "
+            f"modules extracted; {len(command_handler_functions)} classified inline command "
+            "handlers remain as documented future-extraction candidates; "
+            f"{len(glue_functions)} Typer callbacks intentionally remain as wiring; "
+            "0 unexpected inline handlers; PR184/PR202 guardrails present"
+        )
+    else:
+        recommendation = (
+            "closure needs attention: resolve unexpected inline handlers, missing command "
+            "modules, the command-surface guardrail, or cli.py threshold breaches before "
+            "claiming structural closure"
+        )
+
+    block = {
+        "cli_py_role": "typer_wiring",
+        "command_surface_guardrail": "present" if guardrail_present else "missing",
+        "command_modules": present_module_stems,
+        "expected_modules": expected_modules,
+        "missing_expected_modules": missing_expected,
+        "allowed_inline_glue": glue_functions,
+        "remaining_command_handlers": len(command_handler_functions),
+        "remaining_command_handler_functions": command_handler_functions,
+        "unexpected_inline_handlers": unexpected,
+        "closure_status": closure_status,
+        "recommendation": recommendation,
+    }
+    return block, warnings
+
+
 def build_inventory(repo_root: Path) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     cli_path = repo_root / CLI_PATH
@@ -805,7 +940,16 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
     handlers, handler_warnings = discover_inline_handlers(cli_path)
     remaining, classification_warnings = classify_handlers(handlers)
     cli_py, cli_py_warnings = build_cli_py_block(cli_path, repo_root, handlers)
-    warnings = extracted_warnings + handler_warnings + classification_warnings + cli_py_warnings
+    closure, closure_warnings = build_closure_block(
+        repo_root, cli_path, commands_dir, handlers, remaining, cli_py
+    )
+    warnings = (
+        extracted_warnings
+        + handler_warnings
+        + classification_warnings
+        + cli_py_warnings
+        + closure_warnings
+    )
     unknown_handlers = sum(1 for row in remaining if row["category"] == "unknown")
     status = (
         "ok"
@@ -830,8 +974,12 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
             "cli_line_count": cli_py["line_count"],
             "cli_inline_handler_count": cli_py["inline_handler_count"],
             "cli_within_threshold": cli_py["within_threshold"],
+            "closure_status": closure["closure_status"],
+            "unexpected_inline_handlers": len(closure["unexpected_inline_handlers"]),
+            "allowed_inline_glue": len(closure["allowed_inline_glue"]),
         },
         "cli_py": cli_py,
+        "closure": closure,
         "extracted_modules": extracted,
         "remaining_inline_handlers": remaining,
         "recommended_next_extractions": RECOMMENDED_GROUPS,
@@ -929,6 +1077,57 @@ def render_markdown(payload: dict[str, Any]) -> str:
             "new large inline handler is added without lowering the debt or "
             "updating these thresholds and docs."
         ),
+        "",
+        "## CLI refactor closure status",
+        "",
+        f"- Closure status: `{payload['closure']['closure_status']}`",
+        f"- `cli.py` role: `{payload['closure']['cli_py_role']}`",
+        f"- Command-surface guardrail (PR184): `{payload['closure']['command_surface_guardrail']}`",
+        f"- Extracted command modules: {len(payload['closure']['command_modules'])}",
+        (
+            "- Missing expected modules: "
+            + (
+                ", ".join(f"`{m}`" for m in payload["closure"]["missing_expected_modules"])
+                if payload["closure"]["missing_expected_modules"]
+                else "none"
+            )
+        ),
+        (
+            "- Intentional Typer wiring/glue (callbacks) left in cli.py: "
+            + (
+                ", ".join(f"`{g}`" for g in payload["closure"]["allowed_inline_glue"])
+                if payload["closure"]["allowed_inline_glue"]
+                else "none"
+            )
+        ),
+        (
+            f"- Classified inline command handlers remaining (future-extraction "
+            f"candidates): {payload['closure']['remaining_command_handlers']}"
+        ),
+        (
+            "- Unexpected (unclassified) inline handlers: "
+            + (
+                ", ".join(f"`{u}`" for u in payload["closure"]["unexpected_inline_handlers"])
+                if payload["closure"]["unexpected_inline_handlers"]
+                else "none"
+            )
+        ),
+        f"- Recommendation: {payload['closure']['recommendation']}",
+        "",
+        "## Intentional `cli.py` responsibilities (allowed Typer wiring/glue)",
+        "",
+        (
+            "`src/shellforgeai/cli.py` is intended to remain the Typer app entrypoint "
+            "and registration glue. The following are allowed to stay:"
+        ),
+        "",
+        *[f"- {note}" for note in ALLOWED_INLINE_GLUE_NOTES],
+        "",
+        "## Not allowed in `cli.py`",
+        "",
+        "The following belong in command modules, not inline in `cli.py`:",
+        "",
+        *[f"- {note}" for note in NOT_ALLOWED_IN_CLI_NOTES],
         "",
         "## How to run the inventory",
         "",
