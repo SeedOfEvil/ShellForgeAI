@@ -207,6 +207,45 @@ command-surface guardrail plus the appropriate validation lane. The inventory
 guardrail is test/process tooling only — it adds no runtime command and no
 execution behavior.
 
+### CLI wiring-only enforcement (PR204)
+
+`cli.py` is treated as **wiring-only**: Typer app/group creation, command-module
+registration, shared app metadata, and thin root/bootstrap helpers. The strict
+`--check` mode enforces that no *unapproved* inline command handler appears in
+`cli.py`:
+
+```bash
+python scripts/cli_refactor_inventory.py --check        # human; exit 1 on failure
+python scripts/cli_refactor_inventory.py --check --json  # strict JSON contract
+```
+
+The check is read-only (AST inspection only) and sorts every inline Typer
+callable in `cli.py` into exactly one bucket:
+
+- **Allowed** — explicitly allowlisted Typer wiring / root bootstrap. The
+  allowlist (`INLINE_ALLOWLIST`) is tiny and every entry must carry a `reason`;
+  an entry without a reason is rejected by `validate_allowlist`. Current entries:
+  `main` (root callback / app bootstrap), `version_cmd` (tiny read-only `version`
+  command), and the `audit index`/`v1 packet` group callbacks.
+- **Remaining extraction candidate** — a classified inline command handler
+  documented as future-extraction debt. These are reported (and counted) as the
+  tracked extraction map, not silently folded into the allowlist; while any
+  remain, `cli_py_role` is `wiring_with_tracked_remaining` rather than
+  `wiring_only`.
+- **Unapproved** — an unclassified inline command handler or a non-allowlisted
+  Typer callback. These fail the check (`status: failed`, exit code 1) and must
+  move into `src/shellforgeai/commands/` or earn an explicit allowlist reason.
+
+When a future PR needs to keep a new inline callable in `cli.py`, it must add an
+explicit `INLINE_ALLOWLIST` entry **with a reason**; if the allowlist would grow
+beyond a few genuine wiring/bootstrap items, extract the handler into a command
+module instead. New command handlers belong under `src/shellforgeai/commands/`,
+and the PR184 golden command-surface guardrail remains required for any command
+refactor. The check is enforced by
+[`tests/test_pr204_cli_wiring_only_enforcement.py`](../tests/test_pr204_cli_wiring_only_enforcement.py)
+and is process/test tooling only: it runs no command, no Docker/Compose, no
+model call, and mutates no files.
+
 ### Command-surface golden guardrail (PR184)
 
 Before more handlers move out of `cli.py` (including V1 readiness moves such as

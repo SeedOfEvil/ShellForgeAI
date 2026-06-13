@@ -402,7 +402,13 @@ golden guardrail. The PR202 CLI refactor inventory enforcement guardrail
 that each extracted module stays imported/registered by `cli.py` rather than
 re-owned inline, and that `cli.py` stays at or below its documented
 inline-handler debt thresholds; it is read-only process tooling and changes no
-command contract.
+command contract. The PR204 wiring-only enforcement mode
+(`python scripts/cli_refactor_inventory.py --check`) further treats `cli.py` as
+wiring-only: it fails if an unapproved inline command handler (an unclassified
+handler or a non-allowlisted Typer callback) appears, while a tiny reasoned
+allowlist (`main`, `version_cmd`, and the `audit index`/`v1 packet` group
+callbacks) and the documented remaining-extraction candidates are tracked
+explicitly. It is read-only and changes no command contract.
 
 ### Governed receipt audit/history layer
 
