@@ -84,6 +84,19 @@ The staged split currently covers these behavior-preserving slices:
   call, starts no Codex task, and mutates nothing. `model test` keeps its
   positional prompt and `--raw`/`--timeout`/`--model` options and remains the
   group's only explicit one-shot model call, unchanged.
+- PR199: `commands/remediation.py` for the `remediation self-test`
+  readiness/testing handler. The command surface is unchanged:
+  `remediation self-test [--profile quick|standard|full] [--json]
+  [--fail-on-warn]` keeps the same checks, pass/fail/warn/skipped summary
+  shape, JSON/human output, exit codes, and safety flags; live
+  docker-disposable execute remains skipped by default and still requires the
+  existing explicit `--include-live-disposable-execute --target <exact>
+  --confirm-live-disposable` lab-only gate. The self-test remains
+  readiness/testing only: no cleanup, arbitrary remediation, rollback, or
+  recovery execution, no Docker Compose call, no production restart, and no
+  model call. All other remediation handlers
+  (eligibility/plan/validate/preflight/execute/report/bundle/audit/status/
+  rollback/receipt) remain in `cli.py` for later focused moves.
 - PR189: `commands/recipes.py` for the read-only governed recipe registry and
   preflight surfaces: `recipes` (root listing), `recipes list`, `recipes
   inspect`, `recipes eligibility`, `recipes preflight` (build/`--save`), and

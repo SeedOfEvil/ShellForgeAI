@@ -263,6 +263,18 @@ and safety fields. The V1 packet lifecycle remains in `cli.py` for a later
 focused move. Future CLI refactors should run the PR184 command-surface golden
 guardrail.
 
+Implementation note: the `remediation self-test` Typer registration/handler
+now lives in `src/shellforgeai/commands/remediation.py` (PR199).
+Behavior-preserving only: quick/standard/full profiles, `--json`,
+`--fail-on-warn`, the pass/fail/warn/skipped summary, and safety flags keep
+their existing readiness/testing semantics; live docker-disposable execute
+remains skipped by default behind the explicit
+`--include-live-disposable-execute --target <exact> --confirm-live-disposable`
+lab-only gate. No cleanup/remediation/rollback/recovery execution was added.
+All other remediation handlers (eligibility/plan/validate/preflight/execute/
+report/bundle/audit/status/rollback/receipt) remain in `cli.py`. Future CLI
+refactors should run the PR184 command-surface golden guardrail.
+
 ## Support commands
 
 Support commands can stay documented, but below the golden path:

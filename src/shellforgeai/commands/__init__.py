@@ -49,6 +49,12 @@ The behavior-preserving extraction slices currently cover read-only domains:
   command; deterministic read-only routing, mutation refusal, and the
   evidence-backed model path delegate to the existing ``cli.py`` helpers,
   which stay in ``cli.py`` (interactive mode and other surfaces share them).
+* :mod:`shellforgeai.commands.remediation` — the ``remediation self-test``
+  readiness/testing handler; quick/standard/full profiles, JSON/human output,
+  safety flags, and the skipped-by-default live disposable execute gate are
+  unchanged. All other remediation handlers (eligibility/plan/validate/
+  preflight/execute/report/bundle/audit/status/rollback/receipt) stay in
+  ``cli.py``.
 
 Importing these modules has no side effects: they only define ``register``
 functions and resolve ``shellforgeai.cli`` lazily so registration order, help
@@ -70,6 +76,7 @@ __all__ = [
     "receipt_recovery_readonly",
     "receipt_safety",
     "recipes",
+    "remediation",
     "status",
     "triage",
     "verify",

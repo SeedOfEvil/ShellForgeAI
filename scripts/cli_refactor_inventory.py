@@ -48,6 +48,11 @@ EXTRACTED_MODULES: dict[str, dict[str, Any]] = {
     },
     "receipt safety": {"module": "receipt_safety.py", "category": "preview_only", "known_pr": 192},
     "recipes/preflight": {"module": "recipes.py", "category": "read_only", "known_pr": 189},
+    "remediation self-test": {
+        "module": "remediation.py",
+        "category": "preview_only",
+        "known_pr": 199,
+    },
     "status": {"module": "status.py", "category": "read_only", "known_pr": 182},
     "triage": {"module": "triage.py", "category": "read_only", "known_pr": 183},
     "v1": {"module": "v1.py", "category": "read_only", "known_pr": 195},
