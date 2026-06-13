@@ -947,3 +947,33 @@ command-surface golden guardrail should be run for these refactors so help,
 JSON flags, receipt-aware verify, confirmation markers, and mutation-refusal
 paths remain visible.
 
+## PR201 milestone: interactive "not-a-shell" policy guardrail
+
+PR201 makes the interactive safety posture explicit and tests it: **interactive
+mode is not a shell.** It routes known ShellForgeAI read-only commands and
+deterministic read-only operator asks, and refuses shell-shaped input rather
+than executing it. Refusals carry clear wording — "Interactive mode is not a
+shell.", "No command was executed.", "No action was taken." — and offer safe
+read-only alternatives.
+
+Refused categories: arbitrary shell commands; filesystem mutation
+(`touch`/`rm`/`mv`/`cp`/`chmod`/`chown`); arbitrary file reads
+(`cat /etc/passwd`, `cat ~/.ssh/id_rsa`); Docker/Compose mutation
+(`docker restart`, `docker compose restart`/`up`/`down`, `docker volume prune`);
+cleanup/remediation/rollback/recovery execution; network/download commands
+(`curl`/`wget`); package installs (`apt install`/`pip install`); cloud/VCS
+mutation (`git push`, `gh pr merge`, `codex apply`, `kubectl apply`); and shell
+metacharacters/pipelines/redirections (`|`, `>`, `>>`, `&&`, `;`).
+
+`uname -a` decision: bare host-evidence shell invocations are refused as
+not-a-shell rather than answered, because interactive cannot guarantee a
+non-shell evidence path for a raw `uname` invocation. Use the read-only
+ShellForgeAI evidence surfaces (`status`, `ops report`, `diagnose health`).
+
+This PR is behavior-preserving except for clearer wording and stricter tests. It
+adds no shell execution, no new interactive execution lane, no Docker/Compose
+mutation, no `shell=True`, and no model call, and it does not weaken read-only
+command routing — legitimate subcommands with flags/arguments
+(`triage docker --json`, `ops report --json`, `verify --target <target>`) still
+dispatch. Tests live in `tests/test_pr201_interactive_not_a_shell_policy.py`.
+

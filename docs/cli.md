@@ -191,6 +191,17 @@ Running with no `<command>` enters interactive mode (see
 covering fast status, Docker triage/detail, report history/compare,
 remediation readiness, follow-ups, and refused mutation examples.
 
+Interactive mode is **not a shell**: shell-shaped input is refused, never
+executed — arbitrary shell commands, filesystem mutation, arbitrary file reads
+(`cat /etc/passwd`), Docker/Compose mutation, network/download (`curl`/`wget`),
+package installs (`apt install`/`pip install`), cloud/VCS mutation (`git push`,
+`gh pr merge`, `codex apply`), and shell metacharacters/pipelines (`|`, `>`,
+`&&`, `;`). Refusals say "Interactive mode is not a shell.", "No command was
+executed.", "No action was taken." and suggest safe read-only alternatives. Bare
+host-evidence invocations such as `uname -a` are refused as not-a-shell rather
+than answered; legitimate ShellForgeAI subcommands with flags/arguments still
+route. See `docs/interactive-mode.md`.
+
 Interactive broad role/health prompts such as `what does this system do?`,
 `is it running normally?`, and `what should I check first?` are
 deterministically handled with built-in read-only evidence collection/reuse

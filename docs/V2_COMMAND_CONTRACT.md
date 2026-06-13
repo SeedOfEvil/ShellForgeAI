@@ -42,6 +42,17 @@ validation, receipt, and handoff must not sound like execution.
 - Workspace trust never lifts policy.
 - Unknown slash commands and command-like typos must not call the model or run
 anything.
+- Interactive mode is not a shell. Shell-shaped input is refused, never
+  executed: arbitrary shell commands, filesystem mutation, arbitrary file reads
+  (`cat /etc/passwd`), Docker/Compose mutation, cleanup/remediation/rollback/
+  recovery execution, network/download commands (`curl`/`wget`), package
+  installs (`apt install`/`pip install`), cloud/VCS mutation (`git push`,
+  `gh pr merge`, `codex apply`, `kubectl apply`), and shell
+  metacharacters/pipelines/redirections (`|`, `>`, `&&`, `;`). Refusals say
+  "Interactive mode is not a shell.", "No command was executed.", and "No action
+  was taken." and offer safe read-only alternatives. Bare host-evidence shell
+  invocations (`uname -a`) are refused as not-a-shell rather than answered.
+  Legitimate ShellForgeAI subcommands with flags/arguments still route.
 
 ## V2 golden path sketch
 

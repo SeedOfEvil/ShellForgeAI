@@ -418,6 +418,42 @@ executed from latest context. If a target is unambiguous, the refusal names it
 states that no action was taken, and suggests read-only triage detail /
 remediation eligibility explanation.
 
+## Interactive mode is not a shell
+
+Interactive mode routes known ShellForgeAI read-only commands and deterministic
+read-only operator asks. It is **not a shell**: typed text is never executed as a
+shell command, and no command runs from arbitrary or natural-language input.
+
+Shell-shaped input is refused with explicit wording — "Interactive mode is not a
+shell.", "No command was executed.", "No action was taken." — plus safe read-only
+alternatives. Refused categories include:
+
+- arbitrary shell commands and shell command invocations
+  (`touch ...`, `rm ...`, `mv ...`, `cp ...`, `chmod ...`, `chown ...`);
+- arbitrary file reads (`cat /etc/passwd`, `cat ~/.ssh/id_rsa`);
+- Docker/Compose mutation (`docker restart ...`, `docker compose restart ...`,
+  `docker compose up`, `docker compose down`, `docker volume prune`);
+- cleanup / remediation / rollback / recovery execution;
+- network/download commands (`curl ...`, `wget ...`);
+- package installs (`apt install ...`, `pip install ...`);
+- cloud / VCS / orchestration mutation (`git push`, `gh pr merge`,
+  `codex apply`, `kubectl apply`);
+- shell metacharacters / pipelines / redirections (`|`, `>`, `>>`, `&&`, `;`,
+  command substitution);
+- natural-language mutation requests.
+
+Real fixes only run through governed, named recipes with explicit confirmation.
+
+`uname -a` and other bare host-evidence shell invocations are refused as
+not-a-shell: interactive mode cannot guarantee a non-shell evidence path for a
+raw `uname` invocation, so it answers with the not-a-shell refusal rather than
+executing anything. Use the ShellForgeAI read-only evidence surfaces instead
+(`status`, `ops report`, `diagnose health`).
+
+Legitimate ShellForgeAI subcommands with flags/arguments (for example
+`triage docker --json`, `ops report --json`, `verify --target <target>`) keep
+working and are not blocked by this policy.
+
 ## Paste guard
 
 The REPL is not a shell. Pasted shell-looking input is blocked unless

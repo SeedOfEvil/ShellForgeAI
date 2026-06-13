@@ -132,7 +132,14 @@ asks deterministically, and refuses or gates mutation.
   command-surface golden guardrail protects these moves; `v1 check`
   quick/standard readiness behavior and JSON/human output remain unchanged
   after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —
-  see [`docs/cli.md`](docs/cli.md).
+  see [`docs/cli.md`](docs/cli.md). PR201 adds a focused interactive
+  "not-a-shell" guardrail and wording polish: shell-shaped input (arbitrary
+  shell commands, filesystem mutation, arbitrary file reads, Docker/Compose
+  mutation, network/package/cloud commands, shell metacharacters) is refused
+  with clear wording and safe read-only alternatives — interactive mode is not
+  a shell and `uname -a` is refused rather than answered — while safe read-only
+  command routing is unchanged
+  (`tests/test_pr201_interactive_not_a_shell_policy.py`).
 
 ### What this is (V1)
 

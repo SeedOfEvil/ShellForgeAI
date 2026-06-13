@@ -423,6 +423,90 @@ _DANGEROUS_COMMAND_PATTERNS = (
     ("mission", "execute"),
 )
 
+# PR201: interactive mode is not a shell. Shell-shaped command invocations are
+# refused (never executed). These are common Linux/Docker binaries whose first
+# token unambiguously indicates a shell command rather than a ShellForgeAI
+# subcommand or a natural-language operator ask. English-ambiguous binaries
+# (e.g. "ssh", "find", "go") are deliberately excluded so legitimate
+# natural-language routing ("ssh login failing", "find recent errors") is not
+# blocked. ShellForgeAI command words and follow-up confirmations are never in
+# this set, and safe CLI dispatch is resolved before this check runs.
+_NOT_A_SHELL_COMMANDS = frozenset(
+    {
+        # filesystem mutation
+        "touch",
+        "mv",
+        "cp",
+        "ln",
+        "mkdir",
+        "rmdir",
+        "dd",
+        "mkfs",
+        "mount",
+        "umount",
+        # arbitrary file read / edit
+        "cat",
+        "nano",
+        "vi",
+        "vim",
+        # network / download
+        "curl",
+        "wget",
+        "scp",
+        "rsync",
+        "telnet",
+        "nc",
+        "netcat",
+        # package install / managers
+        "apt",
+        "apt-get",
+        "dnf",
+        "yum",
+        "apk",
+        "pacman",
+        "zypper",
+        "pip",
+        "pip3",
+        "pipx",
+        "npm",
+        "gem",
+        "brew",
+        "snap",
+        # cloud / VCS / orchestration mutation
+        "git",
+        "gh",
+        "codex",
+        "kubectl",
+        "helm",
+        "terraform",
+        "ansible",
+        "gcloud",
+        "podman",
+        "nerdctl",
+        # host-evidence shell binaries -> refused (interactive is not a shell)
+        "uname",
+    }
+)
+
+# Shell metacharacters (pipes, redirections, command separators, command
+# substitution). Their presence means the input is shell-shaped and is refused
+# rather than executed or routed.
+_SHELL_METACHARACTERS = ("|", "&&", ";", ">", "`", "$(")
+
+# Explicit ``ask`` review/explain frames are read-only model requests about a
+# command; they must not be refused as shell-shaped so the operator can still
+# get an explanation. They never execute the snippet.
+_EXPLICIT_ASK_FRAMES = (
+    "ask ",
+    "explain this command:",
+    "review this shell snippet:",
+    "what does this command do?",
+)
+
+
+def _has_shell_metacharacters(raw: str) -> bool:
+    return any(token in raw for token in _SHELL_METACHARACTERS)
+
 
 def _split_command_style(raw: str) -> tuple[str, ...] | None:
     try:
@@ -942,6 +1026,34 @@ def _dispatch_dangerous_command(raw: str) -> RoutedCommand | None:
     return None
 
 
+def _dispatch_shell_shaped_command(raw: str) -> RoutedCommand | None:
+    """Refuse not-a-shell input: shell command invocations and metacharacters.
+
+    Interactive mode is not a shell. This catches arbitrary shell command names
+    (file read/mutation, network/download, package installs, cloud/VCS mutation)
+    and shell metacharacters (pipes, redirections, command separators, command
+    substitution) and routes them to a read-only refusal. It never executes
+    anything and never calls a model.
+
+    Explicit ``ask`` explain/review frames are left untouched so the operator can
+    still request a read-only explanation of a command. Unbalanced/multiline
+    paste fragments tokenize as ``None`` here and are deferred to the REPL paste
+    guard so their existing quarantine handling is preserved.
+    """
+    lowered = raw.lower()
+    if lowered.startswith("/") or lowered.startswith(_EXPLICIT_ASK_FRAMES):
+        return None
+    if _has_shell_metacharacters(raw):
+        return RoutedCommand(name="shell_refused", args=raw)
+    tokens = _split_command_style(raw)
+    if tokens is None:
+        # Unbalanced quotes / multiline paste -> defer to the REPL paste guard.
+        return None
+    if tokens and tokens[0].lower() in _NOT_A_SHELL_COMMANDS:
+        return RoutedCommand(name="shell_refused", args=raw)
+    return None
+
+
 def _normalize_intent_text(text: str) -> str:
     lowered = re.sub(r"[^a-z0-9/\s]", " ", text.lower())
     lowered = re.sub(r"\s+", " ", lowered).strip()
@@ -1043,6 +1155,9 @@ def route_input(text: str) -> RoutedCommand:
     dangerous_dispatch = _dispatch_dangerous_command(raw)
     if dangerous_dispatch is not None:
         return dangerous_dispatch
+    shell_shaped_dispatch = _dispatch_shell_shaped_command(raw)
+    if shell_shaped_dispatch is not None:
+        return shell_shaped_dispatch
     if _is_command_like_unknown(raw):
         return RoutedCommand(name="unknown_command", args=raw, argv=suggest_safe_commands(raw))
 

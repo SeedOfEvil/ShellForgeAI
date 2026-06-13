@@ -1728,6 +1728,33 @@ def _interactive_mutation_refusal(text: str) -> str:
     )
 
 
+def _interactive_not_a_shell_refusal(text: str) -> str:
+    """Refusal for shell-shaped input (commands/metacharacters/file reads).
+
+    Interactive mode is not a shell: no shell command, file read, network call,
+    package install, or Docker/Compose mutation is executed from typed text. The
+    wording is explicit (not a shell / no command was executed / no action was
+    taken) and offers safe read-only ShellForgeAI alternatives.
+    """
+    return (
+        "Refused: interactive mode is not a shell.\n"
+        "No command was executed.\n"
+        "No action was taken.\n"
+        "ShellForgeAI interactive mode does not execute shell commands, shell "
+        "snippets, arbitrary file reads, network or download commands, package "
+        "installs, or Docker/Compose, cleanup, remediation, rollback, recovery, "
+        "apply, merge, push, or restart commands. Real fixes only run through "
+        "governed, named recipes with explicit confirmation.\n"
+        "Safe read-only alternatives:\n"
+        "  shellforgeai ops report --json\n"
+        "  shellforgeai triage docker --json\n"
+        "- status\n"
+        "- doctor\n"
+        "- recipes list\n"
+        "- recipes receipt audit"
+    )
+
+
 @dataclass
 class InteractiveSessionSummaryState:
     """Compact read-only metadata for deterministic REPL handoff summaries."""
@@ -2144,7 +2171,12 @@ def start_interactive(
         # are answered with safe read-only / plan-only guidance and never execute.
         # Mutation requests still fall through to the existing deterministic
         # refusal paths (route_input mutation_refused, _detect_action_request, ...).
-        if routed.name not in {"cli_dispatch", "mutation_refused", "logs_mutation_refused"}:
+        if routed.name not in {
+            "cli_dispatch",
+            "mutation_refused",
+            "logs_mutation_refused",
+            "shell_refused",
+        }:
             nuance = classify_intent_nuance(user_input)
             if nuance.category in (COMMAND_HELP, PLAN_HELP, CLEANUP_REVIEW_HELP):
                 console.print(render_intent_nuance(nuance, text=user_input))
@@ -2464,6 +2496,13 @@ Commands:
                 console.print(
                     "Log triage failed safely; no logs were modified and the REPL is healthy."
                 )
+            continue
+        if routed.name == "shell_refused" and not paste_guard_active:
+            # Interactive is not a shell: shell-shaped commands / metacharacters
+            # are refused with clear wording and never executed. While a paste
+            # quarantine is active, defer to the paste-fragment guard below.
+            session_summary.note_refusal("not-a-shell command refused")
+            console.print(_interactive_not_a_shell_refusal(routed.args or user_input))
             continue
         if routed.name == "/tools":
             t = Table("Name", "Category", "Risk", "Description")
