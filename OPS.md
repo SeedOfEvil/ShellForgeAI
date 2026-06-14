@@ -222,6 +222,55 @@ network call, or cloud apply/merge/push, and does not fix anything. The bundle
 never auto-declares a PR mergeable — the reviewer still gives the final merge
 verdict. See [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) for details.
 
+### QA bundle lifecycle: validate / history / compare (PR207)
+
+The same helper has four **artifact-only** lifecycle modes that prove bundles are
+complete, discoverable, and comparable *without* re-running smoke QA, running
+Docker, or touching the live container. They only read existing bundle files,
+parse JSON, and compute hashes — no subprocess, no Docker/ShellForgeAI/validation
+commands, no mutation:
+
+```bash
+# Validate a bundle is structurally complete and internally consistent:
+python3 scripts/docker01_operator_qa_bundle.py --validate-bundle <bundle_dir>
+python3 scripts/docker01_operator_qa_bundle.py --validate-bundle <bundle_dir> --json
+
+# Discover bundles under a root (default /tmp); filter by pr/commit/status:
+python3 scripts/docker01_operator_qa_bundle.py --history --root /tmp
+python3 scripts/docker01_operator_qa_bundle.py --history --root /tmp --pr 206 --json
+
+# Compare two bundles and report deltas (regressed/improved/changed/same):
+python3 scripts/docker01_operator_qa_bundle.py --compare <old_bundle> <new_bundle>
+
+# Compare the newest two matching bundles for a PR (or exact PR/commit):
+python3 scripts/docker01_operator_qa_bundle.py --compare-latest --root /tmp --pr 206
+python3 scripts/docker01_operator_qa_bundle.py --compare-latest --root /tmp --pr 206 --commit <sha> --json
+```
+
+`validate` reports `valid|warning|invalid`: it checks required files exist and
+parse, command/assertion summary counts match their entries, raw outputs exist
+for every listed command, `read_only=true`, `mutation_performed=false` (unless
+the bundle honestly reports `status=failed`), `first_safe_command` points at
+`qa-summary.md`, and — when a `bundle-manifest.json` is present — that every
+file's sha256 matches (tamper detection). A **scoped validation `not_found`** is
+treated as *clean evidence-of-absence* (valid) as long as it belongs to the
+requested PR/commit and does not claim `pass_eligible=true`; a
+`scope_matched=false` (evidence captured for a different PR/commit) is surfaced
+as a **warning**, never as current passing evidence.
+
+Newly generated bundles include a `bundle-manifest.json` (sha256 + size of every
+file) so integrity can be verified later. **Legacy PR206 bundles without a
+manifest remain valid** — validation falls back to structural checks and adds a
+warning that integrity checks are limited.
+
+`compare` / `compare-latest` classify the delta as `regressed` (e.g.
+`passed -> failed`, a command or safety assertion `passed -> failed`,
+`mutation_performed false -> true`, validation `scope_matched true/null -> false`,
+`restart_count` increased, health `healthy -> unhealthy`), `improved` (the
+inverse), `changed` (other differences), or `same`. Use the compare output in the
+PR handoff to show that a new bundle did not regress against the prior one — the
+reviewer still gives the final merge verdict.
+
 ## V1 canonical operator path (knife, not toolbox)
 
 ## Safe compose update pattern (Docker01/lab)

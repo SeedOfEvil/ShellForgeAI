@@ -4,6 +4,33 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Docker01 QA bundle validate/history/compare lifecycle (PR207)
+
+- Extended `scripts/docker01_operator_qa_bundle.py` with four **artifact-only**
+  lifecycle modes that make PR206 bundles validateable, discoverable, and
+  comparable without re-running smoke QA or mutating Docker01:
+  `--validate-bundle <dir>` (structure + internal-consistency + manifest
+  integrity, reporting `valid`/`warning`/`invalid`), `--history --root <dir>`
+  (discover/filter bundles by `--pr`/`--commit`/`--status`/`--limit`, newest
+  first), `--compare <old> <new>` and `--compare-latest --root <dir> --pr <PR>`
+  (classify deltas as `regressed`/`improved`/`changed`/`same`, or
+  `not_enough_bundles`/`invalid`). The original PR206 generation command forms
+  are unchanged.
+- Newly generated bundles now include a `bundle-manifest.json` (size + sha256 of
+  `qa-summary.md`, every top-level JSON file, and each `raw/*` output) so later
+  integrity/tamper checks are possible. **Legacy PR206 bundles without a manifest
+  remain valid** — validation falls back to structural checks and adds a warning.
+- Validation treats a scoped validation `not_found` as clean evidence-of-absence
+  (valid when it belongs to the requested PR/commit and does not claim
+  `pass_eligible=true`) and surfaces `scope_matched=false` as a warning, never as
+  current passing evidence.
+- Lifecycle modes are read-only and **use no subprocess at all**: they only read
+  bundle files, parse JSON, list directories under the chosen root, and compute
+  hashes. They never run ShellForgeAI/Docker/`validation_status.py`, never mutate
+  or delete/repair bundles, never restart/prune anything, and never call the
+  network. New coverage in `tests/test_pr207_qa_bundle_lifecycle.py`; PR206 tests
+  remain green.
+
 ### Fallback packet non-execution contract + Lane B QA marker (PR180)
 
 - Added durable regression coverage (`tests/test_pr180_fallback_packet_safety.py`)
