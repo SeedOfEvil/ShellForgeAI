@@ -2435,3 +2435,15 @@ python scripts/docker01_hygiene_report.py --json
 By default the helper writes `/tmp/sfai-docker01-hygiene-report-<timestamp>/` with `hygiene-summary.md`, `hygiene-report.json`, `candidate-cleanup-plan.md`, `commands-run.json`, and raw captures under `raw/`. It inventories root disk use, `shellforgeai` container state, Docker images, `lab/shellforgeai` PR/latest images, compose backups, validation evidence, QA bundles, support packets, and receipt/audit/handoff/release artifacts where discoverable.
 
 The candidate cleanup plan is proposal-only. It does not delete files, prune Docker, remove images, restart containers, run Docker Compose mutation, or perform service changes. Any future cleanup must be reviewed and implemented in a separate narrow lane with explicit operator approval.
+
+## Docker01 hygiene report validation
+
+Docker01 hygiene reports can be validated before an operator reviews any future cleanup lane:
+
+```bash
+python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-report --json
+```
+
+The validator reads an existing report directory only. It expects `hygiene-summary.md`, `hygiene-report.json`, `candidate-cleanup-plan.md`, `commands-run.json`, and bounded `raw/` captures when present. It emits `mode=docker01_hygiene_report_validate` JSON with `status=passed|failed`, check counts, candidate counts, safety flags, and `first_safe_command="cat <report_dir>/hygiene-summary.md"`. Exit code is `0` only when all checks pass.
+
+The validation lane proves that the PR209 report is ShellForgeAI-shaped, proposal-only, bounded, non-executable, and honest about safety flags. It rejects malformed JSON, missing required files, non-read-only safety fields, overlarge candidate sets, unsafe cleanup/delete/prune/restart/network/package/cloud/Codex command patterns, and commands-run entries outside the fixed PR209 read-only collector allowlist. Validation does not run Docker, rescan broad filesystem roots, regenerate reports, delete files, prune Docker, remove images, restart containers, run Docker Compose, call a model, call Codex, fetch from the network, install packages, or make cleanup safe to execute automatically. The reviewer/operator still decides any future named cleanup lane.

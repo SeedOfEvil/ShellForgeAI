@@ -898,3 +898,13 @@ Self-test profile checks that probe `compose env-check --target shellforgeai --j
 `python scripts/docker01_hygiene_report.py --dry-run` previews the fixed read-only checks and intended report path without executing commands or writing the full report. `python scripts/docker01_hygiene_report.py --out /tmp/sfai-docker01-hygiene-report` writes a Docker01 hygiene evidence directory for handoff review.
 
 The lane is operational visibility only: it captures disk, Docker image, container, compose-backup, validation-evidence, QA-bundle, and support-artifact inventory. `candidate-cleanup-plan.md` is not executable and records only proposal-only cleanup candidates for future operator review. Cleanup, prune, image removal, file deletion, Compose mutation, and restart remain out of scope.
+
+## Docker01 hygiene cleanup-plan validation
+
+Use the explicit validation mode when reviewing an existing Docker01 hygiene report / candidate cleanup plan:
+
+```bash
+python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-report --json
+```
+
+This is a Lane C safety-boundary check for hygiene/reporting infrastructure, even though it is read-only. The helper reads the existing report files, validates strict JSON shape, checks the fixed PR209 read-only command list, verifies proposal-only/no-cleanup language, bounds candidates and raw files, and rejects executable cleanup/prune/delete/restart/network/package/cloud/Codex patterns. A pass means the artifact is safer for operator review; it does not authorize automatic cleanup or future mutation.

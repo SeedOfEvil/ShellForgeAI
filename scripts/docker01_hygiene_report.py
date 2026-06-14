@@ -16,6 +16,17 @@ from typing import Any
 MODE = "docker01_hygiene_report"
 DEFAULT_TIMEOUT = 30
 RAW_LIMIT = 500_000
+VALIDATE_MODE = "docker01_hygiene_report_validate"
+MAX_CANDIDATES = 500
+MAX_CANDIDATE_ITEM_LENGTH = 500
+MAX_WARNINGS = 100
+MAX_RAW_FILE_BYTES = 500_000
+REQUIRED_REPORT_FILES = (
+    "hygiene-summary.md",
+    "hygiene-report.json",
+    "candidate-cleanup-plan.md",
+    "commands-run.json",
+)
 KNOWN_ROOTS = (
     "/tmp",
     "/srv/compose/shellforgeai",
@@ -66,6 +77,371 @@ COMMAND_SPECS = [
     ),
 ]
 ALLOWED = {spec.argv for spec in COMMAND_SPECS}
+
+
+UNSAFE_COMMAND_PATTERNS = (
+    re.compile(r"\bdocker\s+system\s+prune\b", re.I),
+    re.compile(r"\bdocker\s+volume\s+prune\b", re.I),
+    re.compile(r"\bdocker\s+image\s+rm\b", re.I),
+    re.compile(r"\bdocker\s+rmi\b", re.I),
+    re.compile(r"\bdocker\s+rm\b", re.I),
+    re.compile(r"\bdocker\s+restart\b", re.I),
+    re.compile(r"\bdocker\s+compose\s+(?:down|restart)\b", re.I),
+    re.compile(r"\brm\s+-[A-Za-z]*r[A-Za-z]*f\b|\brm\s+-[A-Za-z]*f[A-Za-z]*r\b", re.I),
+    re.compile(
+        r"\brm\s+[^\n]*(?:/tmp/sfai|/data/shellforgeai|/srv/compose/shellforgeai|/opt/shellforgeai)",
+        re.I,
+    ),
+    re.compile(r"\bfind\b[^\n]*\s-delete\b", re.I),
+    re.compile(r"\bunlink\b", re.I),
+    re.compile(r"\b(?:sh|bash)\s+-c\b", re.I),
+    re.compile(r"\bcurl\b", re.I),
+    re.compile(r"\bwget\b", re.I),
+    re.compile(r"\bapt(?:-get)?\s+install\b", re.I),
+    re.compile(r"\bpip(?:3)?\s+install\b", re.I),
+    re.compile(r"\bgh\s+pr\s+merge\b", re.I),
+    re.compile(r"\bcodex\s+apply\b", re.I),
+)
+
+SAFE_NEGATION_MARKERS = (
+    "does not ",
+    "do not ",
+    "no cleanup was performed",
+    "not an executable",
+    "intentionally non-executable",
+    "executed: false",
+    "removed: false",
+)
+
+COMMAND_FAMILY_DENYLIST = {
+    "rm",
+    "unlink",
+    "touch",
+    "mkdir",
+    "rmdir",
+    "mv",
+    "cp",
+    "tee",
+    "curl",
+    "wget",
+    "apt",
+    "apt-get",
+    "pip",
+    "pip3",
+    "sh",
+    "bash",
+    "gh",
+    "codex",
+    "find",
+}
+
+
+def _check(checks: list[dict[str, Any]], name: str, passed: bool, detail: str) -> bool:
+    checks.append({"name": name, "passed": bool(passed), "detail": detail})
+    return passed
+
+
+def _read_bounded_text(path: Path, max_bytes: int = MAX_RAW_FILE_BYTES) -> tuple[str, str | None]:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return "", str(exc)
+    if size > max_bytes:
+        return "", f"file exceeds bounded read size: {size} > {max_bytes}"
+    try:
+        return path.read_text(encoding="utf-8"), None
+    except UnicodeDecodeError as exc:
+        return "", f"file is not utf-8 text: {exc}"
+
+
+def _parse_json_file(path: Path) -> tuple[Any, str | None]:
+    text, error = _read_bounded_text(path)
+    if error:
+        return None, error
+    try:
+        return json.loads(text), None
+    except json.JSONDecodeError as exc:
+        return None, f"invalid JSON: {exc}"
+
+
+def _line_is_harmless_safety_statement(line: str) -> bool:
+    stripped = line.strip().lower()
+    if stripped.startswith("#"):
+        return True
+    return any(marker in stripped for marker in SAFE_NEGATION_MARKERS)
+
+
+def _unsafe_content_hits(text: str) -> list[str]:
+    hits: list[str] = []
+    for line in text.splitlines():
+        if _line_is_harmless_safety_statement(line):
+            continue
+        for pattern in UNSAFE_COMMAND_PATTERNS:
+            if pattern.search(line):
+                hits.append(line.strip()[:160])
+                break
+    return hits
+
+
+def _command_argv(entry: Any) -> list[str]:
+    argv = entry.get("argv") or entry.get("command") or [] if isinstance(entry, dict) else entry
+    if isinstance(argv, str):
+        return argv.split()
+    if isinstance(argv, list) and all(isinstance(part, str) for part in argv):
+        return argv
+    return []
+
+
+def _command_is_safe(argv: list[str]) -> tuple[bool, str]:
+    if not argv:
+        return False, "missing argv"
+    if is_allowlisted_command(argv):
+        return True, "allowlisted PR209 read-only command"
+    if argv[0] in COMMAND_FAMILY_DENYLIST:
+        return False, f"unsafe executable family: {argv[0]}"
+    joined = " ".join(argv)
+    if _unsafe_content_hits(joined):
+        return False, "unsafe command pattern"
+    return False, f"unknown executable family: {argv[0]}"
+
+
+def validate_report(report_dir: Path) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    report_dir = report_dir.resolve()
+    required_ok = True
+    for rel in REQUIRED_REPORT_FILES:
+        required_ok = (
+            _check(
+                checks,
+                f"required_file_present:{rel}",
+                (report_dir / rel).is_file(),
+                f"{rel} exists" if (report_dir / rel).is_file() else f"missing {rel}",
+            )
+            and required_ok
+        )
+    _check(
+        checks,
+        "required_files_present",
+        required_ok,
+        "required report files present" if required_ok else "one or more required files missing",
+    )
+
+    report: Any = None
+    commands: Any = None
+    if (report_dir / "hygiene-report.json").is_file():
+        report, err = _parse_json_file(report_dir / "hygiene-report.json")
+        _check(
+            checks,
+            "hygiene_report_json_object",
+            err is None and isinstance(report, dict),
+            err or "hygiene-report.json is a JSON object",
+        )
+    if (report_dir / "commands-run.json").is_file():
+        commands, err = _parse_json_file(report_dir / "commands-run.json")
+        _check(
+            checks,
+            "commands_run_json_list",
+            err is None and isinstance(commands, list),
+            err or "commands-run.json is a JSON list",
+        )
+
+    candidates: list[Any] = []
+    if isinstance(report, dict):
+        _check(
+            checks,
+            "mode_is_docker01_hygiene_report",
+            report.get("mode") == MODE,
+            f"mode={report.get('mode')!r}",
+        )
+        _check(
+            checks,
+            "top_level_read_only_true",
+            report.get("read_only") is True,
+            f"read_only={report.get('read_only')!r}",
+        )
+        _check(
+            checks,
+            "top_level_mutation_performed_false",
+            report.get("mutation_performed") is False,
+            f"mutation_performed={report.get('mutation_performed')!r}",
+        )
+        safety = report.get("safety")
+        _check(
+            checks,
+            "safety_block_exists",
+            isinstance(safety, dict),
+            "safety block exists" if isinstance(safety, dict) else "missing safety block",
+        )
+        if isinstance(safety, dict):
+            mutation_flags_ok = True
+            for key, expected in safety_block().items():
+                passed = safety.get(key) is expected
+                mutation_flags_ok = mutation_flags_ok and passed
+                _check(checks, f"safety_flag:{key}", passed, f"{key}={safety.get(key)!r}")
+            _check(
+                checks,
+                "safety_mutation_flags_all_false",
+                mutation_flags_ok,
+                "all safety flags match read-only contract"
+                if mutation_flags_ok
+                else "one or more safety flags violate read-only contract",
+            )
+        candidates_obj = report.get("candidate_cleanup")
+        _check(
+            checks,
+            "candidate_cleanup_is_list",
+            isinstance(candidates_obj, list),
+            f"type={type(candidates_obj).__name__}",
+        )
+        if isinstance(candidates_obj, list):
+            candidates = candidates_obj
+            _check(
+                checks,
+                "candidate_count_bounded",
+                len(candidates) <= MAX_CANDIDATES,
+                f"candidate count={len(candidates)} max={MAX_CANDIDATES}",
+            )
+            required = {
+                "category",
+                "item",
+                "reason",
+                "risk_note",
+                "proposed_operator_review_action",
+            }
+            all_objects = True
+            all_fields = True
+            all_items_bounded = True
+            for idx, cand in enumerate(candidates):
+                is_obj = isinstance(cand, dict)
+                all_objects = all_objects and is_obj
+                if not is_obj:
+                    all_fields = False
+                    all_items_bounded = False
+                    continue
+                missing = sorted(required - set(cand))
+                if missing:
+                    all_fields = False
+                    warnings.append(f"candidate {idx} missing fields: {', '.join(missing)}")
+                item = cand.get("item")
+                if not isinstance(item, str) or len(item) > MAX_CANDIDATE_ITEM_LENGTH:
+                    all_items_bounded = False
+            _check(
+                checks,
+                "every_candidate_is_object",
+                all_objects,
+                "all candidates are objects" if all_objects else "candidate entry is not an object",
+            )
+            _check(
+                checks,
+                "candidate_required_fields",
+                all_fields,
+                "all candidates include required review fields"
+                if all_fields
+                else "candidate missing required fields",
+            )
+            _check(
+                checks,
+                "candidate_items_bounded",
+                all_items_bounded,
+                f"item strings max {MAX_CANDIDATE_ITEM_LENGTH} chars",
+            )
+
+    plan_text = ""
+    if (report_dir / "candidate-cleanup-plan.md").is_file():
+        plan_text, err = _read_bounded_text(report_dir / "candidate-cleanup-plan.md")
+        _check(checks, "candidate_plan_exists", err is None, err or "candidate cleanup plan exists")
+        lower = plan_text.lower()
+        has_proposal = "proposal only" in lower or "proposal-only" in lower
+        has_no_cleanup = (
+            "no cleanup was performed" in lower
+            or "does not delete" in lower
+            or "does not prune" in lower
+        )
+        _check(
+            checks,
+            "candidate_plan_proposal_only_language",
+            has_proposal and has_no_cleanup,
+            "proposal-only and no-cleanup language present"
+            if has_proposal and has_no_cleanup
+            else "missing proposal-only/no-cleanup language",
+        )
+        hits = _unsafe_content_hits(plan_text)
+        _check(
+            checks,
+            "candidate_plan_no_executable_cleanup_commands",
+            not hits,
+            "no executable cleanup commands found" if not hits else f"unsafe lines: {hits[:3]}",
+        )
+
+    for rel in ("hygiene-summary.md", "hygiene-report.json", "commands-run.json"):
+        path = report_dir / rel
+        if path.is_file():
+            text, err = _read_bounded_text(path)
+            hits = [] if err else _unsafe_content_hits(text)
+            _check(
+                checks,
+                f"unsafe_content_absent:{rel}",
+                err is None and not hits,
+                err
+                or ("no unsafe executable content" if not hits else f"unsafe lines: {hits[:3]}"),
+            )
+
+    if isinstance(commands, list):
+        all_safe = True
+        for idx, entry in enumerate(commands):
+            safe, detail = _command_is_safe(_command_argv(entry))
+            all_safe = all_safe and safe
+            _check(checks, f"commands_run_entry_safe:{idx}", safe, detail)
+        _check(
+            checks,
+            "commands_run_allowlisted_read_only",
+            all_safe,
+            "all commands are PR209 read-only allowlisted commands"
+            if all_safe
+            else "commands-run contains unsafe or unknown command",
+        )
+
+    raw_dir = report_dir / "raw"
+    raw_ok = True
+    if raw_dir.exists():
+        for path in raw_dir.iterdir():
+            if path.is_file() and path.stat().st_size > MAX_RAW_FILE_BYTES:
+                raw_ok = False
+                warnings.append(f"raw file too large for validation read: {path.name}")
+    _check(
+        checks,
+        "raw_outputs_bounded_if_present",
+        raw_ok,
+        f"raw files are <= {MAX_RAW_FILE_BYTES} bytes"
+        if raw_ok
+        else "one or more raw files exceed bounded read size",
+    )
+
+    if len(warnings) > MAX_WARNINGS:
+        warnings = warnings[:MAX_WARNINGS]
+        warnings.append("warning list truncated")
+    passed_count = sum(1 for check in checks if check["passed"])
+    failed_count = len(checks) - passed_count
+    status = "passed" if failed_count == 0 else "failed"
+    return {
+        "schema_version": 1,
+        "mode": VALIDATE_MODE,
+        "status": status,
+        "report_dir": str(report_dir),
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": {
+            "checks_total": len(checks),
+            "checks_passed": passed_count,
+            "checks_failed": failed_count,
+            "candidate_cleanup_items": len(candidates),
+        },
+        "checks": checks,
+        "safety": safety_block(),
+        "first_safe_command": f"cat {report_dir}/hygiene-summary.md",
+        "warnings": warnings,
+    }
 
 
 def default_report_path() -> Path:
@@ -602,7 +978,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="show planned read-only checks without executing or writing report",
     )
+    parser.add_argument(
+        "--validate", type=Path, default=None, help="validate an existing hygiene report directory"
+    )
     args = parser.parse_args(argv)
+    if args.validate is not None:
+        payload = validate_report(args.validate)
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"Docker01 hygiene validation {payload['status']}: {args.validate}")
+            passed = payload["summary"]["checks_passed"]
+            total = payload["summary"]["checks_total"]
+            print(f"Checks: {passed}/{total} passed")
+        return 0 if payload["status"] == "passed" else 1
+
     out = args.out or default_report_path()
     if args.dry_run:
         payload = dry_run_payload(out)

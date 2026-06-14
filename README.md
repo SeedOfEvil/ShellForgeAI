@@ -529,3 +529,11 @@ python scripts/docker01_hygiene_report.py --out /tmp/sfai-docker01-hygiene-repor
 ```
 
 Use `--dry-run` to list the fixed read-only checks without executing commands or writing the full report. The output includes `hygiene-summary.md`, `hygiene-report.json`, `candidate-cleanup-plan.md`, `commands-run.json`, and raw captures. The cleanup plan is proposal-only: no files are deleted, no Docker prune/image removal runs, and no containers or services are restarted.
+
+Validate an existing report before operator review with:
+
+```bash
+python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-report --json
+```
+
+Validation reads existing files only, emits `mode=docker01_hygiene_report_validate`, exits non-zero on malformed/missing/unsafe artifacts, checks proposal-only/no-cleanup language, and rejects executable cleanup/prune/delete/restart/network/package/cloud/Codex command patterns. It does not run Docker, mutate Docker/Compose, delete files, call a model, call Codex, or make cleanup safe to execute automatically.
