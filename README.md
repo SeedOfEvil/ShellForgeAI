@@ -519,3 +519,13 @@ Natural-language asks still refuse execution. Production targets, broad targets,
 `shellforgeai recipes receipt integrity` scans existing ShellForgeAI-owned receipt artifacts for integrity drift without executing anything. It checks required files, JSON parsing, manifest/checksum consistency, recovery original links, unsupported shapes, unsafe safety flags, and production restart records; optional `--include-exports` and `--include-audit-bundles` scan existing owned export/support-packet artifacts without creating or repairing them.
 
 For support handoff, `shellforgeai recipes receipt audit-bundle` packages existing local receipt audit/history evidence into a bounded ShellForgeAI-owned artifact under `<data_dir>/exports/receipt-audit-bundles/`. Bundles include JSON, Markdown, manifest, checksums, receipt audit, and receipt history files; validation uses `shellforgeai recipes receipt audit-bundle-validate <bundle_id>`. Bundle create/validate do not execute recipes, rerun receipts, recover, rollback, restart containers, call Docker/Compose, call a model, or perform cleanup/remediation.
+
+### Docker01 hygiene report
+
+Operators can create a read-only Docker01 disk/image/artifact hygiene inventory with:
+
+```bash
+python scripts/docker01_hygiene_report.py --out /tmp/sfai-docker01-hygiene-report
+```
+
+Use `--dry-run` to list the fixed read-only checks without executing commands or writing the full report. The output includes `hygiene-summary.md`, `hygiene-report.json`, `candidate-cleanup-plan.md`, `commands-run.json`, and raw captures. The cleanup plan is proposal-only: no files are deleted, no Docker prune/image removal runs, and no containers or services are restarted.

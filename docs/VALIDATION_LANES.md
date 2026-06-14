@@ -892,3 +892,9 @@ See [`../OPS.md`](../OPS.md) ("PR validation lane policy") for the operator
 runbook steps.
 
 Self-test profile checks that probe `compose env-check --target shellforgeai --json` treat a blocked/non-allowlisted production target as expected safe behavior, not as execution readiness. Positive readiness checks must use disposable allowlisted fixtures; production `shellforgeai` must remain blocked and non-mutating.
+
+## Docker01 hygiene report lane
+
+`python scripts/docker01_hygiene_report.py --dry-run` previews the fixed read-only checks and intended report path without executing commands or writing the full report. `python scripts/docker01_hygiene_report.py --out /tmp/sfai-docker01-hygiene-report` writes a Docker01 hygiene evidence directory for handoff review.
+
+The lane is operational visibility only: it captures disk, Docker image, container, compose-backup, validation-evidence, QA-bundle, and support-artifact inventory. `candidate-cleanup-plan.md` is not executable and records only proposal-only cleanup candidates for future operator review. Cleanup, prune, image removal, file deletion, Compose mutation, and restart remain out of scope.

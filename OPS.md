@@ -2420,3 +2420,18 @@ Supported categories include malformed JSON, missing required files/manifests/ch
 
 `recipes receipt explain` never repairs, deletes, cleans up, recovers, rolls back, restarts, reruns receipts, calls Docker/Compose, executes shell, creates exports/bundles, or calls a model. Safe next commands are limited to read-only receipt integrity/audit/history/inspect/validate/compare/verify surfaces. Ask and interactive phrasing such as “explain receipt integrity findings”, “what does checksum_mismatch mean?”, and “what should I do about safety drift?” routes to this explanation guidance; mutation phrasing such as “explain and fix corrupt receipts” refuses the mutation part. Support-handoff phrasing that clearly mentions receipt audit or recipe receipts routes to receipt audit-bundle guidance.
 
+
+## Docker01 hygiene report
+
+Use the Docker01 hygiene report when an operator needs a read-only inventory of Docker01 disk, image, and ShellForgeAI artifact pressure before any cleanup is considered:
+
+```bash
+python scripts/docker01_hygiene_report.py
+python scripts/docker01_hygiene_report.py --out /tmp/sfai-docker01-hygiene-report
+python scripts/docker01_hygiene_report.py --dry-run
+python scripts/docker01_hygiene_report.py --json
+```
+
+By default the helper writes `/tmp/sfai-docker01-hygiene-report-<timestamp>/` with `hygiene-summary.md`, `hygiene-report.json`, `candidate-cleanup-plan.md`, `commands-run.json`, and raw captures under `raw/`. It inventories root disk use, `shellforgeai` container state, Docker images, `lab/shellforgeai` PR/latest images, compose backups, validation evidence, QA bundles, support packets, and receipt/audit/handoff/release artifacts where discoverable.
+
+The candidate cleanup plan is proposal-only. It does not delete files, prune Docker, remove images, restart containers, run Docker Compose mutation, or perform service changes. Any future cleanup must be reviewed and implemented in a separate narrow lane with explicit operator approval.

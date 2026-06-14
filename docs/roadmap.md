@@ -1012,3 +1012,7 @@ command routing — legitimate subcommands with flags/arguments
 (`triage docker --json`, `ops report --json`, `verify --target <target>`) still
 dispatch. Tests live in `tests/test_pr201_interactive_not_a_shell_policy.py`.
 
+
+## Docker01 operational hygiene visibility
+
+ShellForgeAI includes a read-only Docker01 hygiene report helper for operators who need disk, image, and artifact inventory before cleanup is considered. The helper produces a report directory containing Markdown summary, strict JSON, raw evidence, command provenance, and a proposal-only candidate cleanup plan. It intentionally performs no cleanup or Docker mutation; any real cleanup remains future work and requires a separate reviewed lane.

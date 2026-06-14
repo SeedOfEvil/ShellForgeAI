@@ -151,3 +151,13 @@ python scripts/validate_pr.py --changed-files scripts/v1_validate.sh
 # force full validation on any change
 python scripts/validate_pr.py --changed-files docs/cli.md --full-validation
 ```
+
+## Docker01 hygiene report checks
+
+| Check | Command | Purpose | Mutates state |
+| --- | --- | --- | --- |
+| Hygiene dry run | `python scripts/docker01_hygiene_report.py --dry-run` | Lists planned read-only Docker01 hygiene checks and output path. | No |
+| Hygiene report | `python scripts/docker01_hygiene_report.py --out /tmp/sfai-docker01-hygiene-report` | Writes disk/image/artifact inventory, raw command captures, strict JSON, and proposal-only cleanup candidates. | No |
+| Hygiene unit tests | `pytest -q tests/test_pr209_docker01_hygiene_report.py` | Verifies report creation, dry-run behavior, command allowlist, parsing, partial failures, and proposal-only cleanup semantics with fakes. | No |
+
+The hygiene report uses a fixed allowlist for `df` and Docker inspection commands and must not run cleanup, prune, image removal, file deletion, Docker Compose mutation, restart, package install, network, or cloud merge/apply operations.
