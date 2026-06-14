@@ -483,9 +483,10 @@ executed *inside* the running `shellforgeai` container through a narrow
 read-only `docker exec shellforgeai shellforgeai …` argv allowlist, so the host
 does **not** need `shellforgeai` on its PATH. Host/system checks
 (`docker ps` / `docker inspect shellforgeai` / `df -h /` / the validation status
-viewer) run host-side, and the validation status viewer runs with the helper's
-own Python interpreter (`sys.executable`) so hosts that have `python3` but no
-`python` alias work too.
+viewer) run host-side; the validation status viewer runs with the helper's own
+Python interpreter (`sys.executable`) so hosts that have `python3` but no
+`python` alias work too, and it is scoped to the PR/commit under review so stale
+evidence from another PR is never embedded.
 
 ```bash
 # Preview the plan without running anything or writing a bundle:
@@ -526,8 +527,20 @@ The default bundle path is
 `remediation self-test --profile full --json` (live disposable execution stays
 skipped by default). The read-only host checks run host-side:
 `docker ps --filter name=shellforgeai`, `docker inspect shellforgeai`,
-`df -h /`, and `<current-python> scripts/validation_status.py --latest --json
---explain-selection`.
+`df -h /`, and the validation status viewer **scoped to the PR/commit under
+review**:
+
+```bash
+<current-python> scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection
+```
+
+Scoping matters: an unscoped `--latest` could select stale validation evidence
+from another PR (e.g. an older PR179 run) and embed it into this bundle. With
+`--pr`/`--commit`, matching validation evidence is included when found; if none
+exists for this PR/commit the bundle reports `not_found` / `not_available`
+cleanly; and concrete evidence for a different PR/commit is never treated as
+current evidence (`validation-status.json` records the scoped target and a
+`scope_matched` flag).
 
 **Paste into the PR handoff:** copy the contents of `qa-summary.md` into the PR.
 The summary reports container state, smoke results, ask safety, the remediation

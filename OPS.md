@@ -191,8 +191,14 @@ shellforgeai shellforgeai …` (`version`, `doctor`, `model doctor`, `v1 check
 expected to be refused, and `remediation self-test --profile full` with live
 disposable execution skipped by default) plus the host-side checks `docker ps
 --filter name=shellforgeai`, `docker inspect shellforgeai`, `df -h /`, and the
-validation status viewer (run with the helper's own Python interpreter, so
-`python3`-only hosts work). It writes a bounded bundle under
+validation status viewer run with the helper's own Python interpreter (so
+`python3`-only hosts work) and **scoped to the PR/commit under review**
+(`<current-python> scripts/validation_status.py --latest --pr <PR> --commit <sha>
+--json --explain-selection`). Scoping keeps the bundle from silently embedding
+stale validation evidence from another PR/commit: matching evidence is included
+when found, missing evidence is reported `not_found`/`not_available` cleanly, and
+evidence for a different PR/commit is never treated as current. It writes a
+bounded bundle under
 `/tmp/sfai-pr<PR>-<shortsha>-qa-bundle-<timestamp>/` containing `qa-summary.md`,
 `qa-results.json`, `safety-assertions.json`, `container-state.json`,
 `validation-status.json`, `commands-run.json`, and `raw/`. Running from the host

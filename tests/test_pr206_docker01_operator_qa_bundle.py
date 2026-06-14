@@ -58,6 +58,11 @@ PR = 206
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 
+def _specs():
+    """Planned specs for the PR/commit under test (validation status is scoped)."""
+    return qa.build_command_specs(PR, COMMIT)
+
+
 def _check_json(profile: str, mode: str) -> str:
     return json.dumps(
         {
@@ -189,14 +194,12 @@ _STDOUT_BY_KEY: dict[str, str] = {
 
 def _default_outputs() -> dict[tuple[str, ...], tuple[int, str, str]]:
     """Map each planned command's real argv -> (returncode, stdout, stderr)."""
-    return {
-        tuple(spec.argv): (0, _STDOUT_BY_KEY[spec.key], "") for spec in qa.build_command_specs()
-    }
+    return {tuple(spec.argv): (0, _STDOUT_BY_KEY[spec.key], "") for spec in _specs()}
 
 
 def _argv_for(key: str) -> tuple[str, ...]:
     """Return the real planned argv for a given command key."""
-    return next(tuple(s.argv) for s in qa.build_command_specs() if s.key == key)
+    return next(tuple(s.argv) for s in _specs() if s.key == key)
 
 
 class FakeRunner:
@@ -316,7 +319,7 @@ def test_11_dry_run_lists_planned_commands(tmp_path):
     labels = {c["label"] for c in result["planned_commands"]}
     assert "version" in labels
     assert "ops report" in labels
-    assert len(result["planned_commands"]) == len(qa.build_command_specs())
+    assert len(result["planned_commands"]) == len(_specs())
 
 
 def test_12_dry_run_does_not_execute(tmp_path):
@@ -344,7 +347,7 @@ def test_14_dry_run_json_reports_not_executed(tmp_path):
 
 
 def test_15_all_planned_commands_are_allowlisted():
-    for spec in qa.build_command_specs():
+    for spec in _specs():
         assert qa.is_command_allowed(spec.argv), spec.argv
 
 
@@ -429,14 +432,14 @@ HOST_KEYS = ("docker_ps", "docker_inspect", "disk", "validation_status")
 
 
 def test_host_product_commands_use_docker_exec_prefix():
-    specs = {s.key: tuple(s.argv) for s in qa.build_command_specs()}
+    specs = {s.key: tuple(s.argv) for s in _specs()}
     for key in PRODUCT_KEYS:
         argv = specs[key]
         assert argv[:4] == ("docker", "exec", "shellforgeai", "shellforgeai"), argv
 
 
 def test_host_checks_stay_host_side():
-    specs = {s.key: tuple(s.argv) for s in qa.build_command_specs()}
+    specs = {s.key: tuple(s.argv) for s in _specs()}
     assert specs["docker_ps"] == ("docker", "ps", "--filter", "name=shellforgeai")
     assert specs["docker_inspect"] == ("docker", "inspect", "shellforgeai")
     assert specs["disk"] == ("df", "-h", "/")
@@ -445,17 +448,28 @@ def test_host_checks_stay_host_side():
         assert specs[key][:2] != ("docker", "exec")
 
 
-def test_validation_status_uses_current_python_interpreter():
-    specs = {s.key: tuple(s.argv) for s in qa.build_command_specs()}
+def test_validation_status_uses_current_python_interpreter_and_is_scoped():
+    specs = {s.key: tuple(s.argv) for s in _specs()}
     vstatus = specs["validation_status"]
     assert vstatus[0] == sys.executable
     assert vstatus[0] != "python"  # not hardcoded; works on python3-only hosts
+    # Scoped to the PR/commit under review so stale evidence is never embedded.
     assert vstatus[1:] == (
         "scripts/validation_status.py",
         "--latest",
+        "--pr",
+        str(PR),
+        "--commit",
+        COMMIT,
         "--json",
         "--explain-selection",
     )
+
+
+def test_planned_validation_status_includes_pr_and_commit():
+    argv = list(_argv_for("validation_status"))
+    assert "--pr" in argv and argv[argv.index("--pr") + 1] == str(PR)
+    assert "--commit" in argv and argv[argv.index("--commit") + 1] == COMMIT
 
 
 def test_dry_run_lists_container_exec_and_host_side_commands(tmp_path):
@@ -466,9 +480,68 @@ def test_dry_run_lists_container_exec_and_host_side_commands(tmp_path):
     assert "docker ps --filter name=shellforgeai" in rendered
     assert "docker inspect shellforgeai" in rendered
     assert "df -h /" in rendered
-    assert any(
-        c["argv"][0] == sys.executable and c["argv"][1] == "scripts/validation_status.py"
-        for c in result["planned_commands"]
+    # Dry-run shows the scoped validation-status command.
+    scoped = (
+        f"{sys.executable} scripts/validation_status.py --latest "
+        f"--pr {PR} --commit {COMMIT} --json --explain-selection"
+    )
+    assert scoped in rendered
+
+
+def test_scoped_validation_status_is_allowlisted():
+    assert qa.is_command_allowed(
+        [
+            sys.executable,
+            "scripts/validation_status.py",
+            "--latest",
+            "--pr",
+            "206",
+            "--commit",
+            "deadbeef",
+            "--json",
+            "--explain-selection",
+        ]
+    )
+
+
+def test_unscoped_or_unrelated_python_invocations_are_rejected():
+    # The old unscoped form is no longer accepted.
+    assert not qa.is_command_allowed(
+        [
+            sys.executable,
+            "scripts/validation_status.py",
+            "--latest",
+            "--json",
+            "--explain-selection",
+        ]
+    )
+    # A different script is rejected even with the scoped flags.
+    assert not qa.is_command_allowed(
+        [
+            sys.executable,
+            "scripts/other.py",
+            "--latest",
+            "--pr",
+            "206",
+            "--commit",
+            "deadbeef",
+            "--json",
+            "--explain-selection",
+        ]
+    )
+    # Flag injection in place of the pr/commit value is rejected.
+    assert not qa.is_command_allowed(
+        [
+            sys.executable,
+            "scripts/validation_status.py",
+            "--latest",
+            "--pr",
+            "206",
+            "--commit",
+            "--execute",
+            "--json",
+            "--explain-selection",
+        ]
     )
 
 
@@ -619,6 +692,87 @@ def test_30_handles_validation_status_not_available_cleanly():
     result = qa.evaluate_safety_assertions(ctx)
     vcheck = next(a for a in result["assertions"] if a["name"] == "validation_status_captured")
     assert vcheck["passed"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Scoped validation evidence: never embed stale evidence from another PR/commit.
+# --------------------------------------------------------------------------- #
+
+
+def test_scoped_bundle_writes_validation_status_json(tmp_path):
+    _result, out, _runner = _make_bundle(tmp_path)
+    vstatus = json.loads((out / "validation-status.json").read_text())
+    assert vstatus["requested_pr"] == PR
+    assert vstatus["requested_commit"] == COMMIT
+
+
+def _validation_run_json(pr, commit, status="passed"):
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "mode": "validation_evidence_status",
+            "status": status,
+            "classification": status,
+            "pass_eligible": status == "passed",
+            "rerun_required": status != "passed",
+            "run": {"pr": pr, "commit": commit},
+            "source": {"kind": "heartbeat", "pr": pr, "commit": commit},
+        }
+    )
+
+
+def test_matching_validation_evidence_is_included():
+    parsed = json.loads(_validation_run_json(PR, COMMIT))
+    vs = qa.extract_validation_status(parsed, ran_ok=True, requested_pr=PR, requested_commit=COMMIT)
+    assert vs["available"] is True
+    assert vs["status"] == "passed"
+    assert vs["scope_matched"] in (True, None)
+
+
+def test_stale_validation_evidence_for_other_pr_is_not_used(tmp_path):
+    # The viewer (hypothetically) returns PR179 evidence; the helper must not
+    # treat it as evidence for PR206 and must report it cleanly.
+    parsed = json.loads(_validation_run_json(179, "deadbeefcafe"))
+    vs = qa.extract_validation_status(parsed, ran_ok=True, requested_pr=PR, requested_commit=COMMIT)
+    assert vs["scope_matched"] is False
+    assert vs["available"] is False
+    assert vs["status"] == "not_found"
+
+    # End-to-end: a stale doc keeps the bundle from claiming current evidence.
+    outputs = _default_outputs()
+    outputs[_argv_for("validation_status")] = (0, _validation_run_json(179, "deadbeefcafe"), "")
+    result, out, _runner = _make_bundle(tmp_path, runner=FakeRunner(outputs))
+    written = json.loads((out / "validation-status.json").read_text())
+    assert written["scope_matched"] is False
+    assert written["available"] is False
+    summary = (out / "qa-summary.md").read_text()
+    assert "different PR/commit" in summary
+    # Validation is non-critical, so the bundle can still pass without stale use.
+    assert result["status"] in ("passed", "partial")
+
+
+def test_scoped_not_found_is_reported_cleanly(tmp_path):
+    # validation_status.py scoped to an unknown PR returns a clean not_found.
+    not_found = json.dumps(
+        {
+            "schema_version": 1,
+            "mode": "validation_evidence_status",
+            "status": "not_found",
+            "classification": "not_found",
+            "pass_eligible": False,
+            "rerun_required": True,
+            "run": {"pr": None, "commit": None},
+            "source": {"kind": "unknown"},
+        }
+    )
+    outputs = _default_outputs()
+    outputs[_argv_for("validation_status")] = (0, not_found, "")
+    result, out, _runner = _make_bundle(tmp_path, runner=FakeRunner(outputs))
+    written = json.loads((out / "validation-status.json").read_text())
+    assert written["status"] == "not_found"
+    assert written["requested_pr"] == PR
+    # Clean handling keeps the safety assertion green and does not fake evidence.
+    assert result["summary"]["safety_assertions_failed"] == 0
 
 
 # --------------------------------------------------------------------------- #

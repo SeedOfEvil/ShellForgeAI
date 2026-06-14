@@ -133,8 +133,9 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
   product smoke commands execute inside the running container through a narrow
   `docker exec shellforgeai shellforgeai …` allowlist (no host `shellforgeai` on
   PATH required), while host checks and the validation status viewer (run with
-  the current Python interpreter) stay host-side so the guarded lane's host
-  artifacts stay visible. Evidence collection only: a small fixed command
+  the current Python interpreter and scoped to the PR/commit under review via
+  `--pr`/`--commit`, so stale evidence from another PR is never embedded) stay
+  host-side so the guarded lane's host artifacts stay visible. Evidence collection only: a small fixed command
   allowlist that rejects unsafe `docker exec` shell/binary forms, argv-list
   subprocesses with no `shell=True`, no cleanup/remediation/rollback/recovery,
   no Docker/Compose mutation or restart/prune, no package install/network, and

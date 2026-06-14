@@ -63,14 +63,26 @@ def _sfai(*args: str) -> tuple[str, ...]:
 
 
 # Validation status is a host-side check. Use the *current* interpreter so hosts
-# that have ``python3`` but no ``python`` alias still work.
-VALIDATION_STATUS_ARGV: tuple[str, ...] = (
-    sys.executable,
-    "scripts/validation_status.py",
-    "--latest",
-    "--json",
-    "--explain-selection",
-)
+# that have ``python3`` but no ``python`` alias still work. The command is scoped
+# to the PR/commit under review so the bundle never silently embeds stale
+# validation evidence from another PR or commit.
+VALIDATION_STATUS_SCRIPT = "scripts/validation_status.py"
+
+
+def validation_status_argv(pr: int, commit: str) -> tuple[str, ...]:
+    """Build the scoped, host-side ``validation_status.py`` argv for pr/commit."""
+    return (
+        sys.executable,
+        VALIDATION_STATUS_SCRIPT,
+        "--latest",
+        "--pr",
+        str(pr),
+        "--commit",
+        str(commit),
+        "--json",
+        "--explain-selection",
+    )
+
 
 # Stable safety-flag dimensions surfaced in qa-results.json. Most are aggregated
 # (OR) from the parsed product outputs so that if any command ever reported a
@@ -103,8 +115,8 @@ class CommandSpec:
     timeout: int = DEFAULT_TIMEOUT
 
 
-def build_command_specs() -> list[CommandSpec]:
-    """Return the ordered standard Docker01 smoke QA command set.
+def build_command_specs(pr: int, commit: str) -> list[CommandSpec]:
+    """Return the ordered standard Docker01 smoke QA command set for pr/commit.
 
     The helper runs on the Docker01 host. ShellForgeAI product smoke commands are
     executed inside the running ``shellforgeai`` container via a narrow read-only
@@ -238,7 +250,7 @@ def build_command_specs() -> list[CommandSpec]:
         CommandSpec(
             "validation_status",
             "validation status",
-            VALIDATION_STATUS_ARGV,
+            validation_status_argv(pr, commit),
             "raw/validation-status.json",
             parse="json",
             critical=False,
@@ -283,8 +295,40 @@ def is_command_allowed(argv: Sequence[str]) -> bool:
     if head == "df":
         return rest == ["-h", "/"]
     if _is_python_exe(head):
-        return len(rest) >= 1 and Path(rest[0]).name == "validation_status.py"
+        return _validation_status_allowed(rest)
     return False
+
+
+def _validation_status_allowed(rest: list[str]) -> bool:
+    """Allow only the scoped ``validation_status.py --latest --pr P --commit C`` form.
+
+    The command must be ``scripts/validation_status.py --latest --pr <pr>
+    --commit <commit> --json --explain-selection`` so validation evidence is
+    scoped to the PR/commit under review (never an unscoped ``--latest`` that
+    could embed stale evidence from another PR). ``<pr>``/``<commit>`` are
+    structural placeholders (any non-flag token); no other script or flag set is
+    accepted.
+    """
+    if not rest or Path(rest[0]).name != "validation_status.py":
+        return False
+    args = rest[1:]
+    if len(args) != 7:
+        return False
+    pr_value, commit_value = args[2], args[4]
+    fixed_ok = (
+        args[0] == "--latest"
+        and args[1] == "--pr"
+        and args[3] == "--commit"
+        and args[5] == "--json"
+        and args[6] == "--explain-selection"
+    )
+    value_ok = (
+        bool(pr_value)
+        and not pr_value.startswith("-")
+        and bool(commit_value)
+        and not commit_value.startswith("-")
+    )
+    return fixed_ok and value_ok
 
 
 def _is_python_exe(head: str) -> bool:
@@ -571,10 +615,50 @@ def extract_container_state(inspect_parsed: Any, disk: dict[str, Any]) -> dict[s
     }
 
 
-def extract_validation_status(parsed: Any, ran_ok: bool) -> dict[str, Any]:
-    """Normalize validation_status output, reporting not_available cleanly."""
+def _scope_matches(
+    requested_pr: int | None,
+    requested_commit: str | None,
+    found_pr: Any,
+    found_commit: Any,
+) -> bool | None:
+    """Whether a concrete validation run matches the requested pr/commit.
+
+    Returns ``None`` when the doc carries no concrete run identity (e.g. a clean
+    ``not_found``), and otherwise ``True``/``False`` based on the pr match and a
+    two-way commit-prefix match.
+    """
+    if found_pr in (None, "") and found_commit in (None, ""):
+        return None
+    pr_mismatch = (
+        requested_pr is not None
+        and found_pr not in (None, "")
+        and str(found_pr) != str(requested_pr)
+    )
+    if pr_mismatch:
+        return False
+    if requested_commit and found_commit:
+        found, requested = str(found_commit), str(requested_commit)
+        if not (found.startswith(requested) or requested.startswith(found)):
+            return False
+    return True
+
+
+def extract_validation_status(
+    parsed: Any,
+    ran_ok: bool,
+    requested_pr: int | None = None,
+    requested_commit: str | None = None,
+) -> dict[str, Any]:
+    """Normalize scoped validation_status output, reporting not_available cleanly.
+
+    The command is scoped to ``--pr``/``--commit``, so the viewer only returns
+    matching evidence or ``not_found``. As defense in depth, a concrete run whose
+    pr/commit disagrees with the request is *not* treated as current evidence.
+    """
+    base = {"requested_pr": requested_pr, "requested_commit": requested_commit}
     if not ran_ok or not isinstance(parsed, dict):
         return {
+            **base,
             "available": False,
             "captured": False,
             "status": "not_available",
@@ -582,19 +666,45 @@ def extract_validation_status(parsed: Any, ran_ok: bool) -> dict[str, Any]:
             "pass_eligible": None,
             "rerun_required": None,
             "source": None,
+            "scope_matched": None,
         }
     status = parsed.get("status")
     source = parsed.get("source") if isinstance(parsed.get("source"), dict) else {}
-    # A structured doc (including a clean ``not_found``) counts as captured; the
-    # viewer ran and returned a status. ``available`` only means "we have a doc".
+    run = parsed.get("run") if isinstance(parsed.get("run"), dict) else {}
+    found_pr = run.get("pr") if run.get("pr") is not None else source.get("pr")
+    found_commit = run.get("commit") if run.get("commit") is not None else source.get("commit")
+    scope_matched = _scope_matches(requested_pr, requested_commit, found_pr, found_commit)
+    if scope_matched is False:
+        # Stale evidence for a different pr/commit: do not use it for this bundle.
+        return {
+            **base,
+            "available": False,
+            "captured": True,
+            "status": "not_found",
+            "classification": parsed.get("classification"),
+            "pass_eligible": False,
+            "rerun_required": True,
+            "source": source.get("kind"),
+            "scope_matched": False,
+            "found_pr": found_pr,
+            "found_commit": found_commit,
+        }
+    # A structured doc (including a clean ``not_found``) counts as *captured*: the
+    # viewer ran and returned a status. ``available`` is narrower — it means we
+    # have real, scoped validation evidence, so a clean ``not_found`` for this
+    # pr/commit is captured-but-not-available (and never implies stale evidence).
+    normalized = status if status is not None else "unknown"
+    available = normalized not in ("not_found", "not_available", "unknown")
     return {
-        "available": True,
+        **base,
+        "available": available,
         "captured": True,
-        "status": status if status is not None else "unknown",
+        "status": normalized,
         "classification": parsed.get("classification"),
         "pass_eligible": parsed.get("pass_eligible"),
         "rerun_required": parsed.get("rerun_required"),
         "source": source.get("kind"),
+        "scope_matched": scope_matched,
     }
 
 
@@ -787,10 +897,10 @@ def default_bundle_path(pr: int, commit: str, now: datetime | None = None) -> Pa
     return Path("/tmp") / f"sfai-pr{pr}-{_short_sha(commit)}-qa-bundle-{stamp}"
 
 
-def plan_commands() -> list[dict[str, Any]]:
-    """Return the planned command list (used by dry-run and tests)."""
+def plan_commands(pr: int, commit: str) -> list[dict[str, Any]]:
+    """Return the planned command list for pr/commit (used by dry-run and tests)."""
     plan: list[dict[str, Any]] = []
-    for spec in build_command_specs():
+    for spec in build_command_specs(pr, commit):
         plan.append(
             {
                 "key": spec.key,
@@ -817,7 +927,7 @@ def dry_run_result(pr: int, commit: str, out: Path) -> dict[str, Any]:
         "bundle_written": False,
         "mutation_performed": False,
         "intended_bundle_path": str(out),
-        "planned_commands": plan_commands(),
+        "planned_commands": plan_commands(pr, commit),
     }
 
 
@@ -873,7 +983,7 @@ def generate_bundle(
             "first_safe_command": None,
         }
 
-    specs = build_command_specs()
+    specs = build_command_specs(pr, commit)
     command_entries: list[dict[str, Any]] = []
     parsed_by_key: dict[str, Any] = {}
     warnings: list[str] = []
@@ -931,7 +1041,10 @@ def generate_bundle(
     validation_entry = next((c for c in command_entries if c["key"] == "validation_status"), None)
     validation_ran_ok = bool(validation_entry and validation_entry["status"] == "passed")
     validation_status = extract_validation_status(
-        parsed_by_key.get("validation_status"), validation_ran_ok
+        parsed_by_key.get("validation_status"),
+        validation_ran_ok,
+        requested_pr=pr,
+        requested_commit=commit,
     )
 
     remediation = parse_remediation_self_test(parsed_by_key.get("remediation_self_test"))
@@ -1171,11 +1284,25 @@ def render_summary_md(
     lines.append("")
     lines.append("## Validation status")
     lines.append("")
+    scoped_commit = _short_sha(str(validation_status.get("requested_commit") or ""))
+    lines.append(
+        f"* scoped to: PR {validation_status.get('requested_pr')} @ commit {scoped_commit}"
+    )
     lines.append(f"* status: {validation_status.get('status')}")
     lines.append(f"* classification: {validation_status.get('classification')}")
     lines.append(f"* pass_eligible: {validation_status.get('pass_eligible')}")
     lines.append(f"* rerun_required: {validation_status.get('rerun_required')}")
     lines.append(f"* source: {validation_status.get('source')}")
+    if validation_status.get("scope_matched") is False:
+        lines.append(
+            "* note: discovered validation evidence was for a different PR/commit "
+            "and was NOT used for this bundle"
+        )
+    elif not validation_status.get("available"):
+        lines.append(
+            "* note: no validation evidence for this PR/commit (reported cleanly; "
+            "no stale evidence used)"
+        )
     lines.append("")
     safety = qa_results["safety"]
 
