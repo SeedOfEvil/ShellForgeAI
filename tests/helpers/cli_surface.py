@@ -22,6 +22,7 @@ artifacts and never mutates real ``/data``.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -194,10 +195,112 @@ def block_model_calls(monkeypatch, cli_module) -> None:
 
 
 def invoke(app, argv: list[str]) -> CommandResult:
-    """Invoke the CLI in-process and return a bounded result view."""
+    """Invoke the CLI in-process and return a bounded result view (uncached)."""
 
     result = make_runner().invoke(app, argv)
     return CommandResult(exit_code=result.exit_code, stdout=result.stdout or "")
+
+
+# --------------------------------------------------------------------------
+# Shared, in-process invocation cache + deterministic duration reporting
+# --------------------------------------------------------------------------
+#
+# The golden command-surface guardrail invokes the same read-only commands many
+# times: once in the parametrized sweep, again in the explicit numbered tests,
+# and again in the whole-surface safety sweep (``test_35_*``). The expensive
+# ones -- ``v1 check`` readiness, ``status --json``, ``ops report`` -- each cost
+# seconds of real, read-only host inspection, so re-running them 2-3x dominates
+# the suite (and the PR205 ``test_23`` subprocess that runs this whole suite).
+#
+# This cache makes each *unique* argv run at most once per test process. It is
+# correctness-neutral: every command the guardrail invokes is read-only and
+# deterministic with respect to its argv -- help text is static, and the JSON
+# inspection commands probe the host read-only against an always-empty tmp data
+# dir -- so a cached result is identical to a fresh invocation. Coverage is
+# unchanged: if a command regresses, the (single) cached result reflects the
+# regression and every test reading it still fails.
+
+_INVOKE_CACHE: dict[tuple[str, ...], CommandResult] = {}
+_INVOKE_DURATIONS: dict[tuple[str, ...], float] = {}
+_INVOKE_HITS = 0
+_INVOKE_MISSES = 0
+
+
+def invoke_cached(app, argv: list[str]) -> CommandResult:
+    """Invoke the CLI once per unique argv and reuse the result thereafter.
+
+    Returns the *same* :class:`CommandResult` object for repeated argv so callers
+    can rely on identity as well as equality. The first (uncached) invocation is
+    timed for the duration report; cache hits do no work.
+    """
+
+    global _INVOKE_HITS, _INVOKE_MISSES
+    key = tuple(argv)
+    cached = _INVOKE_CACHE.get(key)
+    if cached is not None:
+        _INVOKE_HITS += 1
+        return cached
+    _INVOKE_MISSES += 1
+    start = time.perf_counter()
+    result = invoke(app, argv)
+    _INVOKE_DURATIONS[key] = time.perf_counter() - start
+    _INVOKE_CACHE[key] = result
+    return result
+
+
+def clear_invoke_cache() -> None:
+    """Reset the shared invocation cache, stats, and timings (test isolation)."""
+
+    global _INVOKE_HITS, _INVOKE_MISSES
+    _INVOKE_CACHE.clear()
+    _INVOKE_DURATIONS.clear()
+    _INVOKE_HITS = 0
+    _INVOKE_MISSES = 0
+
+
+def invoke_cache_stats() -> dict[str, int]:
+    """Return deterministic counters describing cache usage in this process."""
+
+    return {
+        "unique": len(_INVOKE_CACHE),
+        "hits": _INVOKE_HITS,
+        "misses": _INVOKE_MISSES,
+    }
+
+
+def invocation_duration_report(top: int = 10) -> dict[str, Any]:
+    """Return a deterministic summary of per-argv invocation cost.
+
+    The shape is stable and ordering is deterministic (slowest first, argv as a
+    tiebreaker), so tests can assert on structure without depending on machine
+    timing. Absolute durations are reported for observability only and must not
+    be turned into assertions.
+    """
+
+    items = sorted(_INVOKE_DURATIONS.items(), key=lambda kv: (-kv[1], kv[0]))
+    return {
+        "unique_commands": len(_INVOKE_DURATIONS),
+        "cache_hits": _INVOKE_HITS,
+        "cache_misses": _INVOKE_MISSES,
+        "slowest": [
+            {"argv": list(argv), "seconds": round(seconds, 4)}
+            for argv, seconds in items[: max(0, top)]
+        ],
+    }
+
+
+def format_duration_report(report: dict[str, Any] | None = None) -> str:
+    """Render the duration report as a short, deterministic text block."""
+
+    report = report or invocation_duration_report()
+    lines = [
+        "command-surface invocation report:",
+        f"  unique commands invoked: {report['unique_commands']}",
+        f"  cache hits / misses: {report['cache_hits']} / {report['cache_misses']}",
+    ]
+    for item in report["slowest"]:
+        lines.append(f"  {item['seconds']:.4f}s  {' '.join(item['argv'])}")
+    return "\n".join(lines)
 
 
 def resolve_safety_flag(payload: dict[str, Any], key: str) -> Any:
@@ -229,7 +332,7 @@ def check_command(app, entry: dict[str, Any]) -> None:
     """Assert a single command-surface fixture entry against the live CLI."""
 
     name = entry["name"]
-    result = invoke(app, entry["argv"])
+    result = invoke_cached(app, entry["argv"])
 
     if "expect_exit_code" in entry and result.exit_code != entry["expect_exit_code"]:
         raise AssertionError(
@@ -277,7 +380,7 @@ def check_refusal(app, entry: dict[str, Any]) -> None:
     """Assert a mutation-refusal phrase still refuses without any execution flag."""
 
     name = entry["name"]
-    result = invoke(app, entry["argv"])
+    result = invoke_cached(app, entry["argv"])
     if result.exit_code != entry.get("expect_exit_code", 0):
         raise AssertionError(
             f"{name}: refusal exit code {result.exit_code} unexpected\n"
