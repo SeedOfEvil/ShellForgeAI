@@ -141,6 +141,19 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
   no Docker/Compose mutation or restart/prune, no package install/network, and
   no cloud apply/merge/push. The bundle never auto-declares a PR mergeable; the
   reviewer still gives the final verdict.
+- Completed: PR207 Docker01 QA bundle validate/history/compare lifecycle.
+  The same helper gains four **artifact-only** modes — `--validate-bundle`,
+  `--history`, `--compare`, `--compare-latest` — that prove bundles are complete,
+  internally consistent, discoverable, and comparable without re-running smoke QA
+  or mutating Docker01. They only read bundle files, parse JSON, and compute
+  sha256 hashes (no subprocess, no Docker/ShellForgeAI/validation execution).
+  Newly generated bundles carry a `bundle-manifest.json` (size + sha256 of every
+  file) for tamper detection; legacy PR206 bundles without it stay valid with a
+  warning. Scoped validation `not_found` is treated as clean evidence-of-absence;
+  `scope_matched=false` is surfaced as a warning, never as current evidence.
+  Compare classifies deltas as regressed/improved/changed/same so a new bundle
+  can be shown not to regress against the prior one in the PR handoff. Reviewer
+  still gives the final merge verdict.
 
 ## V2 golden-path milestones
 

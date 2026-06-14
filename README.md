@@ -370,7 +370,11 @@ explicit CLI lane.
   allowlist while host checks stay host-side) and writes a bounded, pasteable
   evidence bundle (`qa-summary.md` + JSON) for the PR handoff — evidence
   collection only, with a fixed command allowlist, no `shell=True`, and no
-  mutation/restart/cleanup; see
+  mutation/restart/cleanup. The same helper adds artifact-only lifecycle modes
+  (`--validate-bundle`, `--history`, `--compare`, `--compare-latest`) that prove
+  bundles are complete, discoverable, and comparable without re-running smoke QA
+  or touching Docker01 (they only read files, parse JSON, and check
+  `bundle-manifest.json` sha256 integrity); see
   [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
 
 ## Using OpenAI Codex / ChatGPT sign-in

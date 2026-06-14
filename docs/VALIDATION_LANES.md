@@ -565,6 +565,71 @@ prune, package install, network call, or cloud apply/merge/push. The bundle
 **never auto-declares a PR mergeable** — the reviewer still gives the final merge
 verdict.
 
+### QA bundle lifecycle: validate / history / compare / compare-latest (PR207)
+
+PR206 generates bundles; PR207 adds four **artifact-only** lifecycle modes that
+prove bundles are complete, internally consistent, discoverable, and comparable
+**without re-running smoke QA and without mutating Docker01**. They only read
+existing bundle files, parse JSON, list bundle directories under a chosen root,
+and compute sha256 hashes. They **do not** run ShellForgeAI, Docker,
+`docker exec`, or `validation_status.py`, use no subprocess at all, and never
+modify/delete/repair a bundle, restart anything, prune, call the network, or
+apply/merge/push.
+
+```bash
+# Validate one bundle (structure + internal consistency + manifest integrity):
+python3 scripts/docker01_operator_qa_bundle.py --validate-bundle <bundle_dir>
+python3 scripts/docker01_operator_qa_bundle.py --validate-bundle <bundle_dir> --json
+
+# Discover/filter bundles under a root (default /tmp), newest first:
+python3 scripts/docker01_operator_qa_bundle.py --history --root /tmp
+python3 scripts/docker01_operator_qa_bundle.py --history --root /tmp --pr 206 --json
+python3 scripts/docker01_operator_qa_bundle.py --history --root /tmp --pr 206 --status passed --limit 5
+
+# Compare two bundles, or the newest two matching a PR/commit:
+python3 scripts/docker01_operator_qa_bundle.py --compare <old_bundle> <new_bundle>
+python3 scripts/docker01_operator_qa_bundle.py --compare-latest --root /tmp --pr 206
+python3 scripts/docker01_operator_qa_bundle.py --compare-latest --root /tmp --pr 206 --commit <sha> --json
+```
+
+**validate** returns `valid` / `warning` / `invalid` after checking: the bundle
+directory and required files exist; required JSON parses strictly; `qa-summary.md`
+is non-empty; `qa-results.json` carries `schema_version`/`mode`/`status` and
+`pr`/`commit`/`short_sha`; a safety block exists with `read_only=true` and
+`mutation_performed=false` (unless `status=failed` is honestly reported);
+`first_safe_command` points at `qa-summary.md`; raw outputs exist for every
+listed command; command and safety-assertion summary counts match their entries;
+and `validation-status.json`'s `requested_pr`/`requested_commit` match the
+bundle. A **scoped validation `not_found`** is *clean* (valid) when it belongs to
+the requested PR/commit and does not claim `pass_eligible=true`; a
+`scope_matched=false` is surfaced as a **warning** (evidence for a different
+PR/commit is never treated as current). When a `bundle-manifest.json` is present,
+validate recomputes each file's sha256 and flags any mismatch as `invalid`.
+
+**bundle-manifest.json** is written into newly generated bundles: it records the
+`size_bytes` + `sha256` of `qa-summary.md`, every top-level JSON file, and each
+`raw/*` output. **Legacy PR206 bundles without it stay usable** — validate falls
+back to structural checks and emits the warning `bundle-manifest.json missing;
+legacy bundle integrity checks limited to structural validation`.
+
+**history** discovers directories matching
+`sfai-pr<PR>-<shortsha>-qa-bundle-<timestamp>` under the root, runs lightweight
+validation on each, extracts pr/commit/short_sha/created_at/status, command and
+safety counts, and the validation status block, then sorts newest first. Filter
+with `--pr`, `--commit`, `--status`, and `--limit`. Unrelated directories and
+corrupt bundles are skipped/flagged without crashing.
+
+**compare** / **compare-latest** classify the delta as `regressed`, `improved`,
+`changed`, or `same` (`invalid` if a bundle can't load; `not_enough_bundles` for
+compare-latest when fewer than two match — exit 1 for human use, strict JSON
+otherwise). Regressions include `passed -> failed`, a command or safety assertion
+flipping `passed -> failed`, `mutation_performed false -> true`, validation
+`scope_matched true/null -> false`, `restart_count` increasing, and health
+`healthy -> unhealthy`; improvements are the inverse (including validation
+`not_found -> passed`). **PR handoff:** attach the compare output to show a new
+bundle did not regress against the prior one. The reviewer still gives the final
+merge verdict.
+
 ## Validation environment preflight (PR178)
 
 Before any ruff/compileall/pytest phase runs on a host, the validation

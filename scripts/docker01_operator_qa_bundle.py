@@ -27,7 +27,9 @@ a PR mergeable; the reviewer still gives the final merge verdict.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Sequence
@@ -41,6 +43,43 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_VERSION = 1
 MODE = "docker01_operator_qa_bundle"
 SHORT_SHA_LEN = 12
+
+# Lifecycle modes (validate / history / compare) are artifact-only: they read an
+# existing bundle's files, parse JSON, and compute hashes. They never run Docker,
+# ShellForgeAI, or validation_status.py, never use subprocess, and never mutate a
+# bundle or Docker01.
+MANIFEST_FILE = "bundle-manifest.json"
+MANIFEST_MODE = "docker01_qa_bundle_manifest"
+VALIDATE_MODE = "docker01_qa_bundle_validate"
+HISTORY_MODE = "docker01_qa_bundle_history"
+COMPARE_MODE = "docker01_qa_bundle_compare"
+
+# Default discovery root for history/compare-latest.
+DEFAULT_ROOT = "/tmp"
+
+# PR206 bundle directory naming: ``sfai-pr<PR>-<shortsha>-qa-bundle-<timestamp>``.
+BUNDLE_NAME_RE = re.compile(r"^sfai-pr(?P<pr>\d+)-(?P<short>[^-]+)-qa-bundle-(?P<stamp>.+)$")
+
+# Files every PR206-style bundle must contain (besides ``raw/``).
+REQUIRED_BUNDLE_FILES: tuple[str, ...] = (
+    "qa-summary.md",
+    "qa-results.json",
+    "safety-assertions.json",
+    "container-state.json",
+    "validation-status.json",
+    "commands-run.json",
+)
+# Subset of required files that must parse as strict JSON.
+REQUIRED_BUNDLE_JSON: tuple[str, ...] = (
+    "qa-results.json",
+    "safety-assertions.json",
+    "container-state.json",
+    "validation-status.json",
+    "commands-run.json",
+)
+
+# Bundle status ordering used to classify compare regressions/improvements.
+_STATUS_RANK = {"failed": 0, "dry_run": 1, "partial": 2, "passed": 3}
 
 # Per-command subprocess timeout (seconds). A couple of commands get more room.
 DEFAULT_TIMEOUT = 120
@@ -1100,7 +1139,57 @@ def generate_bundle(
     )
     (out / "qa-summary.md").write_text(summary_md, encoding="utf-8")
 
+    # Lightweight integrity manifest (sha256 of every bundle file). Written last,
+    # after all other files exist, so validate can detect post-hoc tampering.
+    _write_json(out / MANIFEST_FILE, build_manifest(out, pr, commit, now))
+
     return qa_results
+
+
+# ---------------------------------------------------------------------------
+# Bundle manifest
+# ---------------------------------------------------------------------------
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the hex sha256 of a file, read in bounded chunks."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _manifest_relpaths(out: Path) -> list[str]:
+    """Ordered relative paths the manifest covers (top-level files then raw/*)."""
+    rels: list[str] = [name for name in REQUIRED_BUNDLE_FILES if (out / name).is_file()]
+    raw_dir = out / "raw"
+    if raw_dir.is_dir():
+        rels.extend(
+            p.relative_to(out).as_posix() for p in sorted(raw_dir.rglob("*")) if p.is_file()
+        )
+    return rels
+
+
+def build_manifest(out: Path, pr: int, commit: str, now: datetime) -> dict[str, Any]:
+    """Build the bundle manifest (file sizes + sha256) for integrity checks."""
+    files = [
+        {
+            "path": rel,
+            "size_bytes": (out / rel).stat().st_size,
+            "sha256": _sha256_file(out / rel),
+        }
+        for rel in _manifest_relpaths(out)
+    ]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": MANIFEST_MODE,
+        "created_at": now.isoformat(),
+        "pr": pr,
+        "commit": commit,
+        "short_sha": _short_sha(commit),
+        "files": files,
+    }
 
 
 def _read_raw(out: Path, rel: str) -> str:
@@ -1334,6 +1423,792 @@ def render_summary_md(
 
 
 # ---------------------------------------------------------------------------
+# Lifecycle: shared artifact-only helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_json_file(path: Path) -> tuple[bool, Any, str | None]:
+    """Read + strict-parse a JSON file. Returns ``(ok, data, error)``."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, None, f"cannot read {path.name}: {exc}"
+    try:
+        return True, json.loads(text), None
+    except (json.JSONDecodeError, ValueError) as exc:
+        return False, None, f"{path.name} is not strict JSON: {exc}"
+
+
+def _commit_prefix_match(a: Any, b: Any) -> bool:
+    """Two-way commit-prefix match (either may be a short sha of the other)."""
+    if not a or not b:
+        return False
+    sa, sb = str(a), str(b)
+    return sa.startswith(sb) or sb.startswith(sa)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: validate
+# ---------------------------------------------------------------------------
+
+
+def validate_bundle(bundle_dir: str | Path) -> dict[str, Any]:
+    """Structurally validate an existing PR206-style bundle (artifact-only).
+
+    Reads bundle files, parses JSON, and (when a ``bundle-manifest.json`` is
+    present) verifies sha256 integrity. Never runs Docker/ShellForgeAI/validation
+    commands and never mutates the bundle. Returns a strict result dict with a
+    ``valid|warning|invalid`` status.
+    """
+    bundle = Path(bundle_dir)
+    checks: list[dict[str, Any]] = []
+    info_warnings: list[str] = []
+    pr: Any = None
+    commit: Any = None
+    short_sha: Any = None
+
+    def chk(name: str, passed: Any, level: str, detail: str) -> bool:
+        checks.append({"name": name, "passed": bool(passed), "level": level, "detail": detail})
+        return bool(passed)
+
+    if not chk(
+        "bundle_dir_exists", bundle.is_dir(), "error", f"bundle directory exists ({bundle})"
+    ):
+        return _build_validate_result(bundle, checks, info_warnings, pr, commit, short_sha)
+
+    for name in REQUIRED_BUNDLE_FILES:
+        chk(
+            f"file_present:{name}",
+            (bundle / name).is_file(),
+            "error",
+            f"required file present: {name}",
+        )
+    chk("raw_dir_present", (bundle / "raw").is_dir(), "error", "raw/ directory present")
+
+    summary_path = bundle / "qa-summary.md"
+    summary_ok = summary_path.is_file() and bool(summary_path.read_text(encoding="utf-8").strip())
+    chk("qa_summary_nonempty", summary_ok, "error", "qa-summary.md exists and is non-empty")
+
+    parsed: dict[str, Any] = {}
+    for name in REQUIRED_BUNDLE_JSON:
+        path = bundle / name
+        if not path.is_file():
+            continue  # already reported by file_present
+        ok, data, err = _load_json_file(path)
+        chk(f"json_parses:{name}", ok, "error", err or f"{name} parses as strict JSON")
+        if ok:
+            parsed[name] = data
+
+    qa = parsed.get("qa-results.json")
+    if isinstance(qa, dict):
+        pr, commit, short_sha = qa.get("pr"), qa.get("commit"), qa.get("short_sha")
+        chk(
+            "qa_results_header",
+            all(qa.get(k) is not None for k in ("schema_version", "mode", "status")),
+            "error",
+            "qa-results.json has schema_version/mode/status",
+        )
+        chk(
+            "qa_results_identity",
+            qa.get("pr") is not None and qa.get("commit") and qa.get("short_sha"),
+            "error",
+            "qa-results.json has pr/commit/short_sha",
+        )
+        chk(
+            "qa_results_safety_block",
+            isinstance(qa.get("safety"), dict),
+            "error",
+            "qa-results.json has a safety block",
+        )
+        chk(
+            "qa_results_read_only",
+            qa.get("read_only") is True,
+            "error",
+            "qa-results.json read_only=true",
+        )
+        mutation = qa.get("mutation_performed")
+        chk(
+            "qa_results_mutation_clean",
+            mutation is False or qa.get("status") == "failed",
+            "error",
+            "qa-results.json mutation_performed=false (or status=failed if mutation reported)",
+        )
+        fsc = qa.get("first_safe_command") or ""
+        chk(
+            "first_safe_command_points_at_summary",
+            "qa-summary.md" in str(fsc),
+            "error",
+            "first_safe_command points at qa-summary.md",
+        )
+        _validate_command_counts(qa, chk)
+    else:
+        chk("qa_results_loaded", False, "error", "qa-results.json could not be loaded as an object")
+
+    sa = parsed.get("safety-assertions.json")
+    if isinstance(sa, dict):
+        _validate_assertion_counts(sa, chk)
+    else:
+        chk(
+            "safety_assertions_loaded",
+            False,
+            "error",
+            "safety-assertions.json could not be loaded as an object",
+        )
+
+    _validate_raw_outputs(bundle, qa, parsed.get("commands-run.json"), chk)
+    _validate_validation_status(parsed.get("validation-status.json"), qa, chk)
+    _validate_manifest(bundle, info_warnings, chk)
+
+    return _build_validate_result(bundle, checks, info_warnings, pr, commit, short_sha)
+
+
+def _validate_command_counts(qa: dict[str, Any], chk: Callable[..., bool]) -> None:
+    commands = qa.get("commands") if isinstance(qa.get("commands"), list) else []
+    summary = qa.get("summary") if isinstance(qa.get("summary"), dict) else {}
+    passed = sum(1 for c in commands if isinstance(c, dict) and c.get("status") == "passed")
+    failed = sum(1 for c in commands if isinstance(c, dict) and c.get("status") == "failed")
+    chk(
+        "command_count_total",
+        summary.get("commands_total") == len(commands),
+        "error",
+        "qa-results summary commands_total matches command entries",
+    )
+    chk(
+        "command_count_passed",
+        summary.get("commands_passed") == passed,
+        "error",
+        "qa-results summary commands_passed matches passed entries",
+    )
+    chk(
+        "command_count_failed",
+        summary.get("commands_failed") == failed,
+        "error",
+        "qa-results summary commands_failed matches failed entries",
+    )
+
+
+def _validate_assertion_counts(sa: dict[str, Any], chk: Callable[..., bool]) -> None:
+    assertions = sa.get("assertions") if isinstance(sa.get("assertions"), list) else []
+    summary = sa.get("summary") if isinstance(sa.get("summary"), dict) else {}
+    passed = sum(1 for a in assertions if isinstance(a, dict) and a.get("passed") is True)
+    failed = sum(1 for a in assertions if isinstance(a, dict) and a.get("passed") is False)
+    chk(
+        "assertion_summary_present",
+        isinstance(sa.get("summary"), dict),
+        "error",
+        "safety-assertions.json has an assertion summary",
+    )
+    chk(
+        "assertion_count_total",
+        summary.get("total") == len(assertions),
+        "error",
+        "safety assertion summary total matches assertion entries",
+    )
+    chk(
+        "assertion_count_passed",
+        summary.get("passed") == passed,
+        "error",
+        "safety assertion summary passed matches passing assertions",
+    )
+    chk(
+        "assertion_count_failed",
+        summary.get("failed") == failed,
+        "error",
+        "safety assertion summary failed matches failing assertions",
+    )
+
+
+def _validate_raw_outputs(
+    bundle: Path, qa: Any, commands_run: Any, chk: Callable[..., bool]
+) -> None:
+    raw_files: set[str] = set()
+    for source in (qa, commands_run):
+        if isinstance(source, dict):
+            for entry in source.get("commands") or []:
+                if isinstance(entry, dict) and entry.get("raw_file"):
+                    raw_files.add(str(entry["raw_file"]))
+    if not raw_files:
+        return
+    missing = sorted(rf for rf in raw_files if not (bundle / rf).is_file())
+    chk(
+        "raw_outputs_present",
+        not missing,
+        "error",
+        "all listed raw command outputs are present"
+        if not missing
+        else f"missing raw command outputs: {missing}",
+    )
+
+
+def _validate_validation_status(vs: Any, qa: Any, chk: Callable[..., bool]) -> None:
+    if not isinstance(vs, dict):
+        return
+    if isinstance(qa, dict):
+        rp = vs.get("requested_pr")
+        if rp is not None:
+            chk(
+                "validation_requested_pr_matches",
+                str(rp) == str(qa.get("pr")),
+                "error",
+                "validation-status requested_pr matches qa-results pr",
+            )
+        rc = vs.get("requested_commit")
+        if rc:
+            chk(
+                "validation_requested_commit_matches",
+                _commit_prefix_match(rc, qa.get("commit")),
+                "error",
+                "validation-status requested_commit matches qa-results commit",
+            )
+    # A scoped ``not_found`` is clean evidence-of-absence; it only becomes a
+    # problem if it simultaneously claims pass eligibility.
+    if vs.get("status") in ("not_found", "not_available") and vs.get("pass_eligible") is True:
+        chk(
+            "validation_not_found_consistent",
+            False,
+            "error",
+            "validation-status not_found must not claim pass_eligible=true",
+        )
+    # scope_matched=false means the captured evidence belonged to another
+    # PR/commit and is not current evidence: surface as a warning.
+    if vs.get("scope_matched") is False:
+        chk(
+            "validation_scope_matched",
+            False,
+            "warning",
+            "validation-status scope_matched=false; captured evidence is not current evidence",
+        )
+
+
+def _validate_manifest(bundle: Path, info_warnings: list[str], chk: Callable[..., bool]) -> None:
+    manifest_path = bundle / MANIFEST_FILE
+    if not manifest_path.is_file():
+        info_warnings.append(
+            "bundle-manifest.json missing; legacy bundle integrity checks limited to "
+            "structural validation"
+        )
+        return
+    ok, manifest, err = _load_json_file(manifest_path)
+    if not chk("manifest_parses", ok, "error", err or "bundle-manifest.json parses as strict JSON"):
+        return
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, list):
+        chk("manifest_files_present", False, "error", "bundle-manifest.json has no files list")
+        return
+    missing: list[str] = []
+    mismatched: list[str] = []
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        rel = entry.get("path")
+        if not rel:
+            continue
+        path = bundle / rel
+        if not path.is_file():
+            missing.append(str(rel))
+            continue
+        expected = entry.get("sha256")
+        if expected and _sha256_file(path) != expected:
+            mismatched.append(str(rel))
+    chk(
+        "manifest_files_present",
+        not missing,
+        "error",
+        "all manifest files present" if not missing else f"manifest lists missing files: {missing}",
+    )
+    chk(
+        "manifest_hashes_match",
+        not mismatched,
+        "error",
+        "manifest sha256 hashes match"
+        if not mismatched
+        else f"manifest sha256 mismatch: {mismatched}",
+    )
+
+
+def _build_validate_result(
+    bundle: Path,
+    checks: list[dict[str, Any]],
+    info_warnings: list[str],
+    pr: Any,
+    commit: Any,
+    short_sha: Any,
+) -> dict[str, Any]:
+    errors = [c["detail"] for c in checks if not c["passed"] and c["level"] == "error"]
+    warn_failures = [c["detail"] for c in checks if not c["passed"] and c["level"] == "warning"]
+    warnings = warn_failures + list(info_warnings)
+    passed = sum(1 for c in checks if c["passed"])
+    if errors:
+        status = "invalid"
+    elif warn_failures:
+        status = "warning"
+    else:
+        status = "valid"
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": VALIDATE_MODE,
+        "status": status,
+        "bundle_path": str(bundle),
+        "pr": pr,
+        "commit": commit,
+        "short_sha": short_sha,
+        "checks_total": len(checks),
+        "checks_passed": passed,
+        "checks_failed": len(checks) - passed,
+        "warnings": warnings,
+        "errors": errors,
+        "checks": checks,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: history
+# ---------------------------------------------------------------------------
+
+
+def _validation_view(vs: Any) -> dict[str, Any]:
+    """Compact validation summary used by history/compare."""
+    if not isinstance(vs, dict):
+        return {
+            "status": None,
+            "classification": None,
+            "pass_eligible": None,
+            "rerun_required": None,
+            "scope_matched": None,
+        }
+    return {
+        "status": vs.get("status"),
+        "classification": vs.get("classification"),
+        "pass_eligible": vs.get("pass_eligible"),
+        "rerun_required": vs.get("rerun_required"),
+        "scope_matched": vs.get("scope_matched"),
+    }
+
+
+def _bundle_entry(bundle: Path, name_match: re.Match[str]) -> dict[str, Any]:
+    """Build one history entry from a bundle directory (artifact-only)."""
+    entry: dict[str, Any] = {
+        "bundle_path": str(bundle),
+        "name": bundle.name,
+        "pr": int(name_match.group("pr")),
+        "commit": None,
+        "short_sha": name_match.group("short"),
+        "created_at": None,
+        "status": None,
+        "commands_passed": None,
+        "commands_failed": None,
+        "safety_assertions_passed": None,
+        "safety_assertions_failed": None,
+        "validation": _validation_view(None),
+        "bundle_validation": "invalid",
+    }
+
+    qa_path = bundle / "qa-results.json"
+    if qa_path.is_file():
+        ok, qa, _ = _load_json_file(qa_path)
+        if ok and isinstance(qa, dict):
+            entry["pr"] = qa.get("pr", entry["pr"])
+            entry["commit"] = qa.get("commit")
+            entry["short_sha"] = qa.get("short_sha", entry["short_sha"])
+            entry["created_at"] = qa.get("created_at")
+            entry["status"] = qa.get("status")
+            summary = qa.get("summary") if isinstance(qa.get("summary"), dict) else {}
+            entry["commands_passed"] = summary.get("commands_passed")
+            entry["commands_failed"] = summary.get("commands_failed")
+            entry["safety_assertions_passed"] = summary.get("safety_assertions_passed")
+            entry["safety_assertions_failed"] = summary.get("safety_assertions_failed")
+
+    vs_path = bundle / "validation-status.json"
+    if vs_path.is_file():
+        ok, vs, _ = _load_json_file(vs_path)
+        if ok:
+            entry["validation"] = _validation_view(vs)
+
+    try:
+        entry["bundle_validation"] = validate_bundle(bundle)["status"]
+    except Exception:  # pragma: no cover - defensive; validate is artifact-only
+        entry["bundle_validation"] = "invalid"
+    return entry
+
+
+def discover_history(
+    root: str | Path,
+    pr: int | None = None,
+    commit: str | None = None,
+    status: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Discover + filter PR206 bundles under ``root`` (artifact-only, no recursion)."""
+    root_path = Path(root)
+    entries: list[dict[str, Any]] = []
+    if root_path.is_dir():
+        for child in root_path.iterdir():
+            if not child.is_dir():
+                continue
+            match = BUNDLE_NAME_RE.match(child.name)
+            if not match:
+                continue
+            entry = _bundle_entry(child, match)
+            if pr is not None and entry["pr"] != pr:
+                continue
+            if commit and not (
+                _commit_prefix_match(entry.get("commit"), commit)
+                or _commit_prefix_match(entry.get("short_sha"), commit)
+            ):
+                continue
+            if status is not None and entry.get("status") != status:
+                continue
+            entries.append(entry)
+
+    entries.sort(key=lambda e: (e.get("created_at") or "", e.get("name") or ""), reverse=True)
+    if limit is not None and limit >= 0:
+        entries = entries[:limit]
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": HISTORY_MODE,
+        "root": str(root_path),
+        "filters": {"pr": pr, "commit": commit, "status": status},
+        "bundles_total": len(entries),
+        "bundles": entries,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: compare
+# ---------------------------------------------------------------------------
+
+
+def _bundle_view(bundle_dir: str | Path) -> dict[str, Any]:
+    """Extract the comparable fields from a bundle (artifact-only)."""
+    bundle = Path(bundle_dir)
+    view: dict[str, Any] = {
+        "bundle_path": str(bundle),
+        "valid": False,
+        "status": None,
+        "pr": None,
+        "commit": None,
+        "short_sha": None,
+        "created_at": None,
+        "mutation_performed": None,
+        "commands": {},
+        "failed_commands": [],
+        "safety": {},
+        "safety_block": {},
+        "container": {},
+        "disk_text": None,
+        "validation": _validation_view(None),
+        "warnings": [],
+    }
+    qa_path = bundle / "qa-results.json"
+    if not qa_path.is_file():
+        return view
+    ok, qa, _ = _load_json_file(qa_path)
+    if not ok or not isinstance(qa, dict):
+        return view
+
+    view["valid"] = True
+    view["status"] = qa.get("status")
+    view["pr"] = qa.get("pr")
+    view["commit"] = qa.get("commit")
+    view["short_sha"] = qa.get("short_sha")
+    view["created_at"] = qa.get("created_at")
+    view["mutation_performed"] = qa.get("mutation_performed")
+    view["safety_block"] = qa.get("safety") if isinstance(qa.get("safety"), dict) else {}
+    view["warnings"] = qa.get("warnings") if isinstance(qa.get("warnings"), list) else []
+
+    commands = qa.get("commands") if isinstance(qa.get("commands"), list) else []
+    view["commands"] = {
+        c["key"]: c.get("status") for c in commands if isinstance(c, dict) and c.get("key")
+    }
+    view["failed_commands"] = sorted(k for k, s in view["commands"].items() if s == "failed")
+
+    sa_path = bundle / "safety-assertions.json"
+    if sa_path.is_file():
+        ok, sa, _ = _load_json_file(sa_path)
+        if ok and isinstance(sa, dict):
+            view["safety"] = {
+                a["name"]: a.get("passed")
+                for a in sa.get("assertions") or []
+                if isinstance(a, dict) and a.get("name")
+            }
+
+    cs_path = bundle / "container-state.json"
+    if cs_path.is_file():
+        ok, cs, _ = _load_json_file(cs_path)
+        if ok and isinstance(cs, dict):
+            view["container"] = {
+                "status": cs.get("status"),
+                "health": cs.get("health"),
+                "restart_count": cs.get("restart_count"),
+                "image": cs.get("image"),
+                "labels": cs.get("labels") or {},
+            }
+            disk = cs.get("disk") if isinstance(cs.get("disk"), dict) else {}
+            view["disk_text"] = disk.get("use_percent")
+
+    vs_path = bundle / "validation-status.json"
+    if vs_path.is_file():
+        ok, vs, _ = _load_json_file(vs_path)
+        if ok:
+            view["validation"] = _validation_view(vs)
+    return view
+
+
+def _view_summary(view: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bundle_path": view["bundle_path"],
+        "valid": view["valid"],
+        "status": view["status"],
+        "pr": view["pr"],
+        "commit": view["commit"],
+        "short_sha": view["short_sha"],
+        "created_at": view["created_at"],
+        "validation_status": view["validation"].get("status"),
+        "container_status": view["container"].get("status"),
+        "container_health": view["container"].get("health"),
+        "restart_count": view["container"].get("restart_count"),
+    }
+
+
+def compare_bundles(old_dir: str | Path, new_dir: str | Path) -> dict[str, Any]:
+    """Compare two existing bundles and report meaningful deltas (artifact-only)."""
+    old = _bundle_view(old_dir)
+    new = _bundle_view(new_dir)
+    base = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": COMPARE_MODE,
+        "old": _view_summary(old),
+        "new": _view_summary(new),
+    }
+    if not old["valid"] or not new["valid"]:
+        return {
+            **base,
+            "status": "invalid",
+            "deltas": _empty_deltas(["one or both bundles could not be loaded as valid"]),
+        }
+
+    commands_regressed = sorted(
+        k
+        for k, s in new["commands"].items()
+        if old["commands"].get(k) == "passed" and s == "failed"
+    )
+    commands_improved = sorted(
+        k
+        for k, s in new["commands"].items()
+        if old["commands"].get(k) == "failed" and s == "passed"
+    )
+    safety_regressed = sorted(
+        k for k, v in new["safety"].items() if old["safety"].get(k) is True and v is False
+    )
+    safety_improved = sorted(
+        k for k, v in new["safety"].items() if old["safety"].get(k) is False and v is True
+    )
+    validation_changed = sorted(
+        k
+        for k in ("status", "classification", "pass_eligible", "rerun_required", "scope_matched")
+        if old["validation"].get(k) != new["validation"].get(k)
+    )
+    container_changed = sorted(
+        k
+        for k in ("status", "health", "restart_count", "image", "labels")
+        if old["container"].get(k) != new["container"].get(k)
+    )
+
+    warnings, regressed, improved = _classify_compare(old, new)
+
+    status_changed = old["status"] != new["status"]
+    old_rank = _STATUS_RANK.get(old["status"])
+    new_rank = _STATUS_RANK.get(new["status"])
+    if old_rank is not None and new_rank is not None:
+        if new_rank < old_rank:
+            regressed = True
+        elif new_rank > old_rank:
+            improved = True
+    if commands_regressed or safety_regressed:
+        regressed = True
+    if commands_improved or safety_improved:
+        improved = True
+
+    if regressed:
+        status = "regressed"
+    elif improved:
+        status = "improved"
+    elif status_changed or container_changed or validation_changed or warnings:
+        status = "changed"
+    else:
+        status = "same"
+
+    if old["disk_text"] != new["disk_text"]:
+        warnings.append(f"disk usage changed: {old['disk_text']} -> {new['disk_text']}")
+
+    return {
+        **base,
+        "status": status,
+        "deltas": {
+            "status_changed": status_changed,
+            "commands_regressed": commands_regressed,
+            "commands_improved": commands_improved,
+            "safety_regressed": safety_regressed,
+            "safety_improved": safety_improved,
+            "validation_changed": validation_changed,
+            "container_changed": container_changed,
+            "warnings": warnings,
+        },
+    }
+
+
+def _empty_deltas(warnings: list[str]) -> dict[str, Any]:
+    return {
+        "status_changed": False,
+        "commands_regressed": [],
+        "commands_improved": [],
+        "safety_regressed": [],
+        "safety_improved": [],
+        "validation_changed": [],
+        "container_changed": [],
+        "warnings": warnings,
+    }
+
+
+def _classify_compare(old: dict[str, Any], new: dict[str, Any]) -> tuple[list[str], bool, bool]:
+    """Return (warnings, regressed, improved) for the non-list compare signals."""
+    warnings: list[str] = []
+    regressed = False
+    improved = False
+
+    if old["mutation_performed"] is False and new["mutation_performed"] is True:
+        warnings.append("mutation_performed changed false -> true")
+        regressed = True
+
+    old_scope = old["validation"].get("scope_matched")
+    new_scope = new["validation"].get("scope_matched")
+    if old_scope in (True, None) and new_scope is False:
+        warnings.append("validation scope_matched changed to false (evidence no longer current)")
+        regressed = True
+
+    if old["validation"].get("status") in ("not_found", "not_available") and (
+        new["validation"].get("status") == "passed"
+    ):
+        improved = True
+
+    old_rc = old["container"].get("restart_count")
+    new_rc = new["container"].get("restart_count")
+    if isinstance(old_rc, int) and isinstance(new_rc, int) and new_rc > old_rc:
+        warnings.append(f"container restart_count increased {old_rc} -> {new_rc}")
+        regressed = True
+
+    if (
+        old["container"].get("health") == "healthy"
+        and new["container"].get("health") == "unhealthy"
+    ):
+        warnings.append("container health changed healthy -> unhealthy")
+        regressed = True
+
+    return warnings, regressed, improved
+
+
+def compare_latest(root: str | Path, pr: int, commit: str | None = None) -> dict[str, Any]:
+    """Compare the newest two matching bundles under ``root`` (artifact-only)."""
+    history = discover_history(root, pr=pr, commit=commit)
+    bundles = history["bundles"]
+    if len(bundles) < 2:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "mode": COMPARE_MODE,
+            "status": "not_enough_bundles",
+            "root": str(Path(root)),
+            "pr": pr,
+            "commit": commit,
+            "bundles_found": len(bundles),
+            "message": (
+                f"need at least 2 matching bundles to compare, found {len(bundles)} "
+                f"(root={root}, pr={pr}, commit={commit})"
+            ),
+        }
+    newest, previous = bundles[0], bundles[1]
+    result = compare_bundles(previous["bundle_path"], newest["bundle_path"])
+    result["root"] = str(Path(root))
+    result["selected"] = {
+        "old": previous["bundle_path"],
+        "new": newest["bundle_path"],
+    }
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: human renderers
+# ---------------------------------------------------------------------------
+
+
+def render_validate_human(result: dict[str, Any]) -> str:
+    lines = ["# Docker01 QA Bundle — validate", ""]
+    lines.append(f"* bundle: {result['bundle_path']}")
+    lines.append(
+        f"* pr: {result.get('pr')}  commit: {result.get('short_sha') or result.get('commit')}"
+    )
+    lines.append(f"* status: {result['status']}")
+    lines.append(
+        f"* checks: {result['checks_passed']}/{result['checks_total']} passed "
+        f"({result['checks_failed']} failed)"
+    )
+    if result["errors"]:
+        lines.append("* errors:")
+        lines.extend(f"  - {e}" for e in result["errors"])
+    if result["warnings"]:
+        lines.append("* warnings:")
+        lines.extend(f"  - {w}" for w in result["warnings"])
+    return "\n".join(lines)
+
+
+def render_history_human(result: dict[str, Any]) -> str:
+    filters = result["filters"]
+    lines = ["# Docker01 QA Bundle — history", ""]
+    lines.append(f"* root: {result['root']}")
+    lines.append(
+        f"* filters: pr={filters['pr']} commit={filters['commit']} status={filters['status']}"
+    )
+    lines.append(f"* bundles: {result['bundles_total']}")
+    lines.append("")
+    if not result["bundles"]:
+        lines.append("(no matching bundles)")
+        return "\n".join(lines)
+    for b in result["bundles"]:
+        lines.append(
+            f"- pr{b['pr']} {b['short_sha']} {b.get('status')} "
+            f"[{b['bundle_validation']}] {b.get('created_at')}"
+        )
+        lines.append(f"    {b['bundle_path']}")
+    return "\n".join(lines)
+
+
+def render_compare_human(result: dict[str, Any]) -> str:
+    lines = ["# Docker01 QA Bundle — compare", ""]
+    old, new = result["old"], result["new"]
+    lines.append(f"* old: {old['bundle_path']} ({old.get('status')})")
+    lines.append(f"* new: {new['bundle_path']} ({new.get('status')})")
+    lines.append(f"* verdict: {result['status']}")
+    if result["status"] == "not_enough_bundles":
+        lines.append(f"* {result.get('message')}")
+        return "\n".join(lines)
+    deltas = result["deltas"]
+    lines.append(f"* status_changed: {deltas['status_changed']}")
+    for key in (
+        "commands_regressed",
+        "commands_improved",
+        "safety_regressed",
+        "safety_improved",
+        "validation_changed",
+        "container_changed",
+    ):
+        if deltas[key]:
+            lines.append(f"* {key}: {', '.join(deltas[key])}")
+    for warning in deltas["warnings"]:
+        lines.append(f"* warning: {warning}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1342,14 +2217,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="docker01_operator_qa_bundle.py",
         description=(
-            "Read-only Docker01 operator QA evidence bundle helper. Runs the "
-            "standard read-only smoke QA set and writes a bounded, pasteable "
-            "evidence packet for the PR handoff. Evidence collection only: no "
-            "fixes, cleanup, restart, or mutation."
+            "Read-only Docker01 operator QA evidence bundle helper. Generation "
+            "runs the standard read-only smoke QA set and writes a bounded, "
+            "pasteable evidence packet for the PR handoff. Lifecycle modes "
+            "(--validate-bundle / --history / --compare / --compare-latest) are "
+            "artifact-only: they read existing bundles, never run Docker, "
+            "ShellForgeAI, or validation commands, and never mutate anything."
         ),
     )
-    parser.add_argument("--pr", type=int, required=True, help="PR number under QA.")
-    parser.add_argument("--commit", required=True, help="Commit SHA under QA.")
+    # Generation requires --pr/--commit; for lifecycle modes they act as filters
+    # (or are unused), so they are not globally required here. main() enforces
+    # them when generating a bundle.
+    parser.add_argument("--pr", type=int, default=None, help="PR number under QA / history filter.")
+    parser.add_argument("--commit", default=None, help="Commit SHA under QA / history filter.")
     parser.add_argument("--out", default=None, help="Explicit bundle output directory.")
     parser.add_argument("--json", action="store_true", help="Emit strict JSON only.")
     parser.add_argument(
@@ -1357,19 +2237,98 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="List planned commands and intended output path; execute nothing and write no bundle.",
     )
+    # Lifecycle modes (artifact-only).
+    parser.add_argument(
+        "--validate-bundle",
+        default=None,
+        metavar="BUNDLE_DIR",
+        help="Validate an existing bundle's structure/integrity (artifact-only).",
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Discover bundles under --root (artifact-only); filter with --pr/--commit/--status.",
+    )
+    parser.add_argument(
+        "--compare",
+        nargs=2,
+        default=None,
+        metavar=("OLD_BUNDLE", "NEW_BUNDLE"),
+        help="Compare two existing bundles and report deltas (artifact-only).",
+    )
+    parser.add_argument(
+        "--compare-latest",
+        action="store_true",
+        help="Compare the newest two matching bundles under --root (artifact-only).",
+    )
+    parser.add_argument(
+        "--root",
+        default=DEFAULT_ROOT,
+        help=f"Discovery root for --history/--compare-latest (default {DEFAULT_ROOT}).",
+    )
+    parser.add_argument(
+        "--status",
+        default=None,
+        help="History filter: bundle status (passed|failed|partial|dry_run).",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, help="History: cap results to N bundles."
+    )
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_arg_parser().parse_args(argv)
-    out = Path(args.out) if args.out else None
+def _run_validate(args: argparse.Namespace) -> int:
+    result = validate_bundle(args.validate_bundle)
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(render_validate_human(result))
+    return 0 if result["status"] in ("valid", "warning") else 1
 
-    result = generate_bundle(
-        pr=args.pr,
-        commit=args.commit,
-        out=out,
-        dry_run=args.dry_run,
+
+def _run_history(args: argparse.Namespace) -> int:
+    result = discover_history(
+        args.root, pr=args.pr, commit=args.commit, status=args.status, limit=args.limit
     )
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(render_history_human(result))
+    return 0
+
+
+def _compare_exit_code(status: str) -> int:
+    return 0 if status in ("same", "improved", "changed") else 1
+
+
+def _run_compare(args: argparse.Namespace) -> int:
+    old_dir, new_dir = args.compare
+    result = compare_bundles(old_dir, new_dir)
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(render_compare_human(result))
+    return _compare_exit_code(result["status"])
+
+
+def _run_compare_latest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.pr is None:
+        parser.error("--compare-latest requires --pr")
+    result = compare_latest(args.root, pr=args.pr, commit=args.commit)
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(render_compare_human(result))
+    if result["status"] == "not_enough_bundles":
+        return 1
+    return _compare_exit_code(result["status"])
+
+
+def _run_generation(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.pr is None or args.commit is None:
+        parser.error("--pr and --commit are required for bundle generation")
+    out = Path(args.out) if args.out else None
+    result = generate_bundle(pr=args.pr, commit=args.commit, out=out, dry_run=args.dry_run)
 
     if args.json:
         print(json.dumps(result, indent=2))
@@ -1385,6 +2344,30 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     status = result.get("status")
     return 0 if status in ("passed", "dry_run") else 1
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+
+    lifecycle = [
+        bool(args.validate_bundle),
+        bool(args.history),
+        bool(args.compare),
+        bool(args.compare_latest),
+    ]
+    if sum(lifecycle) > 1:
+        parser.error("choose at most one lifecycle mode (validate/history/compare/compare-latest)")
+
+    if args.validate_bundle:
+        return _run_validate(args)
+    if args.history:
+        return _run_history(args)
+    if args.compare:
+        return _run_compare(args)
+    if args.compare_latest:
+        return _run_compare_latest(args, parser)
+    return _run_generation(args, parser)
 
 
 if __name__ == "__main__":
