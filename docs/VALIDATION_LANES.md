@@ -215,6 +215,32 @@ pytest -q tests/test_pr184_cli_command_surface_golden.py
   `tests/golden/cli_command_surface_pr184.json` in the same PR; see
   [`cli.md`](cli.md) for the fixture contract and update workflow.
 
+#### Command-surface guardrail performance (PR208)
+
+The golden guardrail invokes the same read-only commands many times (the
+parametrized sweep, the explicit numbered tests, and the whole-surface safety
+sweep). The expensive ones — `v1 check` readiness, `status --json`,
+`ops report` — each cost seconds of real, read-only host inspection, so the
+PR205 `test_23` subprocess (which runs the whole PR184 suite) was repeatedly the
+slowest validation path (~360s on Docker01).
+
+PR208 adds a shared, process-wide invocation cache in
+`tests/helpers/cli_surface.py` (`invoke_cached`) so each *unique* argv runs at
+most once per test process, plus a deterministic duration report
+(`invocation_duration_report` / `format_duration_report`). This is
+**validation-performance/diagnostics work only**:
+
+- Command-surface coverage is unchanged — every command, JSON flag, help
+  surface, governed `--confirm` requirement, and mutation-refusal path is still
+  asserted. The cache is correctness-neutral (every cached command is read-only
+  and deterministic w.r.t. its argv), so a cached result is identical to a fresh
+  invocation; a regression still fails every test that reads it.
+- Import side-effect coverage (PR205) is unchanged; `test_23` simply runs the
+  faster PR184 suite and now passes `--durations=15` for observability.
+- Full validation is still appropriate when touching CLI registration or the
+  import guardrails: run `pytest -q tests/test_pr208_command_surface_performance_polish.py`
+  alongside the PR184/PR204/PR205 suites and `python scripts/run_full_pytest.py`.
+
 Before expensive Docker01/full validation, run the read-only validation
 environment doctor when the container or dev environment is new, stale, or
 suspect:

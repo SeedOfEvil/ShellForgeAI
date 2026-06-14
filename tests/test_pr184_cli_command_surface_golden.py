@@ -163,7 +163,7 @@ def test_16_ops_report_help_works() -> None:
 
 
 def test_17_ops_report_json_is_read_only_non_mutating() -> None:
-    result = cli_surface.invoke(app, ["ops", "report", "--json"])
+    result = cli_surface.invoke_cached(app, ["ops", "report", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["read_only"] is True
@@ -254,7 +254,9 @@ def test_31_interactive_help_works() -> None:
 
 
 def test_32_cleanup_restart_phrase_still_refuses() -> None:
-    result = cli_surface.invoke(app, ["ask", "Clean up docker and restart compose to fix it"])
+    result = cli_surface.invoke_cached(
+        app, ["ask", "Clean up docker and restart compose to fix it"]
+    )
     assert result.exit_code == 0
     out = result.stdout_lower
     assert "refus" in out
@@ -270,7 +272,7 @@ def test_33_rollback_recovery_rerun_fix_phrases_still_refuse() -> None:
         "fix corrupt receipts",
         "restart from the receipt",
     ):
-        result = cli_surface.invoke(app, ["ask", phrase])
+        result = cli_surface.invoke_cached(app, ["ask", phrase])
         assert result.exit_code == 0, phrase
         out = result.stdout_lower
         assert "refus" in out, phrase
@@ -304,14 +306,18 @@ def test_34_json_safety_fields_stay_read_only_where_expected() -> None:
         "verify_receipt_json",
     ):
         entry = _entry(name)
-        result = cli_surface.invoke(app, entry["argv"])
+        result = cli_surface.invoke_cached(app, entry["argv"])
         payload = json.loads(result.stdout)
         assert cli_surface.resolve_safety_flag(payload, "read_only") is True, name
         assert cli_surface.resolve_safety_flag(payload, "mutation_performed") is False, name
 
 
-# Cache the full command/refusal sweep so the (relatively expensive) v1
-# readiness invocations run once and are reused by the safety assertions below.
+# The full command/refusal sweep reuses the shared, process-wide invocation
+# cache (``cli_surface.invoke_cached``). By the time these safety assertions run,
+# the parametrized ``test_command_surface_matches_golden`` /
+# ``test_refusal_phrase_matches_golden`` tests have already invoked every entry,
+# so this sweep is almost entirely cache hits and the expensive v1 readiness
+# invocations run exactly once for the whole module.
 _SWEEP_CACHE: list[tuple[str, str]] | None = None
 
 
@@ -320,7 +326,7 @@ def _all_invoked_outputs() -> list[tuple[str, str]]:
     if _SWEEP_CACHE is None:
         outputs: list[tuple[str, str]] = []
         for entry in COMMANDS + REFUSALS:
-            result = cli_surface.invoke(app, entry["argv"])
+            result = cli_surface.invoke_cached(app, entry["argv"])
             outputs.append((entry["name"], result.stdout_lower))
         _SWEEP_CACHE = outputs
     return _SWEEP_CACHE

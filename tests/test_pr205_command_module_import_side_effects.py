@@ -551,8 +551,11 @@ def test_22_audit_helper_does_not_execute_dangerous_primitives() -> None:
 def _run_pytest(target: str, *extra: str) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(SRC), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    # ``--durations`` surfaces the slowest tests in the captured output so that
+    # when this guardrail subprocess is slow (it runs a whole sub-suite), the
+    # offending command-surface invocations are easy to spot without re-running.
     return subprocess.run(  # noqa: S603 - test runs the local pytest guardrail suites.
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:xdist", target, *extra],
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:xdist", "--durations=15", target, *extra],
         cwd=REPO,
         text=True,
         capture_output=True,
