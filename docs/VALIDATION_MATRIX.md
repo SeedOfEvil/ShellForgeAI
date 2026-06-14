@@ -173,4 +173,4 @@ pytest -q tests -k "hygiene_report or hygiene_validate or qa_bundle or validatio
 python scripts/run_full_pytest.py
 ```
 
-The validator is read-only. It never executes Docker, Docker Compose, cleanup, restart, package install, network fetch, model/Codex, merge, push, or arbitrary shell commands.
+The validator is read-only and uses bounded reads: report JSON is sized for realistic Docker01 outputs, commands/Markdown have separate caps, and raw captures remain tightly bounded. Oversized files fail safely. It never executes Docker, Docker Compose, cleanup, restart, package install, network fetch, model/Codex, merge, push, or arbitrary shell commands.

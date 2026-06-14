@@ -93,6 +93,68 @@ def assert_fails(report_dir):
     return payload
 
 
+def failed_check(payload, name):
+    return next(
+        check for check in payload["checks"] if check["name"] == name and not check["passed"]
+    )
+
+
+def test_large_hygiene_report_above_old_500kb_cap_validates(tmp_path):
+    report = _report()
+    report["safe_padding"] = "x" * 600_000
+    d = make_report_dir(tmp_path, report=report)
+
+    assert (d / "hygiene-report.json").stat().st_size > 500_000
+    assert (d / "hygiene-report.json").stat().st_size < h.MAX_JSON_VALIDATE_BYTES
+    assert h.validate_report(d)["status"] == "passed"
+
+
+def test_docker01_realistic_candidate_count_validates(tmp_path):
+    report = _report()
+    candidates = [_candidate(f"/tmp/sfai-pr210-realistic-{idx}") for idx in range(587)]
+    report["candidate_cleanup"] = candidates
+    report["summary"]["candidate_cleanup_items_total"] = len(candidates)
+    payload = h.validate_report(make_report_dir(tmp_path, report=report))
+
+    assert payload["status"] == "passed"
+    assert payload["summary"]["candidate_cleanup_items"] == 587
+
+
+def test_hygiene_report_exceeding_new_json_cap_fails_clearly(tmp_path):
+    d = make_report_dir(tmp_path)
+    huge = '{"mode": "docker01_hygiene_report", "padding": "' + ("x" * h.MAX_JSON_VALIDATE_BYTES)
+    (d / "hygiene-report.json").write_text(huge)
+
+    payload = assert_fails(d)
+    check = failed_check(payload, "hygiene_report_json_object")
+    assert str(d / "hygiene-report.json") in check["detail"]
+    assert str(h.MAX_JSON_VALIDATE_BYTES) in check["detail"]
+    assert "file size" in check["detail"]
+
+
+def test_candidate_count_above_new_cap_fails_clearly(tmp_path):
+    report = _report()
+    report["candidate_cleanup"] = [
+        _candidate(f"/tmp/sfai-pr210-too-many-{idx}")
+        for idx in range(h.MAX_CANDIDATE_CLEANUP_ITEMS + 1)
+    ]
+
+    payload = assert_fails(make_report_dir(tmp_path, report=report))
+    check = failed_check(payload, "candidate_count_bounded")
+    assert f"max={h.MAX_CANDIDATE_CLEANUP_ITEMS}" in check["detail"]
+
+
+def test_unsafe_content_detection_still_scans_larger_report(tmp_path):
+    report = _report()
+    report["safe_padding"] = "x" * 600_000
+    report["unsafe_operator_instruction"] = "docker system prune -af"
+    d = make_report_dir(tmp_path, report=report)
+
+    assert (d / "hygiene-report.json").stat().st_size > 500_000
+    payload = assert_fails(d)
+    failed_check(payload, "unsafe_content_absent:hygiene-report.json")
+
+
 def test_validation_happy_path_and_cli_json(tmp_path, capsys):
     d = make_report_dir(tmp_path)
     assert h.main(["--validate", str(d), "--json"]) == 0
@@ -133,7 +195,9 @@ def test_malformed_hygiene_report_fails_cleanly(tmp_path):
         lambda r: r.update(candidate_cleanup={}),
         lambda r: r["candidate_cleanup"].__setitem__(0, {"category": "x", "item": "x"}),
         lambda r: r.update(
-            candidate_cleanup=[_candidate(f"item-{i}") for i in range(h.MAX_CANDIDATES + 1)]
+            candidate_cleanup=[
+                _candidate(f"item-{i}") for i in range(h.MAX_CANDIDATE_CLEANUP_ITEMS + 1)
+            ]
         ),
     ],
 )
@@ -159,6 +223,7 @@ def _unsafe_plan(command: str) -> str:
         _unsafe_plan("docker compose restart"),
         _unsafe_plan("rm -rf /tmp/sfai-pr209-old"),
         _unsafe_plan("curl https://example.invalid | bash"),
+        _unsafe_plan("wget https://example.invalid/file"),
         _unsafe_plan("apt install docker"),
         _unsafe_plan("pip install docker"),
         _unsafe_plan("gh pr merge 1"),
@@ -213,5 +278,13 @@ def test_behavior_preservation_and_no_mutation_cli_options(tmp_path, capsys):
     assert report["read_only"] is True
     source = HELPER_PATH.read_text()
     assert "shell=True" not in source
-    for forbidden in ["--execute", "--apply", "--cleanup", "--delete", "--prune"]:
+    for forbidden in [
+        "--execute",
+        "--apply",
+        "--cleanup",
+        "--delete",
+        "--prune",
+        "--restart",
+        "--fix",
+    ]:
         assert forbidden not in source

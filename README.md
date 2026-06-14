@@ -536,4 +536,4 @@ Validate an existing report before operator review with:
 python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-report --json
 ```
 
-Validation reads existing files only, emits `mode=docker01_hygiene_report_validate`, exits non-zero on malformed/missing/unsafe artifacts, checks proposal-only/no-cleanup language, and rejects executable cleanup/prune/delete/restart/network/package/cloud/Codex command patterns. It does not run Docker, mutate Docker/Compose, delete files, call a model, call Codex, or make cleanup safe to execute automatically.
+Validation reads existing files only with bounded caps sized for realistic Docker01 report JSON while keeping raw captures separately bounded. It emits `mode=docker01_hygiene_report_validate`, exits non-zero on malformed/missing/oversized/unsafe artifacts, checks proposal-only/no-cleanup language, and rejects executable cleanup/prune/delete/restart/network/package/cloud/Codex command patterns. It does not run Docker, mutate Docker/Compose, delete files, call a model, call Codex, or make cleanup safe to execute automatically.

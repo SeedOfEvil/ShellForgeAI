@@ -17,10 +17,13 @@ MODE = "docker01_hygiene_report"
 DEFAULT_TIMEOUT = 30
 RAW_LIMIT = 500_000
 VALIDATE_MODE = "docker01_hygiene_report_validate"
-MAX_CANDIDATES = 500
+MAX_CANDIDATE_CLEANUP_ITEMS = 1_000
 MAX_CANDIDATE_ITEM_LENGTH = 500
 MAX_WARNINGS = 100
-MAX_RAW_FILE_BYTES = 500_000
+MAX_JSON_VALIDATE_BYTES = 5_000_000
+MAX_MARKDOWN_VALIDATE_BYTES = 2_000_000
+MAX_COMMANDS_RUN_BYTES = 2_000_000
+MAX_RAW_VALIDATE_BYTES = 500_000
 REQUIRED_REPORT_FILES = (
     "hygiene-summary.md",
     "hygiene-report.json",
@@ -141,21 +144,21 @@ def _check(checks: list[dict[str, Any]], name: str, passed: bool, detail: str) -
     return passed
 
 
-def _read_bounded_text(path: Path, max_bytes: int = MAX_RAW_FILE_BYTES) -> tuple[str, str | None]:
+def _read_bounded_text(path: Path, max_bytes: int) -> tuple[str, str | None]:
     try:
         size = path.stat().st_size
     except OSError as exc:
         return "", str(exc)
     if size > max_bytes:
-        return "", f"file exceeds bounded read size: {size} > {max_bytes}"
+        return "", f"{path}: file size {size} exceeds validation cap {max_bytes}"
     try:
         return path.read_text(encoding="utf-8"), None
     except UnicodeDecodeError as exc:
         return "", f"file is not utf-8 text: {exc}"
 
 
-def _parse_json_file(path: Path) -> tuple[Any, str | None]:
-    text, error = _read_bounded_text(path)
+def _parse_json_file(path: Path, max_bytes: int) -> tuple[Any, str | None]:
+    text, error = _read_bounded_text(path, max_bytes)
     if error:
         return None, error
     try:
@@ -230,7 +233,7 @@ def validate_report(report_dir: Path) -> dict[str, Any]:
     report: Any = None
     commands: Any = None
     if (report_dir / "hygiene-report.json").is_file():
-        report, err = _parse_json_file(report_dir / "hygiene-report.json")
+        report, err = _parse_json_file(report_dir / "hygiene-report.json", MAX_JSON_VALIDATE_BYTES)
         _check(
             checks,
             "hygiene_report_json_object",
@@ -238,7 +241,7 @@ def validate_report(report_dir: Path) -> dict[str, Any]:
             err or "hygiene-report.json is a JSON object",
         )
     if (report_dir / "commands-run.json").is_file():
-        commands, err = _parse_json_file(report_dir / "commands-run.json")
+        commands, err = _parse_json_file(report_dir / "commands-run.json", MAX_COMMANDS_RUN_BYTES)
         _check(
             checks,
             "commands_run_json_list",
@@ -299,8 +302,8 @@ def validate_report(report_dir: Path) -> dict[str, Any]:
             _check(
                 checks,
                 "candidate_count_bounded",
-                len(candidates) <= MAX_CANDIDATES,
-                f"candidate count={len(candidates)} max={MAX_CANDIDATES}",
+                len(candidates) <= MAX_CANDIDATE_CLEANUP_ITEMS,
+                f"candidate count={len(candidates)} max={MAX_CANDIDATE_CLEANUP_ITEMS}",
             )
             required = {
                 "category",
@@ -349,7 +352,9 @@ def validate_report(report_dir: Path) -> dict[str, Any]:
 
     plan_text = ""
     if (report_dir / "candidate-cleanup-plan.md").is_file():
-        plan_text, err = _read_bounded_text(report_dir / "candidate-cleanup-plan.md")
+        plan_text, err = _read_bounded_text(
+            report_dir / "candidate-cleanup-plan.md", MAX_MARKDOWN_VALIDATE_BYTES
+        )
         _check(checks, "candidate_plan_exists", err is None, err or "candidate cleanup plan exists")
         lower = plan_text.lower()
         has_proposal = "proposal only" in lower or "proposal-only" in lower
@@ -377,7 +382,14 @@ def validate_report(report_dir: Path) -> dict[str, Any]:
     for rel in ("hygiene-summary.md", "hygiene-report.json", "commands-run.json"):
         path = report_dir / rel
         if path.is_file():
-            text, err = _read_bounded_text(path)
+            cap = (
+                MAX_JSON_VALIDATE_BYTES
+                if rel == "hygiene-report.json"
+                else MAX_COMMANDS_RUN_BYTES
+                if rel == "commands-run.json"
+                else MAX_MARKDOWN_VALIDATE_BYTES
+            )
+            text, err = _read_bounded_text(path, cap)
             hits = [] if err else _unsafe_content_hits(text)
             _check(
                 checks,
@@ -403,19 +415,24 @@ def validate_report(report_dir: Path) -> dict[str, Any]:
         )
 
     raw_dir = report_dir / "raw"
-    raw_ok = True
+    raw_failures: list[str] = []
     if raw_dir.exists():
         for path in raw_dir.iterdir():
-            if path.is_file() and path.stat().st_size > MAX_RAW_FILE_BYTES:
-                raw_ok = False
-                warnings.append(f"raw file too large for validation read: {path.name}")
+            if path.is_file():
+                size = path.stat().st_size
+                if size > MAX_RAW_VALIDATE_BYTES:
+                    detail = (
+                        f"{path}: file size {size} exceeds validation cap {MAX_RAW_VALIDATE_BYTES}"
+                    )
+                    raw_failures.append(detail)
+                    warnings.append(detail)
     _check(
         checks,
         "raw_outputs_bounded_if_present",
-        raw_ok,
-        f"raw files are <= {MAX_RAW_FILE_BYTES} bytes"
-        if raw_ok
-        else "one or more raw files exceed bounded read size",
+        not raw_failures,
+        f"raw files are <= {MAX_RAW_VALIDATE_BYTES} bytes"
+        if not raw_failures
+        else "; ".join(raw_failures[:3]),
     )
 
     if len(warnings) > MAX_WARNINGS:
