@@ -141,7 +141,13 @@ asks deterministically, and refuses or gates mutation.
   enforcement mode (`python scripts/cli_refactor_inventory.py --check`) that
   fails if an unapproved inline command handler appears in `cli.py`, backed by a
   tiny reasoned allowlist of intentional root/bootstrap callables
-  (`tests/test_pr204_cli_wiring_only_enforcement.py`). The PR184
+  (`tests/test_pr204_cli_wiring_only_enforcement.py`). PR205 adds an import
+  side-effect guardrail proving that importing `shellforgeai.cli` and every
+  `shellforgeai.commands.*` module is import-safe — no subprocess/Docker/Compose/
+  model/network/cleanup/remediation/rollback/recovery execution and no artifact
+  write/delete at import time — via a static AST scan plus a runtime reimport
+  check and a read-only `python scripts/cli_import_audit.py` helper
+  (`tests/test_pr205_command_module_import_side_effects.py`). The PR184
   command-surface golden guardrail protects these moves; `v1 check`
   quick/standard readiness behavior and JSON/human output remain unchanged
   after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —

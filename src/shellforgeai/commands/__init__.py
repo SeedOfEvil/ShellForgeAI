@@ -86,5 +86,6 @@ __all__ = [
     "remediation",
     "status",
     "triage",
+    "v1",
     "verify",
 ]

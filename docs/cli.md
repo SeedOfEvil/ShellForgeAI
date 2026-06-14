@@ -246,6 +246,38 @@ refactor. The check is enforced by
 and is process/test tooling only: it runs no command, no Docker/Compose, no
 model call, and mutates no files.
 
+### Import side-effect guardrail (PR205)
+
+PR204 makes `cli.py` wiring-only; PR205 makes the whole command surface
+**import-safe**. Importing `shellforgeai.cli`,
+`shellforgeai.commands.__init__`, and every module under
+`src/shellforgeai/commands/` must only define Typer apps/functions/classes,
+import local modules, define constants/option metadata, and register commands. It
+must never execute operational logic at import time — no subprocess/`os.system`/
+`shell=True` execution, no Docker/Compose call or container/production restart, no
+cleanup/remediation/rollback/recovery execution, no model/Codex call, no network
+call, and no artifact write/repair/delete. Those run only inside the command's
+execution path (the handler body), when the command is invoked.
+
+The guardrail
+([`tests/test_pr205_command_module_import_side_effects.py`](../tests/test_pr205_command_module_import_side_effects.py))
+combines a static AST scan (no top-level operational calls; harmless help text /
+command strings are not flagged) with a runtime check that purges the audited
+modules from `sys.modules` and reimports them under monkeypatched recording stubs
+over the dangerous primitives, asserting none fired. A read-only helper runs the
+same audit in a fresh process:
+
+```bash
+python scripts/cli_import_audit.py            # human summary; exit 1 on any side effect
+python scripts/cli_import_audit.py --json      # strict JSON contract
+python scripts/cli_import_audit.py --markdown  # concise Markdown
+```
+
+The helper is read-only and local-only: no command/Docker/Compose/subprocess/
+model/network execution and no artifact or `/data` mutation. While PR184 protects
+user-visible commands, PR205 protects hidden import-time behavior; run both for
+any command-module change.
+
 ### Command-surface golden guardrail (PR184)
 
 Before more handlers move out of `cli.py` (including V1 readiness moves such as
