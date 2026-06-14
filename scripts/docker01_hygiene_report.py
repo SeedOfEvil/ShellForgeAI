@@ -17,6 +17,10 @@ MODE = "docker01_hygiene_report"
 DEFAULT_TIMEOUT = 30
 RAW_LIMIT = 500_000
 VALIDATE_MODE = "docker01_hygiene_report_validate"
+HISTORY_MODE = "docker01_hygiene_report_history"
+COMPARE_MODE = "docker01_hygiene_report_compare"
+DEFAULT_DISCOVERY_ROOT = Path("/tmp")
+REPORT_DIR_PATTERNS = ("sfai-docker01-hygiene-report-*", "sfai-pr*-hygiene-*")
 MAX_CANDIDATE_CLEANUP_ITEMS = 1_000
 MAX_CANDIDATE_ITEM_LENGTH = 500
 MAX_WARNINGS = 100
@@ -459,6 +463,313 @@ def validate_report(report_dir: Path) -> dict[str, Any]:
         "first_safe_command": f"cat {report_dir}/hygiene-summary.md",
         "warnings": warnings,
     }
+
+
+def _parse_percent_points(value: Any) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    text = str(value).strip().rstrip("%")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _created_sort_value(entry: dict[str, Any]) -> tuple[float, str]:
+    created = entry.get("created_at")
+    if isinstance(created, str):
+        try:
+            return (datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp(), created)
+        except ValueError:
+            pass
+    return (float(entry.get("dir_mtime") or 0), str(entry.get("report_dir") or ""))
+
+
+def _required_shape(report_dir: Path) -> tuple[bool, list[str]]:
+    missing = [rel for rel in REQUIRED_REPORT_FILES if not (report_dir / rel).is_file()]
+    return not missing, missing
+
+
+def _report_safety_ok(report: dict[str, Any]) -> bool:
+    if report.get("mode") != MODE:
+        return False
+    if report.get("read_only") is not True or report.get("mutation_performed") is not False:
+        return False
+    safety = report.get("safety")
+    if isinstance(safety, dict):
+        for key, expected in safety_block().items():
+            if safety.get(key) is not expected:
+                return False
+    return True
+
+
+def _int_metric(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def load_report_summary(report_dir: Path) -> dict[str, Any]:
+    report_dir = report_dir.resolve()
+    warnings: list[str] = []
+    valid_shape, missing = _required_shape(report_dir)
+    if missing:
+        warnings.append("missing required files: " + ", ".join(missing))
+    report: Any = None
+    err = None
+    if (report_dir / "hygiene-report.json").is_file():
+        report, err = _parse_json_file(report_dir / "hygiene-report.json", MAX_JSON_VALIDATE_BYTES)
+        if err:
+            warnings.append(f"hygiene-report.json: {err}")
+    else:
+        warnings.append("missing hygiene-report.json")
+    report_ok = isinstance(report, dict) and _report_safety_ok(report)
+    if isinstance(report, dict) and not report_ok:
+        warnings.append("hygiene-report.json violates Docker01 read-only hygiene report contract")
+    status = (
+        "ok"
+        if valid_shape and report_ok
+        else "partial"
+        if valid_shape or isinstance(report, dict)
+        else "unknown"
+    )
+    summary = (
+        report.get("summary", {})
+        if isinstance(report, dict) and isinstance(report.get("summary"), dict)
+        else {}
+    )
+    try:
+        dir_mtime = report_dir.stat().st_mtime
+    except OSError:
+        dir_mtime = 0.0
+    entry = {
+        "report_dir": str(report_dir),
+        "created_at": report.get("created_at") if isinstance(report, dict) else None,
+        "status": status,
+        "disk_use_percent": summary.get("disk_use_percent", "unknown"),
+        "candidate_cleanup_items_total": _int_metric(summary.get("candidate_cleanup_items_total")),
+        "candidate_cleanup_bytes_estimated": _int_metric(
+            summary.get("candidate_cleanup_bytes_estimated")
+        ),
+        "docker_images_total": _int_metric(summary.get("docker_images_total")),
+        "shellforgeai_images_total": _int_metric(summary.get("shellforgeai_images_total")),
+        "compose_backups_total": _int_metric(summary.get("compose_backups_total")),
+        "qa_bundles_total": _int_metric(summary.get("qa_bundles_total")),
+        "validation_artifacts_total": _int_metric(summary.get("validation_artifacts_total")),
+        "receipt_artifacts_total": _int_metric(summary.get("receipt_artifacts_total")),
+        "valid_shape": bool(valid_shape and report_ok),
+        "dir_mtime": dir_mtime,
+    }
+    if warnings:
+        entry["warnings"] = warnings[:MAX_WARNINGS]
+    return entry
+
+
+def discover_report_dirs(root: Path) -> list[Path]:
+    found: dict[str, Path] = {}
+    for pattern in REPORT_DIR_PATTERNS:
+        for path in root.glob(pattern):
+            if path.is_dir():
+                found[str(path.resolve())] = path.resolve()
+    return list(found.values())
+
+
+def build_history(root: Path) -> dict[str, Any]:
+    warnings: list[str] = []
+    try:
+        dirs = discover_report_dirs(root)
+    except OSError as exc:
+        warnings.append(f"unable to read root {root}: {exc}")
+        dirs = []
+    reports = [load_report_summary(path) for path in dirs]
+    reports.sort(key=_created_sort_value, reverse=True)
+    valid = [r for r in reports if r.get("valid_shape") is True]
+    warnings.extend(
+        f"{r['report_dir']}: {'; '.join(r.get('warnings', []))}"
+        for r in reports
+        if r.get("warnings")
+    )
+    status = "empty" if not reports else "partial" if warnings else "ok"
+    return {
+        "schema_version": 1,
+        "mode": HISTORY_MODE,
+        "status": status,
+        "root": str(root),
+        "read_only": True,
+        "mutation_performed": False,
+        "reports": [{k: v for k, v in r.items() if k != "dir_mtime"} for r in reports],
+        "summary": {
+            "reports_total": len(reports),
+            "valid_reports_total": len(valid),
+            "latest_report_dir": valid[0]["report_dir"] if valid else None,
+            "oldest_report_dir": valid[-1]["report_dir"] if valid else None,
+        },
+        "safety": safety_block(),
+        "first_safe_command": "python scripts/docker01_hygiene_report.py --compare-latest --json",
+        "warnings": warnings[:MAX_WARNINGS],
+    }
+
+
+COMPARE_METRICS = (
+    "candidate_cleanup_items_total",
+    "candidate_cleanup_bytes_estimated",
+    "docker_images_total",
+    "shellforgeai_images_total",
+    "compose_backups_total",
+    "qa_bundles_total",
+    "validation_artifacts_total",
+    "receipt_artifacts_total",
+)
+
+
+def _delta(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    old_pct = _parse_percent_points(old.get("disk_use_percent"))
+    new_pct = _parse_percent_points(new.get("disk_use_percent"))
+    out["disk_use_percent_points"] = (
+        None if old_pct is None or new_pct is None else new_pct - old_pct
+    )
+    for key in COMPARE_METRICS:
+        out[key] = _int_metric(new.get(key)) - _int_metric(old.get(key))
+    return out
+
+
+def _notable_changes(delta: dict[str, Any]) -> list[str]:
+    checks = [
+        (
+            "disk_use_percent_points",
+            5,
+            "disk use increased by >= 5 percentage points; "
+            "compare reports before cleanup is considered",
+        ),
+        (
+            "candidate_cleanup_items_total",
+            50,
+            "candidate cleanup items increased by >= 50; review candidate cleanup plan",
+        ),
+        (
+            "candidate_cleanup_bytes_estimated",
+            100 * 1024 * 1024,
+            "candidate cleanup bytes increased by >= 100 MB; review candidate cleanup plan",
+        ),
+        (
+            "shellforgeai_images_total",
+            3,
+            "ShellForgeAI images increased by >= 3; consider a future scoped cleanup lane",
+        ),
+        (
+            "validation_artifacts_total",
+            25,
+            "validation artifacts increased by >= 25; review candidate cleanup plan",
+        ),
+        ("qa_bundles_total", 25, "QA bundles increased by >= 25; review candidate cleanup plan"),
+        (
+            "compose_backups_total",
+            10,
+            "compose backups increased by >= 10; compare reports before cleanup is considered",
+        ),
+    ]
+    return [message for key, threshold, message in checks if (delta.get(key) or 0) >= threshold]
+
+
+def build_compare(old_dir: Path, new_dir: Path) -> dict[str, Any]:
+    warnings: list[str] = []
+    old = load_report_summary(old_dir)
+    new = load_report_summary(new_dir)
+    for label, entry in (("old", old), ("new", new)):
+        if not Path(entry["report_dir"]).exists():
+            warnings.append(f"{label} report directory is missing: {entry['report_dir']}")
+        if entry.get("valid_shape") is not True:
+            warnings.append(f"{label} report is invalid or partial: {entry['report_dir']}")
+            warnings.extend(f"{label}: {w}" for w in entry.get("warnings", []))
+    status = "ok" if old.get("valid_shape") and new.get("valid_shape") else "failed"
+    delta = _delta(old, new) if status == "ok" else {}
+    return {
+        "schema_version": 1,
+        "mode": COMPARE_MODE,
+        "status": status,
+        "old_report_dir": str(old_dir.resolve()),
+        "new_report_dir": str(new_dir.resolve()),
+        "read_only": True,
+        "mutation_performed": False,
+        "old": {k: v for k, v in old.items() if k not in {"dir_mtime", "warnings"}},
+        "new": {k: v for k, v in new.items() if k not in {"dir_mtime", "warnings"}},
+        "delta": delta,
+        "notable_changes": _notable_changes(delta),
+        "safety": safety_block(),
+        "first_safe_command": f"cat {new_dir.resolve()}/hygiene-summary.md",
+        "warnings": warnings[:MAX_WARNINGS],
+    }
+
+
+def build_compare_latest(root: Path) -> dict[str, Any]:
+    history = build_history(root)
+    valid = [r for r in history["reports"] if r.get("valid_shape") is True]
+    if len(valid) < 2:
+        return {
+            "schema_version": 1,
+            "mode": COMPARE_MODE,
+            "status": "failed",
+            "old_report_dir": None,
+            "new_report_dir": None,
+            "read_only": True,
+            "mutation_performed": False,
+            "old": {},
+            "new": {},
+            "delta": {},
+            "notable_changes": [],
+            "safety": safety_block(),
+            "first_safe_command": "python scripts/docker01_hygiene_report.py --history --json",
+            "warnings": ["fewer than two valid Docker01 hygiene reports found"]
+            + history.get("warnings", []),
+        }
+    return build_compare(Path(valid[1]["report_dir"]), Path(valid[0]["report_dir"]))
+
+
+def render_history(payload: dict[str, Any]) -> str:
+    latest = payload["reports"][0] if payload["reports"] else {}
+    return "\n".join(
+        [
+            "Docker01 hygiene report history",
+            "Reports: "
+            f"{payload['summary']['reports_total']} "
+            f"({payload['summary']['valid_reports_total']} valid)",
+            f"Latest report: {latest.get('report_dir') or 'none'}",
+            f"Latest disk usage: {latest.get('disk_use_percent', 'unknown')}",
+            f"Latest candidate cleanup count: {latest.get('candidate_cleanup_items_total', 0)}",
+            f"Latest candidate bytes: {latest.get('candidate_cleanup_bytes_estimated', 0)}",
+            f"First safe compare command: {payload['first_safe_command']}",
+        ]
+    )
+
+
+def render_compare(payload: dict[str, Any]) -> str:
+    d = payload.get("delta", {})
+    lines = [
+        "Docker01 hygiene report compare",
+        f"Status: {payload['status']}",
+        "Old report: "
+        f"{payload.get('old_report_dir')} created "
+        f"{payload.get('old', {}).get('created_at')}",
+        "New report: "
+        f"{payload.get('new_report_dir')} created "
+        f"{payload.get('new', {}).get('created_at')}",
+        f"Disk usage delta: {d.get('disk_use_percent_points')}",
+        f"Candidate cleanup item delta: {d.get('candidate_cleanup_items_total')}",
+        f"Estimated candidate bytes delta: {d.get('candidate_cleanup_bytes_estimated')}",
+        "Category deltas:",
+        f"- Docker images: {d.get('docker_images_total')}",
+        f"- ShellForgeAI images: {d.get('shellforgeai_images_total')}",
+        f"- Compose backups: {d.get('compose_backups_total')}",
+        f"- QA bundles: {d.get('qa_bundles_total')}",
+        f"- validation artifacts: {d.get('validation_artifacts_total')}",
+        f"- receipt artifacts: {d.get('receipt_artifacts_total')}",
+        "Notable changes:",
+    ]
+    lines.extend([f"- {item}" for item in payload.get("notable_changes", [])] or ["- none"])
+    lines.append("compare only; no cleanup performed")
+    return "\n".join(lines)
 
 
 def default_report_path() -> Path:
@@ -991,6 +1302,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="print JSON result")
     parser.add_argument("--out", type=Path, default=None, help="report output directory")
     parser.add_argument(
+        "--root", type=Path, default=DEFAULT_DISCOVERY_ROOT, help="history discovery root"
+    )
+    parser.add_argument("--history", action="store_true", help="list existing hygiene reports")
+    parser.add_argument(
+        "--compare",
+        nargs=2,
+        metavar=("OLD_REPORT_DIR", "NEW_REPORT_DIR"),
+        help="compare two existing hygiene reports",
+    )
+    parser.add_argument(
+        "--compare-latest",
+        action="store_true",
+        help="compare the two newest valid hygiene reports under --root",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="show planned read-only checks without executing or writing report",
@@ -999,6 +1325,25 @@ def main(argv: list[str] | None = None) -> int:
         "--validate", type=Path, default=None, help="validate an existing hygiene report directory"
     )
     args = parser.parse_args(argv)
+    if args.history:
+        payload = build_history(args.root)
+        print(
+            json.dumps(payload, indent=2, sort_keys=True) if args.json else render_history(payload)
+        )
+        return 0 if payload["status"] != "failed" else 1
+    if args.compare:
+        payload = build_compare(Path(args.compare[0]), Path(args.compare[1]))
+        print(
+            json.dumps(payload, indent=2, sort_keys=True) if args.json else render_compare(payload)
+        )
+        return 0 if payload["status"] == "ok" else 1
+    if args.compare_latest:
+        payload = build_compare_latest(args.root)
+        print(
+            json.dumps(payload, indent=2, sort_keys=True) if args.json else render_compare(payload)
+        )
+        return 0 if payload["status"] == "ok" else 1
+
     if args.validate is not None:
         payload = validate_report(args.validate)
         if args.json:

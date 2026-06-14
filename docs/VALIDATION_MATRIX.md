@@ -174,3 +174,18 @@ python scripts/run_full_pytest.py
 ```
 
 The validator is read-only and uses bounded reads: report JSON is sized for realistic Docker01 outputs, commands/Markdown have separate caps, and raw captures remain tightly bounded. Oversized files fail safely. It never executes Docker, Docker Compose, cleanup, restart, package install, network fetch, model/Codex, merge, push, or arbitrary shell commands.
+## Docker01 hygiene history and compare
+
+Docker01 hygiene reports are useful when disk, image, and artifact pressure can be trended instead of reviewed as a single point-in-time snapshot. The helper can now read previously generated PR209/PR210 report directories and produce history or comparison output without running Docker and without generating a new report.
+
+Use these read-only forms when reviewing whether Docker01 artifact/image pressure is growing before any future scoped cleanup lane is considered:
+
+```bash
+python scripts/docker01_hygiene_report.py --history --json
+python scripts/docker01_hygiene_report.py --compare <old_report_dir> <new_report_dir> --json
+python scripts/docker01_hygiene_report.py --compare-latest --json
+```
+
+`--history` and `--compare-latest` discover reports under `/tmp` by default; pass `--root <dir>` for a scoped offline location. Candidate directories must contain `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` to be treated as valid hygiene reports. Malformed or partial directories are reported with warnings and are skipped by `--compare-latest`.
+
+These modes read existing report files only. They do not run Docker, Docker Compose, report generation, cleanup, prune, image removal, file deletion, restart, remediation, rollback, recovery, model calls, network calls, or arbitrary shell execution. A passing validation result or comparison summary is review evidence only and does not authorize cleanup execution.
