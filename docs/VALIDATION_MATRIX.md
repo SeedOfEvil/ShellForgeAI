@@ -161,3 +161,16 @@ python scripts/validate_pr.py --changed-files docs/cli.md --full-validation
 | Hygiene unit tests | `pytest -q tests/test_pr209_docker01_hygiene_report.py` | Verifies report creation, dry-run behavior, command allowlist, parsing, partial failures, and proposal-only cleanup semantics with fakes. | No |
 
 The hygiene report uses a fixed allowlist for `df` and Docker inspection commands and must not run cleanup, prune, image removal, file deletion, Docker Compose mutation, restart, package install, network, or cloud merge/apply operations.
+
+## Docker01 hygiene validator impact
+
+Changes to `scripts/docker01_hygiene_report.py` validation behavior or `tests/test_pr210_docker01_hygiene_validate.py` are safety/reporting infrastructure changes and should run the focused PR209/PR210 hygiene tests plus full validation when practical:
+
+```bash
+pytest -q tests/test_pr209_docker01_hygiene_report.py
+pytest -q tests/test_pr210_docker01_hygiene_validate.py
+pytest -q tests -k "hygiene_report or hygiene_validate or qa_bundle or validation_status"
+python scripts/run_full_pytest.py
+```
+
+The validator is read-only and uses bounded reads: report JSON is sized for realistic Docker01 outputs, commands/Markdown have separate caps, and raw captures remain tightly bounded. Oversized files fail safely. It never executes Docker, Docker Compose, cleanup, restart, package install, network fetch, model/Codex, merge, push, or arbitrary shell commands.
