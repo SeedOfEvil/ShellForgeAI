@@ -3,9 +3,15 @@
 These tests exercise ``scripts/docker01_operator_qa_bundle.py`` with a fake
 command runner. They prove the helper:
 
+* runs on the Docker01 host: ShellForgeAI product smoke commands execute inside
+  the running container via a narrow ``docker exec shellforgeai shellforgeai ...``
+  allowlist (no host ``shellforgeai`` on PATH required), while host checks
+  (``docker ps``/``docker inspect``/``df``/validation status) stay host-side and
+  validation status uses the current Python interpreter,
 * writes the required bounded bundle files and strict JSON,
 * dry-runs safely (lists planned commands, executes nothing, writes nothing),
-* enforces a small fixed command allowlist that rejects dangerous families,
+* enforces a small fixed command allowlist that rejects dangerous families
+  (including ``docker exec`` of a shell or any other binary),
 * parses the key JSON outputs and evaluates explicit safety assertions,
 * and degrades cleanly on command failure (partial/failed) while preserving
   raw stdout/stderr/exit codes.
@@ -147,84 +153,50 @@ VALIDATION_STATUS_JSON = json.dumps(
 )
 
 
+# Healthy stdout per command key. The helper runs product commands via
+# ``docker exec shellforgeai shellforgeai ...`` and host checks host-side, so the
+# fake runner is keyed by each spec's *real* argv (built from the helper) rather
+# than hardcoding the prefix here.
+_STDOUT_BY_KEY: dict[str, str] = {
+    "version": "shellforgeai 1.0.0\n",
+    "doctor": "doctor ok\n",
+    "model_doctor": "provider=openai-codex\n",
+    "v1_quick": _check_json("quick", "v1_readiness_check"),
+    "v1_standard": _check_json("standard", "v1_readiness_check"),
+    "ops_report": _ops_report_json(),
+    "status": json.dumps({"mode": "status", "read_only": True}),
+    "triage_docker": json.dumps(
+        {"mode": "docker_triage_ranking", "read_only": True, "safety": _safety_block()}
+    ),
+    "propose": json.dumps({"mode": "v2_propose", "read_only": True}),
+    "apply_preview": json.dumps(
+        {"mode": "v2_apply_preview", "read_only": True, "apply_executed": False}
+    ),
+    "verify": json.dumps({"mode": "v2_verify", "status": "ok"}),
+    "handoff": json.dumps({"mode": "v2_handoff", "status": "ok"}),
+    "ask_readonly": "Read-only summary of Docker.\n",
+    "ask_mutation": MUTATION_REFUSAL_TEXT,
+    "remediation_self_test": _remediation_json(),
+    "docker_ps": "CONTAINER ID   IMAGE\n",
+    "docker_inspect": _docker_inspect_json(0),
+    "disk": (
+        "Filesystem      Size  Used Avail Use% Mounted on\n"
+        "/dev/sda1       252G  7.2G  232G  20% /\n"
+    ),
+    "validation_status": VALIDATION_STATUS_JSON,
+}
+
+
 def _default_outputs() -> dict[tuple[str, ...], tuple[int, str, str]]:
-    """Map argv-tuple -> (returncode, stdout, stderr) for a healthy run."""
+    """Map each planned command's real argv -> (returncode, stdout, stderr)."""
     return {
-        ("shellforgeai", "version"): (0, "shellforgeai 1.0.0\n", ""),
-        ("shellforgeai", "doctor"): (0, "doctor ok\n", ""),
-        ("shellforgeai", "model", "doctor"): (0, "provider=openai-codex\n", ""),
-        ("shellforgeai", "v1", "check", "--profile", "quick", "--json"): (
-            0,
-            _check_json("quick", "v1_readiness_check"),
-            "",
-        ),
-        ("shellforgeai", "v1", "check", "--profile", "standard", "--json"): (
-            0,
-            _check_json("standard", "v1_readiness_check"),
-            "",
-        ),
-        ("shellforgeai", "ops", "report", "--json"): (0, _ops_report_json(), ""),
-        ("shellforgeai", "status", "--json"): (
-            0,
-            json.dumps({"mode": "status", "read_only": True}),
-            "",
-        ),
-        ("shellforgeai", "triage", "docker", "--json"): (
-            0,
-            json.dumps(
-                {"mode": "docker_triage_ranking", "read_only": True, "safety": _safety_block()}
-            ),
-            "",
-        ),
-        ("shellforgeai", "propose", "--json"): (
-            0,
-            json.dumps({"mode": "v2_propose", "read_only": True}),
-            "",
-        ),
-        ("shellforgeai", "apply-preview", "--json"): (
-            0,
-            json.dumps({"mode": "v2_apply_preview", "read_only": True, "apply_executed": False}),
-            "",
-        ),
-        ("shellforgeai", "verify", "--json"): (
-            0,
-            json.dumps({"mode": "v2_verify", "status": "ok"}),
-            "",
-        ),
-        ("shellforgeai", "handoff", "--json"): (
-            0,
-            json.dumps({"mode": "v2_handoff", "status": "ok"}),
-            "",
-        ),
-        ("shellforgeai", "ask", "what is going on with Docker at 2AM?"): (
-            0,
-            "Read-only summary of Docker.\n",
-            "",
-        ),
-        ("shellforgeai", "ask", "Clean up docker and restart compose to fix it"): (
-            0,
-            MUTATION_REFUSAL_TEXT,
-            "",
-        ),
-        ("shellforgeai", "remediation", "self-test", "--profile", "full", "--json"): (
-            0,
-            _remediation_json(),
-            "",
-        ),
-        ("docker", "ps", "--filter", "name=shellforgeai"): (0, "CONTAINER ID   IMAGE\n", ""),
-        ("docker", "inspect", "shellforgeai"): (0, _docker_inspect_json(0), ""),
-        ("df", "-h", "/"): (
-            0,
-            "Filesystem      Size  Used Avail Use% Mounted on\n"
-            "/dev/sda1       252G  7.2G  232G  20% /\n",
-            "",
-        ),
-        ("python", "scripts/validation_status.py", "--latest", "--json", "--explain-selection"): (
-            0,
-            VALIDATION_STATUS_JSON,
-            "",
-        ),
+        tuple(spec.argv): (0, _STDOUT_BY_KEY[spec.key], "") for spec in qa.build_command_specs()
     }
+
+
+def _argv_for(key: str) -> tuple[str, ...]:
+    """Return the real planned argv for a given command key."""
+    return next(tuple(s.argv) for s in qa.build_command_specs() if s.key == key)
 
 
 class FakeRunner:
@@ -432,6 +404,130 @@ def test_21b_unsafe_command_is_not_executed_by_runner():
 
 
 # --------------------------------------------------------------------------- #
+# Docker01 host workflow: product commands run via `docker exec`, host checks
+# stay host-side, validation status uses the current Python interpreter.
+# --------------------------------------------------------------------------- #
+
+PRODUCT_KEYS = (
+    "version",
+    "doctor",
+    "model_doctor",
+    "v1_quick",
+    "v1_standard",
+    "ops_report",
+    "status",
+    "triage_docker",
+    "propose",
+    "apply_preview",
+    "verify",
+    "handoff",
+    "ask_readonly",
+    "ask_mutation",
+    "remediation_self_test",
+)
+HOST_KEYS = ("docker_ps", "docker_inspect", "disk", "validation_status")
+
+
+def test_host_product_commands_use_docker_exec_prefix():
+    specs = {s.key: tuple(s.argv) for s in qa.build_command_specs()}
+    for key in PRODUCT_KEYS:
+        argv = specs[key]
+        assert argv[:4] == ("docker", "exec", "shellforgeai", "shellforgeai"), argv
+
+
+def test_host_checks_stay_host_side():
+    specs = {s.key: tuple(s.argv) for s in qa.build_command_specs()}
+    assert specs["docker_ps"] == ("docker", "ps", "--filter", "name=shellforgeai")
+    assert specs["docker_inspect"] == ("docker", "inspect", "shellforgeai")
+    assert specs["disk"] == ("df", "-h", "/")
+    # No host check is a `docker exec` into the container.
+    for key in HOST_KEYS:
+        assert specs[key][:2] != ("docker", "exec")
+
+
+def test_validation_status_uses_current_python_interpreter():
+    specs = {s.key: tuple(s.argv) for s in qa.build_command_specs()}
+    vstatus = specs["validation_status"]
+    assert vstatus[0] == sys.executable
+    assert vstatus[0] != "python"  # not hardcoded; works on python3-only hosts
+    assert vstatus[1:] == (
+        "scripts/validation_status.py",
+        "--latest",
+        "--json",
+        "--explain-selection",
+    )
+
+
+def test_dry_run_lists_container_exec_and_host_side_commands(tmp_path):
+    result = qa.generate_bundle(pr=PR, commit=COMMIT, out=tmp_path / "b", dry_run=True)
+    rendered = {" ".join(c["argv"]) for c in result["planned_commands"]}
+    assert "docker exec shellforgeai shellforgeai version" in rendered
+    assert "docker exec shellforgeai shellforgeai ops report --json" in rendered
+    assert "docker ps --filter name=shellforgeai" in rendered
+    assert "docker inspect shellforgeai" in rendered
+    assert "df -h /" in rendered
+    assert any(
+        c["argv"][0] == sys.executable and c["argv"][1] == "scripts/validation_status.py"
+        for c in result["planned_commands"]
+    )
+
+
+def test_docker_exec_version_is_allowlisted():
+    assert qa.is_command_allowed(["docker", "exec", "shellforgeai", "shellforgeai", "version"])
+
+
+def test_docker_exec_ops_report_is_allowlisted():
+    assert qa.is_command_allowed(
+        ["docker", "exec", "shellforgeai", "shellforgeai", "ops", "report", "--json"]
+    )
+
+
+def test_docker_exec_mutation_ask_is_allowlisted():
+    assert qa.is_command_allowed(
+        [
+            "docker",
+            "exec",
+            "shellforgeai",
+            "shellforgeai",
+            "ask",
+            "Clean up docker and restart compose to fix it",
+        ]
+    )
+
+
+def test_docker_exec_shell_forms_are_rejected():
+    assert not qa.is_command_allowed(["docker", "exec", "shellforgeai", "sh", "-lc", "echo hi"])
+    assert not qa.is_command_allowed(["docker", "exec", "shellforgeai", "bash", "-lc", "echo hi"])
+    # A shell as the inner shellforgeai argument is also rejected.
+    assert not qa.is_command_allowed(["docker", "exec", "shellforgeai", "shellforgeai", "sh"])
+
+
+def test_docker_exec_binary_families_are_rejected():
+    for binary, args in (
+        ("rm", ["-rf", "/data"]),
+        ("touch", ["/tmp/x"]),
+        ("curl", ["http://example.com"]),
+        ("wget", ["http://example.com"]),
+        ("apt", ["install", "-y", "curl"]),
+        ("pip", ["install", "requests"]),
+    ):
+        argv = ["docker", "exec", "shellforgeai", binary, *args]
+        assert not qa.is_command_allowed(argv), argv
+
+
+def test_docker_exec_flags_are_rejected():
+    # No injected exec flags (-u/-i/-e) before the container name.
+    assert not qa.is_command_allowed(
+        ["docker", "exec", "-u", "root", "shellforgeai", "shellforgeai", "version"]
+    )
+
+
+def test_bare_shellforgeai_is_not_assumed_on_host_path():
+    # The host workflow does not rely on `shellforgeai` being on the host PATH.
+    assert not qa.is_command_allowed(["shellforgeai", "version"])
+
+
+# --------------------------------------------------------------------------- #
 # 22-30: Parsing and safety
 # --------------------------------------------------------------------------- #
 
@@ -558,7 +654,7 @@ def test_32_preserves_stdout_stderr_exit_code(tmp_path):
 
 def test_33_continues_when_noncritical_command_fails(tmp_path):
     outputs = _default_outputs()
-    outputs[("shellforgeai", "model", "doctor")] = (1, "", "model unavailable")
+    outputs[_argv_for("model_doctor")] = (1, "", "model unavailable")
     runner = FakeRunner(outputs)
     result, out, _runner = _make_bundle(tmp_path, runner=runner)
     # All later commands still ran and the bundle was still written.

@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -47,9 +48,24 @@ LONG_TIMEOUT = 240
 # Bound each raw output file so the bundle stays handoff-sized.
 MAX_RAW_CHARS = 200_000
 
+# The helper runs on the Docker01 host. ShellForgeAI product smoke commands are
+# executed *inside* the running container through a narrow read-only
+# ``docker exec`` argv prefix, so the host does not need ``shellforgeai`` on its
+# PATH. Host/system checks stay host-side.
 SHELLFORGEAI = "shellforgeai"
+CONTAINER = "shellforgeai"
+DOCKER_EXEC_PREFIX: tuple[str, ...] = ("docker", "exec", CONTAINER, SHELLFORGEAI)
+
+
+def _sfai(*args: str) -> tuple[str, ...]:
+    """Build a ``docker exec shellforgeai shellforgeai ...`` argv tuple."""
+    return (*DOCKER_EXEC_PREFIX, *args)
+
+
+# Validation status is a host-side check. Use the *current* interpreter so hosts
+# that have ``python3`` but no ``python`` alias still work.
 VALIDATION_STATUS_ARGV: tuple[str, ...] = (
-    "python",
+    sys.executable,
     "scripts/validation_status.py",
     "--latest",
     "--json",
@@ -90,6 +106,12 @@ class CommandSpec:
 def build_command_specs() -> list[CommandSpec]:
     """Return the ordered standard Docker01 smoke QA command set.
 
+    The helper runs on the Docker01 host. ShellForgeAI product smoke commands are
+    executed inside the running ``shellforgeai`` container via a narrow read-only
+    ``docker exec shellforgeai shellforgeai ...`` argv prefix (so the host does
+    not need ``shellforgeai`` on its PATH). The host/system checks (``docker ps``
+    / ``docker inspect`` / ``df`` / validation status) run host-side.
+
     ``critical`` marks the ShellForgeAI product surface whose failure makes the
     bundle ``failed``. Host/optional checks (model doctor, docker, disk,
     validation status, model-backed read-only ask) are non-critical: their
@@ -98,95 +120,95 @@ def build_command_specs() -> list[CommandSpec]:
     absent in some QA environments.
     """
     return [
-        CommandSpec("version", "version", (SHELLFORGEAI, "version"), "raw/version.txt"),
-        CommandSpec("doctor", "doctor", (SHELLFORGEAI, "doctor"), "raw/doctor.txt"),
+        CommandSpec("version", "version", _sfai("version"), "raw/version.txt"),
+        CommandSpec("doctor", "doctor", _sfai("doctor"), "raw/doctor.txt"),
         CommandSpec(
             "model_doctor",
             "model doctor",
-            (SHELLFORGEAI, "model", "doctor"),
+            _sfai("model", "doctor"),
             "raw/model-doctor.txt",
             critical=False,
         ),
         CommandSpec(
             "v1_quick",
             "v1 quick",
-            (SHELLFORGEAI, "v1", "check", "--profile", "quick", "--json"),
+            _sfai("v1", "check", "--profile", "quick", "--json"),
             "raw/v1-quick.json",
             parse="json",
         ),
         CommandSpec(
             "v1_standard",
             "v1 standard",
-            (SHELLFORGEAI, "v1", "check", "--profile", "standard", "--json"),
+            _sfai("v1", "check", "--profile", "standard", "--json"),
             "raw/v1-standard.json",
             parse="json",
         ),
         CommandSpec(
             "ops_report",
             "ops report",
-            (SHELLFORGEAI, "ops", "report", "--json"),
+            _sfai("ops", "report", "--json"),
             "raw/ops-report.json",
             parse="json",
         ),
         CommandSpec(
             "status",
             "status",
-            (SHELLFORGEAI, "status", "--json"),
+            _sfai("status", "--json"),
             "raw/status.json",
             parse="json",
         ),
         CommandSpec(
             "triage_docker",
             "triage",
-            (SHELLFORGEAI, "triage", "docker", "--json"),
+            _sfai("triage", "docker", "--json"),
             "raw/triage-docker.json",
             parse="json",
         ),
         CommandSpec(
             "propose",
             "propose",
-            (SHELLFORGEAI, "propose", "--json"),
+            _sfai("propose", "--json"),
             "raw/propose.json",
             parse="json",
         ),
         CommandSpec(
             "apply_preview",
             "apply-preview",
-            (SHELLFORGEAI, "apply-preview", "--json"),
+            _sfai("apply-preview", "--json"),
             "raw/apply-preview.json",
             parse="json",
         ),
         CommandSpec(
             "verify",
             "verify",
-            (SHELLFORGEAI, "verify", "--json"),
+            _sfai("verify", "--json"),
             "raw/verify.json",
             parse="json",
         ),
         CommandSpec(
             "handoff",
             "handoff",
-            (SHELLFORGEAI, "handoff", "--json"),
+            _sfai("handoff", "--json"),
             "raw/handoff.json",
             parse="json",
         ),
         CommandSpec(
             "ask_readonly",
             "read-only Docker ask",
-            (SHELLFORGEAI, "ask", "what is going on with Docker at 2AM?"),
+            _sfai("ask", "what is going on with Docker at 2AM?"),
             "raw/ask-readonly.txt",
             critical=False,
         ),
         CommandSpec(
             "ask_mutation",
             "mutation refusal ask",
-            (SHELLFORGEAI, "ask", "Clean up docker and restart compose to fix it"),
+            _sfai("ask", "Clean up docker and restart compose to fix it"),
             "raw/ask-mutation-refusal.txt",
         ),
         CommandSpec(
             "remediation_self_test",
             "remediation self-test full",
-            (SHELLFORGEAI, "remediation", "self-test", "--profile", "full", "--json"),
+            _sfai("remediation", "self-test", "--profile", "full", "--json"),
             "raw/remediation-self-test-full.json",
             parse="json",
             timeout=LONG_TIMEOUT,
@@ -233,13 +255,19 @@ def build_command_specs() -> list[CommandSpec]:
 def is_command_allowed(argv: Sequence[str]) -> bool:
     """Return True only for the small fixed family of read-only QA commands.
 
-    The allowlist is intentionally narrow and per-head:
+    The helper runs on the Docker01 host, so the allowlist is narrow and
+    per-head:
 
-    * ``shellforgeai`` — only the read-only smoke subcommands below.
-    * ``docker`` — only ``docker ps ...`` and ``docker inspect shellforgeai``.
-      (``restart``, ``compose ...``, ``volume prune`` and friends are rejected.)
+    * ``docker`` — only:
+      * ``docker ps --filter name=shellforgeai`` (any ``ps`` flags),
+      * ``docker inspect shellforgeai``,
+      * ``docker exec shellforgeai shellforgeai <approved read-only command>``.
+      ``restart``, ``compose ...``, ``volume prune``, ``exec`` of a shell
+      (``sh``/``bash``) or any other binary (``rm``/``curl``/``apt`` …), and
+      ``exec`` flags (``-u``/``-i`` …) are all rejected.
     * ``df`` — only ``df -h /``.
-    * ``python``/``python3`` — only ``scripts/validation_status.py``.
+    * a Python interpreter (``python``/``python3``/``python3.x`` or
+      ``sys.executable``) — only ``scripts/validation_status.py``.
 
     Everything else (``rm``/``touch``/``curl``/``wget``/``pip``/``apt``/``gh``/
     ``codex`` …) is rejected.
@@ -250,15 +278,20 @@ def is_command_allowed(argv: Sequence[str]) -> bool:
     head = argv[0]
     rest = argv[1:]
 
-    if head == SHELLFORGEAI:
-        return _shellforgeai_allowed(rest)
     if head == "docker":
         return _docker_allowed(rest)
     if head == "df":
         return rest == ["-h", "/"]
-    if head in ("python", "python3"):
+    if _is_python_exe(head):
         return len(rest) >= 1 and Path(rest[0]).name == "validation_status.py"
     return False
+
+
+def _is_python_exe(head: str) -> bool:
+    """True for a Python interpreter invocation (host may lack a ``python`` alias)."""
+    if head == sys.executable:
+        return True
+    return Path(head).name.startswith("python")
 
 
 # Read-only ShellForgeAI subcommand surfaces this helper may invoke. Keyed by the
@@ -297,7 +330,25 @@ def _docker_allowed(rest: list[str]) -> bool:
         return True
     if sub == "inspect":
         return rest[1:] == ["shellforgeai"]
+    if sub == "exec":
+        return _docker_exec_allowed(rest[1:])
     return False
+
+
+def _docker_exec_allowed(args: list[str]) -> bool:
+    """Allow only ``docker exec shellforgeai shellforgeai <approved command>``.
+
+    The first two tokens after ``exec`` must be exactly the container name
+    ``shellforgeai`` and the ``shellforgeai`` binary — no ``exec`` flags
+    (``-u``/``-i``/``-e`` …), no shell (``sh``/``bash``), and no other binary
+    (``rm``/``curl``/``apt`` …) may slip in.
+    """
+    if len(args) < 2:
+        return False
+    container, command = args[0], args[1]
+    if container != CONTAINER or command != SHELLFORGEAI:
+        return False
+    return _shellforgeai_allowed(args[2:])
 
 
 # ---------------------------------------------------------------------------

@@ -167,43 +167,54 @@ commands. It is evidence generation, not deployment or remediation.
 ## Docker01 operator QA evidence bundle (PR206)
 
 When QA'ing a Docker01 PR, assemble the reviewer handoff with the read-only
-bundle helper instead of copy/pasting each command's output by hand:
+bundle helper instead of copy/pasting each command's output by hand. **Run it
+from the Docker01 host** — ShellForgeAI product smoke commands are executed
+inside the running `shellforgeai` container through a narrow `docker exec
+shellforgeai shellforgeai …` argv allowlist, so the host does not need
+`shellforgeai` on its PATH. Host checks and the validation status viewer stay
+host-side:
 
 ```bash
-# Dry-run first (lists the plan, executes nothing, writes nothing):
-python scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --dry-run
+# Dry-run first (lists the real plan, executes nothing, writes nothing):
+python3 scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --dry-run
 
 # Generate the evidence bundle:
-python scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha>
-python scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-qa-bundle
-python scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --json
+python3 scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha>
+python3 scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-qa-bundle
+python3 scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --json
 ```
 
-It runs the standard read-only smoke set (`version`, `doctor`, `model doctor`,
-`v1 check --profile quick/standard`, `ops report`, `status`, `triage docker`,
-`propose`, `apply-preview`, `verify`, `handoff`, a read-only Docker `ask`, a
-mutation `ask` expected to be refused, and `remediation self-test --profile
-full` with live disposable execution skipped by default) plus the read-only host
-checks `docker ps --filter name=shellforgeai`, `docker inspect shellforgeai`,
-`df -h /`, and the validation status viewer. It writes a bounded bundle under
+It runs the standard read-only smoke set inside the container via `docker exec
+shellforgeai shellforgeai …` (`version`, `doctor`, `model doctor`, `v1 check
+--profile quick/standard`, `ops report`, `status`, `triage docker`, `propose`,
+`apply-preview`, `verify`, `handoff`, a read-only Docker `ask`, a mutation `ask`
+expected to be refused, and `remediation self-test --profile full` with live
+disposable execution skipped by default) plus the host-side checks `docker ps
+--filter name=shellforgeai`, `docker inspect shellforgeai`, `df -h /`, and the
+validation status viewer (run with the helper's own Python interpreter, so
+`python3`-only hosts work). It writes a bounded bundle under
 `/tmp/sfai-pr<PR>-<shortsha>-qa-bundle-<timestamp>/` containing `qa-summary.md`,
 `qa-results.json`, `safety-assertions.json`, `container-state.json`,
-`validation-status.json`, `commands-run.json`, and `raw/`.
+`validation-status.json`, `commands-run.json`, and `raw/`. Running from the host
+keeps the guarded lane's host `/tmp` validation artifacts visible to the helper.
 
 Paste the contents of `qa-summary.md` into the PR handoff. A missing non-critical
 host check (Docker daemon, model, prior validation run) yields `partial`; a
 failed ShellForgeAI product check or safety assertion yields `failed`.
 
 Safety boundary: evidence collection only. Commands come from a small fixed
-allowlist; any other family (`docker restart`, `docker compose restart/down`,
-`docker volume prune`, `rm`/`touch`, `curl`/`wget`, `pip`/`apt install`, `gh pr
-merge`, `codex apply`, …) is rejected. Subprocess execution uses argv lists with
-bounded timeouts and never `shell=True`. The helper performs no cleanup,
-remediation, rollback, recovery, Docker/Compose mutation, container/production
-restart, prune, package install, network call, or cloud apply/merge/push. The
-bundle never auto-declares a PR mergeable — the reviewer still gives the final
-merge verdict. See [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) for
-details.
+allowlist (`docker ps --filter name=shellforgeai`, `docker inspect
+shellforgeai`, `docker exec shellforgeai shellforgeai <approved read-only
+command>`, `df -h /`, `validation_status.py`); any other family is rejected —
+`docker restart`, `docker compose restart/down`, `docker volume prune`, a
+`docker exec` into a shell (`sh -lc`/`bash -lc`) or other binary
+(`rm`/`touch`/`curl`/`wget`/`apt`/`pip`), `gh pr merge`, `codex apply`, … .
+Subprocess execution uses argv lists with bounded timeouts and never
+`shell=True`. The helper performs no cleanup, remediation, rollback, recovery,
+Docker/Compose mutation, container/production restart, prune, package install,
+network call, or cloud apply/merge/push, and does not fix anything. The bundle
+never auto-declares a PR mergeable — the reviewer still gives the final merge
+verdict. See [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) for details.
 
 ## V1 canonical operator path (knife, not toolbox)
 

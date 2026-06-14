@@ -129,12 +129,17 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
   set once and writes a bounded, pasteable evidence packet (`qa-summary.md`,
   `qa-results.json`, `safety-assertions.json`, `container-state.json`,
   `validation-status.json`, `commands-run.json`, `raw/`) so the Docker01 PR
-  handoff is no longer assembled by hand. Evidence collection only: a small
-  fixed command allowlist, argv-list subprocesses with no `shell=True`, no
-  cleanup/remediation/rollback/recovery, no Docker/Compose mutation or
-  restart/prune, no package install/network, and no cloud apply/merge/push. The
-  bundle never auto-declares a PR mergeable; the reviewer still gives the final
-  verdict.
+  handoff is no longer assembled by hand. It is run from the Docker01 host:
+  product smoke commands execute inside the running container through a narrow
+  `docker exec shellforgeai shellforgeai …` allowlist (no host `shellforgeai` on
+  PATH required), while host checks and the validation status viewer (run with
+  the current Python interpreter) stay host-side so the guarded lane's host
+  artifacts stay visible. Evidence collection only: a small fixed command
+  allowlist that rejects unsafe `docker exec` shell/binary forms, argv-list
+  subprocesses with no `shell=True`, no cleanup/remediation/rollback/recovery,
+  no Docker/Compose mutation or restart/prune, no package install/network, and
+  no cloud apply/merge/push. The bundle never auto-declares a PR mergeable; the
+  reviewer still gives the final verdict.
 
 ## V2 golden-path milestones
 

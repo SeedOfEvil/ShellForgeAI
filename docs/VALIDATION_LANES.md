@@ -478,19 +478,30 @@ removes that copy/paste step: it runs the standard read-only smoke QA set once,
 captures raw stdout/stderr/exit codes, parses the key JSON outputs, evaluates
 explicit safety assertions, and writes a small, pasteable evidence packet.
 
+**Run it from the Docker01 host.** ShellForgeAI product smoke commands are
+executed *inside* the running `shellforgeai` container through a narrow
+read-only `docker exec shellforgeai shellforgeai …` argv allowlist, so the host
+does **not** need `shellforgeai` on its PATH. Host/system checks
+(`docker ps` / `docker inspect shellforgeai` / `df -h /` / the validation status
+viewer) run host-side, and the validation status viewer runs with the helper's
+own Python interpreter (`sys.executable`) so hosts that have `python3` but no
+`python` alias work too.
+
 ```bash
 # Preview the plan without running anything or writing a bundle:
-python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --dry-run
-python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --dry-run --json
+python3 scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --dry-run
+python3 scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --dry-run --json
 
 # Generate the evidence bundle (default path under /tmp):
-python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha>
-python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --out /tmp/sfai-pr206-qa-bundle
-python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --json
+python3 scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha>
+python3 scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --out /tmp/sfai-pr206-qa-bundle
+python3 scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --json
 ```
 
-**When to run it:** during Docker01 PR QA, after the container is deployed and
-the standard smoke checks are expected to be green. **Dry-run first** to confirm
+**When to run it:** from the Docker01 host during PR QA, after the container is
+deployed and the standard smoke checks are expected to be green. Running from
+the host (not inside the container) keeps the host-side validation artifacts
+produced by the guarded lane visible to the helper. **Dry-run first** to confirm
 the plan, then generate the bundle.
 
 The default bundle path is
@@ -506,15 +517,16 @@ The default bundle path is
 - `commands-run.json` — the audited command list (argv, allowlist, exit codes).
 - `raw/` — captured stdout for each command (plus `.stderr.txt` on failure).
 
-**Collected commands:** `version`, `doctor`, `model doctor`,
-`v1 check --profile quick/standard --json`, `ops report --json`,
+**Collected commands:** the ShellForgeAI product smoke checks run as
+`docker exec shellforgeai shellforgeai <command>` — `version`, `doctor`,
+`model doctor`, `v1 check --profile quick/standard --json`, `ops report --json`,
 `status --json`, `triage docker --json`, `propose --json`,
 `apply-preview --json`, `verify --json`, `handoff --json`, a read-only Docker
-`ask`, a mutation `ask` (expected to be refused),
+`ask`, a mutation `ask` (expected to be refused), and
 `remediation self-test --profile full --json` (live disposable execution stays
-skipped by default), plus the read-only host checks
+skipped by default). The read-only host checks run host-side:
 `docker ps --filter name=shellforgeai`, `docker inspect shellforgeai`,
-`df -h /`, and `python scripts/validation_status.py --latest --json
+`df -h /`, and `<current-python> scripts/validation_status.py --latest --json
 --explain-selection`.
 
 **Paste into the PR handoff:** copy the contents of `qa-summary.md` into the PR.
@@ -525,15 +537,19 @@ the bundle status is `partial` rather than `failed`; a failed ShellForgeAI
 product check or a failed safety assertion makes it `failed`.
 
 **Safety boundaries:** this is evidence collection only. Commands come from a
-small fixed allowlist (the read-only smoke set plus `docker ps` / `docker
-inspect shellforgeai` / `df -h /` / `validation_status.py`); any other family
-(`docker restart`, `docker compose restart/down`, `docker volume prune`, `rm`,
-`touch`, `curl`, `wget`, `pip`/`apt install`, `gh pr merge`, `codex apply`, …)
-is rejected. Subprocess execution uses argv lists with bounded timeouts and
-never `shell=True`. The helper performs no cleanup, remediation, rollback,
-recovery, Docker/Compose mutation, container/production restart, prune, package
-install, network call, or cloud apply/merge/push. The bundle **never
-auto-declares a PR mergeable** — the reviewer still gives the final merge
+small fixed allowlist limited to `docker ps --filter name=shellforgeai`,
+`docker inspect shellforgeai`, `docker exec shellforgeai shellforgeai <approved
+read-only command>`, `df -h /`, and `validation_status.py`. Any other family is
+rejected — including `docker restart`, `docker compose restart/down`,
+`docker volume prune`, a `docker exec` into a shell
+(`docker exec shellforgeai sh -lc …` / `bash -lc …`) or any other binary
+(`docker exec shellforgeai rm/touch/curl/wget/apt/pip …`), injected `docker
+exec` flags (`-u`/`-i`/`-e`), and `gh pr merge` / `codex apply`. Subprocess
+execution uses argv lists with bounded timeouts and never `shell=True` (no
+`sh -lc`/`bash -lc` shell strings). The helper performs no cleanup, remediation,
+rollback, recovery, Docker/Compose mutation, container/production restart,
+prune, package install, network call, or cloud apply/merge/push. The bundle
+**never auto-declares a PR mergeable** — the reviewer still gives the final merge
 verdict.
 
 ## Validation environment preflight (PR178)
