@@ -469,6 +469,73 @@ renders human/JSON status only. It never executes validation, never runs
 cleanup/remediation/rollback/recovery, never uses a shell, and never calls a
 model.
 
+## Docker01 operator QA evidence bundle (PR206)
+
+Docker01 PR QA is strong, but the reviewer handoff was still assembled by hand
+from many command outputs and logs. The read-only bundle helper
+[`../scripts/docker01_operator_qa_bundle.py`](../scripts/docker01_operator_qa_bundle.py)
+removes that copy/paste step: it runs the standard read-only smoke QA set once,
+captures raw stdout/stderr/exit codes, parses the key JSON outputs, evaluates
+explicit safety assertions, and writes a small, pasteable evidence packet.
+
+```bash
+# Preview the plan without running anything or writing a bundle:
+python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --dry-run
+python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --dry-run --json
+
+# Generate the evidence bundle (default path under /tmp):
+python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha>
+python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --out /tmp/sfai-pr206-qa-bundle
+python scripts/docker01_operator_qa_bundle.py --pr 206 --commit <sha> --json
+```
+
+**When to run it:** during Docker01 PR QA, after the container is deployed and
+the standard smoke checks are expected to be green. **Dry-run first** to confirm
+the plan, then generate the bundle.
+
+The default bundle path is
+`/tmp/sfai-pr<PR>-<shortsha>-qa-bundle-<timestamp>/` and contains:
+
+- `qa-summary.md` — the pasteable Markdown handoff (paste this into the PR).
+- `qa-results.json` — strict machine-readable rollup (status, per-command
+  results, safety block).
+- `safety-assertions.json` — explicit read-only safety assertion results.
+- `container-state.json` — status/health/restart_count/image/labels/disk.
+- `validation-status.json` — latest validation evidence status (or a clean
+  `not_available`).
+- `commands-run.json` — the audited command list (argv, allowlist, exit codes).
+- `raw/` — captured stdout for each command (plus `.stderr.txt` on failure).
+
+**Collected commands:** `version`, `doctor`, `model doctor`,
+`v1 check --profile quick/standard --json`, `ops report --json`,
+`status --json`, `triage docker --json`, `propose --json`,
+`apply-preview --json`, `verify --json`, `handoff --json`, a read-only Docker
+`ask`, a mutation `ask` (expected to be refused),
+`remediation self-test --profile full --json` (live disposable execution stays
+skipped by default), plus the read-only host checks
+`docker ps --filter name=shellforgeai`, `docker inspect shellforgeai`,
+`df -h /`, and `python scripts/validation_status.py --latest --json
+--explain-selection`.
+
+**Paste into the PR handoff:** copy the contents of `qa-summary.md` into the PR.
+The summary reports container state, smoke results, ask safety, the remediation
+self-test rollup, validation status, and the safety-assertion verdicts. If a
+non-critical host check (Docker daemon, model, prior validation run) is absent,
+the bundle status is `partial` rather than `failed`; a failed ShellForgeAI
+product check or a failed safety assertion makes it `failed`.
+
+**Safety boundaries:** this is evidence collection only. Commands come from a
+small fixed allowlist (the read-only smoke set plus `docker ps` / `docker
+inspect shellforgeai` / `df -h /` / `validation_status.py`); any other family
+(`docker restart`, `docker compose restart/down`, `docker volume prune`, `rm`,
+`touch`, `curl`, `wget`, `pip`/`apt install`, `gh pr merge`, `codex apply`, …)
+is rejected. Subprocess execution uses argv lists with bounded timeouts and
+never `shell=True`. The helper performs no cleanup, remediation, rollback,
+recovery, Docker/Compose mutation, container/production restart, prune, package
+install, network call, or cloud apply/merge/push. The bundle **never
+auto-declares a PR mergeable** — the reviewer still gives the final merge
+verdict.
+
 ## Validation environment preflight (PR178)
 
 Before any ruff/compileall/pytest phase runs on a host, the validation

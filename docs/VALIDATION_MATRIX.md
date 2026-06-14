@@ -94,6 +94,7 @@ How matching works:
 | `scripts/validation_container_fallback.py` | **full** | `test_pr179_validation_container_fallback_packet` + `python scripts/run_full_pytest.py` |
 | `scripts/validation_status.py` | **full** | `test_pr177_*`, `test_pr178_*`, `test_pr179_*` + `python scripts/run_full_pytest.py` |
 | `scripts/run_full_pytest.py` | **full** | `test_pr160_*`, `test_pr176_*` + `python scripts/run_full_pytest.py` |
+| `scripts/docker01_operator_qa_bundle.py` | **full** | `test_pr206_docker01_operator_qa_bundle` + `python scripts/run_full_pytest.py` |
 | `scripts/**` (other) | **full** | + `python scripts/run_full_pytest.py` |
 | `tests/conftest.py` | **full** | shared harness → `python scripts/run_full_pytest.py` |
 | `tests/**` | fast | the changed test files are run directly |

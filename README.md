@@ -363,7 +363,11 @@ explicit CLI lane.
   classifies that as `setup_failure`, never as product test failure, plus the
   `scripts/validation_container_fallback.py` packet generator that turns a
   setup failure into a copy-pasteable disposable validation-container command
-  (packet files only — it never runs Docker or installs host packages); see
+  (packet files only — it never runs Docker or installs host packages), and the
+  read-only `scripts/docker01_operator_qa_bundle.py` helper that runs the
+  standard Docker01 smoke QA set and writes a bounded, pasteable evidence bundle
+  (`qa-summary.md` + JSON) for the PR handoff — evidence collection only, with a
+  fixed command allowlist, no `shell=True`, and no mutation/restart/cleanup; see
   [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
 
 ## Using OpenAI Codex / ChatGPT sign-in

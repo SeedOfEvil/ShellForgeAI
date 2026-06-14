@@ -124,6 +124,17 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
   checkout. It keeps full-suite confidence in an explicit mainline lane instead
   of overloading every PR, and it does not auto-merge, deploy, remediate, call
   Docker/Compose, restart, prune, or change runtime product behavior.
+- Completed: PR206 Docker01 operator QA evidence bundle.
+  `scripts/docker01_operator_qa_bundle.py` runs the standard read-only smoke QA
+  set once and writes a bounded, pasteable evidence packet (`qa-summary.md`,
+  `qa-results.json`, `safety-assertions.json`, `container-state.json`,
+  `validation-status.json`, `commands-run.json`, `raw/`) so the Docker01 PR
+  handoff is no longer assembled by hand. Evidence collection only: a small
+  fixed command allowlist, argv-list subprocesses with no `shell=True`, no
+  cleanup/remediation/rollback/recovery, no Docker/Compose mutation or
+  restart/prune, no package install/network, and no cloud apply/merge/push. The
+  bundle never auto-declares a PR mergeable; the reviewer still gives the final
+  verdict.
 
 ## V2 golden-path milestones
 
