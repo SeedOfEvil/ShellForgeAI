@@ -121,7 +121,13 @@ _EVIDENCE_GLOBS = {
     "manifest": ("manifest.json", "*-manifest.json", "*manifest*.json"),
     "heartbeat": ("validation-heartbeat.json", "*heartbeat*.json"),
     "status": ("validation-status.json", "*-status.json", "*status*.json"),
-    "summary": ("validation-summary.txt", "*-summary.txt", "*summary*.txt"),
+    "summary": (
+        "validation-summary.md",
+        "validation-summary.txt",
+        "*-summary.md",
+        "*summary*.md",
+        "*summary*.txt",
+    ),
     "checkpoint": ("validation-checkpoints.json", "*checkpoint*.json"),
     "preflight": ("validation-preflight.json", "*preflight*.json"),
     "log": ("validation.log", "*-full-pytest.log", "*runner*.log", "*.log"),
@@ -541,6 +547,9 @@ def discover_candidates(
                 out=out,
             )
 
+    if run_override or persisted_override or (include_legacy and os.environ.get(LEGACY_DIR_ENV)):
+        return out
+
     # Recent PR-specific temp run directories (bounded glob, never a crawl).
     if TMP_ROOT.is_dir():
         for entry in sorted(TMP_ROOT.glob(TMP_PR_RUN_GLOB)):
@@ -751,6 +760,39 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
     """
     if not isinstance(data, dict):
         return None
+    if data.get("mode") == "docker01_pr_lane_validation_status":
+        status = data.get("status")
+        if status == "setup_failure":
+            final_status = STATUS_FAILED
+            classification = CLASS_SETUP_FAILURE
+        elif status in ("interrupted", "partial"):
+            final_status = STATUS_INCOMPLETE
+            classification = CLASS_INTERRUPTED
+        elif status == STATUS_PASSED:
+            final_status = STATUS_PASSED
+            classification = CLASS_PASSED
+        elif status == STATUS_FAILED:
+            final_status = STATUS_FAILED
+            classification = "failed"
+        else:
+            final_status = STATUS_UNKNOWN
+            classification = CLASS_UNKNOWN
+        return {
+            "kind": "docker01_pr_lane",
+            "status": final_status,
+            "classification": classification,
+            "phase_status": {},
+            "active_phase": None,
+            "last_completed_phase": None,
+            "full_pytest_exit_code": 0 if final_status == STATUS_PASSED else None,
+            "full_pytest_result": vh.FULL_PASSED
+            if final_status == STATUS_PASSED
+            else vh.FULL_UNKNOWN,
+            "failed_phase": None,
+            "conflict": False,
+            "stored_status": final_status,
+            "recomputed_status": final_status,
+        }
 
     phase_status = data.get("phase_status")
     if not isinstance(phase_status, dict):
@@ -1012,6 +1054,7 @@ def _overall_classification(status: str, verdicts: list[dict[str, Any]]) -> str:
             if verdict["status"] == STATUS_FAILED and verdict["classification"] in (
                 CLASS_SETUP_FAILURE,
                 CLASS_TEST_FAILURE,
+                "failed",
             ):
                 return verdict["classification"]
         return CLASS_TEST_FAILURE

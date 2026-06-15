@@ -948,3 +948,20 @@ python scripts/docker01_operator_qa_bundle.py --pr 213 --commit <sha> --include-
 The default QA bundle records hygiene history and compare-latest status in `qa-results.json`, `qa-summary.md`, `commands-run.json`, and `raw/hygiene-*.json`. Review bundle creation is explicit opt-in with `--include-hygiene-review-bundle`; otherwise review bundle status is `skipped`. Missing hygiene history is non-blocking and is reported as `not_available`, `empty`, or `partial` with warnings.
 
 QA hygiene integration is evidence-only. It does not run cleanup, Docker prune, Docker image removal, file deletion, Docker/Compose mutation, container restart, model/Codex calls, network calls, or package installs.
+
+## Docker01 PR-lane validation evidence
+
+Guarded Docker01 PR-lane runs write a discoverable validation evidence directory by default at:
+
+```text
+/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/
+```
+
+The directory contains `validation-status.json`, `validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and `logs/`. The manifest records SHA256 and byte size metadata for the evidence files so downstream QA bundles can cite the exact validation packet. Inspect it with:
+
+```bash
+cat <run_dir>/validation-summary.md
+python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection
+```
+
+`failed`, `setup_failure`, and `interrupted` evidence is never pass-eligible and always requires a rerun. This evidence writer is validation-only: it does not execute cleanup, Docker prune, image removal, file deletion, remediation, rollback, recovery, natural-language execution, `shell=True`, cloud apply/merge/push, or Docker/Compose mutation beyond the separately guarded deploy/recreate lane.
