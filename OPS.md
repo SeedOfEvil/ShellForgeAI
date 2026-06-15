@@ -2447,3 +2447,18 @@ python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-
 The validator reads an existing report directory only using bounded file reads sized for realistic Docker01 reports: report JSON is capped separately from Markdown and commands-run files, while raw captures remain more tightly bounded. It expects `hygiene-summary.md`, `hygiene-report.json`, `candidate-cleanup-plan.md`, `commands-run.json`, and bounded `raw/` captures when present. Oversized files fail safely with the file path, size, and cap used. It emits `mode=docker01_hygiene_report_validate` JSON with `status=passed|failed`, check counts, candidate counts, safety flags, and `first_safe_command="cat <report_dir>/hygiene-summary.md"`. Exit code is `0` only when all checks pass.
 
 The validation lane proves that the PR209 report is ShellForgeAI-shaped, proposal-only, bounded, non-executable, and honest about safety flags. It rejects malformed JSON, missing required files, non-read-only safety fields, overlarge candidate sets, unsafe cleanup/delete/prune/restart/network/package/cloud/Codex command patterns, and commands-run entries outside the fixed PR209 read-only collector allowlist. Validation does not run Docker, rescan broad filesystem roots, regenerate reports, delete files, prune Docker, remove images, restart containers, run Docker Compose, call a model, call Codex, fetch from the network, install packages, or make cleanup safe to execute automatically. The reviewer/operator still decides any future named cleanup lane.
+## Docker01 hygiene history and compare
+
+Docker01 hygiene reports are useful when disk, image, and artifact pressure can be trended instead of reviewed as a single point-in-time snapshot. The helper can now read previously generated PR209/PR210 report directories and produce history or comparison output without running Docker and without generating a new report.
+
+Use these read-only forms when reviewing whether Docker01 artifact/image pressure is growing before any future scoped cleanup lane is considered:
+
+```bash
+python scripts/docker01_hygiene_report.py --history --json
+python scripts/docker01_hygiene_report.py --compare <old_report_dir> <new_report_dir> --json
+python scripts/docker01_hygiene_report.py --compare-latest --json
+```
+
+`--history` and `--compare-latest` discover reports under `/tmp` by default; pass `--root <dir>` for a scoped offline location. Candidate directories must contain `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` to be treated as valid hygiene reports. Malformed or partial directories are reported with warnings and are skipped by `--compare-latest`.
+
+These modes read existing report files only. They do not run Docker, Docker Compose, report generation, cleanup, prune, image removal, file deletion, restart, remediation, rollback, recovery, model calls, network calls, or arbitrary shell execution. A passing validation result or comparison summary is review evidence only and does not authorize cleanup execution.

@@ -908,3 +908,19 @@ python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-
 ```
 
 This is a Lane C safety-boundary check for hygiene/reporting infrastructure, even though it is read-only. The helper reads the existing report files with bounded caps sized for realistic Docker01 report JSON, validates strict JSON shape, checks the fixed PR209 read-only command list, verifies proposal-only/no-cleanup language, bounds candidates and raw files separately, fails oversized files safely, and rejects executable cleanup/prune/delete/restart/network/package/cloud/Codex patterns. A pass means the artifact is safer for operator review; it does not authorize automatic cleanup or future mutation.
+
+## Docker01 hygiene history and compare
+
+Docker01 hygiene reports are useful when disk, image, and artifact pressure can be trended instead of reviewed as a single point-in-time snapshot. The helper can now read previously generated PR209/PR210 report directories and produce history or comparison output without running Docker and without generating a new report.
+
+Use these read-only forms when reviewing whether Docker01 artifact/image pressure is growing before any future scoped cleanup lane is considered:
+
+```bash
+python scripts/docker01_hygiene_report.py --history --json
+python scripts/docker01_hygiene_report.py --compare <old_report_dir> <new_report_dir> --json
+python scripts/docker01_hygiene_report.py --compare-latest --json
+```
+
+`--history` and `--compare-latest` discover reports under `/tmp` by default; pass `--root <dir>` for a scoped offline location. Candidate directories must contain `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` to be treated as valid hygiene reports. Malformed or partial directories are reported with warnings and are skipped by `--compare-latest`.
+
+These modes read existing report files only. They do not run Docker, Docker Compose, report generation, cleanup, prune, image removal, file deletion, restart, remediation, rollback, recovery, model calls, network calls, or arbitrary shell execution. A passing validation result or comparison summary is review evidence only and does not authorize cleanup execution.

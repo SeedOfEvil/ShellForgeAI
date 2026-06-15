@@ -1017,3 +1017,18 @@ dispatch. Tests live in `tests/test_pr201_interactive_not_a_shell_policy.py`.
 ## Docker01 operational hygiene visibility
 
 ShellForgeAI includes a read-only Docker01 hygiene report helper for operators who need disk, image, and artifact inventory before cleanup is considered. The helper produces a report directory containing Markdown summary, strict JSON, raw evidence, command provenance, and a proposal-only candidate cleanup plan. It intentionally performs no cleanup or Docker mutation; any real cleanup remains future work and requires a separate reviewed lane.
+## Docker01 hygiene history and compare
+
+Docker01 hygiene reports are useful when disk, image, and artifact pressure can be trended instead of reviewed as a single point-in-time snapshot. The helper can now read previously generated PR209/PR210 report directories and produce history or comparison output without running Docker and without generating a new report.
+
+Use these read-only forms when reviewing whether Docker01 artifact/image pressure is growing before any future scoped cleanup lane is considered:
+
+```bash
+python scripts/docker01_hygiene_report.py --history --json
+python scripts/docker01_hygiene_report.py --compare <old_report_dir> <new_report_dir> --json
+python scripts/docker01_hygiene_report.py --compare-latest --json
+```
+
+`--history` and `--compare-latest` discover reports under `/tmp` by default; pass `--root <dir>` for a scoped offline location. Candidate directories must contain `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` to be treated as valid hygiene reports. Malformed or partial directories are reported with warnings and are skipped by `--compare-latest`.
+
+These modes read existing report files only. They do not run Docker, Docker Compose, report generation, cleanup, prune, image removal, file deletion, restart, remediation, rollback, recovery, model calls, network calls, or arbitrary shell execution. A passing validation result or comparison summary is review evidence only and does not authorize cleanup execution.
