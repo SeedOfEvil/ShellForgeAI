@@ -2462,3 +2462,16 @@ python scripts/docker01_hygiene_report.py --compare-latest --json
 `--history` and `--compare-latest` discover reports under `/tmp` by default; pass `--root <dir>` for a scoped offline location. Candidate directories must contain `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` to be treated as valid hygiene reports. Malformed or partial directories are reported with warnings and are skipped by `--compare-latest`.
 
 These modes read existing report files only. They do not run Docker, Docker Compose, report generation, cleanup, prune, image removal, file deletion, restart, remediation, rollback, recovery, model calls, network calls, or arbitrary shell execution. A passing validation result or comparison summary is review evidence only and does not authorize cleanup execution.
+
+## Docker01 hygiene review bundle
+
+When Docker01 hygiene pressure needs human review, create a bundle from an existing hygiene report instead of rerunning collectors:
+
+```bash
+python scripts/docker01_hygiene_report.py --review-bundle /tmp/sfai-docker01-hygiene-report --json
+python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --json
+```
+
+The default bundle path is `/tmp/sfai-docker01-hygiene-review-bundle-<timestamp>/`. The bundle contains `hygiene-review-summary.md`, `hygiene-review.json`, `manifest.json`, `checksums.json`, source report/summary/plan copies, `validation-result.json`, `history-snapshot.json`, `compare-latest.json`, and `safety-notes.md`.
+
+Bundle mode reads existing report files only. It does not run Docker, generate a report, delete source artifacts, clean up files, prune/remove images, mutate Docker Compose, restart containers, call a model, or authorize cleanup. `partial` or `not_available` history/compare statuses are review warnings, not cleanup approval.

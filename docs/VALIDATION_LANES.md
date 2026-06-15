@@ -924,3 +924,14 @@ python scripts/docker01_hygiene_report.py --compare-latest --json
 `--history` and `--compare-latest` discover reports under `/tmp` by default; pass `--root <dir>` for a scoped offline location. Candidate directories must contain `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` to be treated as valid hygiene reports. Malformed or partial directories are reported with warnings and are skipped by `--compare-latest`.
 
 These modes read existing report files only. They do not run Docker, Docker Compose, report generation, cleanup, prune, image removal, file deletion, restart, remediation, rollback, recovery, model calls, network calls, or arbitrary shell execution. A passing validation result or comparison summary is review evidence only and does not authorize cleanup execution.
+
+## Docker01 hygiene review bundle
+
+Use the review bundle when an operator needs one bounded packet containing an existing hygiene report, validation result, optional history/compare context, candidate cleanup plan copy, safety notes, manifest, checksums, and strict JSON rollup before any future cleanup lane is considered:
+
+```bash
+python scripts/docker01_hygiene_report.py --review-bundle <report_dir> --json
+python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --json
+```
+
+Bundle mode reads existing report artifacts only. It does not run Docker, generate a new hygiene report, clean up files, prune/remove Docker images, restart containers, mutate Compose, or authorize cleanup. Missing history/compare context is recorded as a warning or `not_available` so the evidence packet can still be reviewed when safe source files are readable.

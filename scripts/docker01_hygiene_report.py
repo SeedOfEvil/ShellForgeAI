@@ -19,7 +19,9 @@ RAW_LIMIT = 500_000
 VALIDATE_MODE = "docker01_hygiene_report_validate"
 HISTORY_MODE = "docker01_hygiene_report_history"
 COMPARE_MODE = "docker01_hygiene_report_compare"
+REVIEW_BUNDLE_MODE = "docker01_hygiene_review_bundle"
 DEFAULT_DISCOVERY_ROOT = Path("/tmp")
+DEFAULT_REVIEW_BUNDLE_PREFIX = "sfai-docker01-hygiene-review-bundle"
 REPORT_DIR_PATTERNS = ("sfai-docker01-hygiene-report-*", "sfai-pr*-hygiene-*")
 MAX_CANDIDATE_CLEANUP_ITEMS = 1_000
 MAX_CANDIDATE_ITEM_LENGTH = 500
@@ -772,6 +774,294 @@ def render_compare(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def default_review_bundle_path() -> Path:
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return Path(f"/tmp/{DEFAULT_REVIEW_BUNDLE_PREFIX}-{stamp}")
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _copy_bounded(src: Path, dst: Path, cap: int) -> str | None:
+    text, err = _read_bounded_text(src, cap)
+    if err:
+        return err
+    write_text(dst, text)
+    return None
+
+
+def _review_summary_from_report(report_dir: Path) -> tuple[dict[str, Any], list[str]]:
+    report, err = _parse_json_file(report_dir / "hygiene-report.json", MAX_JSON_VALIDATE_BYTES)
+    warnings: list[str] = []
+    if err or not isinstance(report, dict):
+        warnings.append(f"source hygiene-report.json unavailable: {err or 'not an object'}")
+        report = {}
+    s = report.get("summary", {}) if isinstance(report.get("summary"), dict) else {}
+    return {
+        "source_report_status": report.get("status", "unknown") if report else "unknown",
+        "candidate_cleanup_items_total": _int_metric(s.get("candidate_cleanup_items_total")),
+        "candidate_cleanup_bytes_estimated": _int_metric(
+            s.get("candidate_cleanup_bytes_estimated")
+        ),
+        "disk_use_percent": s.get("disk_use_percent", "unknown"),
+        "docker_images_total": _int_metric(s.get("docker_images_total")),
+        "shellforgeai_images_total": _int_metric(s.get("shellforgeai_images_total")),
+        "compose_backups_total": _int_metric(s.get("compose_backups_total")),
+        "qa_bundles_total": _int_metric(s.get("qa_bundles_total")),
+        "validation_artifacts_total": _int_metric(s.get("validation_artifacts_total")),
+        "receipt_artifacts_total": _int_metric(s.get("receipt_artifacts_total")),
+    }, warnings
+
+
+def _render_safety_notes() -> str:
+    return "\n".join(
+        [
+            "# Docker01 Hygiene Review Bundle Safety Notes",
+            "",
+            "This bundle is evidence only.",
+            "Validation/compare output does not authorize cleanup.",
+            "Any cleanup requires a separate narrow reviewed lane.",
+            "No cleanup was performed.",
+            "No Docker command was run by bundle mode.",
+            "No source artifact was modified or deleted.",
+            "",
+        ]
+    )
+
+
+def render_review_summary(
+    payload: dict[str, Any], history: dict[str, Any], compare: dict[str, Any]
+) -> str:
+    s = payload["summary"]
+    d = compare.get("delta", {})
+    return "\n".join(
+        [
+            "# Docker01 Hygiene Review Bundle",
+            "",
+            f"* Created: {payload['created_at']}",
+            f"* Bundle: {payload['bundle_path']}",
+            f"* Source report: {payload['source_report_dir']}",
+            f"* Source validation: {s['source_validation_status']}",
+            f"* History: {s['history_status']}",
+            f"* Compare-latest: {s['compare_latest_status']}",
+            "",
+            "## Current hygiene snapshot",
+            f"* disk: {s['disk_use_percent']}",
+            f"* candidate cleanup items: {s['candidate_cleanup_items_total']}",
+            f"* candidate cleanup estimated bytes: {s['candidate_cleanup_bytes_estimated']}",
+            f"* Docker images: {s['docker_images_total']}",
+            f"* ShellForgeAI images: {s['shellforgeai_images_total']}",
+            f"* compose backups: {s['compose_backups_total']}",
+            f"* QA bundles: {s['qa_bundles_total']}",
+            f"* validation artifacts: {s['validation_artifacts_total']}",
+            f"* receipt/audit/handoff/release artifacts: {s['receipt_artifacts_total']}",
+            "",
+            "## Trend snapshot",
+            f"* latest report: {compare.get('new_report_dir')}",
+            f"* previous report: {compare.get('old_report_dir')}",
+            f"* disk delta: {d.get('disk_use_percent_points')}",
+            f"* candidate item delta: {d.get('candidate_cleanup_items_total')}",
+            f"* candidate byte delta: {d.get('candidate_cleanup_bytes_estimated')}",
+            "* notable changes:",
+            *[f"  * {x}" for x in (compare.get("notable_changes") or ["none"])],
+            "",
+            "## Candidate cleanup review",
+            "* proposal-only",
+            "* no cleanup performed",
+            "* review required before any future cleanup lane",
+            "",
+            "## Safety",
+            "* read-only bundle creation",
+            "* no Docker command run",
+            "* no Docker/Compose mutation",
+            "* no prune/image removal/file deletion",
+            "* no restart",
+            "* no natural-language execution",
+            "* no shell equals true",
+            "* reviewer/operator decides any future cleanup lane",
+            "",
+        ]
+    )
+
+
+def build_review_bundle(
+    report_dir: Path, out: Path | None = None, root: Path | None = None
+) -> dict[str, Any]:
+    report_dir = report_dir.resolve()
+    bundle = (out or default_review_bundle_path()).resolve()
+    root = (root or report_dir.parent).resolve()
+    warnings: list[str] = []
+    bundle.mkdir(parents=True, exist_ok=True)
+
+    validation = validate_report(report_dir)
+    validation_status = "passed" if validation["status"] == "passed" else "failed"
+    warnings.extend(
+        f"validation failed: {c['name']}"
+        for c in validation.get("checks", [])
+        if not c.get("passed")
+    )
+    summary, summary_warnings = _review_summary_from_report(report_dir)
+    warnings.extend(summary_warnings)
+    summary["source_validation_status"] = validation_status
+
+    history = build_history(root)
+    if history.get("status") == "empty":
+        history_status = "not_available"
+        warnings.append("history not available: no hygiene reports found")
+    else:
+        history_status = history.get("status", "partial")
+    compare = build_compare_latest(root)
+    if compare.get("status") == "failed" and "fewer than two" in " ".join(
+        compare.get("warnings", [])
+    ):
+        compare_status = "not_available"
+        compare = {**compare, "status": "not_available"}
+        warnings.extend(compare.get("warnings", []))
+    else:
+        compare_status = compare.get("status", "partial")
+        warnings.extend(compare.get("warnings", []))
+    summary["history_status"] = history_status
+    summary["compare_latest_status"] = compare_status
+
+    for rel, dest, cap in [
+        ("hygiene-report.json", "source-hygiene-report.json", MAX_JSON_VALIDATE_BYTES),
+        ("hygiene-summary.md", "source-hygiene-summary.md", MAX_MARKDOWN_VALIDATE_BYTES),
+        (
+            "candidate-cleanup-plan.md",
+            "source-candidate-cleanup-plan.md",
+            MAX_MARKDOWN_VALIDATE_BYTES,
+        ),
+    ]:
+        err = (
+            _copy_bounded(report_dir / rel, bundle / dest, cap)
+            if (report_dir / rel).is_file()
+            else f"missing {rel}"
+        )
+        if err:
+            warnings.append(f"{rel}: {err}")
+    write_text(
+        bundle / "validation-result.json", json.dumps(validation, indent=2, sort_keys=True) + "\n"
+    )
+    write_text(
+        bundle / "history-snapshot.json", json.dumps(history, indent=2, sort_keys=True) + "\n"
+    )
+    write_text(bundle / "compare-latest.json", json.dumps(compare, indent=2, sort_keys=True) + "\n")
+    write_text(bundle / "safety-notes.md", _render_safety_notes())
+
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "mode": REVIEW_BUNDLE_MODE,
+        "status": "ok",
+        "created_at": datetime.now(UTC).isoformat(),
+        "bundle_path": str(bundle),
+        "source_report_dir": str(report_dir),
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": summary,
+        "artifacts": [],
+        "safety": safety_block(),
+        "first_safe_command": f"cat {bundle}/hygiene-review-summary.md",
+        "warnings": warnings[:MAX_WARNINGS],
+    }
+    if validation_status == "failed" or summary_warnings:
+        payload["status"] = "partial"
+    if any("exceeds" in w for w in warnings):
+        payload["status"] = "failed"
+    write_text(
+        bundle / "hygiene-review-summary.md", render_review_summary(payload, history, compare)
+    )
+
+    artifact_names = [
+        "hygiene-review-summary.md",
+        "source-hygiene-report.json",
+        "source-hygiene-summary.md",
+        "source-candidate-cleanup-plan.md",
+        "validation-result.json",
+        "history-snapshot.json",
+        "compare-latest.json",
+        "safety-notes.md",
+    ]
+    artifacts = []
+    for name in artifact_names:
+        path = bundle / name
+        if path.exists():
+            artifacts.append(
+                {"path": name, "sha256": _sha256_file(path), "size_bytes": path.stat().st_size}
+            )
+    manifest = {
+        "schema_version": 1,
+        "mode": REVIEW_BUNDLE_MODE,
+        "artifacts": artifacts,
+        "warnings": warnings[:MAX_WARNINGS],
+    }
+    write_text(bundle / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    artifacts.append(
+        {
+            "path": "manifest.json",
+            "sha256": _sha256_file(bundle / "manifest.json"),
+            "size_bytes": (bundle / "manifest.json").stat().st_size,
+        }
+    )
+    checksums = {a["path"]: a["sha256"] for a in artifacts}
+    write_text(bundle / "checksums.json", json.dumps(checksums, indent=2, sort_keys=True) + "\n")
+    artifacts.append(
+        {
+            "path": "checksums.json",
+            "sha256": _sha256_file(bundle / "checksums.json"),
+            "size_bytes": (bundle / "checksums.json").stat().st_size,
+        }
+    )
+    payload["artifacts"] = artifacts
+    write_text(bundle / "hygiene-review.json", json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    # Refresh manifest/checksums to include final rollup.
+    artifacts.append(
+        {
+            "path": "hygiene-review.json",
+            "sha256": _sha256_file(bundle / "hygiene-review.json"),
+            "size_bytes": (bundle / "hygiene-review.json").stat().st_size,
+        }
+    )
+    manifest["artifacts"] = artifacts
+    write_text(bundle / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    checksums = {a["path"]: a["sha256"] for a in artifacts}
+    write_text(bundle / "checksums.json", json.dumps(checksums, indent=2, sort_keys=True) + "\n")
+    payload["artifacts"] = [
+        {
+            "path": a["path"],
+            "sha256": _sha256_file(bundle / a["path"]),
+            "size_bytes": (bundle / a["path"]).stat().st_size,
+        }
+        for a in artifacts
+    ]
+    write_text(bundle / "hygiene-review.json", json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return payload
+
+
+def build_review_bundle_latest(root: Path, out: Path | None = None) -> dict[str, Any]:
+    history = build_history(root)
+    valid = [r for r in history["reports"] if r.get("valid_shape") is True]
+    if not valid:
+        return {
+            "schema_version": 1,
+            "mode": REVIEW_BUNDLE_MODE,
+            "status": "failed",
+            "root": str(root),
+            "read_only": True,
+            "mutation_performed": False,
+            "error": "no valid Docker01 hygiene reports found",
+            "safety": safety_block(),
+            "warnings": history.get("warnings", []),
+        }
+    return build_review_bundle(Path(valid[0]["report_dir"]), out=out, root=root)
+
+
 def default_report_path() -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return Path(f"/tmp/sfai-docker01-hygiene-report-{stamp}")
@@ -1324,7 +1614,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--validate", type=Path, default=None, help="validate an existing hygiene report directory"
     )
+    parser.add_argument(
+        "--review-bundle",
+        type=Path,
+        default=None,
+        help="bundle an existing hygiene report for review",
+    )
+    parser.add_argument(
+        "--review-bundle-latest",
+        action="store_true",
+        help="bundle the latest valid hygiene report under --root",
+    )
     args = parser.parse_args(argv)
+    if args.review_bundle is not None:
+        payload = build_review_bundle(
+            args.review_bundle,
+            out=args.out,
+            root=args.root if args.root != DEFAULT_DISCOVERY_ROOT else args.review_bundle.parent,
+        )
+        print(
+            json.dumps(payload, indent=2, sort_keys=True)
+            if args.json
+            else (
+                f"Docker01 hygiene review bundle written: {payload['bundle_path']}\n"
+                f"First safe command: {payload['first_safe_command']}"
+            )
+        )
+        return 0 if payload["status"] != "failed" else 1
+    if args.review_bundle_latest:
+        payload = build_review_bundle_latest(args.root, out=args.out)
+        print(
+            json.dumps(payload, indent=2, sort_keys=True)
+            if args.json
+            else (
+                f"Docker01 hygiene review bundle written: {payload.get('bundle_path')}"
+                if payload.get("status") != "failed"
+                else payload.get("error", "failed")
+            )
+        )
+        return 0 if payload["status"] != "failed" else 1
+
     if args.history:
         payload = build_history(args.root)
         print(
