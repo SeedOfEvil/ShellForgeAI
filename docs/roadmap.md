@@ -1042,3 +1042,7 @@ Docker01 hygiene evidence now supports a bounded review bundle around existing r
 Docker01 PR QA bundles now surface existing hygiene history and compare-latest evidence in the operator handoff. The default remains read-only: it summarizes existing hygiene reports and does not create a hygiene review bundle. Operators can explicitly opt in to bounded review-bundle packaging with `--include-hygiene-review-bundle` when a review packet is useful.
 
 This integration does not add cleanup execution, Docker prune, image removal, file deletion, Docker/Compose mutation, restart, natural-language execution, model/Codex calls, network calls, or package installs. Missing hygiene evidence remains non-blocking and visible as `not_available`, `empty`, or `partial`.
+
+## Validation evidence discoverability
+
+Docker01 PR-lane validation now writes a small PR/commit-scoped evidence packet that downstream QA can discover. The packet documents validation commands, status, checksums, and safety boundaries without adding cleanup or Docker mutation behavior.

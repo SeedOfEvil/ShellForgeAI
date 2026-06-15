@@ -209,3 +209,7 @@ Review bundles are evidence only. Validation, compare, and bundle output do not 
 | QA bundle hygiene tests | `pytest -q tests/test_pr213_docker01_qa_bundle_hygiene_integration.py` | Verifies raw outputs, non-critical command entries, narrow allowlist, dry-run behavior, opt-in review bundle, and hygiene safety drift failure. | No |
 
 Hygiene evidence inside the QA bundle is review-only. Missing history/compare evidence is non-blocking; cleanup/prune/delete/restart or Docker/Compose mutation safety flags fail QA safety.
+
+## Docker01 PR-lane manifest discovery
+
+The Docker01 PR lane emits a scoped validation packet under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`. `validation_status.py --latest --pr <PR> --commit <sha>` selects only exact PR/commit evidence and ignores stale packets from other PRs or commits. QA bundles may use the packet's `validation-status.json` and `validation-manifest.json` to populate validation sections without falling back to scoped `not_found` when current lane evidence exists.
