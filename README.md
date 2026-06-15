@@ -537,3 +537,14 @@ python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-
 ```
 
 Validation reads existing files only with bounded caps sized for realistic Docker01 report JSON while keeping raw captures separately bounded. It emits `mode=docker01_hygiene_report_validate`, exits non-zero on malformed/missing/oversized/unsafe artifacts, checks proposal-only/no-cleanup language, and rejects executable cleanup/prune/delete/restart/network/package/cloud/Codex command patterns. It does not run Docker, mutate Docker/Compose, delete files, call a model, call Codex, or make cleanup safe to execute automatically.
+
+### Docker01 hygiene review bundle
+
+For operator review of an existing Docker01 hygiene report, package the report evidence without rerunning Docker collectors or cleanup:
+
+```bash
+python scripts/docker01_hygiene_report.py --review-bundle <report_dir> --json
+python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --json
+```
+
+The bundle writes a bounded review directory with summary, strict JSON rollup, source copies, validation, optional history/compare snapshots, safety notes, manifest, and checksums. It does not run Docker, generate a new report, delete files, prune/remove images, restart containers, or authorize cleanup.
