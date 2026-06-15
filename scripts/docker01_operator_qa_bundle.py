@@ -14,7 +14,7 @@ It is an *evidence collection helper only*. It is read-only:
   plus ``docker ps`` / ``docker inspect shellforgeai`` / ``df -h /`` /
   ``validation_status.py``). Any other command family is rejected.
 * Subprocess execution uses argv lists with bounded timeouts and never
-  ``shell=True``.
+  the shell execution mode.
 * It performs no cleanup, remediation, rollback, recovery, Docker/Compose
   mutation, container/production restart, prune, package install, network call,
   or cloud apply/merge/push. The remediation self-test keeps live disposable
@@ -128,6 +128,8 @@ def validation_status_argv(pr: int, commit: str) -> tuple[str, ...]:
 # mutation, the bundle surfaces it and the matching safety assertion fails.
 SAFETY_FLAG_KEYS: tuple[str, ...] = (
     "cleanup_executed",
+    "docker_prune_executed",
+    "file_deleted",
     "remediation_executed",
     "rollback_executed",
     "recovery_executed",
@@ -152,6 +154,65 @@ class CommandSpec:
     parse: str = "text"  # "json" | "text"
     critical: bool = True
     timeout: int = DEFAULT_TIMEOUT
+
+
+def hygiene_command_specs(include_review_bundle: bool = False) -> list[CommandSpec]:
+    """Return bounded Docker01 hygiene evidence commands.
+
+    History and compare-latest read existing hygiene reports only. Review bundle
+    packaging is explicit opt-in because it writes a bounded handoff artifact.
+    """
+    specs = [
+        CommandSpec(
+            "hygiene_history",
+            "hygiene history",
+            (
+                sys.executable,
+                "scripts/docker01_hygiene_report.py",
+                "--history",
+                "--root",
+                DEFAULT_ROOT,
+                "--json",
+            ),
+            "raw/hygiene-history.json",
+            parse="json",
+            critical=False,
+        ),
+        CommandSpec(
+            "hygiene_compare_latest",
+            "hygiene compare-latest",
+            (
+                sys.executable,
+                "scripts/docker01_hygiene_report.py",
+                "--compare-latest",
+                "--root",
+                DEFAULT_ROOT,
+                "--json",
+            ),
+            "raw/hygiene-compare-latest.json",
+            parse="json",
+            critical=False,
+        ),
+    ]
+    if include_review_bundle:
+        specs.append(
+            CommandSpec(
+                "hygiene_review_bundle",
+                "hygiene review-bundle-latest",
+                (
+                    sys.executable,
+                    "scripts/docker01_hygiene_report.py",
+                    "--review-bundle-latest",
+                    "--root",
+                    DEFAULT_ROOT,
+                    "--json",
+                ),
+                "raw/hygiene-review-bundle.json",
+                parse="json",
+                critical=False,
+            )
+        )
+    return specs
 
 
 def build_command_specs(pr: int, commit: str) -> list[CommandSpec]:
@@ -334,8 +395,20 @@ def is_command_allowed(argv: Sequence[str]) -> bool:
     if head == "df":
         return rest == ["-h", "/"]
     if _is_python_exe(head):
-        return _validation_status_allowed(rest)
+        return _validation_status_allowed(rest) or _hygiene_command_allowed(rest)
     return False
+
+
+def _hygiene_command_allowed(rest: list[str]) -> bool:
+    """Allow only fixed Docker01 hygiene evidence-reader invocations."""
+    if not rest or Path(rest[0]).name != "docker01_hygiene_report.py":
+        return False
+    args = rest[1:]
+    return args in (
+        ["--history", "--root", DEFAULT_ROOT, "--json"],
+        ["--compare-latest", "--root", DEFAULT_ROOT, "--json"],
+        ["--review-bundle-latest", "--root", DEFAULT_ROOT, "--json"],
+    )
 
 
 def _validation_status_allowed(rest: list[str]) -> bool:
@@ -884,6 +957,8 @@ def evaluate_safety_assertions(ctx: SafetyContext) -> dict[str, Any]:
         ("remediation_executed", "remediation"),
         ("rollback_executed", "rollback"),
         ("recovery_executed", "recovery"),
+        ("docker_prune_executed", "Docker prune"),
+        ("file_deleted", "file deletion"),
     ):
         assertions.append(
             _assertion(
@@ -936,10 +1011,18 @@ def default_bundle_path(pr: int, commit: str, now: datetime | None = None) -> Pa
     return Path("/tmp") / f"sfai-pr{pr}-{_short_sha(commit)}-qa-bundle-{stamp}"
 
 
-def plan_commands(pr: int, commit: str) -> list[dict[str, Any]]:
+def plan_commands(
+    pr: int,
+    commit: str,
+    include_hygiene: bool = True,
+    include_hygiene_review_bundle: bool = False,
+) -> list[dict[str, Any]]:
     """Return the planned command list for pr/commit (used by dry-run and tests)."""
     plan: list[dict[str, Any]] = []
-    for spec in build_command_specs(pr, commit):
+    specs = build_command_specs(pr, commit)
+    if include_hygiene:
+        specs.extend(hygiene_command_specs(include_hygiene_review_bundle))
+    for spec in specs:
         plan.append(
             {
                 "key": spec.key,
@@ -953,7 +1036,13 @@ def plan_commands(pr: int, commit: str) -> list[dict[str, Any]]:
     return plan
 
 
-def dry_run_result(pr: int, commit: str, out: Path) -> dict[str, Any]:
+def dry_run_result(
+    pr: int,
+    commit: str,
+    out: Path,
+    include_hygiene: bool = True,
+    include_hygiene_review_bundle: bool = False,
+) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": MODE,
@@ -966,7 +1055,9 @@ def dry_run_result(pr: int, commit: str, out: Path) -> dict[str, Any]:
         "bundle_written": False,
         "mutation_performed": False,
         "intended_bundle_path": str(out),
-        "planned_commands": plan_commands(pr, commit),
+        "planned_commands": plan_commands(
+            pr, commit, include_hygiene, include_hygiene_review_bundle
+        ),
     }
 
 
@@ -987,6 +1078,8 @@ def generate_bundle(
     runner: Runner | None = None,
     dry_run: bool = False,
     now: datetime | None = None,
+    include_hygiene: bool = True,
+    include_hygiene_review_bundle: bool = False,
 ) -> dict[str, Any]:
     """Run the QA command set and write the evidence bundle.
 
@@ -998,7 +1091,7 @@ def generate_bundle(
     out = Path(out)
 
     if dry_run:
-        return dry_run_result(pr, commit, out)
+        return dry_run_result(pr, commit, out, include_hygiene, include_hygiene_review_bundle)
 
     runner = runner or default_runner
 
@@ -1023,6 +1116,8 @@ def generate_bundle(
         }
 
     specs = build_command_specs(pr, commit)
+    if include_hygiene:
+        specs.extend(hygiene_command_specs(include_hygiene_review_bundle))
     command_entries: list[dict[str, Any]] = []
     parsed_by_key: dict[str, Any] = {}
     warnings: list[str] = []
@@ -1092,6 +1187,11 @@ def generate_bundle(
     mutation_refusal = detect_mutation_refusal(_read_raw(out, "raw/ask-mutation-refusal.txt"))
 
     restart_after = container_state.get("restart_count")
+    hygiene = summarize_hygiene(
+        parsed_by_key, include_hygiene, include_hygiene_review_bundle, command_entries
+    )
+    warnings.extend(hygiene.get("warnings", []))
+
     ctx = SafetyContext(
         ops_report=parsed_by_key.get("ops_report"),
         v1_quick=v1_quick,
@@ -1116,6 +1216,7 @@ def generate_bundle(
         safety_assertions=safety_assertions,
         safety_block=safety_block,
         warnings=warnings,
+        hygiene=hygiene,
     )
 
     # --- Write bundle files ----------------------------------------------
@@ -1136,6 +1237,7 @@ def generate_bundle(
         mutation_refusal=mutation_refusal,
         validation_status=validation_status,
         safety_assertions=safety_assertions,
+        hygiene=hygiene,
     )
     (out / "qa-summary.md").write_text(summary_md, encoding="utf-8")
 
@@ -1200,6 +1302,120 @@ def _read_raw(out: Path, rel: str) -> str:
         return ""
 
 
+def _hygiene_latest(history: Any, compare: Any) -> dict[str, Any]:
+    if isinstance(compare, dict) and isinstance(compare.get("new"), dict) and compare["new"]:
+        return compare["new"]
+    if isinstance(history, dict):
+        reports = history.get("reports") if isinstance(history.get("reports"), list) else []
+        for report in reports:
+            if isinstance(report, dict) and report.get("valid_shape") is True:
+                return report
+    return {}
+
+
+def _hygiene_status(command_status: str | None, parsed: Any, *, empty_ok: bool = False) -> str:
+    if command_status != "passed" or not isinstance(parsed, dict):
+        return "not_available" if command_status in (None, "failed") else "failed"
+    status = parsed.get("status")
+    if status == "empty" and empty_ok:
+        return "empty"
+    if status in ("ok", "partial", "failed", "not_available"):
+        return str(status)
+    return "partial" if status else "not_available"
+
+
+def summarize_hygiene(
+    parsed_by_key: dict[str, Any],
+    enabled: bool,
+    include_review_bundle: bool,
+    command_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Summarize Docker01 hygiene helper outputs for QA handoff."""
+
+    def entry_status(key: str) -> str | None:
+        if command_entries is None:
+            return "passed" if key in parsed_by_key else None
+        entry = next((c for c in command_entries if c.get("key") == key), None)
+        return str(entry.get("status")) if entry else None
+
+    base: dict[str, Any] = {
+        "enabled": enabled,
+        "history_status": "not_available",
+        "compare_latest_status": "not_available",
+        "review_bundle_status": "skipped" if not include_review_bundle else "not_available",
+        "latest_report_dir": None,
+        "latest_review_bundle": None,
+        "disk_use_percent": "unknown",
+        "candidate_cleanup_items_total": 0,
+        "candidate_cleanup_bytes_estimated": 0,
+        "docker_images_total": 0,
+        "shellforgeai_images_total": 0,
+        "compose_backups_total": 0,
+        "qa_bundles_total": 0,
+        "validation_artifacts_total": 0,
+        "receipt_artifacts_total": 0,
+        "notable_changes": [],
+        "warnings": [],
+    }
+    if not enabled:
+        base["review_bundle_status"] = "skipped"
+        base["warnings"].append("hygiene evidence collection skipped")
+        return base
+
+    history = parsed_by_key.get("hygiene_history")
+    compare = parsed_by_key.get("hygiene_compare_latest")
+    review = parsed_by_key.get("hygiene_review_bundle")
+
+    base["history_status"] = _hygiene_status(
+        entry_status("hygiene_history"), history, empty_ok=True
+    )
+    base["compare_latest_status"] = _hygiene_status(entry_status("hygiene_compare_latest"), compare)
+    if include_review_bundle:
+        base["review_bundle_status"] = _hygiene_status(
+            entry_status("hygiene_review_bundle"), review
+        )
+        if isinstance(review, dict):
+            base["latest_review_bundle"] = (
+                review.get("bundle_path")
+                or review.get("bundle_dir")
+                or review.get("review_bundle_dir")
+                or review.get("bundle")
+            )
+
+    latest = _hygiene_latest(history, compare)
+    metric_keys = (
+        "disk_use_percent",
+        "candidate_cleanup_items_total",
+        "candidate_cleanup_bytes_estimated",
+        "docker_images_total",
+        "shellforgeai_images_total",
+        "compose_backups_total",
+        "qa_bundles_total",
+        "validation_artifacts_total",
+        "receipt_artifacts_total",
+    )
+    base["latest_report_dir"] = latest.get("report_dir")
+    for key in metric_keys:
+        if key in latest:
+            base[key] = latest[key]
+    if isinstance(compare, dict) and isinstance(compare.get("notable_changes"), list):
+        base["notable_changes"] = compare["notable_changes"]
+
+    for key, label in (
+        ("hygiene_history", "hygiene history"),
+        ("hygiene_compare_latest", "hygiene compare-latest"),
+        ("hygiene_review_bundle", "hygiene review bundle"),
+    ):
+        parsed = parsed_by_key.get(key)
+        if isinstance(parsed, dict) and isinstance(parsed.get("warnings"), list):
+            base["warnings"].extend(f"{label}: {w}" for w in parsed["warnings"])
+    if base["history_status"] in ("empty", "not_available", "partial", "failed"):
+        base["warnings"].append(f"hygiene history status: {base['history_status']}")
+    if base["compare_latest_status"] in ("not_available", "partial", "failed"):
+        base["warnings"].append(f"hygiene compare-latest status: {base['compare_latest_status']}")
+    return base
+
+
 def _build_safety_block(parsed_by_key: dict[str, Any]) -> dict[str, Any]:
     """Helper-guaranteed safety posture plus flags aggregated from outputs."""
     flagged: dict[str, bool] = {}
@@ -1214,7 +1430,8 @@ def _build_safety_block(parsed_by_key: dict[str, Any]) -> dict[str, Any]:
         "arbitrary_command_execution": False,
         "natural_language_execution": False,
         "model_called": False,
-        "docker_prune_executed": False,
+        "docker_prune_executed": flagged.get("docker_prune_executed", False),
+        "file_deleted": flagged.get("file_deleted", False),
         "cloud_apply_merge_push": False,
         "rollback_executed": flagged.get("rollback_executed", False),
         "recovery_executed": flagged.get("recovery_executed", False),
@@ -1239,6 +1456,7 @@ def _assemble_qa_results(
     safety_assertions: dict[str, Any],
     safety_block: dict[str, Any],
     warnings: list[str],
+    hygiene: dict[str, Any],
 ) -> dict[str, Any]:
     passed = sum(1 for c in command_entries if c["status"] == "passed")
     failed = sum(1 for c in command_entries if c["status"] == "failed")
@@ -1275,6 +1493,7 @@ def _assemble_qa_results(
         },
         "commands": command_entries,
         "safety": safety_block,
+        "hygiene": hygiene,
         "first_safe_command": f"cat {out / 'qa-summary.md'}",
         "warnings": warnings,
     }
@@ -1302,6 +1521,7 @@ def render_summary_md(
     mutation_refusal: dict[str, Any],
     validation_status: dict[str, Any],
     safety_assertions: dict[str, Any],
+    hygiene: dict[str, Any] | None = None,
 ) -> str:
     def cmd(key: str) -> str:
         return _cmd_line(command_entries, key)
@@ -1399,6 +1619,28 @@ def render_summary_md(
         return "pass" if not safety.get(name) else "FAIL"
 
     artifact_ok = not (safety["artifact_repaired"] or safety["artifact_deleted"])
+    h = hygiene or qa_results.get("hygiene", {}) or {}
+    lines.append("## Docker01 hygiene evidence")
+    lines.append("")
+    lines.append(f"* history: {h.get('history_status', 'not_available')}")
+    lines.append(f"* compare-latest: {h.get('compare_latest_status', 'not_available')}")
+    lines.append(f"* review bundle: {h.get('review_bundle_status', 'skipped')}")
+    lines.append(f"* latest report: {h.get('latest_report_dir') or 'none'}")
+    lines.append(f"* latest review bundle: {h.get('latest_review_bundle') or 'none'}")
+    lines.append(f"* disk: {h.get('disk_use_percent', 'unknown')}")
+    lines.append(f"* candidate cleanup items: {h.get('candidate_cleanup_items_total', 'unknown')}")
+    candidate_bytes = h.get("candidate_cleanup_bytes_estimated", "unknown")
+    lines.append(f"* candidate cleanup estimated bytes: {candidate_bytes}")
+    lines.append(f"* Docker images: {h.get('docker_images_total', 'unknown')}")
+    lines.append(f"* ShellForgeAI images: {h.get('shellforgeai_images_total', 'unknown')}")
+    lines.append(f"* compose backups: {h.get('compose_backups_total', 'unknown')}")
+    lines.append(f"* QA bundles: {h.get('qa_bundles_total', 'unknown')}")
+    lines.append(f"* validation artifacts: {h.get('validation_artifacts_total', 'unknown')}")
+    changes = h.get("notable_changes") or []
+    lines.append("* notable changes: " + ("; ".join(map(str, changes)) if changes else "none"))
+    lines.append("")
+    lines.append("Hygiene evidence is review-only. No cleanup was performed.")
+    lines.append("")
     lines.append("## Safety assertions")
     lines.append("")
     lines.append(f"* cleanup execute: {assertion('no_cleanup_executed')}")
@@ -2233,6 +2475,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", default=None, help="Explicit bundle output directory.")
     parser.add_argument("--json", action="store_true", help="Emit strict JSON only.")
     parser.add_argument(
+        "--include-hygiene",
+        action="store_true",
+        default=True,
+        help="Include hygiene history/compare evidence (default).",
+    )
+    parser.add_argument(
+        "--skip-hygiene", action="store_true", help="Skip hygiene evidence collection."
+    )
+    parser.add_argument(
+        "--include-hygiene-review-bundle",
+        action="store_true",
+        help="Opt in to bounded hygiene review bundle packaging.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="List planned commands and intended output path; execute nothing and write no bundle.",
@@ -2328,7 +2584,14 @@ def _run_generation(args: argparse.Namespace, parser: argparse.ArgumentParser) -
     if args.pr is None or args.commit is None:
         parser.error("--pr and --commit are required for bundle generation")
     out = Path(args.out) if args.out else None
-    result = generate_bundle(pr=args.pr, commit=args.commit, out=out, dry_run=args.dry_run)
+    result = generate_bundle(
+        pr=args.pr,
+        commit=args.commit,
+        out=out,
+        dry_run=args.dry_run,
+        include_hygiene=not args.skip_hygiene,
+        include_hygiene_review_bundle=args.include_hygiene_review_bundle,
+    )
 
     if args.json:
         print(json.dumps(result, indent=2))

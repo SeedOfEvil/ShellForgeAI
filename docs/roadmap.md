@@ -1036,3 +1036,9 @@ These modes read existing report files only. They do not run Docker, Docker Comp
 ### Docker01 hygiene review bundles
 
 Docker01 hygiene evidence now supports a bounded review bundle around existing reports: validation result, optional history and compare-latest snapshots, candidate cleanup plan copy, safety notes, manifest, checksums, and strict JSON rollup. This keeps artifact/disk pressure review evidence-first while preserving the boundary that cleanup requires a separate narrow reviewed lane.
+
+### Docker01 QA bundle hygiene evidence integration
+
+Docker01 PR QA bundles now surface existing hygiene history and compare-latest evidence in the operator handoff. The default remains read-only: it summarizes existing hygiene reports and does not create a hygiene review bundle. Operators can explicitly opt in to bounded review-bundle packaging with `--include-hygiene-review-bundle` when a review packet is useful.
+
+This integration does not add cleanup execution, Docker prune, image removal, file deletion, Docker/Compose mutation, restart, natural-language execution, model/Codex calls, network calls, or package installs. Missing hygiene evidence remains non-blocking and visible as `not_available`, `empty`, or `partial`.
