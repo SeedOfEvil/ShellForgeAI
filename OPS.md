@@ -2475,3 +2475,16 @@ python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --j
 The default bundle path is `/tmp/sfai-docker01-hygiene-review-bundle-<timestamp>/`. The bundle contains `hygiene-review-summary.md`, `hygiene-review.json`, `manifest.json`, `checksums.json`, source report/summary/plan copies, `validation-result.json`, `history-snapshot.json`, `compare-latest.json`, and `safety-notes.md`.
 
 Bundle mode reads existing report files only. It does not run Docker, generate a report, delete source artifacts, clean up files, prune/remove images, mutate Docker Compose, restart containers, call a model, or authorize cleanup. `partial` or `not_available` history/compare statuses are review warnings, not cleanup approval.
+
+## Docker01 QA bundle hygiene evidence
+
+Docker01 operator QA bundles summarize existing hygiene evidence by default:
+
+```bash
+python scripts/docker01_operator_qa_bundle.py --pr 213 --commit <sha> --json
+python scripts/docker01_operator_qa_bundle.py --pr 213 --commit <sha> --include-hygiene-review-bundle --json
+```
+
+Default mode runs only the existing hygiene history and compare-latest JSON readers against `/tmp`. The QA bundle records `hygiene.history_status`, `hygiene.compare_latest_status`, latest report metrics, notable changes, warnings, command provenance, and raw JSON captures. Review bundle creation is opt-in and records `hygiene.review_bundle_status` plus the bundle path when available.
+
+This is review-only evidence. The QA bundle hygiene integration does not clean files, prune Docker, remove images, mutate Docker/Compose, restart containers, run arbitrary shell commands, call a model/Codex, call the network, or install packages. Missing hygiene evidence is a warning, not a core QA failure.

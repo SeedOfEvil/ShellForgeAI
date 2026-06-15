@@ -199,3 +199,13 @@ These modes read existing report files only. They do not run Docker, Docker Comp
 | Hygiene review tests | `pytest -q tests/test_pr212_docker01_hygiene_review_bundle.py` | Verifies bundle files, JSON, partial/warning behavior, bounded copies, latest discovery, and no Docker/report generation/source mutation. | No |
 
 Review bundles are evidence only. Validation, compare, and bundle output do not authorize cleanup execution; any cleanup requires a separate narrow reviewed lane.
+
+## Docker01 QA bundle hygiene evidence checks
+
+| Check | Command | Purpose | Mutates state |
+| --- | --- | --- | --- |
+| QA bundle with hygiene summary | `python scripts/docker01_operator_qa_bundle.py --pr 213 --commit <sha> --json` | Adds existing hygiene history/compare-latest status and latest report metrics to the operator QA evidence bundle. | No |
+| QA bundle with hygiene review bundle | `python scripts/docker01_operator_qa_bundle.py --pr 213 --commit <sha> --include-hygiene-review-bundle --json` | Opts in to bounded latest hygiene review-bundle packaging and records its status/path. | Only writes the bounded review bundle artifact |
+| QA bundle hygiene tests | `pytest -q tests/test_pr213_docker01_qa_bundle_hygiene_integration.py` | Verifies raw outputs, non-critical command entries, narrow allowlist, dry-run behavior, opt-in review bundle, and hygiene safety drift failure. | No |
+
+Hygiene evidence inside the QA bundle is review-only. Missing history/compare evidence is non-blocking; cleanup/prune/delete/restart or Docker/Compose mutation safety flags fail QA safety.

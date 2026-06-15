@@ -935,3 +935,16 @@ python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --j
 ```
 
 Bundle mode reads existing report artifacts only. It does not run Docker, generate a new hygiene report, clean up files, prune/remove Docker images, restart containers, mutate Compose, or authorize cleanup. Missing history/compare context is recorded as a warning or `not_available` so the evidence packet can still be reviewed when safe source files are readable.
+
+## Docker01 QA bundle hygiene evidence
+
+Docker01 operator QA bundles include hygiene evidence by default using existing history and compare-latest report readers:
+
+```bash
+python scripts/docker01_operator_qa_bundle.py --pr 213 --commit <sha> --json
+python scripts/docker01_operator_qa_bundle.py --pr 213 --commit <sha> --include-hygiene-review-bundle --json
+```
+
+The default QA bundle records hygiene history and compare-latest status in `qa-results.json`, `qa-summary.md`, `commands-run.json`, and `raw/hygiene-*.json`. Review bundle creation is explicit opt-in with `--include-hygiene-review-bundle`; otherwise review bundle status is `skipped`. Missing hygiene history is non-blocking and is reported as `not_available`, `empty`, or `partial` with warnings.
+
+QA hygiene integration is evidence-only. It does not run cleanup, Docker prune, Docker image removal, file deletion, Docker/Compose mutation, container restart, model/Codex calls, network calls, or package installs.

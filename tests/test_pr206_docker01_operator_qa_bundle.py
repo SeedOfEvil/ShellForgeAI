@@ -194,7 +194,24 @@ _STDOUT_BY_KEY: dict[str, str] = {
 
 def _default_outputs() -> dict[tuple[str, ...], tuple[int, str, str]]:
     """Map each planned command's real argv -> (returncode, stdout, stderr)."""
-    return {tuple(spec.argv): (0, _STDOUT_BY_KEY[spec.key], "") for spec in _specs()}
+    outputs = {tuple(spec.argv): (0, _STDOUT_BY_KEY[spec.key], "") for spec in _specs()}
+    for spec in qa.hygiene_command_specs():
+        outputs[tuple(spec.argv)] = (
+            0,
+            json.dumps(
+                {
+                    "status": "empty",
+                    "reports": [],
+                    "summary": {"latest_report_dir": None},
+                    "read_only": True,
+                    "mutation_performed": False,
+                    "safety": _safety_block(),
+                    "warnings": [],
+                }
+            ),
+            "",
+        )
+    return outputs
 
 
 def _argv_for(key: str) -> tuple[str, ...]:
@@ -319,7 +336,7 @@ def test_11_dry_run_lists_planned_commands(tmp_path):
     labels = {c["label"] for c in result["planned_commands"]}
     assert "version" in labels
     assert "ops report" in labels
-    assert len(result["planned_commands"]) == len(_specs())
+    assert len(result["planned_commands"]) == len(_specs()) + len(qa.hygiene_command_specs())
 
 
 def test_12_dry_run_does_not_execute(tmp_path):
