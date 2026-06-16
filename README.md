@@ -565,3 +565,14 @@ python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
 It reports source/container/validation/QA evidence and a deterministic safe next command. It does not deploy, build, write Compose, restart, validate, run QA, clean up, prune, delete, or auto-declare mergeability.
 
 Status image checks use the configured Compose `image:` tag and container `Config.Image`; Docker-resolved `sha256:` digests do not trigger a false deploy mismatch. The helper prefers later exact PR/commit pass-eligible validation evidence over older setup failures and discovers exact operator QA bundle directories before suggesting another QA run.
+
+### Docker01 merge-readiness evidence
+
+Operators can consolidate existing Docker01 evidence for an exact PR/commit without rerunning validation or QA:
+
+```bash
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness
+```
+
+The helper is read-only reviewer evidence (`pass_candidate`, `hold_candidate`, or `unknown`) and does not deploy, build, validate, run QA, clean, prune, delete, restart, mutate Docker/Compose, or replace SeedOfEvil's final merge judgment.

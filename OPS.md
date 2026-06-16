@@ -2512,3 +2512,17 @@ python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
 The helper is resume guidance only. It reads source/container/label/image status and existing validation/QA evidence, then suggests the safest next command. It does not deploy, build, write Compose, restart, run validation, run QA, clean up, prune, delete files, remediate, roll back, recover, or merge. `already_complete` means the expected evidence is present; the reviewer still gives the final merge verdict.
 
 Status matching uses the configured Compose image tag and container `Config.Image`, not Docker's resolved image digest. If an earlier setup-failure packet and a later successful exact PR/commit validation packet both exist, the later pass-eligible validation evidence is used. Exact PR/commit operator QA bundles are discoverable before suggesting another QA run.
+
+## Docker01 merge-readiness evidence report
+
+Before merge review, produce a read-only Docker01 evidence packet for the exact PR and commit:
+
+```bash
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness
+cat /tmp/sfai-pr<PR>-<short>-merge-readiness/merge-readiness-summary.md
+```
+
+The output directory contains `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, `raw-validation-status.json`, `raw-pr-lane-status.json`, and `raw-qa-bundle-summary.json`. Missing raw evidence is recorded as `not_available`; huge logs and arbitrary filesystem listings are not copied.
+
+The helper is evidence-only. It does not deploy, build, validate, run QA, restart, clean, prune, delete files, mutate Docker/Compose, remediate, roll back, recover, call models/Codex, install packages, call the network, merge, push, or use `shell=True`. `pass_candidate`, `hold_candidate`, and `unknown` are review aids, not approval. SeedOfEvil remains final merge owner.
