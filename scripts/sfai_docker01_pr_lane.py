@@ -19,6 +19,8 @@ import argparse
 import contextlib
 import hashlib
 import json
+import os
+import re
 import signal
 import subprocess
 import sys
@@ -39,6 +41,7 @@ import validate_pr  # noqa: E402
 import validation_container_fallback  # noqa: E402
 import validation_env_preflight  # noqa: E402
 import validation_heartbeat  # noqa: E402
+import validation_status as validation_status_viewer  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FULL_PYTEST_RUNNER = validate_pr.FULL_PYTEST_RUNNER
@@ -46,6 +49,10 @@ MANIFEST_SCHEMA_VERSION = 1
 MANIFEST_MODE = "docker01_pr_validation_manifest"
 LANE_STATUS_MODE = "docker01_pr_lane_validation_status"
 LANE_MANIFEST_MODE = "docker01_pr_lane_validation_manifest"
+PR_LANE_STATUS_MODE = "docker01_pr_lane_status"
+QA_BUNDLE_ROOT_ENV = "SFAI_QA_BUNDLE_ROOT"
+COMPOSE_FILE_ENV = "SFAI_DOCKER01_COMPOSE_FILE"
+DEFAULT_COMPOSE_FILE = Path("/srv/compose/shellforgeai/compose.yml")
 DEFAULT_HOST = {"name": "lab-docker01", "target": "Docker01", "lxc_id": "106"}
 DEFAULT_REPO = "SeedOfEvil/ShellForgeAI"
 UNKNOWN = "unknown"
@@ -176,6 +183,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Changed files, space-separated or comma-separated.",
     )
     parser.add_argument("--pr", dest="pr_number", help="PR number for PR-specific tests.")
+    parser.add_argument("--commit", help="Requested PR head commit for read-only --status mode.")
+    parser.add_argument(
+        "--status",
+        "--resume-status",
+        action="store_true",
+        help=(
+            "Read-only Docker01 PR lane status/resume report; executes no deploy, "
+            "build, validation, QA, or cleanup."
+        ),
+    )
+    parser.add_argument("--json", action="store_true", help="With --status, emit strict JSON only.")
     parser.add_argument(
         "--profile",
         default="auto",
@@ -522,6 +540,466 @@ def validation_evidence_safety() -> dict:
         "natural_language_execution": False,
         "cloud_apply_merge_push": False,
     }
+
+
+def pr_lane_status_safety() -> dict:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "deploy_executed": False,
+        "compose_written": False,
+        "docker_build_executed": False,
+        "validation_executed": False,
+        "qa_executed": False,
+        "cleanup_executed": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "natural_language_execution": False,
+        "cloud_apply_merge_push": False,
+    }
+
+
+STATUS_ALLOWED_COMMANDS = (
+    ("git", "rev-parse", "HEAD"),
+    ("docker", "ps", "--filter", "name=shellforgeai"),
+    ("docker", "inspect", "shellforgeai"),
+)
+
+
+def _status_run(argv: list[str], *, runner=None) -> subprocess.CompletedProcess:
+    if tuple(argv) not in STATUS_ALLOWED_COMMANDS:
+        raise ValueError(f"status command is not allowlisted: {' '.join(argv)}")
+    runner = runner or subprocess.run
+    return runner(argv, cwd=str(REPO_ROOT), check=False, capture_output=True, text=True)
+
+
+def _status_git_head(*, runner=None) -> str | None:
+    try:
+        completed = _status_run(["git", "rev-parse", "HEAD"], runner=runner)
+    except (OSError, ValueError):
+        return None
+    return (
+        completed.stdout.strip() if completed.returncode == 0 and completed.stdout.strip() else None
+    )
+
+
+def _status_container(*, runner=None) -> dict:
+    state = {
+        "container_image": None,
+        "container_image_id": None,
+        "container_status": UNKNOWN,
+        "container_health": UNKNOWN,
+        "restart_count": None,
+        "labels": {},
+    }
+    try:
+        completed = _status_run(["docker", "inspect", "shellforgeai"], runner=runner)
+    except (OSError, ValueError):
+        return state
+    if completed.returncode != 0:
+        state["container_status"] = "unknown"
+        return state
+    try:
+        payload = json.loads(completed.stdout or "[]")
+    except json.JSONDecodeError:
+        return state
+    item = payload[0] if isinstance(payload, list) and payload else {}
+    cfg = item.get("Config") or {}
+    st = item.get("State") or {}
+    health = st.get("Health") or {}
+    state.update(
+        {
+            # Config.Image is the operator-visible tag requested by compose.
+            # Top-level Image is Docker's resolved image ID/digest and must not
+            # override the configured tag for PR-lane status matching.
+            "container_image": cfg.get("Image"),
+            "container_image_id": item.get("Image"),
+            "container_status": st.get("Status") or UNKNOWN,
+            "container_health": health.get("Status") or ("none" if st else UNKNOWN),
+            "restart_count": item.get("RestartCount"),
+            "labels": cfg.get("Labels") or {},
+        }
+    )
+    return state
+
+
+def _expected_image(pr: str | int | None, commit: str | None) -> str:
+    short = (commit or "")[:7] or UNKNOWN
+    return f"lab/shellforgeai:pr{pr}-{short}"
+
+
+def _is_digest(value: str | None) -> bool:
+    text = str(value or "").strip()
+    return text.startswith("sha256:") or text.startswith("sha256@")
+
+
+def _image_matches(value: str | None, *, pr: int, commit: str, expected: str) -> bool:
+    if not value or _is_digest(value):
+        return False
+    text = str(value)
+    short7 = commit[:7]
+    short12 = commit[:12]
+    return text == expected or (f"pr{pr}-" in text and (short7 in text or short12 in text))
+
+
+def _read_compose_image() -> str | None:
+    raw = os.environ.get(COMPOSE_FILE_ENV)
+    path = Path(raw) if raw else DEFAULT_COMPOSE_FILE
+    if not path.is_file():
+        return None
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("image:"):
+                return stripped.split(":", 1)[1].strip().strip("\"'") or None
+    except OSError:
+        return None
+    return None
+
+
+def _validation_latest(pr: int, commit: str) -> dict:
+    warnings: list[str] = []
+    candidates = validation_status_viewer.discover_candidates(
+        run_root=None, include_legacy=False, warnings=warnings
+    )
+    exact: list[dict] = []
+    for candidate in candidates:
+        if not validation_status_viewer._pr_matches(candidate.get("pr"), pr):
+            continue
+        if not validation_status_viewer._commit_matches(candidate.get("commit"), commit):
+            continue
+        status_path = Path(candidate["path"]) / "validation-status.json"
+        if not status_path.is_file():
+            continue
+        try:
+            doc = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        doc["_candidate_path"] = candidate["path"]
+        doc["_candidate_mtime"] = candidate.get("mtime") or status_path.stat().st_mtime
+        exact.append(doc)
+    if not exact:
+        return {
+            "status": "not_found",
+            "classification": "not_found",
+            "pass_eligible": False,
+            "rerun_required": True,
+            "source": {"kind": "not_found", "run_dir": None},
+            "warnings": warnings,
+        }
+
+    def rank(doc: dict) -> tuple[int, float]:
+        if doc.get("pass_eligible") is True:
+            return (3, float(doc.get("_candidate_mtime") or 0))
+        if doc.get("classification") == "passed" or doc.get("status") == "passed":
+            return (2, float(doc.get("_candidate_mtime") or 0))
+        return (1, float(doc.get("_candidate_mtime") or 0))
+
+    selected = sorted(exact, key=rank, reverse=True)[0]
+    selected.setdefault("source", {})
+    selected["source"]["run_dir"] = selected.get("_candidate_path")
+    selected["source"]["kind"] = "run_dir"
+    selected["warnings"] = warnings
+    return selected
+
+
+def _qa_bundle_latest(pr: int, commit: str) -> dict:
+    root = Path(os.environ.get(QA_BUNDLE_ROOT_ENV) or tempfile.gettempdir())
+    candidates = []
+    pattern = re.compile(
+        r"^sfai-pr(?P<pr>\d+)-(?P<sha>[^-]+)-(?:(?:operator-)?qa-bundle)-(?P<stamp>.+)$"
+    )
+    if root.is_dir():
+        for path in root.iterdir():
+            match = pattern.match(path.name)
+            if not path.is_dir() or not match:
+                continue
+            if str(match.group("pr")) != str(pr):
+                continue
+            if not validation_status_viewer._commit_matches(match.group("sha"), commit):
+                continue
+            qa_path = path / "qa-results.json"
+            manifest_path = path / "bundle-manifest.json"
+            doc_path = qa_path if qa_path.is_file() else manifest_path
+            if not doc_path.is_file():
+                continue
+            try:
+                doc = json.loads(doc_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                doc = {}
+            candidates.append((path.stat().st_mtime, path, doc))
+    if not candidates:
+        return {
+            "available": False,
+            "status": "not_found",
+            "bundle_path": None,
+            "commands_passed": 0,
+            "commands_failed": 0,
+            "safety_assertions_failed": 0,
+        }
+
+    def rank(candidate: tuple[float, Path, dict]) -> tuple[int, float]:
+        mtime, _path, doc = candidate
+        status = doc.get("status")
+        return (2 if status == "passed" else 1, mtime)
+
+    _mtime, path, doc = sorted(candidates, key=rank, reverse=True)[0]
+    summary = doc.get("summary") or {}
+    return {
+        "available": True,
+        "status": doc.get("status") or UNKNOWN,
+        "bundle_path": str(path),
+        "commands_passed": int(summary.get("commands_passed") or 0),
+        "commands_failed": int(summary.get("commands_failed") or 0),
+        "safety_assertions_failed": int(summary.get("safety_assertions_failed") or 0),
+    }
+
+
+def _normalize_validation(report: dict) -> dict:
+    source = report.get("source") or {}
+    status = report.get("status") or "not_found"
+    classification = report.get("classification") or "unknown"
+    return {
+        "available": status != "not_found",
+        "status": status,
+        "classification": classification,
+        "pass_eligible": bool(report.get("pass_eligible")),
+        "rerun_required": bool(report.get("rerun_required", status != "passed")),
+        "run_dir": source.get("run_dir"),
+        "full_validation": bool(report.get("full_validation")),
+    }
+
+
+def _check(name: str, passed: bool, detail: str) -> dict:
+    return {"name": name, "passed": bool(passed), "detail": detail}
+
+
+def build_pr_lane_status(
+    *, pr: int, commit: str, runner=None, created_at: str | None = None
+) -> dict:
+    created_at = created_at or _utc_now()
+    short = commit[:12]
+    warnings: list[str] = []
+    source_head = _status_git_head(runner=runner)
+    container = _status_container(runner=runner)
+    labels = container.get("labels") or {}
+    expected = _expected_image(pr, commit)
+    configured_compose_image = _read_compose_image()
+    label_compose_image = labels.get("homelab.compose_image") or labels.get(
+        "com.docker.compose.image"
+    )
+    compose_image = configured_compose_image or label_compose_image
+    validation = _normalize_validation(_validation_latest(pr, commit))
+    qa_bundle = _qa_bundle_latest(pr, commit)
+    if not qa_bundle["available"]:
+        warnings.append("QA bundle evidence was not found for the exact PR/commit.")
+
+    source_ok = source_head == commit
+    pr_ok = str(labels.get("homelab.pr")) == str(pr)
+    commit_ok = labels.get("homelab.commit") == commit
+    image = container.get("container_image")
+    image_ok = _image_matches(image, pr=pr, commit=commit, expected=expected) or (
+        configured_compose_image is not None and image == configured_compose_image
+    )
+    compose_ok = (
+        configured_compose_image is None
+        and (label_compose_image is None or _is_digest(label_compose_image))
+        or _image_matches(compose_image, pr=pr, commit=commit, expected=expected)
+    )
+    running = container.get("container_status") == "running"
+    healthy = container.get("container_health") in ("healthy", "none")
+    restart_count = container.get("restart_count")
+    restart_ok = restart_count in (None, 0)
+    deploy_match = source_ok and pr_ok and commit_ok and image_ok and compose_ok and running
+    blocked_validation = validation["status"] == "failed" or validation["classification"] in (
+        "failed",
+        "test_failure",
+        "setup_failure",
+    )
+    blocked_container = running and not healthy or (restart_count is not None and restart_count > 0)
+    blocked_identity = running and not (pr_ok and commit_ok)
+    checks = [
+        _check("source_head_matches", source_ok, f"source HEAD is {source_head or UNKNOWN}"),
+        _check(
+            "compose_image_matches",
+            compose_ok,
+            f"compose image evidence is {compose_image or UNKNOWN}",
+        ),
+        _check(
+            "container_running", running, f"container status is {container.get('container_status')}"
+        ),
+        _check(
+            "container_healthy", healthy, f"container health is {container.get('container_health')}"
+        ),
+        _check("restart_count_acceptable", restart_ok, f"restart_count={restart_count}"),
+        _check("container_labels_match", pr_ok and commit_ok, f"labels={labels}"),
+        _check("container_image_matches", image_ok, f"container image is {image or UNKNOWN}"),
+        _check(
+            "validation_pass_eligible", validation["pass_eligible"], validation["classification"]
+        ),
+        _check("qa_bundle_passed", qa_bundle["status"] == "passed", qa_bundle["status"]),
+    ]
+    if blocked_container or blocked_validation or blocked_identity:
+        status = "blocked"
+    elif not deploy_match:
+        status = "needs_deploy"
+    elif validation["rerun_required"] or validation["status"] in ("not_found", "unknown"):
+        status = "needs_validation"
+    elif qa_bundle["status"] != "passed":
+        status = "needs_qa"
+    elif validation["pass_eligible"] and qa_bundle["status"] == "passed":
+        status = "already_complete"
+    else:
+        status = "ready_to_continue"
+    safe_next = _safe_next(status, pr, commit, validation, qa_bundle)
+    return {
+        "schema_version": 1,
+        "mode": PR_LANE_STATUS_MODE,
+        "status": status,
+        "pr": pr,
+        "commit": commit,
+        "short_sha": short,
+        "created_at": created_at,
+        "read_only": True,
+        "mutation_performed": False,
+        "checks": checks,
+        "state": {
+            "source_head": source_head,
+            "compose_image": compose_image,
+            "container_image": image,
+            "container_image_id": container.get("container_image_id"),
+            "container_status": container.get("container_status"),
+            "container_health": container.get("container_health"),
+            "restart_count": restart_count,
+            "labels": labels,
+        },
+        "validation": validation,
+        "qa_bundle": qa_bundle,
+        "safe_next": safe_next,
+        "safety": pr_lane_status_safety(),
+        "warnings": warnings,
+    }
+
+
+def _safe_next(status: str, pr: int, commit: str, validation: dict, qa_bundle: dict) -> dict:
+    if status == "already_complete":
+        path = qa_bundle.get("bundle_path")
+        command = (
+            f"cat {Path(path) / 'qa-summary.md'}"
+            if path
+            else (
+                "python scripts/validation_status.py --latest "
+                f"--pr {pr} --commit {commit} --json --explain-selection"
+            )
+        )
+        return {
+            "command": command,
+            "reason": (
+                "validation and QA evidence are already present; reviewer still gives "
+                "final merge verdict"
+            ),
+        }
+    if status == "needs_qa":
+        return {
+            "command": (
+                f"python scripts/docker01_operator_qa_bundle.py --pr {pr} --commit {commit} --json"
+            ),
+            "reason": "validation is pass eligible but QA bundle is missing, failed, or partial",
+        }
+    if status == "needs_validation":
+        return {
+            "command": (
+                "python scripts/validation_status.py --latest "
+                f"--pr {pr} --commit {commit} --json --explain-selection"
+            ),
+            "reason": (
+                "exact PR/commit validation evidence is missing or rerun is required; "
+                "inspect evidence before rerunning the guarded lane"
+            ),
+        }
+    if status == "needs_deploy":
+        return {
+            "command": (
+                "python scripts/sfai_docker01_pr_lane.py "
+                f"--pr {pr} --commit {commit} --changed-files <files> "
+                "--full-validation --full-validation-reason '<reason>'"
+            ),
+            "reason": (
+                "source, compose, container, image, or labels do not all match; "
+                "use the guarded lane helper, not direct compose"
+            ),
+        }
+    if status == "blocked":
+        return {
+            "command": (
+                "python scripts/sfai_docker01_pr_lane.py "
+                f"--pr {pr} --commit {commit} --status --json"
+            ),
+            "reason": (
+                "blocked evidence detected; continue with read-only inspection only, "
+                "not restart, cleanup, prune, or delete"
+            ),
+        }
+    return {
+        "command": (
+            "python scripts/validation_status.py --latest "
+            f"--pr {pr} --commit {commit} --json --explain-selection"
+        ),
+        "reason": "state is partially known; inspect existing evidence before any rerun",
+    }
+
+
+def render_pr_lane_status(doc: dict) -> str:
+    return (
+        "\n".join(
+            [
+                "Docker01 PR lane status",
+                "",
+                f"PR: {doc.get('pr')}",
+                f"Commit: {doc.get('commit')}",
+                f"Status: {doc.get('status')}",
+                "",
+                f"Source: {doc['state'].get('source_head') or UNKNOWN}",
+                f"Compose: {doc['state'].get('compose_image') or UNKNOWN}",
+                (
+                    "Container: "
+                    f"{doc['state'].get('container_status')} / "
+                    f"{doc['state'].get('container_health')} / "
+                    f"restart={doc['state'].get('restart_count')}"
+                ),
+                (
+                    "Validation: "
+                    f"{doc['validation'].get('status')} / "
+                    f"{doc['validation'].get('classification')} / "
+                    f"pass_eligible={doc['validation'].get('pass_eligible')}"
+                ),
+                (
+                    "QA bundle: "
+                    f"{doc['qa_bundle'].get('status')} / "
+                    f"{doc['qa_bundle'].get('bundle_path') or UNKNOWN}"
+                ),
+                "Hygiene: available only when already captured in QA bundle evidence",
+                "",
+                f"Safe next command: {doc['safe_next'].get('command')}",
+                f"Reason: {doc['safe_next'].get('reason')}",
+                "",
+                "Safety:",
+                "- read-only status only",
+                "- no deploy/build/compose/restart/validation executed",
+                "- no cleanup/prune/delete",
+                "- reviewer still gives the final merge verdict",
+            ]
+        )
+        + "\n"
+    )
 
 
 def build_lane_validation_status(
@@ -1093,6 +1571,19 @@ def run_validation(
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.status:
+        if args.execute_validation:
+            parser.error("--status is read-only and cannot be combined with --execute")
+        if args.no_cache or args.preflight_only:
+            parser.error("--status cannot be combined with deploy/build/validation flags")
+        if not args.pr_number or not args.commit:
+            parser.error("--status requires --pr and --commit")
+        doc = build_pr_lane_status(pr=int(args.pr_number), commit=args.commit)
+        if args.json:
+            print(json.dumps(doc, sort_keys=True))
+        else:
+            print(render_pr_lane_status(doc), end="")
+        return 0
     if args.print_manifest_json and args.execute_validation and not args.dry_run:
         parser.error("--print-manifest-json cannot be combined with --execute-validation")
     changed_files = _split_changed_files(args.changed_files)

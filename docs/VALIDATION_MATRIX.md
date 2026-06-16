@@ -213,3 +213,15 @@ Hygiene evidence inside the QA bundle is review-only. Missing history/compare ev
 ## Docker01 PR-lane manifest discovery
 
 The Docker01 PR lane emits a scoped validation packet under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`. `validation_status.py --latest --pr <PR> --commit <sha>` selects only exact PR/commit evidence and ignores stale packets from other PRs or commits. QA bundles may use the packet's `validation-status.json` and `validation-manifest.json` to populate validation sections without falling back to scoped `not_found` when current lane evidence exists.
+
+## Docker01 PR-lane status/resume evidence checks
+
+| Check | Command | Purpose | Mutates state |
+| --- | --- | --- | --- |
+| PR-lane status JSON | `python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status --json` | Emits strict JSON describing source, container, validation, QA bundle, safety flags, classification, and safe next command. | No |
+| PR-lane status human | `python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status` | Prints a concise pasteable interrupted-lane resume summary. | No |
+| PR215 status tests | `pytest -q tests/test_pr215_docker01_pr_lane_status.py` | Verifies JSON contract, deterministic classifications, exact evidence discovery, mutual exclusion, and read-only allowlist behavior without Docker. | No |
+
+Classifications are deterministic: matching source/container/labels/image plus pass-eligible validation and passed QA is `already_complete`; matching deploy plus missing/partial/failed QA is `needs_qa`; matching deploy plus missing or rerun-required validation is `needs_validation`; source/compose/container mismatch is `needs_deploy`; unhealthy containers, restart drift, label/image mismatch, failed validation, or setup-failure evidence are `blocked`. Safe-next guidance is non-mutating and favors evidence readers or the guarded lane helper, never direct Compose, cleanup, prune, restart, or direct pytest.
+
+PR-lane status image matching compares the trusted Compose `image:` tag and container `Config.Image` tag to the expected `lab/shellforgeai:pr<PR>-<shortsha>` tag; Docker-resolved `sha256:` IDs/digests do not force a deploy mismatch. Validation evidence selection prefers exact PR/commit pass-eligible packets over older setup-failure packets, and QA discovery includes exact PR/commit `operator-qa-bundle` directories.
