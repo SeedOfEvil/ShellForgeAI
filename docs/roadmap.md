@@ -1046,3 +1046,7 @@ This integration does not add cleanup execution, Docker prune, image removal, fi
 ## Validation evidence discoverability
 
 Docker01 PR-lane validation now writes a small PR/commit-scoped evidence packet that downstream QA can discover. The packet documents validation commands, status, checksums, and safety boundaries without adding cleanup or Docker mutation behavior.
+
+### Docker01 PR-lane resume/status evidence
+
+Docker01 PR-lane operations now include a read-only `--status` / `--resume-status` helper for interrupted runs. It inspects current source/container labels plus existing validation and QA bundle evidence, classifies the lane state, and prints a bounded safe next command without deploying, rebuilding, validating, running QA, restarting, cleaning, pruning, deleting, or changing product runtime behavior.

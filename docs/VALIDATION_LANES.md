@@ -965,3 +965,16 @@ python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --e
 ```
 
 `failed`, `setup_failure`, and `interrupted` evidence is never pass-eligible and always requires a rerun. This evidence writer is validation-only: it does not execute cleanup, Docker prune, image removal, file deletion, remediation, rollback, recovery, natural-language execution, `shell=True`, cloud apply/merge/push, or Docker/Compose mutation beyond the separately guarded deploy/recreate lane.
+
+## Docker01 PR-lane status/resume helper
+
+Use the Docker01 PR-lane status helper after an interrupted or aborted guarded lane run to inspect what is already true before rerunning anything:
+
+```bash
+python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status --json
+python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
+```
+
+`--status` is read-only. It checks the current source HEAD, existing Docker container labels/image/health/restart evidence, exact PR/commit validation evidence, and exact PR/commit QA bundle evidence. It emits `already_complete`, `needs_qa`, `needs_validation`, `needs_deploy`, `blocked`, `ready_to_continue`, or `unknown`, plus a bounded `safe_next.command`. The command is guidance only; it never auto-resumes the lane and never declares the PR mergeable. The reviewer still gives the final merge verdict.
+
+Status mode does not snapshot, deploy, write Compose, build images, restart containers, run validation, run QA, clean up, prune, delete files, remediate, roll back, recover, call a model/Codex, fetch from the network, install packages, merge, push, or use `shell=True`.

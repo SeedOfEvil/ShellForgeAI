@@ -2499,3 +2499,14 @@ python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --e
 ```
 
 The packet is evidence-only and includes status, manifest/checksums, command records, and a `logs/` directory. Non-pass statuses (`failed`, `setup_failure`, `interrupted`) are not merge evidence and require a rerun. The writer does not perform cleanup, Docker prune/image removal, file deletion, remediation, rollback/recovery, natural-language execution, `shell=True`, cloud apply/merge/push, or Docker/Compose mutation beyond the existing guarded deploy/recreate path.
+
+## Docker01 interrupted PR-lane status
+
+After an interrupted guarded Docker01 PR lane, inspect status before rerunning deploy, validation, or QA:
+
+```bash
+python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status --json
+python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
+```
+
+The helper is resume guidance only. It reads source/container/label/image status and existing validation/QA evidence, then suggests the safest next command. It does not deploy, build, write Compose, restart, run validation, run QA, clean up, prune, delete files, remediate, roll back, recover, or merge. `already_complete` means the expected evidence is present; the reviewer still gives the final merge verdict.

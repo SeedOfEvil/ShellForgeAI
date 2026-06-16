@@ -552,3 +552,14 @@ The bundle writes a bounded review directory with summary, strict JSON rollup, s
 ### Docker01 PR-lane validation evidence
 
 Docker01 PR-lane validation writes discoverable PR/commit-scoped evidence under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, including `validation-status.json`, `validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and `logs/`. Use `python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection` to find current evidence; stale PR/commit packets are ignored.
+
+### Docker01 PR-lane status/resume helper
+
+For interrupted Docker01 guarded PR-lane runs, use the read-only status helper before rerunning work:
+
+```bash
+python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status --json
+python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
+```
+
+It reports source/container/validation/QA evidence and a deterministic safe next command. It does not deploy, build, write Compose, restart, validate, run QA, clean up, prune, delete, or auto-declare mergeability.
