@@ -51,6 +51,8 @@ LANE_STATUS_MODE = "docker01_pr_lane_validation_status"
 LANE_MANIFEST_MODE = "docker01_pr_lane_validation_manifest"
 PR_LANE_STATUS_MODE = "docker01_pr_lane_status"
 QA_BUNDLE_ROOT_ENV = "SFAI_QA_BUNDLE_ROOT"
+COMPOSE_FILE_ENV = "SFAI_DOCKER01_COMPOSE_FILE"
+DEFAULT_COMPOSE_FILE = Path("/srv/compose/shellforgeai/compose.yml")
 DEFAULT_HOST = {"name": "lab-docker01", "target": "Docker01", "lxc_id": "106"}
 DEFAULT_REPO = "SeedOfEvil/ShellForgeAI"
 UNKNOWN = "unknown"
@@ -592,6 +594,7 @@ def _status_git_head(*, runner=None) -> str | None:
 def _status_container(*, runner=None) -> dict:
     state = {
         "container_image": None,
+        "container_image_id": None,
         "container_status": UNKNOWN,
         "container_health": UNKNOWN,
         "restart_count": None,
@@ -614,7 +617,11 @@ def _status_container(*, runner=None) -> dict:
     health = st.get("Health") or {}
     state.update(
         {
-            "container_image": cfg.get("Image") or item.get("Image"),
+            # Config.Image is the operator-visible tag requested by compose.
+            # Top-level Image is Docker's resolved image ID/digest and must not
+            # override the configured tag for PR-lane status matching.
+            "container_image": cfg.get("Image"),
+            "container_image_id": item.get("Image"),
             "container_status": st.get("Status") or UNKNOWN,
             "container_health": health.get("Status") or ("none" if st else UNKNOWN),
             "restart_count": item.get("RestartCount"),
@@ -625,46 +632,110 @@ def _status_container(*, runner=None) -> dict:
 
 
 def _expected_image(pr: str | int | None, commit: str | None) -> str:
-    short = (commit or "")[:12] or UNKNOWN
-    return f"shellforgeai:pr{pr}-{short}"
+    short = (commit or "")[:7] or UNKNOWN
+    return f"lab/shellforgeai:pr{pr}-{short}"
+
+
+def _is_digest(value: str | None) -> bool:
+    text = str(value or "").strip()
+    return text.startswith("sha256:") or text.startswith("sha256@")
+
+
+def _image_matches(value: str | None, *, pr: int, commit: str, expected: str) -> bool:
+    if not value or _is_digest(value):
+        return False
+    text = str(value)
+    short7 = commit[:7]
+    short12 = commit[:12]
+    return text == expected or (f"pr{pr}-" in text and (short7 in text or short12 in text))
+
+
+def _read_compose_image() -> str | None:
+    raw = os.environ.get(COMPOSE_FILE_ENV)
+    path = Path(raw) if raw else DEFAULT_COMPOSE_FILE
+    if not path.is_file():
+        return None
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("image:"):
+                return stripped.split(":", 1)[1].strip().strip("\"'") or None
+    except OSError:
+        return None
+    return None
 
 
 def _validation_latest(pr: int, commit: str) -> dict:
-    args = argparse.Namespace(
-        latest=True,
-        pr=pr,
-        commit=commit,
-        run_root=None,
-        include_legacy=False,
-        explain_selection=True,
-        run_dir=None,
-        heartbeat=None,
-        status_file=None,
-        manifest=None,
-        summary=None,
-        log=None,
-        json=True,
+    warnings: list[str] = []
+    candidates = validation_status_viewer.discover_candidates(
+        run_root=None, include_legacy=False, warnings=warnings
     )
-    return validation_status_viewer.generate_report(args)
+    exact: list[dict] = []
+    for candidate in candidates:
+        if not validation_status_viewer._pr_matches(candidate.get("pr"), pr):
+            continue
+        if not validation_status_viewer._commit_matches(candidate.get("commit"), commit):
+            continue
+        status_path = Path(candidate["path"]) / "validation-status.json"
+        if not status_path.is_file():
+            continue
+        try:
+            doc = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        doc["_candidate_path"] = candidate["path"]
+        doc["_candidate_mtime"] = candidate.get("mtime") or status_path.stat().st_mtime
+        exact.append(doc)
+    if not exact:
+        return {
+            "status": "not_found",
+            "classification": "not_found",
+            "pass_eligible": False,
+            "rerun_required": True,
+            "source": {"kind": "not_found", "run_dir": None},
+            "warnings": warnings,
+        }
+
+    def rank(doc: dict) -> tuple[int, float]:
+        if doc.get("pass_eligible") is True:
+            return (3, float(doc.get("_candidate_mtime") or 0))
+        if doc.get("classification") == "passed" or doc.get("status") == "passed":
+            return (2, float(doc.get("_candidate_mtime") or 0))
+        return (1, float(doc.get("_candidate_mtime") or 0))
+
+    selected = sorted(exact, key=rank, reverse=True)[0]
+    selected.setdefault("source", {})
+    selected["source"]["run_dir"] = selected.get("_candidate_path")
+    selected["source"]["kind"] = "run_dir"
+    selected["warnings"] = warnings
+    return selected
 
 
 def _qa_bundle_latest(pr: int, commit: str) -> dict:
     root = Path(os.environ.get(QA_BUNDLE_ROOT_ENV) or tempfile.gettempdir())
-    short = commit[:12]
     candidates = []
     pattern = re.compile(
-        rf"^sfai-pr{re.escape(str(pr))}-{re.escape(short)}-qa-bundle-(?P<stamp>.+)$"
+        r"^sfai-pr(?P<pr>\d+)-(?P<sha>[^-]+)-(?:(?:operator-)?qa-bundle)-(?P<stamp>.+)$"
     )
     if root.is_dir():
         for path in root.iterdir():
-            if path.is_dir() and pattern.match(path.name):
-                manifest_path = path / "bundle-manifest.json"
-                if manifest_path.is_file():
-                    try:
-                        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                    except (OSError, json.JSONDecodeError):
-                        manifest = {}
-                    candidates.append((path.name, path, manifest))
+            match = pattern.match(path.name)
+            if not path.is_dir() or not match:
+                continue
+            if str(match.group("pr")) != str(pr):
+                continue
+            if not validation_status_viewer._commit_matches(match.group("sha"), commit):
+                continue
+            qa_path = path / "qa-results.json"
+            manifest_path = path / "bundle-manifest.json"
+            doc_path = qa_path if qa_path.is_file() else manifest_path
+            if not doc_path.is_file():
+                continue
+            try:
+                doc = json.loads(doc_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                doc = {}
+            candidates.append((path.stat().st_mtime, path, doc))
     if not candidates:
         return {
             "available": False,
@@ -674,11 +745,17 @@ def _qa_bundle_latest(pr: int, commit: str) -> dict:
             "commands_failed": 0,
             "safety_assertions_failed": 0,
         }
-    _stamp, path, manifest = sorted(candidates)[-1]
-    summary = manifest.get("summary") or {}
+
+    def rank(candidate: tuple[float, Path, dict]) -> tuple[int, float]:
+        mtime, _path, doc = candidate
+        status = doc.get("status")
+        return (2 if status == "passed" else 1, mtime)
+
+    _mtime, path, doc = sorted(candidates, key=rank, reverse=True)[0]
+    summary = doc.get("summary") or {}
     return {
         "available": True,
-        "status": manifest.get("status") or UNKNOWN,
+        "status": doc.get("status") or UNKNOWN,
         "bundle_path": str(path),
         "commands_passed": int(summary.get("commands_passed") or 0),
         "commands_failed": int(summary.get("commands_failed") or 0),
@@ -715,7 +792,11 @@ def build_pr_lane_status(
     container = _status_container(runner=runner)
     labels = container.get("labels") or {}
     expected = _expected_image(pr, commit)
-    compose_image = labels.get("homelab.compose_image") or labels.get("com.docker.compose.image")
+    configured_compose_image = _read_compose_image()
+    label_compose_image = labels.get("homelab.compose_image") or labels.get(
+        "com.docker.compose.image"
+    )
+    compose_image = configured_compose_image or label_compose_image
     validation = _normalize_validation(_validation_latest(pr, commit))
     qa_bundle = _qa_bundle_latest(pr, commit)
     if not qa_bundle["available"]:
@@ -725,9 +806,13 @@ def build_pr_lane_status(
     pr_ok = str(labels.get("homelab.pr")) == str(pr)
     commit_ok = labels.get("homelab.commit") == commit
     image = container.get("container_image")
-    image_ok = (image == expected) or (short in str(image or "") and f"pr{pr}" in str(image or ""))
-    compose_ok = compose_image in (None, expected) or (
-        short in str(compose_image) and f"pr{pr}" in str(compose_image)
+    image_ok = _image_matches(image, pr=pr, commit=commit, expected=expected) or (
+        configured_compose_image is not None and image == configured_compose_image
+    )
+    compose_ok = (
+        configured_compose_image is None
+        and (label_compose_image is None or _is_digest(label_compose_image))
+        or _image_matches(compose_image, pr=pr, commit=commit, expected=expected)
     )
     running = container.get("container_status") == "running"
     healthy = container.get("container_health") in ("healthy", "none")
@@ -740,6 +825,7 @@ def build_pr_lane_status(
         "setup_failure",
     )
     blocked_container = running and not healthy or (restart_count is not None and restart_count > 0)
+    blocked_identity = running and not (pr_ok and commit_ok)
     checks = [
         _check("source_head_matches", source_ok, f"source HEAD is {source_head or UNKNOWN}"),
         _check(
@@ -761,7 +847,7 @@ def build_pr_lane_status(
         ),
         _check("qa_bundle_passed", qa_bundle["status"] == "passed", qa_bundle["status"]),
     ]
-    if blocked_container or blocked_validation:
+    if blocked_container or blocked_validation or blocked_identity:
         status = "blocked"
     elif not deploy_match:
         status = "needs_deploy"
@@ -789,6 +875,7 @@ def build_pr_lane_status(
             "source_head": source_head,
             "compose_image": compose_image,
             "container_image": image,
+            "container_image_id": container.get("container_image_id"),
             "container_status": container.get("container_status"),
             "container_health": container.get("container_health"),
             "restart_count": restart_count,

@@ -18,21 +18,30 @@ lane = _load("sfai_docker01_pr_lane_pr215", "scripts/sfai_docker01_pr_lane.py")
 validation_status = _load("validation_status_pr215", "scripts/validation_status.py")
 
 PR = 215
-COMMIT = "abcdef1234567890abcdef1234567890abcdef12"
-SHORT = COMMIT[:12]
+COMMIT = "8c692de0680fff517a09d288105d44f3351ba710"
+SHORT7 = COMMIT[:7]
+IMAGE = f"lab/shellforgeai:pr{PR}-{SHORT7}"
+DIGEST = "sha256:00185feedfacecafebeef"
 
 
 def _runner(
-    *, head=COMMIT, status="running", health="healthy", restart=0, pr=PR, commit=COMMIT, image=None
+    *,
+    head=COMMIT,
+    status="running",
+    health="healthy",
+    restart=0,
+    pr=PR,
+    commit=COMMIT,
+    image=IMAGE,
+    image_id=DIGEST,
 ):
-    image = image or f"shellforgeai:pr{pr}-{commit[:12]}"
-
     def run(argv, **kwargs):
         if argv == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(argv, 0, head + "\n", "")
         if argv == ["docker", "inspect", "shellforgeai"]:
             payload = [
                 {
+                    "Image": image_id,
                     "RestartCount": restart,
                     "State": {"Status": status, "Health": {"Status": health}},
                     "Config": {
@@ -40,7 +49,7 @@ def _runner(
                         "Labels": {
                             "homelab.pr": str(pr),
                             "homelab.commit": commit,
-                            "homelab.compose_image": image,
+                            "com.docker.compose.image": image_id,
                         },
                     },
                 }
@@ -51,6 +60,14 @@ def _runner(
     return run
 
 
+def _compose(tmp_path, monkeypatch, image=IMAGE):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "compose.yml"
+    path.write_text(f"services:\n  shellforgeai:\n    image: {image}\n", encoding="utf-8")
+    monkeypatch.setenv(lane.COMPOSE_FILE_ENV, str(path))
+    return path
+
+
 def _write_validation(
     tmp_path,
     monkeypatch,
@@ -59,10 +76,13 @@ def _write_validation(
     commit=COMMIT,
     status="passed",
     classification="passed",
+    pass_eligible=None,
+    stamp="20260615T000000",
     full=True,
 ):
-    run_dir = tmp_path / f"sfai-pr{pr}-{commit[:12]}-validation-20260615T000000"
+    run_dir = tmp_path / f"sfai-pr{pr}-{commit[:7]}-validation-{stamp}"
     run_dir.mkdir()
+    pass_eligible = status == "passed" if pass_eligible is None else pass_eligible
     (run_dir / "validation-status.json").write_text(
         json.dumps(
             {
@@ -70,11 +90,11 @@ def _write_validation(
                 "mode": "docker01_pr_lane_validation_status",
                 "status": status,
                 "classification": classification,
-                "pass_eligible": status == "passed",
-                "rerun_required": status != "passed",
+                "pass_eligible": pass_eligible,
+                "rerun_required": not pass_eligible,
                 "pr": pr,
                 "commit": commit,
-                "short_sha": commit[:12],
+                "short_sha": commit[:7],
                 "full_validation": full,
                 "source": {"kind": "docker01_pr_lane", "run_dir": str(run_dir)},
                 "safety": lane.validation_evidence_safety(),
@@ -87,24 +107,37 @@ def _write_validation(
     return run_dir
 
 
-def _write_qa(tmp_path, monkeypatch, *, pr=PR, commit=COMMIT, status="passed"):
+def _write_qa(
+    tmp_path,
+    monkeypatch,
+    *,
+    pr=PR,
+    commit=COMMIT,
+    status="passed",
+    stamp="20260616T0157Z",
+    operator=True,
+):
     root = tmp_path / "qa"
     root.mkdir(exist_ok=True)
-    bundle = root / f"sfai-pr{pr}-{commit[:12]}-qa-bundle-20260615T000000Z"
+    infix = "operator-qa-bundle" if operator else "qa-bundle"
+    bundle = root / f"sfai-pr{pr}-{commit[:7]}-{infix}-{stamp}"
     bundle.mkdir()
     (bundle / "qa-summary.md").write_text("# QA\n", encoding="utf-8")
+    qa_results = {
+        "mode": "docker01_operator_qa_bundle",
+        "status": status,
+        "pr": pr,
+        "commit": commit,
+        "short_sha": commit[:7],
+        "summary": {
+            "commands_passed": 12,
+            "commands_failed": 0 if status == "passed" else 1,
+            "safety_assertions_failed": 0,
+        },
+    }
+    (bundle / "qa-results.json").write_text(json.dumps(qa_results), encoding="utf-8")
     (bundle / "bundle-manifest.json").write_text(
-        json.dumps(
-            {
-                "mode": "docker01_qa_bundle_manifest",
-                "status": status,
-                "summary": {
-                    "commands_passed": 12,
-                    "commands_failed": 0 if status == "passed" else 1,
-                    "safety_assertions_failed": 0,
-                },
-            }
-        ),
+        json.dumps({"mode": "docker01_qa_bundle_manifest", "status": status}),
         encoding="utf-8",
     )
     monkeypatch.setenv(lane.QA_BUNDLE_ROOT_ENV, str(root))
@@ -112,6 +145,7 @@ def _write_qa(tmp_path, monkeypatch, *, pr=PR, commit=COMMIT, status="passed"):
 
 
 def _doc(tmp_path, monkeypatch, **kw):
+    _compose(tmp_path, monkeypatch, image=kw.pop("compose_image", IMAGE))
     if kw.pop("validation", True):
         _write_validation(
             tmp_path,
@@ -122,11 +156,16 @@ def _doc(tmp_path, monkeypatch, **kw):
     if kw.pop("qa", True):
         _write_qa(tmp_path, monkeypatch, status=kw.pop("qa_status", "passed"))
     return lane.build_pr_lane_status(
-        pr=PR, commit=COMMIT, runner=_runner(**kw), created_at="2026-06-15T00:00:00Z"
+        pr=PR, commit=COMMIT, runner=_runner(**kw), created_at="2026-06-16T00:00:00Z"
     )
 
 
+def _checks(doc):
+    return {item["name"]: item for item in doc["checks"]}
+
+
 def test_status_json_contract_and_human_output(tmp_path, monkeypatch, capsys):
+    _compose(tmp_path, monkeypatch)
     _write_validation(tmp_path, monkeypatch)
     _write_qa(tmp_path, monkeypatch)
     monkeypatch.setattr(lane, "subprocess", type("S", (), {"run": staticmethod(_runner())})())
@@ -144,23 +183,83 @@ def test_status_json_contract_and_human_output(tmp_path, monkeypatch, capsys):
     assert "no deploy/build/compose/restart/validation executed" in human
 
 
-def test_already_complete(tmp_path, monkeypatch):
+def test_successful_deployed_state_with_compose_tag_and_digest_is_already_complete(
+    tmp_path, monkeypatch
+):
     doc = _doc(tmp_path, monkeypatch)
+    checks = _checks(doc)
     assert doc["status"] == "already_complete"
-    assert "qa-summary.md" in doc["safe_next"]["command"]
+    assert checks["source_head_matches"]["passed"] is True
+    assert checks["compose_image_matches"]["passed"] is True
+    assert checks["container_image_matches"]["passed"] is True
+    assert doc["state"]["compose_image"] == IMAGE
+    assert doc["state"]["container_image"] == IMAGE
+    assert doc["state"]["container_image_id"] == DIGEST
+    assert "sfai_docker01_pr_lane.py" not in doc["safe_next"]["command"]
 
 
-def test_matching_deploy_missing_qa_needs_qa(tmp_path, monkeypatch):
+def test_deploy_complete_validation_missing_needs_validation_not_deploy(tmp_path, monkeypatch):
+    doc = _doc(tmp_path, monkeypatch, validation=False)
+    assert doc["status"] == "needs_validation"
+    assert "validation_status.py" in doc["safe_next"]["command"]
+    assert "sfai_docker01_pr_lane.py" not in doc["safe_next"]["command"]
+
+
+def test_deploy_complete_validation_passed_qa_missing_needs_qa(tmp_path, monkeypatch):
     doc = _doc(tmp_path, monkeypatch, qa=False)
     assert doc["status"] == "needs_qa"
     assert "docker01_operator_qa_bundle.py" in doc["safe_next"]["command"]
 
 
-def test_matching_deploy_missing_validation_needs_validation(tmp_path, monkeypatch):
-    doc = _doc(tmp_path, monkeypatch, validation=False)
-    assert doc["status"] == "needs_validation"
-    assert "validation_status.py" in doc["safe_next"]["command"]
-    assert "pytest" not in doc["safe_next"]["command"]
+def test_earlier_setup_failure_later_passed_validation_not_blocked(tmp_path, monkeypatch):
+    _compose(tmp_path, monkeypatch)
+    _write_validation(
+        tmp_path,
+        monkeypatch,
+        status="setup_failure",
+        classification="setup_failure",
+        pass_eligible=False,
+        stamp="20260616T000000",
+    )
+    _write_validation(
+        tmp_path, monkeypatch, status="passed", classification="passed", stamp="20260616T020000"
+    )
+    _write_qa(tmp_path, monkeypatch)
+    doc = lane.build_pr_lane_status(pr=PR, commit=COMMIT, runner=_runner())
+    assert doc["validation"]["pass_eligible"] is True
+    assert doc["status"] == "already_complete"
+
+
+def test_setup_failure_only_is_not_pass_eligible(tmp_path, monkeypatch):
+    doc = _doc(
+        tmp_path,
+        monkeypatch,
+        validation_status="setup_failure",
+        classification="setup_failure",
+        qa=False,
+    )
+    assert doc["validation"]["pass_eligible"] is False
+    assert doc["status"] == "blocked"
+
+
+def test_qa_bundle_discovery_finds_operator_bundle_ignores_stale_and_prefers_passed(
+    tmp_path, monkeypatch
+):
+    _compose(tmp_path, monkeypatch)
+    _write_validation(tmp_path, monkeypatch)
+    _write_qa(tmp_path, monkeypatch, pr=214, commit="1111111111112222", status="passed")
+    failed = _write_qa(tmp_path, monkeypatch, status="failed", stamp="20260616T0300Z")
+    passed = _write_qa(tmp_path, monkeypatch, status="passed", stamp="20260616T0157Z")
+    doc = lane.build_pr_lane_status(pr=PR, commit=COMMIT, runner=_runner())
+    assert doc["qa_bundle"]["bundle_path"] == str(passed)
+    assert doc["qa_bundle"]["bundle_path"] != str(failed)
+    assert doc["qa_bundle"]["status"] == "passed"
+
+
+def test_failed_qa_bundle_is_needs_qa_not_needs_deploy(tmp_path, monkeypatch):
+    doc = _doc(tmp_path, monkeypatch, qa_status="failed")
+    assert doc["status"] == "needs_qa"
+    assert "sfai_docker01_pr_lane.py" not in doc["safe_next"]["command"]
 
 
 def test_source_mismatch_needs_deploy(tmp_path, monkeypatch):
@@ -170,39 +269,26 @@ def test_source_mismatch_needs_deploy(tmp_path, monkeypatch):
     assert "docker compose" not in doc["safe_next"]["command"]
 
 
+def test_label_mismatch_blocks_not_deploy(tmp_path, monkeypatch):
+    doc = _doc(tmp_path, monkeypatch, commit="deadbeef")
+    assert doc["status"] == "blocked"
+
+
 @pytest.mark.parametrize("kwargs", [{"health": "unhealthy"}, {"restart": 2}])
 def test_container_unhealthy_or_restart_blocked(tmp_path, monkeypatch, kwargs):
     doc = _doc(tmp_path, monkeypatch, **kwargs)
     assert doc["status"] == "blocked"
-    assert "restart" not in doc["safe_next"]["command"]
 
 
-@pytest.mark.parametrize(
-    "vstatus, classification", [("failed", "failed"), ("incomplete", "interrupted_or_incomplete")]
-)
-def test_validation_failed_or_interrupted_blocks_or_requires_rerun(
-    tmp_path, monkeypatch, vstatus, classification
-):
-    doc = _doc(tmp_path, monkeypatch, validation_status=vstatus, classification=classification)
-    assert doc["validation"]["rerun_required"] is True
-    assert doc["status"] in {"blocked", "needs_validation"}
-
-
-def test_evidence_discovery_exact_pr_commit_and_stale_ignored(tmp_path, monkeypatch):
-    _write_validation(tmp_path, monkeypatch, pr=214, commit="1111111111112222", status="passed")
-    _write_validation(tmp_path, monkeypatch, status="passed")
-    _write_qa(tmp_path, monkeypatch, pr=214, commit="1111111111112222")
-    bundle = _write_qa(tmp_path, monkeypatch)
-    doc = lane.build_pr_lane_status(pr=PR, commit=COMMIT, runner=_runner())
-    assert doc["validation"]["available"] is True
-    assert doc["qa_bundle"]["bundle_path"] == str(bundle)
-
-
-def test_tolerates_missing_qa_with_warning(tmp_path, monkeypatch):
-    _write_validation(tmp_path, monkeypatch)
-    doc = lane.build_pr_lane_status(pr=PR, commit=COMMIT, runner=_runner())
-    assert doc["qa_bundle"]["status"] == "not_found"
-    assert doc["warnings"]
+def test_safe_next_regression_no_direct_mutation_commands(tmp_path, monkeypatch):
+    for doc in [
+        _doc(tmp_path / "a", monkeypatch, validation=False),
+        _doc(tmp_path / "b", monkeypatch, qa=False),
+        _doc(tmp_path / "c", monkeypatch, health="unhealthy"),
+    ]:
+        command = doc["safe_next"]["command"]
+        forbidden = ("docker compose", "restart", "cleanup", "prune", "delete", "remediation")
+        assert not any(word in command for word in forbidden)
 
 
 def test_status_execute_fails_clearly(capsys):

@@ -1050,3 +1050,5 @@ Docker01 PR-lane validation now writes a small PR/commit-scoped evidence packet 
 ### Docker01 PR-lane resume/status evidence
 
 Docker01 PR-lane operations now include a read-only `--status` / `--resume-status` helper for interrupted runs. It inspects current source/container labels plus existing validation and QA bundle evidence, classifies the lane state, and prints a bounded safe next command without deploying, rebuilding, validating, running QA, restarting, cleaning, pruning, deleting, or changing product runtime behavior.
+
+The status helper now treats Docker image digests as runtime metadata rather than configured image tags, prefers later pass-eligible exact PR/commit validation evidence over older setup failures, and discovers exact PR/commit operator QA bundles.

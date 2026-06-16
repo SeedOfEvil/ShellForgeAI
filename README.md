@@ -563,3 +563,5 @@ python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
 ```
 
 It reports source/container/validation/QA evidence and a deterministic safe next command. It does not deploy, build, write Compose, restart, validate, run QA, clean up, prune, delete, or auto-declare mergeability.
+
+Status image checks use the configured Compose `image:` tag and container `Config.Image`; Docker-resolved `sha256:` digests do not trigger a false deploy mismatch. The helper prefers later exact PR/commit pass-eligible validation evidence over older setup failures and discovers exact operator QA bundle directories before suggesting another QA run.

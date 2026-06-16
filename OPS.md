@@ -2510,3 +2510,5 @@ python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
 ```
 
 The helper is resume guidance only. It reads source/container/label/image status and existing validation/QA evidence, then suggests the safest next command. It does not deploy, build, write Compose, restart, run validation, run QA, clean up, prune, delete files, remediate, roll back, recover, or merge. `already_complete` means the expected evidence is present; the reviewer still gives the final merge verdict.
+
+Status matching uses the configured Compose image tag and container `Config.Image`, not Docker's resolved image digest. If an earlier setup-failure packet and a later successful exact PR/commit validation packet both exist, the later pass-eligible validation evidence is used. Exact PR/commit operator QA bundles are discoverable before suggesting another QA run.
