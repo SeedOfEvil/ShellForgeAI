@@ -574,7 +574,8 @@ Operators can consolidate existing Docker01 evidence for an exact PR/commit with
 
 ```bash
 python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json
-python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --comment
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness --comment
 ```
 
-The helper is read-only reviewer evidence (`pass_candidate`, `hold_candidate`, or `unknown`) and does not deploy, build, validate, run QA, clean, prune, delete, restart, mutate Docker/Compose, or replace SeedOfEvil's final merge judgment.
+`--comment` renders a concise paste-ready Markdown review comment from the same evidence. With `--out --comment`, the packet also includes `merge-comment.md`. It does not post to GitHub, approve, merge, or replace reviewer judgment. Status wording is `pass_candidate` → `PASS / mergeable`, `hold_candidate` → `HOLD / needs follow-up`, and `unknown` → `NEEDS EVIDENCE / cannot determine`. The helper is read-only reviewer evidence and does not deploy, build, validate, run QA, clean, prune, delete, restart, mutate Docker/Compose, or replace SeedOfEvil's final merge judgment; SeedOfEvil remains final merge owner.

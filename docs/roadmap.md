@@ -120,6 +120,7 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
 
 ## Validation discipline milestones
 
+- Completed: Docker01 merge-readiness comment drafting. `scripts/docker01_merge_readiness.py --comment` renders the existing merge-readiness evidence as a concise paste-ready Markdown review comment, and `--out --comment` also writes `merge-comment.md` in the report directory. Status wording maps `pass_candidate` to `PASS / mergeable`, `hold_candidate` to `HOLD / needs follow-up`, and `unknown` to `NEEDS EVIDENCE / cannot determine`. The renderer is evidence-only: no GitHub post/comment/approval/merge, no validation or QA execution, no Docker/Compose mutation, no cleanup/prune/delete/restart, no model/Codex/network/package install, and SeedOfEvil remains final merge owner.
 - Completed: PR165 mainline/scheduled validation baseline helper.
   `scripts/run_mainline_validation.py` creates validation-only baseline
   manifests, summaries, logs, and duration reports/history for the current
