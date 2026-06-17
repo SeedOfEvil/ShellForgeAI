@@ -22,7 +22,11 @@ COMPARE_MODE = "docker01_hygiene_report_compare"
 REVIEW_BUNDLE_MODE = "docker01_hygiene_review_bundle"
 DEFAULT_DISCOVERY_ROOT = Path("/tmp")
 DEFAULT_REVIEW_BUNDLE_PREFIX = "sfai-docker01-hygiene-review-bundle"
-REPORT_DIR_PATTERNS = ("sfai-docker01-hygiene-report-*", "sfai-pr*-hygiene-*")
+REPORT_DIR_PATTERNS = (
+    "sfai-docker01-hygiene-report-*",
+    "sfai-docker01-hygiene-review-bundle-*",
+    "sfai-pr*-hygiene-*",
+)
 MAX_CANDIDATE_CLEANUP_ITEMS = 1_000
 MAX_CANDIDATE_ITEM_LENGTH = 500
 MAX_WARNINGS = 100
@@ -30,6 +34,8 @@ MAX_JSON_VALIDATE_BYTES = 5_000_000
 MAX_MARKDOWN_VALIDATE_BYTES = 2_000_000
 MAX_COMMANDS_RUN_BYTES = 2_000_000
 MAX_RAW_VALIDATE_BYTES = 500_000
+MAX_IGNORED_CANDIDATES = 20
+IGNORED_MISSING_REQUIRED_REASON = "missing_required_hygiene_report_files"
 REQUIRED_REPORT_FILES = (
     "hygiene-summary.md",
     "hygiene-report.json",
@@ -569,18 +575,44 @@ def load_report_summary(report_dir: Path) -> dict[str, Any]:
 
 
 def discover_report_dirs(root: Path) -> list[Path]:
+    return discover_hygiene_candidates(root)[0]
+
+
+def _ignored_candidate(path: Path, reason: str) -> dict[str, str]:
+    return {"path": str(path.resolve()), "reason": reason}
+
+
+def discover_hygiene_candidates(root: Path) -> tuple[list[Path], list[dict[str, str]]]:
     found: dict[str, Path] = {}
+    ignored: dict[str, dict[str, str]] = {}
     for pattern in REPORT_DIR_PATTERNS:
         for path in root.glob(pattern):
-            if path.is_dir():
-                found[str(path.resolve())] = path.resolve()
-    return list(found.values())
+            if not path.is_dir():
+                continue
+            resolved = path.resolve()
+            required_ok, _missing = _required_shape(resolved)
+            report_file = resolved / "hygiene-report.json"
+            if required_ok:
+                found[str(resolved)] = resolved
+                continue
+            if report_file.is_file():
+                report, err = _parse_json_file(report_file, MAX_JSON_VALIDATE_BYTES)
+                if err or not isinstance(report, dict):
+                    found[str(resolved)] = resolved
+                    continue
+            ignored[str(resolved)] = _ignored_candidate(resolved, IGNORED_MISSING_REQUIRED_REASON)
+    return list(found.values()), list(ignored.values())
+
+
+def _ignored_warning(count: int) -> str:
+    return f"ignored {count} stale/non-report hygiene candidate" + ("s" if count != 1 else "")
 
 
 def build_history(root: Path) -> dict[str, Any]:
     warnings: list[str] = []
+    ignored_candidates: list[dict[str, str]] = []
     try:
-        dirs = discover_report_dirs(root)
+        dirs, ignored_candidates = discover_hygiene_candidates(root)
     except OSError as exc:
         warnings.append(f"unable to read root {root}: {exc}")
         dirs = []
@@ -592,7 +624,12 @@ def build_history(root: Path) -> dict[str, Any]:
         for r in reports
         if r.get("warnings")
     )
-    status = "empty" if not reports else "partial" if warnings else "ok"
+    if ignored_candidates:
+        warnings.append(_ignored_warning(len(ignored_candidates)))
+    if not valid:
+        status = "partial" if reports and warnings else "empty"
+    else:
+        status = "partial" if any(r.get("warnings") for r in reports) else "ok"
     return {
         "schema_version": 1,
         "mode": HISTORY_MODE,
@@ -600,10 +637,14 @@ def build_history(root: Path) -> dict[str, Any]:
         "root": str(root),
         "read_only": True,
         "mutation_performed": False,
+        "valid_reports_found": len(valid),
+        "ignored_candidates_count": len(ignored_candidates),
+        "ignored_candidates": ignored_candidates[:MAX_IGNORED_CANDIDATES],
         "reports": [{k: v for k, v in r.items() if k != "dir_mtime"} for r in reports],
         "summary": {
             "reports_total": len(reports),
             "valid_reports_total": len(valid),
+            "ignored_candidates_total": len(ignored_candidates),
             "latest_report_dir": valid[0]["report_dir"] if valid else None,
             "oldest_report_dir": valid[-1]["report_dir"] if valid else None,
         },
@@ -723,10 +764,19 @@ def build_compare_latest(root: Path) -> dict[str, Any]:
             "notable_changes": [],
             "safety": safety_block(),
             "first_safe_command": "python scripts/docker01_hygiene_report.py --history --json",
+            "ignored_candidates_count": history.get("ignored_candidates_count", 0),
+            "ignored_candidates": history.get("ignored_candidates", []),
             "warnings": ["fewer than two valid Docker01 hygiene reports found"]
             + history.get("warnings", []),
         }
-    return build_compare(Path(valid[1]["report_dir"]), Path(valid[0]["report_dir"]))
+    payload = build_compare(Path(valid[1]["report_dir"]), Path(valid[0]["report_dir"]))
+    payload["ignored_candidates_count"] = history.get("ignored_candidates_count", 0)
+    payload["ignored_candidates"] = history.get("ignored_candidates", [])
+    if history.get("ignored_candidates_count"):
+        payload["warnings"] = (
+            payload.get("warnings", []) + [_ignored_warning(history["ignored_candidates_count"])]
+        )[:MAX_WARNINGS]
+    return payload
 
 
 def render_history(payload: dict[str, Any]) -> str:
@@ -1057,9 +1107,14 @@ def build_review_bundle_latest(root: Path, out: Path | None = None) -> dict[str,
             "mutation_performed": False,
             "error": "no valid Docker01 hygiene reports found",
             "safety": safety_block(),
+            "ignored_candidates_count": history.get("ignored_candidates_count", 0),
+            "ignored_candidates": history.get("ignored_candidates", []),
             "warnings": history.get("warnings", []),
         }
-    return build_review_bundle(Path(valid[0]["report_dir"]), out=out, root=root)
+    payload = build_review_bundle(Path(valid[0]["report_dir"]), out=out, root=root)
+    payload["ignored_candidates_count"] = history.get("ignored_candidates_count", 0)
+    payload["ignored_candidates"] = history.get("ignored_candidates", [])
+    return payload
 
 
 def default_report_path() -> Path:
