@@ -61,6 +61,9 @@ UNSAFE_CLI_OPTIONS = {
     "--fix",
     "--rm",
     "--rmi",
+    "--post-comment",
+    "--approve",
+    "--merge",
 }
 
 
@@ -492,13 +495,203 @@ def render_markdown(report: dict[str, Any]) -> str:
     )
 
 
-def write_out(out: Path, report: dict[str, Any], raw: dict[str, Any]) -> None:
+def _bool_word(value: Any) -> str:
+    return "true" if bool(value) else "false"
+
+
+def _bullet_lines(items: list[Any] | tuple[Any, ...] | None, *, default: str) -> list[str]:
+    values = [str(item) for item in (items or []) if str(item)]
+    if not values:
+        values = [default]
+    return [f"- {item}" for item in values]
+
+
+def ignored_hygiene_note(report: dict[str, Any]) -> str:
+    evidence = report.get("evidence") if isinstance(report.get("evidence"), dict) else {}
+    hygiene = evidence.get("hygiene") if isinstance(evidence.get("hygiene"), dict) else {}
+    candidates = hygiene.get("ignored_stale_candidates") or hygiene.get("ignored_candidates")
+    if isinstance(candidates, list):
+        return str(len(candidates))
+    if isinstance(candidates, int):
+        return str(candidates)
+    warnings = report.get("warnings") if isinstance(report.get("warnings"), list) else []
+    hygiene_warnings = hygiene.get("warnings") if isinstance(hygiene.get("warnings"), list) else []
+    ignored = [
+        w
+        for w in [*warnings, *hygiene_warnings]
+        if "ignored" in str(w).lower() or "stale" in str(w).lower()
+    ]
+    if ignored:
+        return f"present ({len(ignored)} warning{'s' if len(ignored) != 1 else ''})"
+    return "none"
+
+
+def missing_evidence(report: dict[str, Any]) -> list[str]:
+    inputs = report.get("inputs") if isinstance(report.get("inputs"), dict) else {}
+    missing = []
+    labels = {
+        "pr_lane_status_available": "Docker01 source/compose/container evidence",
+        "validation_status_available": "validation status evidence",
+        "qa_bundle_available": "operator QA bundle evidence",
+        "hygiene_available": "hygiene evidence",
+    }
+    for key, label in labels.items():
+        if inputs.get(key) is not True:
+            missing.append(label)
+    return missing
+
+
+def safe_next_lines(report: dict[str, Any]) -> list[str]:
+    status = report.get("status")
+    if status == "hold_candidate":
+        return [
+            "review and resolve the blocking evidence above",
+            "rerun the existing evidence/report helper after follow-up",
+        ]
+    return [
+        "collect the missing Docker01 evidence for this exact PR/commit",
+        "rerun the merge-readiness report helper",
+    ]
+
+
+def render_comment(report: dict[str, Any]) -> str:
+    """Render a concise paste-ready evidence comment; performs no external action."""
+    status = report.get("status", "unknown")
+    pr = report.get("pr", "unknown")
+    short = report.get("short_sha") or short_sha(str(report.get("commit", "")))
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    evidence = report.get("evidence") if isinstance(report.get("evidence"), dict) else {}
+    validation = evidence.get("validation") if isinstance(evidence.get("validation"), dict) else {}
+    hygiene = evidence.get("hygiene") if isinstance(evidence.get("hygiene"), dict) else {}
+    warnings = (
+        [str(w) for w in report.get("warnings", [])]
+        if isinstance(report.get("warnings"), list)
+        else []
+    )
+
+    safety = [
+        "no cleanup execution",
+        "no Docker prune",
+        "no Docker image removal",
+        "no file deletion",
+        "no Docker/Compose mutation by this report",
+        "no restart by this report",
+        "no remediation/rollback/recovery execution",
+        "no natural-language execution",
+        "no shell=True",
+        "no cloud apply/merge/push",
+    ]
+
+    if status == "pass_candidate":
+        lines = [
+            "Verdict: PASS / mergeable.",
+            "",
+            (
+                f"PR{pr} is a pass candidate based on Docker01 evidence for commit `{short}`. "
+                "SeedOfEvil remains final merge owner."
+            ),
+            "",
+            "Merge signals:",
+            f"- Docker01 source/compose/container evidence matches commit `{short}`",
+            (
+                "- Container is running healthy with "
+                f"restart={0 if summary.get('restart_count_acceptable') else 'unknown'}"
+            ),
+            (
+                f"- Validation status is {validation.get('status', 'unknown')} and "
+                f"pass_eligible={_bool_word(validation.get('pass_eligible'))}"
+            ),
+            f"- Operator QA bundle {'passed' if summary.get('qa_bundle_passed') else 'unknown'}",
+            (
+                "- QA safety assertions "
+                f"{'passed' if summary.get('safety_assertions_passed') else 'unknown'}"
+            ),
+            "- Merge-readiness report returned `pass_candidate`",
+            "- Blocking reasons: none",
+            "",
+            "Evidence notes:",
+            f"- Full pytest: {_bool_word(summary.get('full_pytest_run'))}",
+            (
+                "- Duplicate full pytest detected: "
+                f"{_bool_word(summary.get('duplicate_full_pytest_detected'))}"
+            ),
+            f"- Hygiene history: {hygiene.get('history_status', 'unknown')}",
+            f"- Hygiene compare-latest: {hygiene.get('compare_latest_status', 'unknown')}",
+            f"- Ignored stale hygiene candidates: {ignored_hygiene_note(report)}",
+        ]
+        if warnings:
+            lines.extend(
+                ["- Warnings/ignored hygiene candidates:", *[f"  - {w}" for w in warnings]]
+            )
+        lines.extend(
+            [
+                "",
+                "Safety posture:",
+                *[f"- {item}" for item in safety],
+                "",
+                "Approved for merge by evidence review.",
+            ]
+        )
+        return "\n".join(lines) + "\n"
+
+    if status == "hold_candidate":
+        lines = [
+            "Verdict: HOLD / needs follow-up.",
+            "",
+            (
+                f"PR{pr} is not merge-ready based on Docker01 evidence for commit `{short}`. "
+                "SeedOfEvil remains final merge owner."
+            ),
+            "",
+            "Blocking reasons:",
+            *_bullet_lines(
+                report.get("blocking_reasons"), default="merge-readiness evidence did not pass"
+            ),
+        ]
+    else:
+        lines = [
+            "Verdict: NEEDS EVIDENCE / cannot determine.",
+            "",
+            (
+                f"PR{pr} does not have enough Docker01 evidence for a merge-readiness "
+                f"verdict for commit `{short}`. SeedOfEvil remains final merge owner."
+            ),
+            "",
+            "Missing/unknown evidence:",
+            *_bullet_lines(
+                missing_evidence(report),
+                default="merge-readiness evidence is incomplete or unknown",
+            ),
+        ]
+    if warnings:
+        lines.extend(["", "Warnings/ignored hygiene candidates:", *[f"- {w}" for w in warnings]])
+    lines.extend(
+        [
+            "",
+            "Safe next:",
+            *[f"- {x}" for x in safe_next_lines(report)],
+            "",
+            "Safety:",
+            "- evidence-only comment draft",
+            "- no mutation performed",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def write_out(
+    out: Path, report: dict[str, Any], raw: dict[str, Any], *, comment: str | None = None
+) -> None:
     out.mkdir(parents=True, exist_ok=True)
     files = {
         "merge-readiness.json": strict_json(report) + "\n",
         "merge-readiness-summary.md": render_markdown(report),
+        **({"merge-comment.md": comment} if comment is not None else {}),
         **{name: strict_json(data) + "\n" for name, data in raw.items()},
     }
+    if comment is not None:
+        report["comment_file"] = "merge-comment.md"
+        files["merge-readiness.json"] = strict_json(report) + "\n"
     for name, text in files.items():
         (out / name).write_text(text, encoding="utf-8")
     manifest = {
@@ -519,8 +712,10 @@ def write_out(out: Path, report: dict[str, Any], raw: dict[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Read-only Docker01 merge-readiness evidence report.")
-    p.add_argument("--pr", type=int, required=True)
-    p.add_argument("--commit", required=True)
+    p.add_argument("--pr", type=int)
+    p.add_argument("--commit")
+    p.add_argument("--from-json")
+    p.add_argument("--comment", action="store_true")
     p.add_argument("--json", action="store_true")
     p.add_argument("--out")
     return p
@@ -531,10 +726,22 @@ def main(argv: list[str] | None = None) -> int:
     if any(opt in argv for opt in UNSAFE_CLI_OPTIONS):
         raise SystemExit(f"unsupported mutation option for {SCRIPT}")
     args = build_parser().parse_args(argv)
-    report, raw = build_report(args.pr, args.commit)
+    if args.comment and args.json:
+        raise SystemExit("--comment cannot be combined with --json")
+    if args.from_json:
+        report = bounded_json(Path(args.from_json))
+        raw = {}
+    else:
+        if args.pr is None or not args.commit:
+            raise SystemExit("--pr and --commit are required unless --from-json is used")
+        report, raw = build_report(args.pr, args.commit)
+    comment = render_comment(report) if args.comment else None
     if args.out:
-        write_out(Path(args.out), report, raw)
-    print(strict_json(report) if args.json else render_markdown(report), end="\n")
+        write_out(Path(args.out), report, raw, comment=comment)
+    if args.comment:
+        print(comment, end="")
+    else:
+        print(strict_json(report) if args.json else render_markdown(report), end="\n")
     return 0
 
 

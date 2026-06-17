@@ -2519,10 +2519,11 @@ Before merge review, produce a read-only Docker01 evidence packet for the exact 
 
 ```bash
 python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json
-python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness
-cat /tmp/sfai-pr<PR>-<short>-merge-readiness/merge-readiness-summary.md
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --comment
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness --comment
+cat /tmp/sfai-pr<PR>-<short>-merge-readiness/merge-comment.md
 ```
 
-The output directory contains `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, `raw-validation-status.json`, `raw-pr-lane-status.json`, and `raw-qa-bundle-summary.json`. Missing raw evidence is recorded as `not_available`; huge logs and arbitrary filesystem listings are not copied.
+The output directory contains `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, `raw-validation-status.json`, `raw-pr-lane-status.json`, and `raw-qa-bundle-summary.json`; with `--comment`, it also contains `merge-comment.md`. Missing raw evidence is recorded as `not_available`; huge logs and arbitrary filesystem listings are not copied.
 
-The helper is evidence-only. It does not deploy, build, validate, run QA, restart, clean, prune, delete files, mutate Docker/Compose, remediate, roll back, recover, call models/Codex, install packages, call the network, merge, push, or use `shell=True`. `pass_candidate`, `hold_candidate`, and `unknown` are review aids, not approval. SeedOfEvil remains final merge owner.
+The helper is evidence-only. `--comment` prints paste-ready Markdown only and does not post to GitHub, approve, merge, or replace reviewer judgment. It does not deploy, build, validate, run QA, restart, clean, prune, delete files, mutate Docker/Compose, remediate, roll back, recover, call models/Codex, install packages, call the network, merge, push, or use `shell=True`. `pass_candidate`, `hold_candidate`, and `unknown` are review aids rendered as `PASS / mergeable`, `HOLD / needs follow-up`, and `NEEDS EVIDENCE / cannot determine`, not approval. SeedOfEvil remains final merge owner.

@@ -987,11 +987,12 @@ Use the merge-readiness helper when reviewers need one bounded read-only packet 
 
 ```bash
 python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json
-python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --comment
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness --comment
 ```
 
-The helper consumes existing PR-lane status, scoped validation status, exact PR/commit operator QA bundle evidence, and hygiene status embedded in the QA bundle. With `--out`, it writes `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, and bounded raw JSON captures for validation status, PR-lane status, and QA-bundle summary.
+The helper consumes existing PR-lane status, scoped validation status, exact PR/commit operator QA bundle evidence, and hygiene status embedded in the QA bundle. With `--out`, it writes `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, and bounded raw JSON captures for validation status, PR-lane status, and QA-bundle summary. `--comment` renders a paste-ready Markdown reviewer comment only; with `--out --comment`, the directory also contains `merge-comment.md`. The renderer does not post to GitHub, approve, merge, or replace reviewer judgment.
 
-Statuses are evidence classifications only: `pass_candidate` means existing exact PR/commit evidence appears merge-ready; `hold_candidate` means a blocker such as failed validation, failed QA, stale/mismatched source/container evidence, restart drift, or safety drift was found; `unknown` means evidence is too incomplete to decide. Safe warnings include partial older hygiene history when compare-latest is ok, known pre-existing metadata advisories, model-doctor auth readiness unknown when other readiness evidence is acceptable, and skipped review bundles when not required.
+Statuses are evidence classifications only: `pass_candidate` means existing exact PR/commit evidence appears merge-ready and renders as `PASS / mergeable`; `hold_candidate` means a blocker such as failed validation, failed QA, stale/mismatched source/container evidence, restart drift, or safety drift was found and renders as `HOLD / needs follow-up`; `unknown` means evidence is too incomplete to decide and renders as `NEEDS EVIDENCE / cannot determine`. Safe warnings include partial older hygiene history when compare-latest is ok, known pre-existing metadata advisories, model-doctor auth readiness unknown when other readiness evidence is acceptable, and skipped review bundles when not required.
 
 This helper does not deploy, build, validate, run QA, restart, clean, prune, delete, remediate, roll back, recover, mutate Docker/Compose, use `shell=True`, execute natural-language commands, call models/Codex, install packages, call the network, apply cloud changes, merge, or push. SeedOfEvil remains final merge owner.
