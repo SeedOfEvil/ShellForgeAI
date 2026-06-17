@@ -980,3 +980,18 @@ python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
 Status mode does not snapshot, deploy, write Compose, build images, restart containers, run validation, run QA, clean up, prune, delete files, remediate, roll back, recover, call a model/Codex, fetch from the network, install packages, merge, push, or use `shell=True`.
 
 `--status` reads the configured Compose image tag from the trusted Compose file when available and treats Docker image IDs/digests as runtime metadata, not as the configured PR image tag. Exact PR/commit validation evidence is ranked so a later pass-eligible result is not masked by an earlier setup-failure packet. QA bundle discovery accepts exact PR/commit operator bundle directories such as `/tmp/sfai-pr<PR>-<shortsha>-operator-qa-bundle-<timestamp>/` and prefers passed bundles.
+
+## Docker01 merge-readiness evidence report
+
+Use the merge-readiness helper when reviewers need one bounded read-only packet that summarizes existing Docker01 evidence for an exact PR/commit:
+
+```bash
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json
+python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness
+```
+
+The helper consumes existing PR-lane status, scoped validation status, exact PR/commit operator QA bundle evidence, and hygiene status embedded in the QA bundle. With `--out`, it writes `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, and bounded raw JSON captures for validation status, PR-lane status, and QA-bundle summary.
+
+Statuses are evidence classifications only: `pass_candidate` means existing exact PR/commit evidence appears merge-ready; `hold_candidate` means a blocker such as failed validation, failed QA, stale/mismatched source/container evidence, restart drift, or safety drift was found; `unknown` means evidence is too incomplete to decide. Safe warnings include partial older hygiene history when compare-latest is ok, known pre-existing metadata advisories, model-doctor auth readiness unknown when other readiness evidence is acceptable, and skipped review bundles when not required.
+
+This helper does not deploy, build, validate, run QA, restart, clean, prune, delete, remediate, roll back, recover, mutate Docker/Compose, use `shell=True`, execute natural-language commands, call models/Codex, install packages, call the network, apply cloud changes, merge, or push. SeedOfEvil remains final merge owner.

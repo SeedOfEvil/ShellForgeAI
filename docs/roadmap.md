@@ -1052,3 +1052,7 @@ Docker01 PR-lane validation now writes a small PR/commit-scoped evidence packet 
 Docker01 PR-lane operations now include a read-only `--status` / `--resume-status` helper for interrupted runs. It inspects current source/container labels plus existing validation and QA bundle evidence, classifies the lane state, and prints a bounded safe next command without deploying, rebuilding, validating, running QA, restarting, cleaning, pruning, deleting, or changing product runtime behavior.
 
 The status helper now treats Docker image digests as runtime metadata rather than configured image tags, prefers later pass-eligible exact PR/commit validation evidence over older setup failures, and discovers exact PR/commit operator QA bundles.
+
+### Docker01 merge-readiness evidence
+
+Docker01 review flow includes a read-only merge-readiness helper that consolidates existing PR-lane status, validation status, operator QA bundle, and hygiene evidence for an exact PR/commit. It emits strict JSON, a concise Markdown summary, and an optional bounded report directory. It is not a product runtime command and does not deploy, build, validate, run QA, restart, clean, prune, remediate, roll back, recover, merge, or push. SeedOfEvil remains final merge owner.

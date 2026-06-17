@@ -225,3 +225,13 @@ The Docker01 PR lane emits a scoped validation packet under `/tmp/sfai-pr<PR>-<s
 Classifications are deterministic: matching source/container/labels/image plus pass-eligible validation and passed QA is `already_complete`; matching deploy plus missing/partial/failed QA is `needs_qa`; matching deploy plus missing or rerun-required validation is `needs_validation`; source/compose/container mismatch is `needs_deploy`; unhealthy containers, restart drift, label/image mismatch, failed validation, or setup-failure evidence are `blocked`. Safe-next guidance is non-mutating and favors evidence readers or the guarded lane helper, never direct Compose, cleanup, prune, restart, or direct pytest.
 
 PR-lane status image matching compares the trusted Compose `image:` tag and container `Config.Image` tag to the expected `lab/shellforgeai:pr<PR>-<shortsha>` tag; Docker-resolved `sha256:` IDs/digests do not force a deploy mismatch. Validation evidence selection prefers exact PR/commit pass-eligible packets over older setup-failure packets, and QA discovery includes exact PR/commit `operator-qa-bundle` directories.
+
+## Docker01 merge-readiness evidence checks
+
+| Check | Command | Purpose | Mutates state |
+| --- | --- | --- | --- |
+| Merge-readiness JSON | `python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json` | Emits strict JSON summarizing existing exact PR/commit PR-lane, validation, QA, hygiene, and safety evidence. | No |
+| Merge-readiness packet | `python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness` | Writes bounded JSON/Markdown/manifest/checksum review files plus bounded raw evidence JSON. | No, except writing the report directory |
+| Merge-readiness tests | `pytest -q tests/test_pr216_docker01_merge_readiness.py` | Verifies JSON/Markdown contracts, exact evidence discovery, deterministic classification, warnings vs blockers, output packet files, and safety allowlist behavior without Docker. | No |
+
+`pass_candidate` is possible only when exact PR/commit evidence is present, PR-lane status is complete, validation passed and is pass-eligible without rerun, QA passed with zero safety assertion failures, available source/container evidence is clean, and all mutation safety flags are false. `hold_candidate` is used for explicit blockers. `unknown` is used for incomplete evidence without a proven blocker. The report is reviewer evidence only; SeedOfEvil remains final merge owner.
