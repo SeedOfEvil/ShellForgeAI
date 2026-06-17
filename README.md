@@ -549,6 +549,8 @@ python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --j
 
 The bundle writes a bounded review directory with summary, strict JSON rollup, source copies, validation, optional history/compare snapshots, safety notes, manifest, and checksums. It does not run Docker, generate a new report, delete files, prune/remove images, restart containers, or authorize cleanup.
 
+Hygiene discovery treats only directories containing `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` as report directories. Old or malformed review-bundle-shaped directories are reported as bounded ignored candidates instead of cleanup work, and they do not authorize deletion, repair, moves, prune, or restart. `--compare-latest` and `--review-bundle-latest` select valid hygiene reports only.
+
 ### Docker01 PR-lane validation evidence
 
 Docker01 PR-lane validation writes discoverable PR/commit-scoped evidence under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, including `validation-status.json`, `validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and `logs/`. Use `python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection` to find current evidence; stale PR/commit packets are ignored.
