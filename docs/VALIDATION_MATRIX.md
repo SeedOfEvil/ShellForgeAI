@@ -237,3 +237,16 @@ PR-lane status image matching compares the trusted Compose `image:` tag and cont
 | Merge-readiness tests | `pytest -q tests/test_pr216_docker01_merge_readiness.py` | Verifies JSON/Markdown contracts, exact evidence discovery, deterministic classification, warnings vs blockers, output packet files, and safety allowlist behavior without Docker. | No |
 
 `pass_candidate` is possible only when exact PR/commit evidence is present, PR-lane status is complete, validation passed and is pass-eligible without rerun, QA passed with zero safety assertion failures, available source/container evidence is clean, and all mutation safety flags are false. `hold_candidate` is used for explicit blockers. `unknown` is used for incomplete evidence without a proven blocker. `--comment` maps them to `PASS / mergeable`, `HOLD / needs follow-up`, and `NEEDS EVIDENCE / cannot determine`. The report and comment are reviewer evidence only, never GitHub posting/approval/merge, and SeedOfEvil remains final merge owner.
+
+
+### Docker01 validation evidence finalization
+
+| Check | Command | Purpose | Mutates services? |
+| --- | --- | --- | --- |
+| Finalize existing validation log | `python scripts/docker01_validation_evidence.py --pr <PR> --commit <sha> --log <validation-log-path> --status passed --json` | Writes PR214-compatible validation evidence from an already-completed Docker01 validation attempt. | No; evidence files only |
+| Exact latest validation evidence | `python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection` | Selects exact PR/commit evidence by pass, failed, setup-failure, interrupted, then not-found precedence. | No |
+
+The finalizer is evidence lifecycle tooling only. It does not run validation,
+pytest, QA, Docker/Compose, cleanup, restart, prune, delete, remediation,
+rollback, recovery, network calls, or model calls. Failed, setup-failure,
+interrupted, and unknown evidence is recorded but never pass eligible.

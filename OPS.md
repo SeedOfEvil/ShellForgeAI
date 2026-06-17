@@ -2527,3 +2527,26 @@ cat /tmp/sfai-pr<PR>-<short>-merge-readiness/merge-comment.md
 The output directory contains `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, `raw-validation-status.json`, `raw-pr-lane-status.json`, and `raw-qa-bundle-summary.json`; with `--comment`, it also contains `merge-comment.md`. Missing raw evidence is recorded as `not_available`; huge logs and arbitrary filesystem listings are not copied.
 
 The helper is evidence-only. `--comment` prints paste-ready Markdown only and does not post to GitHub, approve, merge, or replace reviewer judgment. It does not deploy, build, validate, run QA, restart, clean, prune, delete files, mutate Docker/Compose, remediate, roll back, recover, call models/Codex, install packages, call the network, merge, push, or use `shell=True`. `pass_candidate`, `hold_candidate`, and `unknown` are review aids rendered as `PASS / mergeable`, `HOLD / needs follow-up`, and `NEEDS EVIDENCE / cannot determine`, not approval. SeedOfEvil remains final merge owner.
+
+
+## Docker01 validation evidence finalizer
+
+After a Docker01 PR-lane validation attempt completes, the lane writes a
+structured validation evidence packet automatically. Operators may also recover
+from an already-completed log without rerunning validation:
+
+```bash
+python3 scripts/docker01_validation_evidence.py --pr <PR> --commit <sha> --log <validation-log-path> --status passed --json
+python3 scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection
+```
+
+The packet lives in `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/` unless
+a run directory is supplied, and contains `validation-status.json`,
+`validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and a
+bounded log excerpt. The finalizer records evidence only: it does not execute
+validation or QA and does not perform cleanup, prune, delete, restart,
+Docker/Compose mutation, remediation, rollback, recovery, GitHub actions, cloud
+apply/merge/push, package installs, network calls, or model calls. For the same
+PR/commit, latest pass-eligible evidence wins over earlier setup-failure or
+interrupted evidence so host setup failures do not dominate a later successful
+disposable validation fallback.

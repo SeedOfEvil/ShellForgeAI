@@ -36,6 +36,7 @@ HELPER_DIR = Path(__file__).resolve().parent
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
+import docker01_validation_evidence  # noqa: E402
 import track_pytest_durations  # noqa: E402
 import validate_pr  # noqa: E402
 import validation_container_fallback  # noqa: E402
@@ -1110,60 +1111,24 @@ def write_lane_validation_evidence(
     log_path: str | None,
     created_at: str,
 ) -> dict:
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "logs").mkdir(exist_ok=True)
-    commands = commands_run_records(command_records)
-    completed_at = _utc_now()
-    status_doc = build_lane_validation_status(
-        manifest=manifest,
-        run_dir=run_dir,
-        commands=commands,
+    pr_block = manifest.get("pr") or {}
+    lane_block = manifest.get("lane") or {}
+    value = _lane_status_value(manifest.get("status"), manifest.get("classification"))
+    result = docker01_validation_evidence.finalize_validation_evidence(
+        pr=pr_block.get("number") or "unknown",
+        commit=pr_block.get("head_commit") or "unknown",
         log_path=log_path,
+        run_dir=run_dir,
+        status=value,
+        lane="full" if lane_block.get("full_validation_required") else "targeted",
+        commands=commands_run_records(command_records),
+        full_validation=bool(lane_block.get("full_validation_required")),
+        full_validation_reason=lane_block.get("full_validation_reason") or "",
+        duplicate_full_pytest_detected=False,
         created_at=created_at,
-        completed_at=completed_at,
+        warnings=list(manifest.get("non_blockers") or []),
     )
-    status_path = run_dir / "validation-status.json"
-    commands_path = run_dir / "commands-run.json"
-    summary_path = run_dir / "validation-summary.md"
-    manifest_path = run_dir / "validation-manifest.json"
-    status_path.write_text(
-        json.dumps(status_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    commands_path.write_text(
-        json.dumps(commands, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    summary_path.write_text(render_lane_validation_summary(status_doc), encoding="utf-8")
-    log_files = []
-    if log_path:
-        log_files.append(log_path)
-    manifest_doc = {
-        "schema_version": 1,
-        "mode": LANE_MANIFEST_MODE,
-        "pr": status_doc.get("pr"),
-        "commit": status_doc.get("commit"),
-        "short_sha": status_doc.get("short_sha"),
-        "created_at": created_at,
-        "run_dir": str(run_dir),
-        "status_file": "validation-status.json",
-        "summary_file": "validation-summary.md",
-        "commands_file": "commands-run.json",
-        "log_files": log_files,
-        "artifacts": [
-            _artifact_entry(status_path, base=run_dir),
-            _artifact_entry(commands_path, base=run_dir),
-            _artifact_entry(summary_path, base=run_dir),
-        ],
-        "read_only": True,
-        "mutation_performed": False,
-    }
-    manifest_path.write_text(
-        json.dumps(manifest_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    manifest_doc["artifacts"].append(_artifact_entry(manifest_path, base=run_dir))
-    manifest_path.write_text(
-        json.dumps(manifest_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    return manifest_doc
+    return result["manifest"]
 
 
 def planned_command_records(plan: dict, *, log_path: str | None = None) -> list[dict]:

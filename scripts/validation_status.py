@@ -591,6 +591,35 @@ def discover_candidates(
     return out
 
 
+def _candidate_evidence_rank(candidate: dict[str, Any]) -> tuple[int, float]:
+    """Rank exact PR/commit evidence by completed result before mtime.
+
+    For exact PR/commit discovery, a newer pass-eligible artifact must beat older
+    setup failures and stale partial artifacts. Non-exact discovery preserves the
+    existing kind/time behavior.
+    """
+    status_path = Path(candidate["path"]) / "validation-status.json"
+    doc = load_json_evidence(status_path, [], label="status") if status_path.is_file() else None
+    if not isinstance(doc, dict):
+        return (0, float(candidate.get("mtime") or 0))
+    if (
+        doc.get("pass_eligible") is True
+        or doc.get("classification") == "passed"
+        or doc.get("status") == "passed"
+    ):
+        return (4, float(candidate.get("mtime") or 0))
+    if doc.get("status") == "failed" or doc.get("classification") in ("failed", "test_failure"):
+        return (3, float(candidate.get("mtime") or 0))
+    if doc.get("status") == "setup_failure" or doc.get("classification") == CLASS_SETUP_FAILURE:
+        return (2, float(candidate.get("mtime") or 0))
+    if (
+        doc.get("status") in ("interrupted", STATUS_INCOMPLETE)
+        or doc.get("classification") == CLASS_INTERRUPTED
+    ):
+        return (1, float(candidate.get("mtime") or 0))
+    return (0, float(candidate.get("mtime") or 0))
+
+
 def _selected_by(pr: Any, commit: str | None) -> str:
     if pr is not None and commit is not None:
         return "pr_commit"
@@ -655,10 +684,27 @@ def select_latest(
     eligible_candidates = [c for c in annotated if c["eligible"]]
     selected: dict[str, Any] | None = None
     if eligible_candidates:
-        ordered = sorted(
-            eligible_candidates, key=lambda c: (_kind_rank(c), c["mtime"]), reverse=True
-        )
-        selected = ordered[0]
+        exact_scope = pr is not None and commit is not None
+        if exact_scope:
+            ordered = sorted(eligible_candidates, key=_candidate_evidence_rank, reverse=True)
+            selected = ordered[0]
+            selected_doc_rank = _candidate_evidence_rank(selected)[0]
+            if selected_doc_rank >= 4:
+                ignored = [
+                    c
+                    for c in eligible_candidates
+                    if c["path"] != selected["path"] and _candidate_evidence_rank(c)[0] in (1, 2)
+                ]
+                if ignored:
+                    warnings.append(
+                        "earlier setup_failure/interrupted evidence ignored because "
+                        "newer exact pass evidence was selected"
+                    )
+        else:
+            ordered = sorted(
+                eligible_candidates, key=lambda c: (_kind_rank(c), c["mtime"]), reverse=True
+            )
+            selected = ordered[0]
         top_rank = _kind_rank(selected)
         ties = [c for c in eligible_candidates if _kind_rank(c) == top_rank]
         if len(ties) >= 2:
@@ -681,7 +727,16 @@ def select_latest(
                     "commit": candidate["commit"],
                     "timestamp": _iso_from_mtime(candidate["mtime"]),
                     "selected": is_selected,
-                    "reason": _kind_reason(candidate) if is_selected else None,
+                    "reason": (
+                        (
+                            f"{_kind_reason(candidate)}; exact PR/commit evidence "
+                            "precedence selected latest pass/fail result"
+                        )
+                        if is_selected and pr is not None and commit is not None
+                        else _kind_reason(candidate)
+                        if is_selected
+                        else None
+                    ),
                     "skipped_reason": (
                         None
                         if is_selected

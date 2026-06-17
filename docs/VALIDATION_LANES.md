@@ -996,3 +996,33 @@ The helper consumes existing PR-lane status, scoped validation status, exact PR/
 Statuses are evidence classifications only: `pass_candidate` means existing exact PR/commit evidence appears merge-ready and renders as `PASS / mergeable`; `hold_candidate` means a blocker such as failed validation, failed QA, stale/mismatched source/container evidence, restart drift, or safety drift was found and renders as `HOLD / needs follow-up`; `unknown` means evidence is too incomplete to decide and renders as `NEEDS EVIDENCE / cannot determine`. Safe warnings include partial older hygiene history when compare-latest is ok, known pre-existing metadata advisories, model-doctor auth readiness unknown when other readiness evidence is acceptable, and skipped review bundles when not required.
 
 This helper does not deploy, build, validate, run QA, restart, clean, prune, delete, remediate, roll back, recover, mutate Docker/Compose, use `shell=True`, execute natural-language commands, call models/Codex, install packages, call the network, apply cloud changes, merge, or push. SeedOfEvil remains final merge owner.
+
+### Docker01 validation evidence finalizer
+
+The Docker01 PR lane now finalizes structured validation evidence after each
+validation attempt. The finalizer records an already-completed result only; it
+does not run validation, pytest, QA, Docker, Compose, cleanup, restart, prune,
+delete, remediation, rollback, recovery, network calls, or model calls. The
+optional recovery shape is:
+
+```bash
+python scripts/docker01_validation_evidence.py --pr <PR> --commit <sha> --log <validation-log-path> --status passed --json
+```
+
+Evidence is written under the established PR/commit-scoped validation directory
+shape, for example `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, with
+`validation-status.json`, `validation-manifest.json`, `validation-summary.md`,
+`commands-run.json`, and a bounded `source-log-excerpt.txt` when a log exists.
+Statuses are deterministic: `passed` is pass eligible and does not require a
+rerun; `failed`, `setup_failure`, `interrupted`, and `unknown` are never pass
+eligible and always require a rerun. If a host setup failure is followed by a
+successful disposable-container validation for the same PR/commit, the later
+pass evidence is selected and the earlier setup failure is retained only as a
+warning/process note.
+
+`validation_status.py --latest --pr <PR> --commit <sha> --json
+--explain-selection` selects exact PR/commit evidence by safe precedence:
+latest pass-eligible completed evidence, then failed evidence, then setup
+failure, then interrupted/incomplete, then `not_found`. Stale evidence for a
+different PR or commit is ignored, and read-only status, merge-readiness, and
+comment rendering tools continue to read evidence only.
