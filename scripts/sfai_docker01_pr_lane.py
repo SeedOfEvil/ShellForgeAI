@@ -673,7 +673,10 @@ def _read_compose_image() -> str | None:
 def _validation_latest(pr: int, commit: str) -> dict:
     warnings: list[str] = []
     candidates = validation_status_viewer.discover_candidates(
-        run_root=None, include_legacy=False, warnings=warnings
+        run_root=None,
+        include_legacy=False,
+        warnings=warnings,
+        include_default_roots=True,
     )
     exact: list[dict] = []
     for candidate in candidates:

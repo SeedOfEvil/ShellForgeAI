@@ -498,6 +498,7 @@ def discover_candidates(
     run_root: str | None = None,
     include_legacy: bool = False,
     warnings: list[str] | None = None,
+    include_default_roots: bool = False,
 ) -> list[dict[str, Any]]:
     """Discover validation evidence candidates from bounded, known locations.
 
@@ -547,8 +548,16 @@ def discover_candidates(
                 out=out,
             )
 
-    if run_override or persisted_override or (include_legacy and os.environ.get(LEGACY_DIR_ENV)):
+    if (
+        run_override or persisted_override or (include_legacy and os.environ.get(LEGACY_DIR_ENV))
+    ) and not include_default_roots:
         return out
+
+    # Environment roots can add search locations without suppressing the built-in
+    # writable/default discovery roots for exact PR/commit lookups. Docker01 may
+    # set SFAI_VALIDATION_RUNS_DIR to a persisted location that is not writable by
+    # the lane process; automatic lane evidence under the default temp root must
+    # still be found for exact status checks.
 
     # Recent PR-specific temp run directories (bounded glob, never a crawl).
     if TMP_ROOT.is_dir():
@@ -663,7 +672,10 @@ def select_latest(
     or mutates anything; it only ranks discovered evidence directories.
     """
     candidates = discover_candidates(
-        run_root=run_root, include_legacy=include_legacy, warnings=warnings
+        run_root=run_root,
+        include_legacy=include_legacy,
+        warnings=warnings,
+        include_default_roots=pr is not None and commit is not None,
     )
 
     annotated: list[dict[str, Any]] = []

@@ -2572,3 +2572,7 @@ Normal PR-lane validation evidence is written below
 `/tmp/shellforgeai-validation-runs/`, so the lane process owns the evidence
 packet and `validation_status.py --latest` can discover it without a manual
 `sudo` finalizer.
+
+If `SFAI_VALIDATION_RUNS_DIR` points at a persisted validation location, the
+viewer still also scans the built-in writable lane evidence root so standard
+lane finalization remains discoverable without sudo.

@@ -601,6 +601,41 @@ def test_validation_status_exposes_full_validation_metadata(tmp_path, monkeypatc
     assert report["full_validation_reason"] == "Lane C"
 
 
+def test_validation_status_env_override_does_not_hide_default_lane_root(tmp_path, monkeypatch):
+    env_root = tmp_path / "persisted-env-root"
+    env_root.mkdir()
+    default_root = tmp_path / "shellforgeai-validation-runs"
+    run_dir = default_root / f"sfai-pr{PR}-{COMMIT[:12]}-validation-20260618T010000"
+    finalize(
+        tmp_path / "source",
+        "ruff passed\ncompileall passed\ntargeted tests passed\n",
+        name=str(run_dir),
+    )
+    monkeypatch.setenv(viewer.RUNS_DIR_ENV, str(env_root))
+    monkeypatch.setattr(viewer, "MAINLINE_TMP_ROOT", default_root)
+    args = type(
+        "Args",
+        (),
+        {
+            "latest": True,
+            "pr": PR,
+            "commit": COMMIT,
+            "include_legacy": False,
+            "run_root": None,
+            "explain_selection": True,
+            "run_dir": None,
+            "heartbeat": None,
+            "status_file": None,
+            "manifest": None,
+            "summary": None,
+            "log": None,
+        },
+    )()
+    report = viewer.generate_report(args)
+    assert report["status"] == "passed"
+    assert report["source"]["run_dir"] == str(run_dir)
+
+
 def test_pr_lane_status_sees_auto_finalizer_pass_eligible(tmp_path, monkeypatch):
     result = finalize(tmp_path, "ruff passed\ncompileall passed\ntargeted tests passed\n")
     monkeypatch.setenv(viewer.RUNS_DIR_ENV, str(tmp_path))

@@ -271,3 +271,6 @@ Default PR-lane validation evidence now lives under
 `/tmp/shellforgeai-validation-runs/`, a writable discovery root scanned by the
 validation-status viewer, avoiding a manual `sudo` finalizer step for the normal
 lane path.
+
+Validation discovery treats environment-configured roots as additive: configured
+persisted roots do not suppress the built-in writable lane evidence root.

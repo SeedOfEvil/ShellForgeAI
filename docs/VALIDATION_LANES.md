@@ -1054,3 +1054,8 @@ By default, new lane validation evidence is created under
 `/tmp/shellforgeai-validation-runs/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`.
 This keeps the normal path writable by the lane process without `sudo` while
 remaining within a root scanned by `validation_status.py --latest`.
+
+`SFAI_VALIDATION_RUNS_DIR` and other discovery-root overrides add search roots for
+operators, but they do not hide the built-in writable lane root. This prevents a
+persisted root that needs elevated writes from masking automatically finalized
+standard-lane evidence.
