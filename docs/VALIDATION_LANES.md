@@ -1034,3 +1034,10 @@ terminal validation result. Full Lane C metadata is carried in
 `validation-status.json` as `full_validation=true` with the recorded reason, and
 read-only status/merge-readiness/comment tools surface that metadata without
 running validation or QA.
+
+Disposable validation fallback commands now prepare the slim Python container for
+the full project test suite by installing `procps` (for `ps`), `git`, and
+`rsync` inside the disposable container before copying the read-only source tree
+and running validation. This package installation is part of the generated
+container command only; the packet generator does not install host packages and
+does not change the production container.

@@ -2556,3 +2556,8 @@ PR head commit (`--head-commit` or `--commit`) after terminal validation
 outcomes. Lane C/full validation packets preserve `full_validation=true` and the
 full-validation reason so read-only merge-readiness and comment rendering do not
 misreport full pytest as absent.
+
+Disposable validation fallback packets now bootstrap the disposable
+`python:3.12-slim` environment with `procps` (providing `ps`), `git`, and
+`rsync` inside the container before validation. This is not a Docker01 host
+package install and does not modify the production ShellForgeAI container.

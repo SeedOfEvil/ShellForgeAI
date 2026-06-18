@@ -7,6 +7,7 @@ FINALIZER = ROOT / "scripts" / "docker01_validation_evidence.py"
 VIEWER = ROOT / "scripts" / "validation_status.py"
 LANE = ROOT / "scripts" / "sfai_docker01_pr_lane.py"
 MERGE = ROOT / "scripts" / "docker01_merge_readiness.py"
+FALLBACK = ROOT / "scripts" / "validation_container_fallback.py"
 
 
 def load(path, name):
@@ -20,6 +21,7 @@ finalizer = load(FINALIZER, "docker01_validation_evidence")
 viewer = load(VIEWER, "validation_status_pr219")
 lane = load(LANE, "sfai_lane_pr219")
 merge = load(MERGE, "merge_pr219")
+fallback = load(FALLBACK, "fallback_pr219")
 
 PR = 219
 COMMIT = "abcdef1234567890abcdef1234567890abcdef12"
@@ -290,6 +292,68 @@ def test_safety_source_contains_no_forbidden_execution_paths(tmp_path):
         status="unknown",
     )["status"]
     assert all(value is False for key, value in doc["safety"].items() if key != "read_only")
+
+
+def test_generated_disposable_fallback_installs_procps_git_rsync_inside_container(tmp_path):
+    command = fallback.build_container_command(
+        run_dir=tmp_path,
+        lane=fallback.LANE_FULL,
+        pr=str(PR),
+        commit=COMMIT,
+        repo_root=ROOT,
+    )
+    preview = command["copy_paste"]
+    assert "apt-get update" in preview
+    assert "apt-get install -y --no-install-recommends procps git rsync" in preview
+    assert command["container_packages"] == ["procps", "git", "rsync"]
+    assert "tests/test_investigation_tools.py" not in preview
+    assert " -k " not in preview and "--ignore" not in preview and "--deselect" not in preview
+
+
+def test_generated_fallback_package_install_is_container_only_and_inert(tmp_path):
+    report = fallback.generate_packet(
+        run_dir=tmp_path,
+        lane=fallback.LANE_FULL,
+        pr=str(PR),
+        commit=COMMIT,
+        force=True,
+    )
+    container = report["container_validation"]
+    assert container["host_package_install_required"] is False
+    assert container["container_packages"] == ["procps", "git", "rsync"]
+    assert report["safety"]["packages_installed"] is False
+    assert report["safety"]["validation_executed"] is False
+    assert (
+        "apt-get install -y --no-install-recommends procps git rsync"
+        in container["command_preview"]
+    )
+
+
+def test_generated_fallback_command_safety_surfaces_no_host_mutation_options(tmp_path):
+    report = fallback.generate_packet(
+        run_dir=tmp_path, lane=fallback.LANE_FULL, pr=str(PR), commit=COMMIT, force=True
+    )
+    surfaces = [
+        report["container_validation"]["command_preview"],
+        " ".join(report["container_validation"]["command_argv"]),
+        (tmp_path / fallback.FALLBACK_COMMAND_NAME).read_text(encoding="utf-8"),
+    ]
+    forbidden = [
+        "shell=True",
+        "docker compose",
+        "docker restart",
+        "docker system prune",
+        "--cleanup",
+        "--delete",
+        "--prune",
+        "--restart",
+        "--post-comment",
+        "--approve",
+        "gh pr merge",
+    ]
+    for surface in surfaces:
+        for item in forbidden:
+            assert item not in surface
 
 
 def _passed_preflight(path=None):

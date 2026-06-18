@@ -233,6 +233,8 @@ def build_container_command(
 
     inner = " && ".join(
         [
+            "apt-get update",
+            "apt-get install -y --no-install-recommends procps git rsync",
             "cp -a /src/. /tmp/sfai-validation",
             "cd /tmp/sfai-validation",
             "python -m pip install -q -e '.[dev]'",
@@ -267,6 +269,7 @@ def build_container_command(
         "image": resolved_image,
         "lane": lane if lane in LANES else LANE_UNKNOWN,
         "pytest_step": pytest_step,
+        "container_packages": ["procps", "git", "rsync"],
     }
 
 
@@ -282,6 +285,7 @@ def render_command_text(command: dict[str, Any], run_dir: Path) -> str:
         "#   - starts a disposable container (removed when it exits)",
         "#   - mounts the repo read-only at /src and copies it to a temp workdir",
         f"#   - mounts this run dir at /artifacts: {run_dir}",
+        "#   - installs procps (ps), git, and rsync INSIDE the container only",
         "#   - installs dev dependencies INSIDE the container only",
         "#     (the host package set is unchanged; network access is needed",
         "#     for the in-container dependency install)",
@@ -331,6 +335,7 @@ def build_packet_report(
             "command_preview": command["copy_paste"],
             "command_argv": list(command["argv"]),
             "expected_phases": list(EXPECTED_PHASES),
+            "container_packages": list(command.get("container_packages") or []),
         },
         "first_safe_command": f"cat {command_txt}",
         "safe_next_commands": [

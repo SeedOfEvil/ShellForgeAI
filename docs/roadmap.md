@@ -1071,3 +1071,7 @@ Follow-up PR219 integration tightened the standard guarded lane path: automatic
 finalization now keys evidence to the requested PR head commit and carries Lane
 C/full-validation metadata through downstream read-only status and merge-review
 helpers.
+
+The disposable Docker01 validation fallback has been hardened so the generated
+container command installs the minimal OS tools required by the full test suite
+(`procps`/`ps`, `git`, and `rsync`) inside the disposable container only.

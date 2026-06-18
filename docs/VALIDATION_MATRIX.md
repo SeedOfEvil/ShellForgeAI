@@ -256,3 +256,8 @@ path: success, failure, setup failure, and interrupted outcomes write exact
 PR/commit validation evidence without a manual finalizer step. Lane C/full runs
 preserve `full_validation=true` through validation status, PR-lane status,
 merge-readiness JSON, and merge-comment rendering.
+
+The disposable validation fallback packet includes an in-container bootstrap
+step (`apt-get update` plus `procps`, `git`, and `rsync`) so tests that inspect
+process state have `ps` available. The generator still writes inert command
+text/argv evidence only and performs no host package installation.
