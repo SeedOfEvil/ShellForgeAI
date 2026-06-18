@@ -1075,3 +1075,7 @@ helpers.
 The disposable Docker01 validation fallback has been hardened so the generated
 container command installs the minimal OS tools required by the full test suite
 (`procps`/`ps`, `git`, and `rsync`) inside the disposable container only.
+
+The fallback command now closes the evidence lifecycle itself by invoking the
+validation finalizer inside the disposable container and writing the final
+PR/commit status packet into the mounted lane run directory.

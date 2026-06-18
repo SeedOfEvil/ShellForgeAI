@@ -228,19 +228,62 @@ def build_container_command(
 
     if lane == LANE_TARGETED and pr:
         pytest_step = f"python -m pytest -q tests/test_pr{pr}*"
+        lane_arg = "targeted"
+        full_args: list[str] = []
     else:
         pytest_step = "python scripts/run_full_pytest.py"
+        lane_arg = "full"
+        full_args = [
+            "--full-validation",
+            "--full-validation-reason",
+            "disposable validation fallback full pytest",
+        ]
 
-    inner = " && ".join(
+    finalizer_args = [
+        "python",
+        "scripts/docker01_validation_evidence.py",
+        "--pr",
+        pr or "unknown",
+        "--commit",
+        commit or "unknown",
+        "--log",
+        "/artifacts/disposable-validation.log",
+        "--run-dir",
+        "/artifacts",
+        "--lane",
+        lane_arg,
+        "--warning",
+        "host setup_failure; disposable validation fallback finalized evidence",
+        *full_args,
+        "--status",
+        "__SFAI_VALIDATION_STATUS__",
+    ]
+    finalizer_command = " ".join(shlex.quote(part) for part in finalizer_args).replace(
+        "__SFAI_VALIDATION_STATUS__", '"$sfai_validation_status"'
+    )
+    validation_steps = " && ".join(
         [
             "apt-get update",
             "apt-get install -y --no-install-recommends procps git rsync",
-            "cp -a /src/. /tmp/sfai-validation",
-            "cd /tmp/sfai-validation",
             "python -m pip install -q -e '.[dev]'",
             "ruff check .",
             "python -m compileall -q src tests scripts",
             pytest_step,
+        ]
+    )
+    inner = " ; ".join(
+        [
+            "set -o pipefail",
+            "cp -a /src/. /tmp/sfai-validation",
+            "cd /tmp/sfai-validation",
+            f"{{ {validation_steps}; }} > /artifacts/disposable-validation.log 2>&1",
+            "sfai_validation_rc=$?",
+            (
+                'if [ "$sfai_validation_rc" -eq 0 ]; then '
+                "sfai_validation_status=passed; else sfai_validation_status=failed; fi"
+            ),
+            finalizer_command,
+            "exit $sfai_validation_rc",
         ]
     )
 

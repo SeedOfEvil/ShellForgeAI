@@ -352,6 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lane", choices=["targeted", "full", "unknown"], default="unknown")
     parser.add_argument("--full-validation", action="store_true")
     parser.add_argument("--full-validation-reason", default="")
+    parser.add_argument("--warning", action="append", default=[])
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -367,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
         lane=args.lane,
         full_validation=args.full_validation,
         full_validation_reason=args.full_validation_reason,
+        warnings=list(args.warning or []),
     )
     if args.json:
         print(

@@ -594,3 +594,8 @@ validation evidence automatically, so exact `validation_status.py --latest --pr
 <PR> --commit <sha>` checks should find successful, failed, setup-failure, or
 interrupted lane evidence without a manual finalizer step. Full-validation
 metadata is preserved through downstream status and merge-readiness views.
+
+The disposable Docker01 fallback command finalizes its completed validation
+result into the mounted lane run directory, so successful fallback validation is
+immediately discoverable by exact PR/commit validation-status checks without a
+manual finalizer step.

@@ -261,3 +261,8 @@ The disposable validation fallback packet includes an in-container bootstrap
 step (`apt-get update` plus `procps`, `git`, and `rsync`) so tests that inspect
 process state have `ps` available. The generator still writes inert command
 text/argv evidence only and performs no host package installation.
+
+When the disposable fallback command completes, it calls the evidence finalizer
+inside the container and writes final PR/commit validation evidence into the
+mounted run directory. That directory is the same lane evidence directory read
+by `validation_status.py --latest --pr <PR> --commit <sha>`.

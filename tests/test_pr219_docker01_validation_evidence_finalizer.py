@@ -306,6 +306,9 @@ def test_generated_disposable_fallback_installs_procps_git_rsync_inside_containe
     assert "apt-get update" in preview
     assert "apt-get install -y --no-install-recommends procps git rsync" in preview
     assert command["container_packages"] == ["procps", "git", "rsync"]
+    assert "scripts/docker01_validation_evidence.py" in preview
+    assert "--run-dir /artifacts" in preview
+    assert "--status" in preview and "sfai_validation_status" in preview
     assert "tests/test_investigation_tools.py" not in preview
     assert " -k " not in preview and "--ignore" not in preview and "--deselect" not in preview
 
@@ -323,6 +326,8 @@ def test_generated_fallback_package_install_is_container_only_and_inert(tmp_path
     assert container["container_packages"] == ["procps", "git", "rsync"]
     assert report["safety"]["packages_installed"] is False
     assert report["safety"]["validation_executed"] is False
+    assert "scripts/docker01_validation_evidence.py" in container["command_preview"]
+    assert "--run-dir /artifacts" in container["command_preview"]
     assert (
         "apt-get install -y --no-install-recommends procps git rsync"
         in container["command_preview"]

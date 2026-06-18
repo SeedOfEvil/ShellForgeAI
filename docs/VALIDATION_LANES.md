@@ -1041,3 +1041,11 @@ the full project test suite by installing `procps` (for `ps`), `git`, and
 and running validation. This package installation is part of the generated
 container command only; the packet generator does not install host packages and
 does not change the production container.
+
+The generated disposable fallback command also invokes the validation evidence
+finalizer inside the copied repo after the container validation command exits,
+writing final `validation-status.json`, `validation-manifest.json`,
+`validation-summary.md`, and `commands-run.json` into the mounted run directory
+(`/artifacts`, the host lane run directory). A successful fallback therefore
+turns the exact PR/commit evidence packet into pass-eligible validation evidence
+without a manual finalizer command.

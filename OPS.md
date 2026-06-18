@@ -2561,3 +2561,9 @@ Disposable validation fallback packets now bootstrap the disposable
 `python:3.12-slim` environment with `procps` (providing `ps`), `git`, and
 `rsync` inside the container before validation. This is not a Docker01 host
 package install and does not modify the production ShellForgeAI container.
+
+When operators run the generated disposable fallback command, it finalizes the
+completed validation result back into the mounted lane evidence directory
+(`/artifacts` inside the container). Do not run a separate manual finalizer after
+a successful standard fallback; use the read-only `validation_status.py --latest
+--pr <PR> --commit <sha> --json --explain-selection` check instead.
