@@ -29,7 +29,11 @@ Hard safety posture (this viewer is evidence-only and read-only):
 Conflict rule: if evidence sources disagree (for example a manifest says
 ``passed`` but a heartbeat says ``incomplete``), the viewer prefers the
 conservative result and emits a warning; it never silently reports
-``pass_eligible=true`` on conflicting evidence.
+``pass_eligible=true`` on conflicting evidence. The Docker01 finalizer status
+packet is the exception for a completed fallback attempt: when it records a
+terminal pass/fail for the exact run, it supersedes earlier host setup evidence
+from the same run directory while preserving that earlier setup failure as a
+warning/process note.
 """
 
 from __future__ import annotations
@@ -846,6 +850,7 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
             classification = CLASS_UNKNOWN
         return {
             "kind": "docker01_pr_lane",
+            "finalizer": True,
             "status": final_status,
             "classification": classification,
             "full_validation": bool(data.get("full_validation")),
@@ -1010,6 +1015,93 @@ def _full_pytest_confirmed(verdicts: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _terminal_finalizer_verdict(verdicts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the Docker01 finalizer verdict when it records a terminal attempt.
+
+    The finalizer is written after the selected host/fallback validation attempt
+    completes. For a run directory that also contains earlier host setup-failure
+    evidence, this terminal finalizer status is the authoritative final attempt;
+    read-only viewers still keep the older setup failure visible as a warning.
+    """
+    for verdict in verdicts:
+        if verdict.get("finalizer") is True and verdict.get("status") in (
+            STATUS_PASSED,
+            STATUS_FAILED,
+        ):
+            return verdict
+    return None
+
+
+def _merge_from_terminal_finalizer(
+    finalizer: dict[str, Any],
+    verdicts: list[dict[str, Any]],
+    warnings: list[str],
+) -> dict[str, Any] | None:
+    """Use terminal Docker01 finalizer evidence over earlier setup evidence.
+
+    This is intentionally narrow: it only applies when the Docker01 finalizer
+    status packet exists and records a terminal pass/fail. It does not convert
+    interrupted/unknown finalizer evidence into a pass, and it does not make
+    read-only status tools execute validation.
+    """
+    superseded = [
+        verdict
+        for verdict in verdicts
+        if verdict is not finalizer
+        and (
+            verdict.get("classification") == CLASS_SETUP_FAILURE
+            or verdict.get("failed_phase") == "environment_preflight"
+            or verdict.get("classification") == CLASS_INTERRUPTED
+            or verdict.get("status") == STATUS_INCOMPLETE
+        )
+    ]
+    if not superseded:
+        return None
+
+    final_status = finalizer["status"]
+    pass_eligible = final_status == STATUS_PASSED
+    if pass_eligible:
+        warnings.append(
+            "Earlier host setup_failure evidence was superseded by later successful "
+            "disposable validation fallback."
+        )
+        selected_reason = "latest_exact_pr_commit_completed_fallback_pass"
+        failed_phase = None
+    else:
+        warnings.append(
+            "Earlier host setup_failure evidence was superseded by later terminal "
+            "disposable validation fallback failure."
+        )
+        selected_reason = "latest_exact_pr_commit_completed_fallback_failure"
+        failed_phase = finalizer.get("failed_phase")
+
+    for verdict in superseded:
+        if verdict.get("classification") == CLASS_SETUP_FAILURE:
+            warnings.append(
+                "Preserved earlier setup_failure evidence as a process note; it is "
+                "not the final selected validation classification."
+            )
+            break
+
+    phase_status = _merge_phase_status([finalizer])
+    return {
+        "status": final_status,
+        "classification": CLASS_PASSED
+        if pass_eligible
+        else finalizer.get("classification", "failed"),
+        "pass_eligible": pass_eligible,
+        "rerun_required": not pass_eligible,
+        "phase_status": phase_status,
+        "active_phase": finalizer.get("active_phase"),
+        "last_completed_phase": finalizer.get("last_completed_phase"),
+        "full_pytest_exit_code": finalizer.get("full_pytest_exit_code"),
+        "full_pytest_result": finalizer.get("full_pytest_result") or vh.FULL_UNKNOWN,
+        "failed_phase": failed_phase,
+        "superseded_non_pass_evidence": True,
+        "selected_reason": selected_reason,
+    }
+
+
 def classify_evidence(
     verdicts: list[dict[str, Any]],
     warnings: list[str],
@@ -1032,6 +1124,12 @@ def classify_evidence(
             "full_pytest_result": vh.FULL_UNKNOWN,
             "failed_phase": None,
         }
+
+    terminal_finalizer = _terminal_finalizer_verdict(verdicts)
+    if terminal_finalizer is not None:
+        finalizer_merged = _merge_from_terminal_finalizer(terminal_finalizer, verdicts, warnings)
+        if finalizer_merged is not None:
+            return finalizer_merged
 
     # Highest severity status wins (failed > incomplete > passed). This makes any
     # disagreement collapse to the conservative result and never to a pass.
@@ -1406,6 +1504,12 @@ def build_report(
         source_commit = run_meta.get("commit")
 
     full_meta = _full_validation_metadata(status_doc, manifest_doc)
+    report_selection = dict(selection) if isinstance(selection, dict) else selection
+    if isinstance(report_selection, dict) and merged.get("superseded_non_pass_evidence"):
+        report_selection["superseded_non_pass_evidence"] = True
+        report_selection["selected_final_attempt_reason"] = merged.get("selected_reason")
+        if merged.get("selected_reason"):
+            report_selection["selected_reason"] = merged["selected_reason"]
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1433,7 +1537,7 @@ def build_report(
             "pr": source_pr,
             "commit": source_commit,
         },
-        "selection": selection,
+        "selection": report_selection,
         "fallback_packet_present": fallback_present,
         "fallback_packet_path": fallback_packet_path,
         "qa_marker": lane_qa_marker(manifest_doc, fallback_packet_present=fallback_present),

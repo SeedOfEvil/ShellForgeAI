@@ -2576,3 +2576,13 @@ packet and `validation_status.py --latest` can discover it without a manual
 If `SFAI_VALIDATION_RUNS_DIR` points at a persisted validation location, the
 viewer still also scans the built-in writable lane evidence root so standard
 lane finalization remains discoverable without sudo.
+
+If the host setup preflight failed but a later disposable fallback validation
+completed in the same exact PR/commit/run directory, the terminal fallback
+finalizer packet is the selected final attempt. A fallback pass reports
+`passed`, `pass_eligible=true`, and `rerun_required=false`; the earlier
+`setup_failure` remains in warnings/process notes for auditability. Without a
+later exact fallback pass, failed/setup/interrupted evidence is not pass
+eligible. `validation_status.py --explain-selection` shows when earlier setup
+evidence was superseded; status, merge-readiness, and comment tools still do not
+run validation or QA.

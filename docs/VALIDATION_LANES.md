@@ -1059,3 +1059,14 @@ remaining within a root scanned by `validation_status.py --latest`.
 operators, but they do not hide the built-in writable lane root. This prevents a
 persisted root that needs elevated writes from masking automatically finalized
 standard-lane evidence.
+
+When the host validation setup fails and the disposable fallback later completes
+for the same PR/commit/run directory, the fallback's terminal finalizer packet is
+the selected result. A successful fallback is reported as final `passed` /
+`pass_eligible=true` evidence, while the earlier host `setup_failure` remains in
+warnings/process notes for auditability. If the fallback fails, the final result
+is `failed`; if no later fallback pass/fail exists, setup/interrupted evidence is
+never pass eligible. `validation_status.py --explain-selection` reports when
+earlier setup evidence was superseded by the completed fallback attempt, and the
+status/merge-readiness/comment tools remain read-only: they do not run
+validation or QA.

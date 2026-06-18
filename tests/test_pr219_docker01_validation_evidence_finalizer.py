@@ -636,6 +636,128 @@ def test_validation_status_env_override_does_not_hide_default_lane_root(tmp_path
     assert report["source"]["run_dir"] == str(run_dir)
 
 
+def test_same_run_fallback_pass_supersedes_earlier_setup_failure(tmp_path, monkeypatch):
+    run_dir = tmp_path / f"sfai-pr{PR}-{COMMIT[:12]}-validation-20260618T020000"
+    log = tmp_path / "validation.log"
+    log.write_text("full pytest passed 100%, exit 0\n")
+    result = finalizer.finalize_validation_evidence(
+        pr=PR,
+        commit=COMMIT,
+        log_path=log,
+        run_dir=run_dir,
+        status="passed",
+        lane="full",
+        full_validation=True,
+        full_validation_reason="Lane C disposable fallback",
+        warnings=["host setup_failure; disposable validation fallback finalized evidence"],
+    )
+    (run_dir / "validation-preflight.json").write_text(
+        json.dumps(
+            {
+                "mode": viewer.PREFLIGHT_MODE,
+                "status": "failed",
+                "classification": "setup_failure",
+                "reason": "host missing pytest",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(viewer.RUNS_DIR_ENV, str(tmp_path))
+    report = viewer.generate_report(
+        type(
+            "Args",
+            (),
+            {
+                "latest": True,
+                "pr": PR,
+                "commit": COMMIT,
+                "include_legacy": False,
+                "run_root": None,
+                "explain_selection": True,
+                "run_dir": None,
+                "heartbeat": None,
+                "status_file": None,
+                "manifest": None,
+                "summary": None,
+                "log": None,
+            },
+        )()
+    )
+    assert result["run_dir"] == str(run_dir)
+    assert report["status"] == "passed"
+    assert report["classification"] == "passed"
+    assert report["pass_eligible"] is True
+    assert report["rerun_required"] is False
+    assert report["full_validation"] is True
+    assert report["full_validation_reason"] == "Lane C disposable fallback"
+    assert report["full_pytest"]["result"] == "passed"
+    assert report["full_pytest"]["exit_code"] == 0
+    assert report["selection"]["superseded_non_pass_evidence"] is True
+    assert (
+        report["selection"]["selected_final_attempt_reason"]
+        == "latest_exact_pr_commit_completed_fallback_pass"
+    )
+    assert any("superseded" in warning for warning in report["warnings"])
+    assert any("setup_failure" in warning for warning in report["warnings"])
+
+
+def test_same_run_fallback_failure_supersedes_earlier_setup_failure(tmp_path, monkeypatch):
+    run_dir = tmp_path / f"sfai-pr{PR}-{COMMIT[:12]}-validation-20260618T030000"
+    log = tmp_path / "validation-failed.log"
+    log.write_text("pytest failed\n")
+    finalizer.finalize_validation_evidence(
+        pr=PR,
+        commit=COMMIT,
+        log_path=log,
+        run_dir=run_dir,
+        status="failed",
+        lane="full",
+        full_validation=True,
+        full_validation_reason="Lane C disposable fallback",
+    )
+    (run_dir / "validation-preflight.json").write_text(
+        json.dumps(
+            {
+                "mode": viewer.PREFLIGHT_MODE,
+                "status": "failed",
+                "classification": "setup_failure",
+                "reason": "host missing pytest",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(viewer.RUNS_DIR_ENV, str(tmp_path))
+    report = viewer.generate_report(
+        type(
+            "Args",
+            (),
+            {
+                "latest": True,
+                "pr": PR,
+                "commit": COMMIT,
+                "include_legacy": False,
+                "run_root": None,
+                "explain_selection": True,
+                "run_dir": None,
+                "heartbeat": None,
+                "status_file": None,
+                "manifest": None,
+                "summary": None,
+                "log": None,
+            },
+        )()
+    )
+    assert report["status"] == "failed"
+    assert report["classification"] == "failed"
+    assert report["pass_eligible"] is False
+    assert report["rerun_required"] is True
+    assert report["selection"]["superseded_non_pass_evidence"] is True
+    assert (
+        report["selection"]["selected_final_attempt_reason"]
+        == "latest_exact_pr_commit_completed_fallback_failure"
+    )
+
+
 def test_pr_lane_status_sees_auto_finalizer_pass_eligible(tmp_path, monkeypatch):
     result = finalize(tmp_path, "ruff passed\ncompileall passed\ntargeted tests passed\n")
     monkeypatch.setenv(viewer.RUNS_DIR_ENV, str(tmp_path))

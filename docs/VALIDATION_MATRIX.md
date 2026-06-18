@@ -274,3 +274,10 @@ lane path.
 
 Validation discovery treats environment-configured roots as additive: configured
 persisted roots do not suppress the built-in writable lane evidence root.
+
+For split host/fallback runs in the same exact PR/commit/run directory, the
+terminal disposable fallback finalizer packet is the selected final validation
+attempt. A later fallback pass supersedes earlier host `setup_failure` evidence
+and is pass eligible; the setup failure remains visible as a warning/process
+note. Without a later successful exact validation attempt, failed, setup, and
+interrupted evidence remains non-pass-eligible.
