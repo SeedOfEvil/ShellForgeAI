@@ -2567,3 +2567,8 @@ completed validation result back into the mounted lane evidence directory
 (`/artifacts` inside the container). Do not run a separate manual finalizer after
 a successful standard fallback; use the read-only `validation_status.py --latest
 --pr <PR> --commit <sha> --json --explain-selection` check instead.
+
+Normal PR-lane validation evidence is written below
+`/tmp/shellforgeai-validation-runs/`, so the lane process owns the evidence
+packet and `validation_status.py --latest` can discover it without a manual
+`sudo` finalizer.

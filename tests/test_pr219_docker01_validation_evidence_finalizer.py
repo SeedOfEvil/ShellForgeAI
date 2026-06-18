@@ -373,6 +373,18 @@ def _passed_preflight(path=None):
     }
 
 
+def test_default_evidence_paths_are_discovery_compatible():
+    stamp = "2026-06-18T00:00:00Z"
+    finalizer_dir = finalizer.default_run_dir(pr=PR, commit=COMMIT, created_at=stamp)
+    lane_dir = lane._default_validation_run_dir(
+        pr_number=str(PR), short_commit=COMMIT[:12], created_at=stamp
+    )
+    assert finalizer_dir.parent.name == "shellforgeai-validation-runs"
+    assert lane_dir.parent.name == "shellforgeai-validation-runs"
+    assert finalizer_dir.name.startswith(f"sfai-pr{PR}-{COMMIT[:12]}-validation-")
+    assert lane_dir.name.startswith(f"sfai-pr{PR}-{COMMIT[:12]}-validation-")
+
+
 def test_standard_lane_execute_success_auto_finalizes_exact_commit(tmp_path, monkeypatch):
     run_dir = tmp_path / "sfai-pr219-abcdef123456-validation-auto"
     monkeypatch.setattr(

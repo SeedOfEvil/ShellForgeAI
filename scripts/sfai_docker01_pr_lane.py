@@ -437,7 +437,11 @@ def _default_validation_run_dir(
     safe_pr = pr_number or "unknown"
     safe_sha = short_commit or "unknown"
     stamp = created_at.replace(":", "").replace("-", "").replace("Z", "")
-    return Path(tempfile.gettempdir()) / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
+    return (
+        Path(tempfile.gettempdir())
+        / "shellforgeai-validation-runs"
+        / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
+    )
 
 
 def _command_record(command: dict, *, status: str, duration: float | None, log_path: str | None):

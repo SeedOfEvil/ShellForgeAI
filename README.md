@@ -599,3 +599,8 @@ The disposable Docker01 fallback command finalizes its completed validation
 result into the mounted lane run directory, so successful fallback validation is
 immediately discoverable by exact PR/commit validation-status checks without a
 manual finalizer step.
+
+Default Docker01 PR-lane validation packets are written under
+`/tmp/shellforgeai-validation-runs/`, a writable discovery root used by
+`validation_status.py --latest`, so standard validation completion does not need
+a manual sudo finalizer.

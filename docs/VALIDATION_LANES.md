@@ -1049,3 +1049,8 @@ writing final `validation-status.json`, `validation-manifest.json`,
 (`/artifacts`, the host lane run directory). A successful fallback therefore
 turns the exact PR/commit evidence packet into pass-eligible validation evidence
 without a manual finalizer command.
+
+By default, new lane validation evidence is created under
+`/tmp/shellforgeai-validation-runs/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`.
+This keeps the normal path writable by the lane process without `sudo` while
+remaining within a root scanned by `validation_status.py --latest`.

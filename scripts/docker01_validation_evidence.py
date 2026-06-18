@@ -21,6 +21,7 @@ STATUS_MODE = "docker01_pr_lane_validation_status"
 MANIFEST_MODE = "docker01_pr_lane_validation_manifest"
 MAX_EXCERPT_BYTES = 12000
 MAX_COMMANDS = 200
+DEFAULT_DISCOVERY_ROOT = Path(tempfile.gettempdir()) / "shellforgeai-validation-runs"
 
 SAFETY = {
     "read_only": True,
@@ -86,7 +87,7 @@ def short_sha(commit: str) -> str:
 
 def default_run_dir(*, pr: int | str, commit: str, created_at: str | None = None) -> Path:
     stamp = (created_at or utc_now()).replace(":", "").replace("-", "").replace("Z", "")
-    return Path(tempfile.gettempdir()) / f"sfai-pr{pr}-{short_sha(commit)}-validation-{stamp}"
+    return DEFAULT_DISCOVERY_ROOT / f"sfai-pr{pr}-{short_sha(commit)}-validation-{stamp}"
 
 
 def read_bounded_tail(path: str | Path | None, *, limit: int = MAX_EXCERPT_BYTES) -> str:

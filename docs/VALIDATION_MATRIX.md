@@ -266,3 +266,8 @@ When the disposable fallback command completes, it calls the evidence finalizer
 inside the container and writes final PR/commit validation evidence into the
 mounted run directory. That directory is the same lane evidence directory read
 by `validation_status.py --latest --pr <PR> --commit <sha>`.
+
+Default PR-lane validation evidence now lives under
+`/tmp/shellforgeai-validation-runs/`, a writable discovery root scanned by the
+validation-status viewer, avoiding a manual `sudo` finalizer step for the normal
+lane path.
