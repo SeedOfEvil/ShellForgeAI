@@ -2527,3 +2527,62 @@ cat /tmp/sfai-pr<PR>-<short>-merge-readiness/merge-comment.md
 The output directory contains `merge-readiness.json`, `merge-readiness-summary.md`, `manifest.json`, `checksums.json`, `raw-validation-status.json`, `raw-pr-lane-status.json`, and `raw-qa-bundle-summary.json`; with `--comment`, it also contains `merge-comment.md`. Missing raw evidence is recorded as `not_available`; huge logs and arbitrary filesystem listings are not copied.
 
 The helper is evidence-only. `--comment` prints paste-ready Markdown only and does not post to GitHub, approve, merge, or replace reviewer judgment. It does not deploy, build, validate, run QA, restart, clean, prune, delete files, mutate Docker/Compose, remediate, roll back, recover, call models/Codex, install packages, call the network, merge, push, or use `shell=True`. `pass_candidate`, `hold_candidate`, and `unknown` are review aids rendered as `PASS / mergeable`, `HOLD / needs follow-up`, and `NEEDS EVIDENCE / cannot determine`, not approval. SeedOfEvil remains final merge owner.
+
+
+## Docker01 validation evidence finalizer
+
+After a Docker01 PR-lane validation attempt completes, the lane writes a
+structured validation evidence packet automatically. Operators may also recover
+from an already-completed log without rerunning validation:
+
+```bash
+python3 scripts/docker01_validation_evidence.py --pr <PR> --commit <sha> --log <validation-log-path> --status passed --json
+python3 scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection
+```
+
+The packet lives in `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/` unless
+a run directory is supplied, and contains `validation-status.json`,
+`validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and a
+bounded log excerpt. The finalizer records evidence only: it does not execute
+validation or QA and does not perform cleanup, prune, delete, restart,
+Docker/Compose mutation, remediation, rollback, recovery, GitHub actions, cloud
+apply/merge/push, package installs, network calls, or model calls. For the same
+PR/commit, latest pass-eligible evidence wins over earlier setup-failure or
+interrupted evidence so host setup failures do not dominate a later successful
+disposable validation fallback.
+
+The guarded PR lane records automatic validation evidence against the requested
+PR head commit (`--head-commit` or `--commit`) after terminal validation
+outcomes. Lane C/full validation packets preserve `full_validation=true` and the
+full-validation reason so read-only merge-readiness and comment rendering do not
+misreport full pytest as absent.
+
+Disposable validation fallback packets now bootstrap the disposable
+`python:3.12-slim` environment with `procps` (providing `ps`), `git`, and
+`rsync` inside the container before validation. This is not a Docker01 host
+package install and does not modify the production ShellForgeAI container.
+
+When operators run the generated disposable fallback command, it finalizes the
+completed validation result back into the mounted lane evidence directory
+(`/artifacts` inside the container). Do not run a separate manual finalizer after
+a successful standard fallback; use the read-only `validation_status.py --latest
+--pr <PR> --commit <sha> --json --explain-selection` check instead.
+
+Normal PR-lane validation evidence is written below
+`/tmp/shellforgeai-validation-runs/`, so the lane process owns the evidence
+packet and `validation_status.py --latest` can discover it without a manual
+`sudo` finalizer.
+
+If `SFAI_VALIDATION_RUNS_DIR` points at a persisted validation location, the
+viewer still also scans the built-in writable lane evidence root so standard
+lane finalization remains discoverable without sudo.
+
+If the host setup preflight failed but a later disposable fallback validation
+completed in the same exact PR/commit/run directory, the terminal fallback
+finalizer packet is the selected final attempt. A fallback pass reports
+`passed`, `pass_eligible=true`, and `rerun_required=false`; the earlier
+`setup_failure` remains in warnings/process notes for auditability. Without a
+later exact fallback pass, failed/setup/interrupted evidence is not pass
+eligible. `validation_status.py --explain-selection` shows when earlier setup
+evidence was superseded; status, merge-readiness, and comment tools still do not
+run validation or QA.

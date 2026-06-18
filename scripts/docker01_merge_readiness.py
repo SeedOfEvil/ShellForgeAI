@@ -250,6 +250,11 @@ def build_report(
     v_class = validation_raw.get("classification", "unknown")
     pass_eligible = validation_raw.get("pass_eligible") is True
     rerun_required = validation_raw.get("rerun_required") is True
+    full_validation_run = bool(
+        validation_raw.get("full_validation")
+        or validation_raw.get("full_pytest") == "passed"
+        or (validation_raw.get("qa_marker") or {}).get("full_pytest_run") is True
+    )
     pr_state = pr_lane_raw.get("state") if isinstance(pr_lane_raw.get("state"), dict) else {}
     lane_checks = {c.get("name"): c for c in pr_lane_raw.get("checks", []) if isinstance(c, dict)}
 
@@ -380,11 +385,10 @@ def build_report(
             "validation_pass_eligible": pass_eligible,
             "qa_bundle_passed": qa_passed,
             "safety_assertions_passed": safety_assertions_ok,
-            "full_pytest_run": bool(
-                validation_raw.get("full_validation")
-                or validation_raw.get("full_pytest") == "passed"
+            "full_pytest_run": full_validation_run,
+            "duplicate_full_pytest_detected": bool(
+                validation_raw.get("duplicate_full_pytest_detected")
             ),
-            "duplicate_full_pytest_detected": False,
             "hygiene_status": "ok"
             if hygiene.get("history_status") == "ok"
             and hygiene.get("compare_latest_status") in ("ok", "not_available")
@@ -401,6 +405,8 @@ def build_report(
                 "classification": v_class,
                 "pass_eligible": pass_eligible,
                 "rerun_required": rerun_required,
+                "full_validation": full_validation_run,
+                "full_validation_reason": validation_raw.get("full_validation_reason") or "",
                 "run_dir": (validation_raw.get("source") or {}).get("run_dir")
                 or validation_raw.get("run_dir"),
             },

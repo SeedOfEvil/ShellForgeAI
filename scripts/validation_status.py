@@ -29,7 +29,11 @@ Hard safety posture (this viewer is evidence-only and read-only):
 Conflict rule: if evidence sources disagree (for example a manifest says
 ``passed`` but a heartbeat says ``incomplete``), the viewer prefers the
 conservative result and emits a warning; it never silently reports
-``pass_eligible=true`` on conflicting evidence.
+``pass_eligible=true`` on conflicting evidence. The Docker01 finalizer status
+packet is the exception for a completed fallback attempt: when it records a
+terminal pass/fail for the exact run, it supersedes earlier host setup evidence
+from the same run directory while preserving that earlier setup failure as a
+warning/process note.
 """
 
 from __future__ import annotations
@@ -498,6 +502,7 @@ def discover_candidates(
     run_root: str | None = None,
     include_legacy: bool = False,
     warnings: list[str] | None = None,
+    include_default_roots: bool = False,
 ) -> list[dict[str, Any]]:
     """Discover validation evidence candidates from bounded, known locations.
 
@@ -547,8 +552,16 @@ def discover_candidates(
                 out=out,
             )
 
-    if run_override or persisted_override or (include_legacy and os.environ.get(LEGACY_DIR_ENV)):
+    if (
+        run_override or persisted_override or (include_legacy and os.environ.get(LEGACY_DIR_ENV))
+    ) and not include_default_roots:
         return out
+
+    # Environment roots can add search locations without suppressing the built-in
+    # writable/default discovery roots for exact PR/commit lookups. Docker01 may
+    # set SFAI_VALIDATION_RUNS_DIR to a persisted location that is not writable by
+    # the lane process; automatic lane evidence under the default temp root must
+    # still be found for exact status checks.
 
     # Recent PR-specific temp run directories (bounded glob, never a crawl).
     if TMP_ROOT.is_dir():
@@ -589,6 +602,35 @@ def discover_candidates(
         )
 
     return out
+
+
+def _candidate_evidence_rank(candidate: dict[str, Any]) -> tuple[int, float]:
+    """Rank exact PR/commit evidence by completed result before mtime.
+
+    For exact PR/commit discovery, a newer pass-eligible artifact must beat older
+    setup failures and stale partial artifacts. Non-exact discovery preserves the
+    existing kind/time behavior.
+    """
+    status_path = Path(candidate["path"]) / "validation-status.json"
+    doc = load_json_evidence(status_path, [], label="status") if status_path.is_file() else None
+    if not isinstance(doc, dict):
+        return (0, float(candidate.get("mtime") or 0))
+    if (
+        doc.get("pass_eligible") is True
+        or doc.get("classification") == "passed"
+        or doc.get("status") == "passed"
+    ):
+        return (4, float(candidate.get("mtime") or 0))
+    if doc.get("status") == "failed" or doc.get("classification") in ("failed", "test_failure"):
+        return (3, float(candidate.get("mtime") or 0))
+    if doc.get("status") == "setup_failure" or doc.get("classification") == CLASS_SETUP_FAILURE:
+        return (2, float(candidate.get("mtime") or 0))
+    if (
+        doc.get("status") in ("interrupted", STATUS_INCOMPLETE)
+        or doc.get("classification") == CLASS_INTERRUPTED
+    ):
+        return (1, float(candidate.get("mtime") or 0))
+    return (0, float(candidate.get("mtime") or 0))
 
 
 def _selected_by(pr: Any, commit: str | None) -> str:
@@ -634,7 +676,10 @@ def select_latest(
     or mutates anything; it only ranks discovered evidence directories.
     """
     candidates = discover_candidates(
-        run_root=run_root, include_legacy=include_legacy, warnings=warnings
+        run_root=run_root,
+        include_legacy=include_legacy,
+        warnings=warnings,
+        include_default_roots=pr is not None and commit is not None,
     )
 
     annotated: list[dict[str, Any]] = []
@@ -655,10 +700,27 @@ def select_latest(
     eligible_candidates = [c for c in annotated if c["eligible"]]
     selected: dict[str, Any] | None = None
     if eligible_candidates:
-        ordered = sorted(
-            eligible_candidates, key=lambda c: (_kind_rank(c), c["mtime"]), reverse=True
-        )
-        selected = ordered[0]
+        exact_scope = pr is not None and commit is not None
+        if exact_scope:
+            ordered = sorted(eligible_candidates, key=_candidate_evidence_rank, reverse=True)
+            selected = ordered[0]
+            selected_doc_rank = _candidate_evidence_rank(selected)[0]
+            if selected_doc_rank >= 4:
+                ignored = [
+                    c
+                    for c in eligible_candidates
+                    if c["path"] != selected["path"] and _candidate_evidence_rank(c)[0] in (1, 2)
+                ]
+                if ignored:
+                    warnings.append(
+                        "earlier setup_failure/interrupted evidence ignored because "
+                        "newer exact pass evidence was selected"
+                    )
+        else:
+            ordered = sorted(
+                eligible_candidates, key=lambda c: (_kind_rank(c), c["mtime"]), reverse=True
+            )
+            selected = ordered[0]
         top_rank = _kind_rank(selected)
         ties = [c for c in eligible_candidates if _kind_rank(c) == top_rank]
         if len(ties) >= 2:
@@ -681,7 +743,16 @@ def select_latest(
                     "commit": candidate["commit"],
                     "timestamp": _iso_from_mtime(candidate["mtime"]),
                     "selected": is_selected,
-                    "reason": _kind_reason(candidate) if is_selected else None,
+                    "reason": (
+                        (
+                            f"{_kind_reason(candidate)}; exact PR/commit evidence "
+                            "precedence selected latest pass/fail result"
+                        )
+                        if is_selected and pr is not None and commit is not None
+                        else _kind_reason(candidate)
+                        if is_selected
+                        else None
+                    ),
                     "skipped_reason": (
                         None
                         if is_selected
@@ -779,8 +850,12 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
             classification = CLASS_UNKNOWN
         return {
             "kind": "docker01_pr_lane",
+            "finalizer": True,
             "status": final_status,
             "classification": classification,
+            "full_validation": bool(data.get("full_validation")),
+            "full_validation_reason": data.get("full_validation_reason") or "",
+            "duplicate_full_pytest_detected": bool(data.get("duplicate_full_pytest_detected")),
             "phase_status": {},
             "active_phase": None,
             "last_completed_phase": None,
@@ -940,6 +1015,93 @@ def _full_pytest_confirmed(verdicts: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _terminal_finalizer_verdict(verdicts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the Docker01 finalizer verdict when it records a terminal attempt.
+
+    The finalizer is written after the selected host/fallback validation attempt
+    completes. For a run directory that also contains earlier host setup-failure
+    evidence, this terminal finalizer status is the authoritative final attempt;
+    read-only viewers still keep the older setup failure visible as a warning.
+    """
+    for verdict in verdicts:
+        if verdict.get("finalizer") is True and verdict.get("status") in (
+            STATUS_PASSED,
+            STATUS_FAILED,
+        ):
+            return verdict
+    return None
+
+
+def _merge_from_terminal_finalizer(
+    finalizer: dict[str, Any],
+    verdicts: list[dict[str, Any]],
+    warnings: list[str],
+) -> dict[str, Any] | None:
+    """Use terminal Docker01 finalizer evidence over earlier setup evidence.
+
+    This is intentionally narrow: it only applies when the Docker01 finalizer
+    status packet exists and records a terminal pass/fail. It does not convert
+    interrupted/unknown finalizer evidence into a pass, and it does not make
+    read-only status tools execute validation.
+    """
+    superseded = [
+        verdict
+        for verdict in verdicts
+        if verdict is not finalizer
+        and (
+            verdict.get("classification") == CLASS_SETUP_FAILURE
+            or verdict.get("failed_phase") == "environment_preflight"
+            or verdict.get("classification") == CLASS_INTERRUPTED
+            or verdict.get("status") == STATUS_INCOMPLETE
+        )
+    ]
+    if not superseded:
+        return None
+
+    final_status = finalizer["status"]
+    pass_eligible = final_status == STATUS_PASSED
+    if pass_eligible:
+        warnings.append(
+            "Earlier host setup_failure evidence was superseded by later successful "
+            "disposable validation fallback."
+        )
+        selected_reason = "latest_exact_pr_commit_completed_fallback_pass"
+        failed_phase = None
+    else:
+        warnings.append(
+            "Earlier host setup_failure evidence was superseded by later terminal "
+            "disposable validation fallback failure."
+        )
+        selected_reason = "latest_exact_pr_commit_completed_fallback_failure"
+        failed_phase = finalizer.get("failed_phase")
+
+    for verdict in superseded:
+        if verdict.get("classification") == CLASS_SETUP_FAILURE:
+            warnings.append(
+                "Preserved earlier setup_failure evidence as a process note; it is "
+                "not the final selected validation classification."
+            )
+            break
+
+    phase_status = _merge_phase_status([finalizer])
+    return {
+        "status": final_status,
+        "classification": CLASS_PASSED
+        if pass_eligible
+        else finalizer.get("classification", "failed"),
+        "pass_eligible": pass_eligible,
+        "rerun_required": not pass_eligible,
+        "phase_status": phase_status,
+        "active_phase": finalizer.get("active_phase"),
+        "last_completed_phase": finalizer.get("last_completed_phase"),
+        "full_pytest_exit_code": finalizer.get("full_pytest_exit_code"),
+        "full_pytest_result": finalizer.get("full_pytest_result") or vh.FULL_UNKNOWN,
+        "failed_phase": failed_phase,
+        "superseded_non_pass_evidence": True,
+        "selected_reason": selected_reason,
+    }
+
+
 def classify_evidence(
     verdicts: list[dict[str, Any]],
     warnings: list[str],
@@ -962,6 +1124,12 @@ def classify_evidence(
             "full_pytest_result": vh.FULL_UNKNOWN,
             "failed_phase": None,
         }
+
+    terminal_finalizer = _terminal_finalizer_verdict(verdicts)
+    if terminal_finalizer is not None:
+        finalizer_merged = _merge_from_terminal_finalizer(terminal_finalizer, verdicts, warnings)
+        if finalizer_merged is not None:
+            return finalizer_merged
 
     # Highest severity status wins (failed > incomplete > passed). This makes any
     # disagreement collapse to the conservative result and never to a pass.
@@ -1128,6 +1296,33 @@ def _log_path_from_manifest(manifest: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _full_validation_metadata(
+    status_doc: dict[str, Any] | None, manifest_doc: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Return proven full-validation metadata from status/manifest evidence."""
+    for doc in (status_doc, manifest_doc):
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("full_validation") is True:
+            return {
+                "full_validation": True,
+                "full_validation_reason": doc.get("full_validation_reason") or "",
+                "duplicate_full_pytest_detected": bool(doc.get("duplicate_full_pytest_detected")),
+            }
+        lane = doc.get("lane")
+        if isinstance(lane, dict) and lane.get("full_validation_required") is True:
+            return {
+                "full_validation": True,
+                "full_validation_reason": lane.get("full_validation_reason") or "",
+                "duplicate_full_pytest_detected": False,
+            }
+    return {
+        "full_validation": False,
+        "full_validation_reason": "",
+        "duplicate_full_pytest_detected": False,
+    }
+
+
 def lane_qa_marker(
     manifest_doc: dict[str, Any] | None,
     *,
@@ -1145,11 +1340,13 @@ def lane_qa_marker(
     full_run = False
     manifest_reason = None
     if isinstance(manifest_doc, dict):
+        full_run = bool(manifest_doc.get("full_validation"))
+        manifest_reason = manifest_doc.get("full_validation_reason")
         lane_block = manifest_doc.get("lane")
         if isinstance(lane_block, dict):
             selected = lane_block.get("selected")
-            full_run = bool(lane_block.get("full_validation_required"))
-            manifest_reason = lane_block.get("full_validation_reason")
+            full_run = full_run or bool(lane_block.get("full_validation_required"))
+            manifest_reason = manifest_reason or lane_block.get("full_validation_reason")
 
     lane_letter = LANE_LETTER.get(selected) if isinstance(selected, str) else None
     scope = "full" if full_run else "targeted"
@@ -1306,6 +1503,14 @@ def build_report(
     if source_commit is None:
         source_commit = run_meta.get("commit")
 
+    full_meta = _full_validation_metadata(status_doc, manifest_doc)
+    report_selection = dict(selection) if isinstance(selection, dict) else selection
+    if isinstance(report_selection, dict) and merged.get("superseded_non_pass_evidence"):
+        report_selection["superseded_non_pass_evidence"] = True
+        report_selection["selected_final_attempt_reason"] = merged.get("selected_reason")
+        if merged.get("selected_reason"):
+            report_selection["selected_reason"] = merged["selected_reason"]
+
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": MODE,
@@ -1313,6 +1518,9 @@ def build_report(
         "classification": merged["classification"],
         "pass_eligible": bool(merged["pass_eligible"]),
         "rerun_required": bool(merged["rerun_required"]),
+        "full_validation": full_meta["full_validation"],
+        "full_validation_reason": full_meta["full_validation_reason"],
+        "duplicate_full_pytest_detected": full_meta["duplicate_full_pytest_detected"],
         "source": {
             "latest": bool(latest),
             "run_dir": run_dir,
@@ -1329,7 +1537,7 @@ def build_report(
             "pr": source_pr,
             "commit": source_commit,
         },
-        "selection": selection,
+        "selection": report_selection,
         "fallback_packet_present": fallback_present,
         "fallback_packet_path": fallback_packet_path,
         "qa_marker": lane_qa_marker(manifest_doc, fallback_packet_present=fallback_present),

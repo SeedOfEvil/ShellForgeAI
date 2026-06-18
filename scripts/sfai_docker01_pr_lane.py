@@ -36,6 +36,7 @@ HELPER_DIR = Path(__file__).resolve().parent
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
+import docker01_validation_evidence  # noqa: E402
 import track_pytest_durations  # noqa: E402
 import validate_pr  # noqa: E402
 import validation_container_fallback  # noqa: E402
@@ -436,7 +437,11 @@ def _default_validation_run_dir(
     safe_pr = pr_number or "unknown"
     safe_sha = short_commit or "unknown"
     stamp = created_at.replace(":", "").replace("-", "").replace("Z", "")
-    return Path(tempfile.gettempdir()) / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
+    return (
+        Path(tempfile.gettempdir())
+        / "shellforgeai-validation-runs"
+        / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
+    )
 
 
 def _command_record(command: dict, *, status: str, duration: float | None, log_path: str | None):
@@ -668,7 +673,10 @@ def _read_compose_image() -> str | None:
 def _validation_latest(pr: int, commit: str) -> dict:
     warnings: list[str] = []
     candidates = validation_status_viewer.discover_candidates(
-        run_root=None, include_legacy=False, warnings=warnings
+        run_root=None,
+        include_legacy=False,
+        warnings=warnings,
+        include_default_roots=True,
     )
     exact: list[dict] = []
     for candidate in candidates:
@@ -1110,60 +1118,31 @@ def write_lane_validation_evidence(
     log_path: str | None,
     created_at: str,
 ) -> dict:
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "logs").mkdir(exist_ok=True)
-    commands = commands_run_records(command_records)
-    completed_at = _utc_now()
-    status_doc = build_lane_validation_status(
-        manifest=manifest,
-        run_dir=run_dir,
-        commands=commands,
+    pr_block = manifest.get("pr") or {}
+    lane_block = manifest.get("lane") or {}
+    value = _lane_status_value(manifest.get("status"), manifest.get("classification"))
+    if (
+        manifest.get("status") == "failed"
+        and manifest.get("failed_phase")
+        and manifest.get("failed_phase") != "environment_preflight"
+        and (manifest.get("environment_preflight") or {}).get("status") == "passed"
+    ):
+        value = "failed"
+    result = docker01_validation_evidence.finalize_validation_evidence(
+        pr=pr_block.get("number") or "unknown",
+        commit=pr_block.get("head_commit") or "unknown",
         log_path=log_path,
+        run_dir=run_dir,
+        status=value,
+        lane="full" if lane_block.get("full_validation_required") else "targeted",
+        commands=commands_run_records(command_records),
+        full_validation=bool(lane_block.get("full_validation_required")),
+        full_validation_reason=lane_block.get("full_validation_reason") or "",
+        duplicate_full_pytest_detected=False,
         created_at=created_at,
-        completed_at=completed_at,
+        warnings=list(manifest.get("non_blockers") or []),
     )
-    status_path = run_dir / "validation-status.json"
-    commands_path = run_dir / "commands-run.json"
-    summary_path = run_dir / "validation-summary.md"
-    manifest_path = run_dir / "validation-manifest.json"
-    status_path.write_text(
-        json.dumps(status_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    commands_path.write_text(
-        json.dumps(commands, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    summary_path.write_text(render_lane_validation_summary(status_doc), encoding="utf-8")
-    log_files = []
-    if log_path:
-        log_files.append(log_path)
-    manifest_doc = {
-        "schema_version": 1,
-        "mode": LANE_MANIFEST_MODE,
-        "pr": status_doc.get("pr"),
-        "commit": status_doc.get("commit"),
-        "short_sha": status_doc.get("short_sha"),
-        "created_at": created_at,
-        "run_dir": str(run_dir),
-        "status_file": "validation-status.json",
-        "summary_file": "validation-summary.md",
-        "commands_file": "commands-run.json",
-        "log_files": log_files,
-        "artifacts": [
-            _artifact_entry(status_path, base=run_dir),
-            _artifact_entry(commands_path, base=run_dir),
-            _artifact_entry(summary_path, base=run_dir),
-        ],
-        "read_only": True,
-        "mutation_performed": False,
-    }
-    manifest_path.write_text(
-        json.dumps(manifest_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    manifest_doc["artifacts"].append(_artifact_entry(manifest_path, base=run_dir))
-    manifest_path.write_text(
-        json.dumps(manifest_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    return manifest_doc
+    return result["manifest"]
 
 
 def planned_command_records(plan: dict, *, log_path: str | None = None) -> list[dict]:
@@ -1612,7 +1591,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     created_at = _utc_now()
-    head_commit = args.head_commit or _git_value(["rev-parse", "HEAD"])
+    head_commit = args.head_commit or args.commit or _git_value(["rev-parse", "HEAD"])
     short_commit = head_commit[:12] if head_commit else None
     validation_run_dir = (
         Path(args.run_dir)

@@ -579,3 +579,28 @@ python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/s
 ```
 
 `--comment` renders a concise paste-ready Markdown review comment from the same evidence. With `--out --comment`, the packet also includes `merge-comment.md`. It does not post to GitHub, approve, merge, or replace reviewer judgment. Status wording is `pass_candidate` → `PASS / mergeable`, `hold_candidate` → `HOLD / needs follow-up`, and `unknown` → `NEEDS EVIDENCE / cannot determine`. The helper is read-only reviewer evidence and does not deploy, build, validate, run QA, clean, prune, delete, restart, mutate Docker/Compose, or replace SeedOfEvil's final merge judgment; SeedOfEvil remains final merge owner.
+
+
+Docker01 validation evidence is finalized automatically after PR-lane validation
+attempts. The evidence-only helper `scripts/docker01_validation_evidence.py` can
+also write PR/commit-scoped evidence from an already-completed log; it does not
+run validation or QA. Use `python scripts/validation_status.py --latest --pr
+<PR> --commit <sha> --json --explain-selection` to select exact current
+evidence. Pass evidence is selected ahead of older setup/interrupted attempts;
+failed, setup-failure, interrupted, and unknown evidence is never pass eligible.
+
+The guarded Docker01 PR lane uses the requested PR head commit when it finalizes
+validation evidence automatically, so exact `validation_status.py --latest --pr
+<PR> --commit <sha>` checks should find successful, failed, setup-failure, or
+interrupted lane evidence without a manual finalizer step. Full-validation
+metadata is preserved through downstream status and merge-readiness views.
+
+The disposable Docker01 fallback command finalizes its completed validation
+result into the mounted lane run directory, so successful fallback validation is
+immediately discoverable by exact PR/commit validation-status checks without a
+manual finalizer step.
+
+Default Docker01 PR-lane validation packets are written under
+`/tmp/shellforgeai-validation-runs/`, a writable discovery root used by
+`validation_status.py --latest`, so standard validation completion does not need
+a manual sudo finalizer.

@@ -1057,3 +1057,25 @@ The status helper now treats Docker image digests as runtime metadata rather tha
 ### Docker01 merge-readiness evidence
 
 Docker01 review flow includes a read-only merge-readiness helper that consolidates existing PR-lane status, validation status, operator QA bundle, and hygiene evidence for an exact PR/commit. It emits strict JSON, a concise Markdown summary, and an optional bounded report directory. It is not a product runtime command and does not deploy, build, validate, run QA, restart, clean, prune, remediate, roll back, recover, merge, or push. SeedOfEvil remains final merge owner.
+
+## Docker01 validation evidence lifecycle
+
+Docker01 validation evidence finalization is now part of the PR-lane evidence
+lifecycle: completed validation attempts write structured PR/commit-scoped
+status, manifest, summary, command, and bounded log-excerpt artifacts without
+rerunning validation. Status, merge-readiness, and merge-comment rendering stay
+read-only and consume the same exact evidence, with pass evidence preferred over
+earlier setup-failure/interrupted attempts for the same PR and commit.
+
+Follow-up PR219 integration tightened the standard guarded lane path: automatic
+finalization now keys evidence to the requested PR head commit and carries Lane
+C/full-validation metadata through downstream read-only status and merge-review
+helpers.
+
+The disposable Docker01 validation fallback has been hardened so the generated
+container command installs the minimal OS tools required by the full test suite
+(`procps`/`ps`, `git`, and `rsync`) inside the disposable container only.
+
+The fallback command now closes the evidence lifecycle itself by invoking the
+validation finalizer inside the disposable container and writing the final
+PR/commit status packet into the mounted lane run directory.

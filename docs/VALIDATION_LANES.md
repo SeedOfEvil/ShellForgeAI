@@ -996,3 +996,77 @@ The helper consumes existing PR-lane status, scoped validation status, exact PR/
 Statuses are evidence classifications only: `pass_candidate` means existing exact PR/commit evidence appears merge-ready and renders as `PASS / mergeable`; `hold_candidate` means a blocker such as failed validation, failed QA, stale/mismatched source/container evidence, restart drift, or safety drift was found and renders as `HOLD / needs follow-up`; `unknown` means evidence is too incomplete to decide and renders as `NEEDS EVIDENCE / cannot determine`. Safe warnings include partial older hygiene history when compare-latest is ok, known pre-existing metadata advisories, model-doctor auth readiness unknown when other readiness evidence is acceptable, and skipped review bundles when not required.
 
 This helper does not deploy, build, validate, run QA, restart, clean, prune, delete, remediate, roll back, recover, mutate Docker/Compose, use `shell=True`, execute natural-language commands, call models/Codex, install packages, call the network, apply cloud changes, merge, or push. SeedOfEvil remains final merge owner.
+
+### Docker01 validation evidence finalizer
+
+The Docker01 PR lane now finalizes structured validation evidence after each
+validation attempt. The finalizer records an already-completed result only; it
+does not run validation, pytest, QA, Docker, Compose, cleanup, restart, prune,
+delete, remediation, rollback, recovery, network calls, or model calls. The
+optional recovery shape is:
+
+```bash
+python scripts/docker01_validation_evidence.py --pr <PR> --commit <sha> --log <validation-log-path> --status passed --json
+```
+
+Evidence is written under the established PR/commit-scoped validation directory
+shape, for example `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, with
+`validation-status.json`, `validation-manifest.json`, `validation-summary.md`,
+`commands-run.json`, and a bounded `source-log-excerpt.txt` when a log exists.
+Statuses are deterministic: `passed` is pass eligible and does not require a
+rerun; `failed`, `setup_failure`, `interrupted`, and `unknown` are never pass
+eligible and always require a rerun. If a host setup failure is followed by a
+successful disposable-container validation for the same PR/commit, the later
+pass evidence is selected and the earlier setup failure is retained only as a
+warning/process note.
+
+`validation_status.py --latest --pr <PR> --commit <sha> --json
+--explain-selection` selects exact PR/commit evidence by safe precedence:
+latest pass-eligible completed evidence, then failed evidence, then setup
+failure, then interrupted/incomplete, then `not_found`. Stale evidence for a
+different PR or commit is ignored, and read-only status, merge-readiness, and
+comment rendering tools continue to read evidence only.
+
+The automatic finalizer uses the requested PR head commit supplied to the lane
+(`--head-commit` or `--commit`) when writing validation evidence, so the standard
+lane path is immediately discoverable by exact PR/commit status checks after a
+terminal validation result. Full Lane C metadata is carried in
+`validation-status.json` as `full_validation=true` with the recorded reason, and
+read-only status/merge-readiness/comment tools surface that metadata without
+running validation or QA.
+
+Disposable validation fallback commands now prepare the slim Python container for
+the full project test suite by installing `procps` (for `ps`), `git`, and
+`rsync` inside the disposable container before copying the read-only source tree
+and running validation. This package installation is part of the generated
+container command only; the packet generator does not install host packages and
+does not change the production container.
+
+The generated disposable fallback command also invokes the validation evidence
+finalizer inside the copied repo after the container validation command exits,
+writing final `validation-status.json`, `validation-manifest.json`,
+`validation-summary.md`, and `commands-run.json` into the mounted run directory
+(`/artifacts`, the host lane run directory). A successful fallback therefore
+turns the exact PR/commit evidence packet into pass-eligible validation evidence
+without a manual finalizer command.
+
+By default, new lane validation evidence is created under
+`/tmp/shellforgeai-validation-runs/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`.
+This keeps the normal path writable by the lane process without `sudo` while
+remaining within a root scanned by `validation_status.py --latest`.
+
+`SFAI_VALIDATION_RUNS_DIR` and other discovery-root overrides add search roots for
+operators, but they do not hide the built-in writable lane root. This prevents a
+persisted root that needs elevated writes from masking automatically finalized
+standard-lane evidence.
+
+When the host validation setup fails and the disposable fallback later completes
+for the same PR/commit/run directory, the fallback's terminal finalizer packet is
+the selected result. A successful fallback is reported as final `passed` /
+`pass_eligible=true` evidence, while the earlier host `setup_failure` remains in
+warnings/process notes for auditability. If the fallback fails, the final result
+is `failed`; if no later fallback pass/fail exists, setup/interrupted evidence is
+never pass eligible. `validation_status.py --explain-selection` reports when
+earlier setup evidence was superseded by the completed fallback attempt, and the
+status/merge-readiness/comment tools remain read-only: they do not run
+validation or QA.
