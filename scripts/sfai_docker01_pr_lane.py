@@ -194,7 +194,19 @@ def build_parser() -> argparse.ArgumentParser:
             "build, validation, QA, or cleanup."
         ),
     )
-    parser.add_argument("--json", action="store_true", help="With --status, emit strict JSON only.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --status or --evidence-check-only, emit strict JSON only.",
+    )
+    parser.add_argument(
+        "--evidence-check-only",
+        action="store_true",
+        help=(
+            "Read existing validation evidence for --pr/--commit and write only "
+            "validation-evidence-check artifacts; no deploy/build/validation/QA/cleanup."
+        ),
+    )
     parser.add_argument(
         "--profile",
         default="auto",
@@ -525,6 +537,163 @@ def _lane_classification(value: str) -> str:
         "interrupted": "interrupted_or_incomplete",
         "partial": "interrupted_or_incomplete",
     }.get(value, "unknown")
+
+
+def validation_evidence_check_safety() -> dict:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "validation_executed": False,
+        "pytest_executed": False,
+        "qa_executed": False,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "cloud_apply_merge_push": False,
+    }
+
+
+def build_validation_evidence_check(
+    *,
+    pr: int | str,
+    commit: str,
+    run_dir: Path,
+    expected_pass_eligible: bool | None = None,
+    created_at: str | None = None,
+) -> dict:
+    created_at = created_at or _utc_now()
+    pr_int = int(pr) if str(pr).isdigit() else pr
+    warnings: list[str] = []
+    args = argparse.Namespace(
+        latest=True,
+        pr=pr_int,
+        commit=commit,
+        include_legacy=False,
+        run_root=None,
+        explain_selection=True,
+        run_dir=None,
+        heartbeat=None,
+        status_file=None,
+        manifest=None,
+        summary=None,
+        log=None,
+    )
+    report = validation_status_viewer.generate_report(args)
+    warnings.extend(report.get("warnings") or [])
+    source = report.get("source") or {}
+    selection = report.get("selection") or {}
+    selected_run_dir = source.get("run_dir")
+    selected_reason = selection.get("selected_reason") or source.get("selection_reason")
+    exact_selected = (
+        selected_run_dir is not None
+        and validation_status_viewer._pr_matches(source.get("pr"), pr_int)
+        and validation_status_viewer._commit_matches(source.get("commit"), commit)
+    )
+    actual_pass = bool(report.get("pass_eligible")) and report.get("status") == "passed"
+    expected_pass = actual_pass if expected_pass_eligible is None else bool(expected_pass_eligible)
+    matches_expected = bool(report.get("pass_eligible")) is expected_pass and bool(
+        report.get("rerun_required")
+    ) is (not expected_pass)
+    checks = [
+        _check(
+            "exact_pr_commit_evidence_selected",
+            exact_selected,
+            f"selected={selected_run_dir or 'none'} reason={selected_reason or UNKNOWN}",
+        ),
+        _check(
+            "pass_eligible_matches_validation_result",
+            matches_expected,
+            (
+                f"status={report.get('status')} classification={report.get('classification')} "
+                f"pass_eligible={report.get('pass_eligible')} "
+                f"rerun_required={report.get('rerun_required')}"
+            ),
+        ),
+    ]
+    status = "passed" if all(c["passed"] for c in checks) else "failed"
+    if report.get("status") == "not_found":
+        status = "failed"
+    return {
+        "schema_version": 1,
+        "mode": "docker01_pr_lane_validation_evidence_check",
+        "status": status,
+        "pr": pr_int,
+        "commit": commit,
+        "short_sha": commit[:12],
+        "created_at": created_at,
+        "read_only": True,
+        "mutation_performed": False,
+        "validation_status": {
+            "status": report.get("status") or UNKNOWN,
+            "classification": report.get("classification") or UNKNOWN,
+            "pass_eligible": bool(report.get("pass_eligible")),
+            "rerun_required": bool(report.get("rerun_required", True)),
+            "full_validation": bool(report.get("full_validation")),
+            "duplicate_full_pytest_detected": bool(report.get("duplicate_full_pytest_detected")),
+            "selected_run_dir": selected_run_dir,
+            "selected_reason": selected_reason,
+        },
+        "checks": checks,
+        "warnings": warnings,
+        "safety": validation_evidence_check_safety(),
+    }
+
+
+def render_validation_evidence_check(doc: dict) -> str:
+    vs = doc.get("validation_status") or {}
+    return "\n".join(
+        [
+            "# Docker01 Validation Evidence Check",
+            "",
+            f"* PR: {doc.get('pr')}",
+            f"* Commit: {doc.get('commit')}",
+            f"* Status: {doc.get('status')}",
+            f"* Selected validation evidence: {vs.get('selected_run_dir') or UNKNOWN}",
+            f"* Pass eligible: {vs.get('pass_eligible')}",
+            f"* Rerun required: {vs.get('rerun_required')}",
+            f"* Full validation: {vs.get('full_validation')}",
+            f"* Duplicate full pytest: {vs.get('duplicate_full_pytest_detected')}",
+            f"* Result: {vs.get('status')} / {vs.get('classification')}",
+            "",
+            "## Notes",
+            "* Finalizer evidence was checked through validation_status.",
+            "* No validation/pytest/QA was executed by this check.",
+            "* SeedOfEvil remains final merge owner.",
+            "",
+        ]
+    )
+
+
+def write_validation_evidence_check_artifacts(
+    *,
+    pr: int | str,
+    commit: str,
+    run_dir: Path,
+    expected_pass_eligible: bool | None = None,
+    created_at: str | None = None,
+) -> dict:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    doc = build_validation_evidence_check(
+        pr=pr,
+        commit=commit,
+        run_dir=run_dir,
+        expected_pass_eligible=expected_pass_eligible,
+        created_at=created_at,
+    )
+    json_path = run_dir / "validation-evidence-check.json"
+    md_path = run_dir / "validation-evidence-check.md"
+    json_path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    md_path.write_text(render_validation_evidence_check(doc), encoding="utf-8")
+    doc["artifact_paths"] = {"json": str(json_path), "markdown": str(md_path)}
+    return doc
 
 
 def validation_evidence_safety() -> dict:
@@ -1428,6 +1597,32 @@ def render_human_summary(manifest: dict) -> str:
         f"* manifest: {artifacts.get('manifest_path') or UNKNOWN}",
         f"* heartbeat: {artifacts.get('heartbeat_path') or UNKNOWN}",
     ]
+    evidence_check = manifest.get("validation_evidence_check") or {}
+    if evidence_check:
+        lines.extend(
+            [
+                f"* validation evidence check: {evidence_check.get('json_path') or UNKNOWN}",
+                "",
+                "Validation evidence self-check:",
+                f"* status: {evidence_check.get('status') or UNKNOWN}",
+                f"* selected evidence: {evidence_check.get('selected_run_dir') or UNKNOWN}",
+                f"* pass eligible: {evidence_check.get('pass_eligible')}",
+                f"* rerun required: {evidence_check.get('rerun_required')}",
+                f"* full validation: {evidence_check.get('full_validation')}",
+                f"* duplicate full pytest: {evidence_check.get('duplicate_full_pytest_detected')}",
+                "* earlier setup_failure superseded by fallback pass: "
+                f"{evidence_check.get('earlier_setup_failure_superseded')}",
+            ]
+        )
+        if evidence_check.get("status") != "passed":
+            lines.extend(
+                [
+                    "* lifecycle result: needs_followup",
+                    "* safe next step: python3 scripts/validation_status.py --latest "
+                    f"--pr {pr.get('number')} --commit {pr.get('head_commit')} "
+                    "--json --explain-selection",
+                ]
+            )
     if status == "incomplete":
         lines.extend(
             [
@@ -1563,6 +1758,29 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(render_pr_lane_status(doc), end="")
         return 0
+    if args.evidence_check_only:
+        if args.execute_validation or args.preflight_only or args.no_cache:
+            parser.error(
+                "--evidence-check-only cannot be combined with deploy/build/validation flags"
+            )
+        if not args.pr_number or not args.commit:
+            parser.error("--evidence-check-only requires --pr and --commit")
+        created_at = _utc_now()
+        run_dir = (
+            Path(args.run_dir)
+            if args.run_dir
+            else _default_validation_run_dir(
+                pr_number=args.pr_number, short_commit=args.commit[:12], created_at=created_at
+            )
+        )
+        doc = write_validation_evidence_check_artifacts(
+            pr=args.pr_number, commit=args.commit, run_dir=run_dir, created_at=created_at
+        )
+        if args.json:
+            print(json.dumps(doc, sort_keys=True))
+        else:
+            print(render_validation_evidence_check(doc), end="")
+        return 0 if doc.get("status") == "passed" else 1
     if args.print_manifest_json and args.execute_validation and not args.dry_run:
         parser.error("--print-manifest-json cannot be combined with --execute-validation")
     changed_files = _split_changed_files(args.changed_files)
@@ -1880,6 +2098,50 @@ def main(argv: list[str] | None = None) -> int:
         log_path=args.validation_log,
         created_at=created_at,
     )
+    evidence_check = None
+    if args.pr_number and head_commit:
+        evidence_check = write_validation_evidence_check_artifacts(
+            pr=args.pr_number,
+            commit=head_commit,
+            run_dir=validation_run_dir,
+            expected_pass_eligible=bool(manifest.get("pass_eligible")),
+            created_at=_utc_now(),
+        )
+        manifest["validation_evidence_check"] = {
+            "status": evidence_check.get("status"),
+            "json_path": str(validation_run_dir / "validation-evidence-check.json"),
+            "markdown_path": str(validation_run_dir / "validation-evidence-check.md"),
+            "selected_run_dir": (evidence_check.get("validation_status") or {}).get(
+                "selected_run_dir"
+            ),
+            "pass_eligible": (evidence_check.get("validation_status") or {}).get("pass_eligible"),
+            "rerun_required": (evidence_check.get("validation_status") or {}).get("rerun_required"),
+            "full_validation": (evidence_check.get("validation_status") or {}).get(
+                "full_validation"
+            ),
+            "duplicate_full_pytest_detected": (evidence_check.get("validation_status") or {}).get(
+                "duplicate_full_pytest_detected"
+            ),
+            "earlier_setup_failure_superseded": any(
+                "setup_failure" in str(w) and "ignored" in str(w)
+                for w in evidence_check.get("warnings", [])
+            ),
+        }
+        manifest.setdefault("artifacts", {})["validation_evidence_check_json"] = str(
+            validation_run_dir / "validation-evidence-check.json"
+        )
+        manifest.setdefault("artifacts", {})["validation_evidence_check_md"] = str(
+            validation_run_dir / "validation-evidence-check.md"
+        )
+        if evidence_check.get("status") != "passed":
+            manifest.setdefault("non_blockers", []).append(
+                "validation evidence lifecycle needs_followup: "
+                f"python3 scripts/validation_status.py --latest --pr {args.pr_number} "
+                f"--commit {head_commit} --json --explain-selection"
+            )
+        summary = render_human_summary(manifest)
+        write_manifest(manifest, manifest_path)
+        write_human_summary(summary, summary_path)
 
     if args.print_manifest_json:
         print(json.dumps(manifest, sort_keys=True))
