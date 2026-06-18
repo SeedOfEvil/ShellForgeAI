@@ -588,3 +588,9 @@ run validation or QA. Use `python scripts/validation_status.py --latest --pr
 <PR> --commit <sha> --json --explain-selection` to select exact current
 evidence. Pass evidence is selected ahead of older setup/interrupted attempts;
 failed, setup-failure, interrupted, and unknown evidence is never pass eligible.
+
+The guarded Docker01 PR lane uses the requested PR head commit when it finalizes
+validation evidence automatically, so exact `validation_status.py --latest --pr
+<PR> --commit <sha>` checks should find successful, failed, setup-failure, or
+interrupted lane evidence without a manual finalizer step. Full-validation
+metadata is preserved through downstream status and merge-readiness views.

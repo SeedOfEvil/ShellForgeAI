@@ -1026,3 +1026,11 @@ latest pass-eligible completed evidence, then failed evidence, then setup
 failure, then interrupted/incomplete, then `not_found`. Stale evidence for a
 different PR or commit is ignored, and read-only status, merge-readiness, and
 comment rendering tools continue to read evidence only.
+
+The automatic finalizer uses the requested PR head commit supplied to the lane
+(`--head-commit` or `--commit`) when writing validation evidence, so the standard
+lane path is immediately discoverable by exact PR/commit status checks after a
+terminal validation result. Full Lane C metadata is carried in
+`validation-status.json` as `full_validation=true` with the recorded reason, and
+read-only status/merge-readiness/comment tools surface that metadata without
+running validation or QA.

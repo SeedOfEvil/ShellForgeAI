@@ -250,3 +250,9 @@ The finalizer is evidence lifecycle tooling only. It does not run validation,
 pytest, QA, Docker/Compose, cleanup, restart, prune, delete, remediation,
 rollback, recovery, network calls, or model calls. Failed, setup-failure,
 interrupted, and unknown evidence is recorded but never pass eligible.
+
+Automatic PR-lane evidence finalization is part of the guarded lane terminal
+path: success, failure, setup failure, and interrupted outcomes write exact
+PR/commit validation evidence without a manual finalizer step. Lane C/full runs
+preserve `full_validation=true` through validation status, PR-lane status,
+merge-readiness JSON, and merge-comment rendering.

@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FINALIZER = ROOT / "scripts" / "docker01_validation_evidence.py"
 VIEWER = ROOT / "scripts" / "validation_status.py"
 LANE = ROOT / "scripts" / "sfai_docker01_pr_lane.py"
+MERGE = ROOT / "scripts" / "docker01_merge_readiness.py"
 
 
 def load(path, name):
@@ -18,6 +19,7 @@ def load(path, name):
 finalizer = load(FINALIZER, "docker01_validation_evidence")
 viewer = load(VIEWER, "validation_status_pr219")
 lane = load(LANE, "sfai_lane_pr219")
+merge = load(MERGE, "merge_pr219")
 
 PR = 219
 COMMIT = "abcdef1234567890abcdef1234567890abcdef12"
@@ -258,7 +260,7 @@ def test_host_setup_failure_warning_plus_fallback_success_passes(tmp_path):
     assert any("host setup_failure" in w for w in doc["warnings"])
 
 
-def test_safety_source_contains_no_forbidden_execution_paths():
+def test_safety_source_contains_no_forbidden_execution_paths(tmp_path):
     src = FINALIZER.read_text(encoding="utf-8")
     forbidden = [
         "shell=True",
@@ -284,7 +286,308 @@ def test_safety_source_contains_no_forbidden_execution_paths():
         pr=PR,
         commit=COMMIT,
         log_path=None,
-        run_dir=Path("/tmp") / "sfai-pr219-safety-test",
+        run_dir=tmp_path / "sfai-pr219-safety-test",
         status="unknown",
     )["status"]
     assert all(value is False for key, value in doc["safety"].items() if key != "read_only")
+
+
+def _passed_preflight(path=None):
+    return {
+        "schema_version": 1,
+        "mode": "validation_environment_preflight",
+        "status": "passed",
+        "classification": "passed",
+        "failed_checks": [],
+        "warning_checks": [],
+        "path": str(path) if path else None,
+    }
+
+
+def test_standard_lane_execute_success_auto_finalizes_exact_commit(tmp_path, monkeypatch):
+    run_dir = tmp_path / "sfai-pr219-abcdef123456-validation-auto"
+    monkeypatch.setattr(
+        lane.validation_env_preflight, "run_preflight", lambda **_: _passed_preflight()
+    )
+    monkeypatch.setattr(
+        lane.validation_env_preflight,
+        "write_report",
+        lambda report, path: Path(path).write_text(json.dumps(report)),
+    )
+
+    def fake_run_validation(plan, *, return_records, log_path, heartbeat, record_sink):
+        records = []
+        for command in plan["_commands"]:
+            phase = lane.validation_heartbeat.COMMAND_KIND_TO_PHASE.get(command["kind"])
+            if phase:
+                heartbeat.start_phase(phase)
+                if command["kind"] == "pytest_full_runner":
+                    heartbeat.record_full_pytest_exit(0, phase=phase)
+                else:
+                    heartbeat.complete_phase(phase, status="passed")
+            record = lane._command_record(
+                command, status="passed", duration=0.01, log_path=log_path
+            )
+            records.append(record)
+            record_sink.append(record)
+        return 0, records
+
+    monkeypatch.setattr(lane, "run_validation", fake_run_validation)
+    rc = lane.main(
+        [
+            "--changed-files",
+            "src/shellforgeai/core/ask_routing.py",
+            "--pr",
+            str(PR),
+            "--commit",
+            COMMIT,
+            "--execute-validation",
+            "--run-dir",
+            str(run_dir),
+        ]
+    )
+    assert rc == 0
+    doc = status_doc(run_dir)
+    assert doc["status"] == "passed"
+    assert doc["classification"] == "passed"
+    assert doc["pass_eligible"] is True
+    assert doc["commit"] == COMMIT
+    assert doc["source"]["kind"] == "docker01_validation_finalizer"
+
+
+def test_standard_lane_full_execute_success_preserves_full_metadata(tmp_path, monkeypatch):
+    run_dir = tmp_path / "sfai-pr219-abcdef123456-validation-full"
+    monkeypatch.setattr(
+        lane.validation_env_preflight, "run_preflight", lambda **_: _passed_preflight()
+    )
+    monkeypatch.setattr(
+        lane.validation_env_preflight,
+        "write_report",
+        lambda report, path: Path(path).write_text(json.dumps(report)),
+    )
+
+    def fake_full(plan, *, return_records, log_path, heartbeat, record_sink):
+        records = []
+        for command in plan["_commands"]:
+            phase = lane.validation_heartbeat.COMMAND_KIND_TO_PHASE.get(command["kind"])
+            if phase:
+                heartbeat.start_phase(phase)
+                if command["kind"] == "pytest_full_runner":
+                    heartbeat.record_full_pytest_exit(0, phase=phase)
+                else:
+                    heartbeat.complete_phase(phase, status="passed")
+            record = lane._command_record(
+                command, status="passed", duration=0.01, log_path=log_path
+            )
+            records.append(record)
+            record_sink.append(record)
+        return 0, records
+
+    monkeypatch.setattr(lane, "run_validation", fake_full)
+    assert (
+        lane.main(
+            [
+                "--changed-files",
+                "Dockerfile",
+                "--pr",
+                str(PR),
+                "--commit",
+                COMMIT,
+                "--full-validation",
+                "--full-validation-reason",
+                "operator requested Lane C",
+                "--execute-validation",
+                "--run-dir",
+                str(run_dir),
+            ]
+        )
+        == 0
+    )
+    doc = status_doc(run_dir)
+    assert doc["full_validation"] is True
+    assert doc["full_validation_reason"] == "operator requested Lane C"
+
+
+def test_standard_lane_execute_failure_auto_finalizes_failed(tmp_path, monkeypatch):
+    run_dir = tmp_path / "sfai-pr219-abcdef123456-validation-failed"
+    monkeypatch.setattr(
+        lane.validation_env_preflight, "run_preflight", lambda **_: _passed_preflight()
+    )
+    monkeypatch.setattr(
+        lane.validation_env_preflight,
+        "write_report",
+        lambda report, path: Path(path).write_text(json.dumps(report)),
+    )
+
+    def fake_failed(plan, *, return_records, log_path, heartbeat, record_sink):
+        command = plan["_commands"][0]
+        phase = lane.validation_heartbeat.COMMAND_KIND_TO_PHASE.get(command["kind"])
+        heartbeat.start_phase(phase)
+        heartbeat.complete_phase(phase, status="failed")
+        record = lane._command_record(command, status="failed", duration=0.01, log_path=log_path)
+        record_sink.append(record)
+        return 1, [record]
+
+    monkeypatch.setattr(lane, "run_validation", fake_failed)
+    assert (
+        lane.main(
+            [
+                "--changed-files",
+                "src/shellforgeai/core/ask_routing.py",
+                "--pr",
+                str(PR),
+                "--commit",
+                COMMIT,
+                "--execute-validation",
+                "--run-dir",
+                str(run_dir),
+            ]
+        )
+        == 1
+    )
+    doc = status_doc(run_dir)
+    assert doc["status"] == "failed"
+    assert doc["pass_eligible"] is False
+    assert doc["rerun_required"] is True
+
+
+def test_standard_lane_setup_failure_auto_finalizes_setup_failure(tmp_path, monkeypatch):
+    run_dir = tmp_path / "sfai-pr219-abcdef123456-validation-setup"
+    report = _passed_preflight()
+    report.update(
+        {"status": "failed", "classification": "setup_failure", "failed_checks": ["pytest"]}
+    )
+    monkeypatch.setattr(lane.validation_env_preflight, "run_preflight", lambda **_: report)
+    monkeypatch.setattr(
+        lane.validation_env_preflight,
+        "write_report",
+        lambda report, path: Path(path).write_text(json.dumps(report)),
+    )
+    monkeypatch.setattr(
+        lane.validation_container_fallback, "generate_packet", lambda **_: {"status": "created"}
+    )
+    assert (
+        lane.main(
+            [
+                "--changed-files",
+                "src/shellforgeai/core/ask_routing.py",
+                "--pr",
+                str(PR),
+                "--commit",
+                COMMIT,
+                "--execute-validation",
+                "--run-dir",
+                str(run_dir),
+            ]
+        )
+        == 1
+    )
+    doc = status_doc(run_dir)
+    assert doc["status"] == "setup_failure"
+    assert doc["classification"] == "setup_failure"
+    assert doc["pass_eligible"] is False
+
+
+def test_validation_status_exposes_full_validation_metadata(tmp_path, monkeypatch):
+    finalize(
+        tmp_path,
+        "full pytest passed 100%, exit 0\n",
+        lane="full",
+        full_validation=True,
+        full_validation_reason="Lane C",
+    )
+    monkeypatch.setenv(viewer.RUNS_DIR_ENV, str(tmp_path))
+    args = type(
+        "Args",
+        (),
+        {
+            "latest": True,
+            "pr": PR,
+            "commit": COMMIT,
+            "include_legacy": False,
+            "run_root": None,
+            "explain_selection": True,
+            "run_dir": None,
+            "heartbeat": None,
+            "status_file": None,
+            "manifest": None,
+            "summary": None,
+            "log": None,
+        },
+    )()
+    report = viewer.generate_report(args)
+    assert report["full_validation"] is True
+    assert report["full_validation_reason"] == "Lane C"
+
+
+def test_pr_lane_status_sees_auto_finalizer_pass_eligible(tmp_path, monkeypatch):
+    result = finalize(tmp_path, "ruff passed\ncompileall passed\ntargeted tests passed\n")
+    monkeypatch.setenv(viewer.RUNS_DIR_ENV, str(tmp_path))
+    monkeypatch.setattr(lane, "_status_git_head", lambda **_: COMMIT)
+    monkeypatch.setattr(
+        lane, "_read_compose_image", lambda: f"lab/shellforgeai:pr{PR}-{COMMIT[:7]}"
+    )
+    monkeypatch.setattr(
+        lane,
+        "_status_container",
+        lambda **_: {
+            "container_image": f"lab/shellforgeai:pr{PR}-{COMMIT[:7]}",
+            "container_image_id": "sha256:x",
+            "container_status": "running",
+            "container_health": "healthy",
+            "restart_count": 0,
+            "labels": {"homelab.pr": str(PR), "homelab.commit": COMMIT},
+        },
+    )
+    monkeypatch.setattr(
+        lane,
+        "_qa_bundle_latest",
+        lambda pr, commit: {
+            "available": True,
+            "status": "passed",
+            "bundle_path": str(tmp_path / "qa"),
+            "commands_passed": 1,
+            "commands_failed": 0,
+            "safety_assertions_failed": 0,
+        },
+    )
+    doc = lane.build_pr_lane_status(pr=PR, commit=COMMIT)
+    assert doc["status"] == "already_complete"
+    assert doc["validation"]["pass_eligible"] is True
+    assert doc["validation"]["run_dir"] == result["run_dir"]
+
+
+def test_merge_readiness_and_comment_preserve_full_validation_true(monkeypatch, tmp_path):
+    validation_doc = {
+        "status": "passed",
+        "classification": "passed",
+        "pass_eligible": True,
+        "rerun_required": False,
+        "full_validation": True,
+        "full_validation_reason": "Lane C",
+        "source": {"run_dir": str(tmp_path / "run")},
+    }
+    lane_doc = {
+        "status": "already_complete",
+        "state": {"container_status": "running", "container_health": "healthy", "restart_count": 0},
+        "checks": [
+            {"name": "source_head_matches", "passed": True},
+            {"name": "compose_image_matches", "passed": True},
+            {"name": "container_labels_match", "passed": True},
+            {"name": "container_image_matches", "passed": True},
+            {"name": "container_running", "passed": True},
+            {"name": "container_healthy", "passed": True},
+            {"name": "restart_count_acceptable", "passed": True},
+        ],
+    }
+    monkeypatch.setenv("SFAI_QA_BUNDLE_ROOT", str(tmp_path))
+    from test_pr216_docker01_merge_readiness import write_qa
+
+    write_qa(tmp_path, pr=PR, commit=COMMIT)
+    monkeypatch.setattr(merge, "load_pr_lane_status", lambda pr, commit: lane_doc)
+    monkeypatch.setattr(merge, "load_validation_status", lambda pr, commit: validation_doc)
+    report, _raw = merge.build_report(PR, COMMIT, created_at="2026-06-17T00:00:00Z")
+    assert report["status"] == "pass_candidate"
+    assert report["summary"]["full_pytest_run"] is True
+    assert report["evidence"]["validation"]["full_validation"] is True
+    assert "Full pytest: true" in merge.render_comment(report)

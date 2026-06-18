@@ -1114,6 +1114,13 @@ def write_lane_validation_evidence(
     pr_block = manifest.get("pr") or {}
     lane_block = manifest.get("lane") or {}
     value = _lane_status_value(manifest.get("status"), manifest.get("classification"))
+    if (
+        manifest.get("status") == "failed"
+        and manifest.get("failed_phase")
+        and manifest.get("failed_phase") != "environment_preflight"
+        and (manifest.get("environment_preflight") or {}).get("status") == "passed"
+    ):
+        value = "failed"
     result = docker01_validation_evidence.finalize_validation_evidence(
         pr=pr_block.get("number") or "unknown",
         commit=pr_block.get("head_commit") or "unknown",
@@ -1577,7 +1584,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     created_at = _utc_now()
-    head_commit = args.head_commit or _git_value(["rev-parse", "HEAD"])
+    head_commit = args.head_commit or args.commit or _git_value(["rev-parse", "HEAD"])
     short_commit = head_commit[:12] if head_commit else None
     validation_run_dir = (
         Path(args.run_dir)

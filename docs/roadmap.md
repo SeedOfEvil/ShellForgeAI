@@ -1066,3 +1066,8 @@ status, manifest, summary, command, and bounded log-excerpt artifacts without
 rerunning validation. Status, merge-readiness, and merge-comment rendering stay
 read-only and consume the same exact evidence, with pass evidence preferred over
 earlier setup-failure/interrupted attempts for the same PR and commit.
+
+Follow-up PR219 integration tightened the standard guarded lane path: automatic
+finalization now keys evidence to the requested PR head commit and carries Lane
+C/full-validation metadata through downstream read-only status and merge-review
+helpers.

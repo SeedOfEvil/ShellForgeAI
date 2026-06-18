@@ -2550,3 +2550,9 @@ apply/merge/push, package installs, network calls, or model calls. For the same
 PR/commit, latest pass-eligible evidence wins over earlier setup-failure or
 interrupted evidence so host setup failures do not dominate a later successful
 disposable validation fallback.
+
+The guarded PR lane records automatic validation evidence against the requested
+PR head commit (`--head-commit` or `--commit`) after terminal validation
+outcomes. Lane C/full validation packets preserve `full_validation=true` and the
+full-validation reason so read-only merge-readiness and comment rendering do not
+misreport full pytest as absent.

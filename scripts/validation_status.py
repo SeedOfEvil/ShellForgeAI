@@ -836,6 +836,9 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
             "kind": "docker01_pr_lane",
             "status": final_status,
             "classification": classification,
+            "full_validation": bool(data.get("full_validation")),
+            "full_validation_reason": data.get("full_validation_reason") or "",
+            "duplicate_full_pytest_detected": bool(data.get("duplicate_full_pytest_detected")),
             "phase_status": {},
             "active_phase": None,
             "last_completed_phase": None,
@@ -1183,6 +1186,33 @@ def _log_path_from_manifest(manifest: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _full_validation_metadata(
+    status_doc: dict[str, Any] | None, manifest_doc: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Return proven full-validation metadata from status/manifest evidence."""
+    for doc in (status_doc, manifest_doc):
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("full_validation") is True:
+            return {
+                "full_validation": True,
+                "full_validation_reason": doc.get("full_validation_reason") or "",
+                "duplicate_full_pytest_detected": bool(doc.get("duplicate_full_pytest_detected")),
+            }
+        lane = doc.get("lane")
+        if isinstance(lane, dict) and lane.get("full_validation_required") is True:
+            return {
+                "full_validation": True,
+                "full_validation_reason": lane.get("full_validation_reason") or "",
+                "duplicate_full_pytest_detected": False,
+            }
+    return {
+        "full_validation": False,
+        "full_validation_reason": "",
+        "duplicate_full_pytest_detected": False,
+    }
+
+
 def lane_qa_marker(
     manifest_doc: dict[str, Any] | None,
     *,
@@ -1200,11 +1230,13 @@ def lane_qa_marker(
     full_run = False
     manifest_reason = None
     if isinstance(manifest_doc, dict):
+        full_run = bool(manifest_doc.get("full_validation"))
+        manifest_reason = manifest_doc.get("full_validation_reason")
         lane_block = manifest_doc.get("lane")
         if isinstance(lane_block, dict):
             selected = lane_block.get("selected")
-            full_run = bool(lane_block.get("full_validation_required"))
-            manifest_reason = lane_block.get("full_validation_reason")
+            full_run = full_run or bool(lane_block.get("full_validation_required"))
+            manifest_reason = manifest_reason or lane_block.get("full_validation_reason")
 
     lane_letter = LANE_LETTER.get(selected) if isinstance(selected, str) else None
     scope = "full" if full_run else "targeted"
@@ -1361,6 +1393,8 @@ def build_report(
     if source_commit is None:
         source_commit = run_meta.get("commit")
 
+    full_meta = _full_validation_metadata(status_doc, manifest_doc)
+
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": MODE,
@@ -1368,6 +1402,9 @@ def build_report(
         "classification": merged["classification"],
         "pass_eligible": bool(merged["pass_eligible"]),
         "rerun_required": bool(merged["rerun_required"]),
+        "full_validation": full_meta["full_validation"],
+        "full_validation_reason": full_meta["full_validation_reason"],
+        "duplicate_full_pytest_detected": full_meta["duplicate_full_pytest_detected"],
         "source": {
             "latest": bool(latest),
             "run_dir": run_dir,
