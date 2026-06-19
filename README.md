@@ -613,3 +613,7 @@ After the guarded Docker01 PR lane writes/finalizes validation evidence, it now 
 The self-check proves whether exact PR/commit evidence was selected, whether it is pass-eligible, whether a rerun is required, whether full validation ran, and whether duplicate full pytest evidence was detected. If host setup fails but a later disposable fallback validation passes, the fallback pass can supersede the earlier setup failure while preserving the earlier setup failure as a warning/process note. If evidence is not discoverable after validation, the lane reports a validation evidence lifecycle failure/needs-followup rather than silently treating the run as merge-ready.
 
 The self-check does not run validation, pytest, the operator QA bundle, cleanup, Docker prune, Docker image removal, Docker/Compose mutation, restarts, remediation, rollback, recovery, GitHub posting/approval/merge, model calls, or cloud apply/merge/push. Merge-readiness and merge-comment tools remain separate read-only post-QA checks. SeedOfEvil remains final merge owner.
+
+### Docker01 V2 readiness evidence
+
+Use `python scripts/docker01_v2_readiness.py --pr <PR> --commit <sha> --json` or `--out /tmp/sfai-pr<PR>-<short>-v2-readiness` to create a read-only V2 readiness evidence snapshot. It consumes existing Docker01 PR-lane, validation, QA, merge-readiness, and hygiene evidence only; it never deploys, builds, validates, runs QA/pytest, cleans, restarts, mutates Docker/Compose, posts to GitHub, or replaces SeedOfEvil's final merge-owner judgment.
