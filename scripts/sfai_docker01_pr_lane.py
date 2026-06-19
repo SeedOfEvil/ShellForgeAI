@@ -443,17 +443,21 @@ def _default_artifact_path(
     return str(Path(tempfile.gettempdir()) / name)
 
 
+def _validation_discovery_root() -> Path:
+    """Choose the established writable validation evidence discovery root."""
+    env_root = os.environ.get(validation_status_viewer.RUNS_DIR_ENV)
+    if env_root:
+        return Path(env_root)
+    return docker01_validation_evidence.DEFAULT_DISCOVERY_ROOT
+
+
 def _default_validation_run_dir(
     *, pr_number: str | None, short_commit: str | None, created_at: str
 ) -> Path:
     safe_pr = pr_number or "unknown"
     safe_sha = short_commit or "unknown"
     stamp = created_at.replace(":", "").replace("-", "").replace("Z", "")
-    return (
-        Path(tempfile.gettempdir())
-        / "shellforgeai-validation-runs"
-        / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
-    )
+    return _validation_discovery_root() / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
 
 
 def _command_record(command: dict, *, status: str, duration: float | None, log_path: str | None):
@@ -577,7 +581,7 @@ def build_validation_evidence_check(
         pr=pr_int,
         commit=commit,
         include_legacy=False,
-        run_root=None,
+        run_root=str(run_dir.parent),
         explain_selection=True,
         run_dir=None,
         heartbeat=None,
@@ -840,52 +844,24 @@ def _read_compose_image() -> str | None:
 
 
 def _validation_latest(pr: int, commit: str) -> dict:
-    warnings: list[str] = []
-    candidates = validation_status_viewer.discover_candidates(
+    args = argparse.Namespace(
+        latest=True,
+        run_dir=None,
+        heartbeat=None,
+        status_file=None,
+        manifest=None,
+        summary=None,
+        log=None,
+        preflight=None,
+        fallback_packet=None,
         run_root=None,
         include_legacy=False,
-        warnings=warnings,
-        include_default_roots=True,
+        pr=pr,
+        commit=commit,
+        json=True,
+        explain_selection=True,
     )
-    exact: list[dict] = []
-    for candidate in candidates:
-        if not validation_status_viewer._pr_matches(candidate.get("pr"), pr):
-            continue
-        if not validation_status_viewer._commit_matches(candidate.get("commit"), commit):
-            continue
-        status_path = Path(candidate["path"]) / "validation-status.json"
-        if not status_path.is_file():
-            continue
-        try:
-            doc = json.loads(status_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        doc["_candidate_path"] = candidate["path"]
-        doc["_candidate_mtime"] = candidate.get("mtime") or status_path.stat().st_mtime
-        exact.append(doc)
-    if not exact:
-        return {
-            "status": "not_found",
-            "classification": "not_found",
-            "pass_eligible": False,
-            "rerun_required": True,
-            "source": {"kind": "not_found", "run_dir": None},
-            "warnings": warnings,
-        }
-
-    def rank(doc: dict) -> tuple[int, float]:
-        if doc.get("pass_eligible") is True:
-            return (3, float(doc.get("_candidate_mtime") or 0))
-        if doc.get("classification") == "passed" or doc.get("status") == "passed":
-            return (2, float(doc.get("_candidate_mtime") or 0))
-        return (1, float(doc.get("_candidate_mtime") or 0))
-
-    selected = sorted(exact, key=rank, reverse=True)[0]
-    selected.setdefault("source", {})
-    selected["source"]["run_dir"] = selected.get("_candidate_path")
-    selected["source"]["kind"] = "run_dir"
-    selected["warnings"] = warnings
-    return selected
+    return validation_status_viewer.generate_report(args)
 
 
 def _qa_bundle_latest(pr: int, commit: str) -> dict:
@@ -894,9 +870,18 @@ def _qa_bundle_latest(pr: int, commit: str) -> dict:
     pattern = re.compile(
         r"^sfai-pr(?P<pr>\d+)-(?P<sha>[^-]+)-(?:(?:operator-)?qa-bundle)-(?P<stamp>.+)$"
     )
+    convergence_pattern = re.compile(
+        r"^sfai-pr(?P<pr>\d+)-(?P<sha>[^-]+)-convergence-(?P<stamp>.+)$"
+    )
     if root.is_dir():
-        for path in root.iterdir():
-            match = pattern.match(path.name)
+        direct = [path for path in root.iterdir() if path.is_dir()]
+        nested = list(root.glob(f"sfai-pr{pr}-{commit[:7]}*convergence*/operator-qa"))[:100]
+        for path in [*direct, *nested]:
+            match = (
+                convergence_pattern.match(path.parent.name)
+                if path.name == "operator-qa"
+                else pattern.match(path.name)
+            )
             if not path.is_dir() or not match:
                 continue
             if str(match.group("pr")) != str(pr):
@@ -1311,7 +1296,24 @@ def write_lane_validation_evidence(
         created_at=created_at,
         warnings=list(manifest.get("non_blockers") or []),
     )
-    return result["manifest"]
+    artifacts = manifest.setdefault("artifacts", {})
+    evidence_manifest = result["manifest"]
+    artifacts["validation_status_json"] = str(
+        Path(evidence_manifest["run_dir"]) / "validation-status.json"
+    )
+    artifacts["validation_manifest_json"] = str(
+        Path(evidence_manifest["run_dir"]) / "validation-manifest.json"
+    )
+    artifacts["validation_summary_md"] = str(
+        Path(evidence_manifest["run_dir"]) / "validation-summary.md"
+    )
+    artifacts["validation_commands_run_json"] = str(
+        Path(evidence_manifest["run_dir"]) / "commands-run.json"
+    )
+    manifest.setdefault("validation_evidence", {})["run_dir"] = evidence_manifest["run_dir"]
+    manifest["validation_evidence"]["status_file"] = artifacts["validation_status_json"]
+    manifest["validation_evidence"]["manifest_file"] = artifacts["validation_manifest_json"]
+    return evidence_manifest
 
 
 def planned_command_records(plan: dict, *, log_path: str | None = None) -> list[dict]:
@@ -2134,11 +2136,19 @@ def main(argv: list[str] | None = None) -> int:
             validation_run_dir / "validation-evidence-check.md"
         )
         if evidence_check.get("status") != "passed":
-            manifest.setdefault("non_blockers", []).append(
-                "validation evidence lifecycle needs_followup: "
+            message = (
+                "validation evidence lifecycle failed: validation passed but exact "
+                "PR/commit evidence was not discoverable; "
                 f"python3 scripts/validation_status.py --latest --pr {args.pr_number} "
                 f"--commit {head_commit} --json --explain-selection"
             )
+            manifest.setdefault("non_blockers", []).append(message)
+            if manifest.get("status") == "passed":
+                return_code = 1
+                manifest["status"] = "failed"
+                manifest["verdict"] = "fail"
+                manifest["failed_phase"] = "validation_evidence_self_check"
+                manifest["error_summary"] = message
         summary = render_human_summary(manifest)
         write_manifest(manifest, manifest_path)
         write_human_summary(summary, summary_path)

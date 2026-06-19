@@ -226,10 +226,11 @@ def build_command_specs(pr: int, commit: str) -> list[CommandSpec]:
 
     ``critical`` marks the ShellForgeAI product surface whose failure makes the
     bundle ``failed``. Host/optional checks (model doctor, docker, disk,
-    validation status, model-backed read-only ask) are non-critical: their
-    failure makes the bundle ``partial`` because they depend on host state
-    (Docker daemon, Codex model, prior validation runs) that is legitimately
-    absent in some QA environments.
+    validation status) are non-critical: their failure makes the bundle
+    ``partial`` because they depend on host state (Docker daemon, prior
+    validation runs) that is legitimately absent in some QA environments. The
+    read-only Docker ask is deliberately phrased to use deterministic local
+    triage routing and must not require Codex/model auth.
     """
     return [
         CommandSpec("version", "version", _sfai("version"), "raw/version.txt"),
@@ -307,7 +308,7 @@ def build_command_specs(pr: int, commit: str) -> list[CommandSpec]:
         CommandSpec(
             "ask_readonly",
             "read-only Docker ask",
-            _sfai("ask", "what is going on with Docker at 2AM?"),
+            _sfai("ask", "2AM docker feels broken"),
             "raw/ask-readonly.txt",
             critical=False,
         ),

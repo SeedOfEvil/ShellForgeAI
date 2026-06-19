@@ -123,8 +123,8 @@ def test_09_doctor_help_and_json_work() -> None:
 
 
 def test_10_model_doctor_help_works() -> None:
-    # model doctor intentionally has no --json flag in the current surface and
-    # builds a provider when invoked without --help, so only help is golden.
+    # model doctor exposes --json for read-only readiness and builds a
+    # provider when invoked without --help, so only help is golden here.
     cli_surface.check_command(app, _entry("model_doctor_help"))
 
 

@@ -86,9 +86,7 @@ def test_v1_check_safe_commands_are_canonical(tmp_path):
     p = json.loads(r.stdout)
     allowed = {
         "shellforgeai doctor --json",
-        # model doctor is human-output only (no --json), so guidance must
-        # suggest the bare command.
-        "shellforgeai model doctor",
+        "shellforgeai model doctor --json",
         "shellforgeai ops report --json",
         "shellforgeai remediation self-test --profile standard --json",
     }

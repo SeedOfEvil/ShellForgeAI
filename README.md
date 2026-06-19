@@ -613,3 +613,15 @@ After the guarded Docker01 PR lane writes/finalizes validation evidence, it now 
 The self-check proves whether exact PR/commit evidence was selected, whether it is pass-eligible, whether a rerun is required, whether full validation ran, and whether duplicate full pytest evidence was detected. If host setup fails but a later disposable fallback validation passes, the fallback pass can supersede the earlier setup failure while preserving the earlier setup failure as a warning/process note. If evidence is not discoverable after validation, the lane reports a validation evidence lifecycle failure/needs-followup rather than silently treating the run as merge-ready.
 
 The self-check does not run validation, pytest, the operator QA bundle, cleanup, Docker prune, Docker image removal, Docker/Compose mutation, restarts, remediation, rollback, recovery, GitHub posting/approval/merge, model calls, or cloud apply/merge/push. Merge-readiness and merge-comment tools remain separate read-only post-QA checks. SeedOfEvil remains final merge owner.
+
+### Docker01 V2 readiness evidence
+
+Use `python scripts/docker01_v2_readiness.py --pr <PR> --commit <sha> --json` or `--out /tmp/sfai-pr<PR>-<short>-v2-readiness` to create a read-only V2 readiness evidence snapshot. It consumes existing Docker01 PR-lane, validation, QA, merge-readiness, and hygiene evidence only; it never deploys, builds, validates, runs QA/pytest, cleans, restarts, mutates Docker/Compose, posts to GitHub, or replaces SeedOfEvil's final merge-owner judgment. Missing exact validation/QA evidence is reported as `v2_unknown`, while explicit failed evidence remains `v2_not_ready`; the QA read-only Docker ask uses deterministic local triage and does not require Codex auth.
+
+Targeted Docker01 validation lanes now finalize exact PR/commit validation evidence automatically, so `validation_status.py --latest --pr <PR> --commit <sha>` can discover targeted passes without a manual finalizer; the self-check fails clearly if persistence is missing.
+
+Completed guarded lane logs named `sfai-pr<PR>-<short>-validation-<timestamp>.log` are bounded read-only validation evidence for `validation_status.py --latest`, so completed full lanes can be discovered without manual normalization. Exact legacy Docker01 validation logs are pass-eligible only when trusted terminal markers are present (for example ruff and compileall passed plus full pytest 100%/exit 0 for full lanes); ambiguous, truncated, failed, setup-failure, or interrupted logs remain non-pass-eligible. Read-only status/readiness tools never run validation, pytest, QA, deploy, cleanup, or restart.
+
+`shellforgeai model doctor --json` is part of Docker01 live QA and emits strict read-only model readiness JSON; unavailable or unknown model auth is reported structurally instead of as a CLI option failure.
+
+For exact PR/commit lane runs, a later successful disposable validation fallback supersedes earlier host setup_failure evidence in `validation_status.py --latest`; the setup failure remains in warnings/process notes, while failed or interrupted evidence without a later exact pass stays non-pass-eligible.

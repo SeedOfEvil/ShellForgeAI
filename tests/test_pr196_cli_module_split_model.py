@@ -142,9 +142,7 @@ def test_model_help_lists_doctor_and_test() -> None:
 def test_model_doctor_help_works_and_surface_is_unchanged() -> None:
     result = runner.invoke(app, ["model", "doctor", "--help"])
     assert result.exit_code == 0
-    # model doctor intentionally has no --json/--brief flag in the current
-    # surface; the extraction must not invent new user-facing flags.
-    assert "--json" not in result.stdout
+    assert "--json" in result.stdout
     assert "--brief" not in result.stdout
 
 

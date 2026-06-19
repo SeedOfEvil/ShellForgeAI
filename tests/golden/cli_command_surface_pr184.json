@@ -69,8 +69,8 @@
       "group": "core",
       "argv": ["model", "doctor", "--help"],
       "expect_exit_code": 0,
-      "required_substrings": ["doctor"],
-      "notes": "model doctor is provider-readiness only and intentionally has NO --json flag in the current surface; it is help-only here because the handler builds a provider (a model call) when invoked without --help."
+      "required_substrings": ["doctor", "--json"],
+      "notes": "model doctor is provider-readiness only; --json is a read-only structured readiness report and does not call model inference."
     },
     {
       "name": "v1_check_help",
