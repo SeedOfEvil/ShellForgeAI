@@ -202,11 +202,18 @@ def find_qa_bundle(pr: int, commit: str) -> tuple[dict[str, Any], dict[str, Any]
                 "commands_failed": 0,
                 "safety_assertions_passed": 0,
                 "safety_assertions_failed": 0,
+                "failing_commands": [],
             },
             unavailable("qa_bundle_not_found"),
         )
     _rank, _mtime, path, qa = sorted(candidates, key=lambda x: (x[0], x[1]), reverse=True)[0]
     summary = qa.get("summary") if isinstance(qa.get("summary"), dict) else {}
+    commands = qa.get("commands") if isinstance(qa.get("commands"), list) else []
+    failing_commands = [
+        str(item.get("key") or item.get("label") or item.get("raw_file"))
+        for item in commands
+        if isinstance(item, dict) and item.get("status") == "failed"
+    ]
     return (
         {
             "status": qa.get("status") or "unknown",
@@ -215,6 +222,7 @@ def find_qa_bundle(pr: int, commit: str) -> tuple[dict[str, Any], dict[str, Any]
             "commands_failed": int(summary.get("commands_failed") or 0),
             "safety_assertions_passed": int(summary.get("safety_assertions_passed") or 0),
             "safety_assertions_failed": int(summary.get("safety_assertions_failed") or 0),
+            "failing_commands": failing_commands,
         },
         qa,
     )
@@ -372,7 +380,10 @@ def build_report(
     if lane.get("status") == "not_available":
         missing.append("Docker01 PR-lane evidence is unavailable.")
     if v_status in ("not_available", "not_found", "unknown"):
-        missing.append("Validation evidence is unavailable for the exact PR/commit.")
+        missing.append("Exact PR/commit validation evidence is unavailable.")
+        missing.append(
+            "V2 readiness cannot be determined until validation evidence is discoverable."
+        )
     if qa_summary["status"] in ("not_found", "unknown"):
         missing.append("Operator QA bundle evidence is unavailable for the exact PR/commit.")
     if merge_status in ("not_available", "unknown"):
@@ -404,10 +415,17 @@ def build_report(
         blockers.append(f"Validation evidence is not pass-eligible ({v_status}/{v_class}).")
     if qa_summary["status"] in ("failed", "partial") or qa_summary["safety_assertions_failed"]:
         explicit_fail = True
-        blockers.append("Operator QA bundle or safety assertions failed.")
+        failing = qa_summary.get("failing_commands") or []
+        suffix = f" Failing commands: {', '.join(map(str, failing))}." if failing else ""
+        blockers.append(f"Operator QA bundle or safety assertions failed.{suffix}")
     if merge_status == "hold_candidate":
-        explicit_fail = True
-        blockers.append("Merge-readiness is hold_candidate.")
+        if missing:
+            missing.append(
+                "Merge-readiness is hold_candidate because required evidence is incomplete."
+            )
+        else:
+            explicit_fail = True
+            blockers.append("Merge-readiness is hold_candidate.")
     if any(
         report_flag is True for key, report_flag in SAFETY_FLAGS.items() if key not in {"read_only"}
     ):
@@ -436,6 +454,24 @@ def build_report(
         "read_only": True,
         "mutation_performed": False,
         "summary": summary,
+        "evidence": {
+            "validation": {
+                "status": v_status,
+                "classification": v_class,
+                "pass_eligible": pass_eligible,
+                "rerun_required": rerun_required,
+                "run_dir": (validation.get("source") or {}).get("run_dir")
+                if isinstance(validation.get("source"), dict)
+                else validation.get("run_dir"),
+            },
+            "qa_bundle": qa_summary,
+            "merge_readiness": {
+                "status": summary["merge_readiness_status"],
+                "blocking_reasons": list(merge.get("blocking_reasons") or [])
+                if isinstance(merge.get("blocking_reasons"), list)
+                else [],
+            },
+        },
         "v2_checks": checks,
         "blocking_reasons": blockers,
         "warnings": hygiene_warnings + missing,

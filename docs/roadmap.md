@@ -1090,3 +1090,5 @@ The self-check proves whether exact PR/commit evidence was selected, whether it 
 The self-check does not run validation, pytest, the operator QA bundle, cleanup, Docker prune, Docker image removal, Docker/Compose mutation, restarts, remediation, rollback, recovery, GitHub posting/approval/merge, model calls, or cloud apply/merge/push. Merge-readiness and merge-comment tools remain separate read-only post-QA checks. SeedOfEvil remains final merge owner.
 
 - Docker01 V2 readiness evidence snapshot: adds `scripts/docker01_v2_readiness.py`, a read-only report helper that classifies exact PR/commit Docker01 evidence as `v2_candidate`, `v2_not_ready`, or `v2_unknown` without deploy/build/validation/QA/cleanup/restart behavior. SeedOfEvil remains final merge owner.
+
+- PR221 follow-up: V2 readiness now treats missing exact validation/QA evidence as incomplete `v2_unknown` warnings instead of false failures, preserves explicit failures as `v2_not_ready`, and the operator QA read-only Docker ask uses deterministic local triage wording rather than Codex-auth-gated synthesis.

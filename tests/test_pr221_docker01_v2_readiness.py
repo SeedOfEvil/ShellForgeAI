@@ -1,5 +1,7 @@
+import importlib
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +12,15 @@ spec.loader.exec_module(v2)
 
 PR = 221
 COMMIT = "abcdef1234567890abcdef1234567890abcdef12"
+
+
+def load_qa_module():
+    qa_helper = ROOT / "scripts" / "docker01_operator_qa_bundle.py"
+    qa_spec = importlib.util.spec_from_file_location("qa_bundle", qa_helper)
+    qa = importlib.util.module_from_spec(qa_spec)
+    sys.modules["qa_bundle"] = qa
+    qa_spec.loader.exec_module(qa)
+    return qa
 
 
 def lane(good=True, health="healthy", restart=0):
@@ -61,6 +72,7 @@ def write_qa(
     pr=PR,
     hygiene=None,
     warnings=None,
+    commands=None,
 ):
     b = root / f"sfai-pr{pr}-{commit[:12]}-operator-qa-bundle-{stamp}"
     b.mkdir(parents=True)
@@ -79,6 +91,7 @@ def write_qa(
         "hygiene": hygiene
         or {"history_status": "ok", "compare_latest_status": "ok", "warnings": []},
         "warnings": warnings or [],
+        "commands": commands or [],
     }
     (b / "qa-results.json").write_text(json.dumps(doc), encoding="utf-8")
     return b
@@ -101,6 +114,7 @@ def report(monkeypatch, tmp_path, **kw):
             failed_assertions=kw.pop("failed_assertions", 0),
             hygiene=kw.pop("hygiene", None),
             warnings=kw.pop("warnings", None),
+            commands=kw.pop("commands", None),
         )
     patch(
         monkeypatch,
@@ -203,15 +217,21 @@ def test_json_contract_human_and_out(monkeypatch, tmp_path):
 
 
 def test_complete_good_evidence_v2_candidate(monkeypatch, tmp_path):
-    assert report(monkeypatch, tmp_path)["status"] == "v2_candidate"
+    r = report(monkeypatch, tmp_path)
+    assert r["status"] == "v2_candidate"
+    assert r["evidence"]["validation"]["status"] == "passed"
+    assert r["evidence"]["merge_readiness"]["status"] == "pass_candidate"
 
 
 def test_validation_not_found_unknown_and_failures_not_ready(monkeypatch, tmp_path):
-    assert report(
-        monkeypatch,
-        tmp_path / "nf",
-        validation_doc=validation("not_found", "not_found", False, True),
-    )["status"] in {"v2_not_ready", "v2_unknown"}
+    assert (
+        report(
+            monkeypatch,
+            tmp_path / "nf",
+            validation_doc=validation("not_found", "not_found", False, True),
+        )["status"]
+        == "v2_unknown"
+    )
     assert (
         report(
             monkeypatch,
@@ -228,8 +248,38 @@ def test_validation_not_found_unknown_and_failures_not_ready(monkeypatch, tmp_pa
     )
 
 
+def test_qa_missing_and_merge_hold_due_missing_evidence_are_unknown(monkeypatch, tmp_path):
+    r = report(
+        monkeypatch,
+        tmp_path / "missing-validation",
+        validation_doc=validation("not_found", "not_found", False, True),
+        merge_doc=merge("hold_candidate"),
+    )
+    assert r["status"] == "v2_unknown"
+    assert "Exact PR/commit validation evidence is unavailable." in r["warnings"]
+    assert (
+        "V2 readiness cannot be determined until validation evidence is discoverable."
+        in r["warnings"]
+    )
+    assert not r["blocking_reasons"]
+
+    patch(monkeypatch, tmp_path / "missing-qa", merge_doc=merge("hold_candidate"))
+    r, _ = v2.build_report(PR, COMMIT)
+    assert r["status"] == "v2_unknown"
+    assert "Operator QA bundle evidence is unavailable for the exact PR/commit." in r["warnings"]
+    assert not any("QA" in reason and "failed" in reason for reason in r["blocking_reasons"])
+
+
 def test_qa_merge_container_blockers(monkeypatch, tmp_path):
-    assert report(monkeypatch, tmp_path / "qa", qa_status="failed")["status"] == "v2_not_ready"
+    r = report(
+        monkeypatch,
+        tmp_path / "qa",
+        qa_status="failed",
+        commands=[{"key": "ask_readonly", "status": "failed"}],
+    )
+    assert r["status"] == "v2_not_ready"
+    assert "ask_readonly" in " ".join(r["blocking_reasons"])
+    assert r["evidence"]["qa_bundle"]["failing_commands"] == ["ask_readonly"]
     assert report(monkeypatch, tmp_path / "safe", failed_assertions=1)["status"] == "v2_not_ready"
     assert (
         report(monkeypatch, tmp_path / "merge", merge_doc=merge("hold_candidate"))["status"]
@@ -291,6 +341,77 @@ def test_finds_latest_exact_qa_and_missing_raw_not_available(monkeypatch, tmp_pa
     qa, raw_missing = v2.find_qa_bundle(PR, "2222222222222222222222222222222222222222")
     assert qa["status"] == "not_found"
     assert raw_missing["status"] == "not_available"
+
+
+def test_operator_qa_readonly_docker_ask_uses_deterministic_auth_independent_route():
+    qa = load_qa_module()
+    routing = importlib.import_module("shellforgeai.core.ask_routing")
+    specs = qa.build_command_specs(PR, COMMIT)
+    ask = next(spec for spec in specs if spec.key == "ask_readonly")
+    assert ask.argv[-1] == "2AM docker feels broken"
+    assert routing.is_broad_docker_triage_intent(ask.argv[-1])
+    assert "codex" not in " ".join(ask.argv).lower()
+    assert qa.is_command_allowed(ask.argv)
+
+
+def test_operator_qa_bundle_can_pass_with_readonly_ask_without_codex_auth(monkeypatch, tmp_path):
+    qa = load_qa_module()
+
+    def fake_runner(argv, timeout):
+        key = " ".join(argv)
+        safe = {
+            "read_only": True,
+            "mutation_performed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "cleanup_executed": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "recovery_executed": False,
+            "docker_prune_executed": False,
+            "file_deleted": False,
+        }
+        if list(argv[:2]) == ["docker", "inspect"]:
+            stdout = json.dumps(
+                [{"State": {"Running": True, "Health": {"Status": "healthy"}}, "RestartCount": 0}]
+            )
+        elif "validation_status.py" in key:
+            stdout = json.dumps({"status": "not_available"})
+        elif "remediation self-test" in key or "remediation self-test" in key.replace("--", ""):
+            stdout = json.dumps(
+                {
+                    "status": "passed",
+                    "summary": {"passed": 1, "failed": 0},
+                    "skipped": ["live disposable execution skipped"],
+                    "safety": {"live_disposable_execute": False, **safe},
+                }
+            )
+        elif "v1 check" in key or "--json" in argv:
+            stdout = json.dumps(
+                {
+                    "status": "passed",
+                    "summary": {"passed": 1, "failed": 0},
+                    "read_only": True,
+                    "mutation_performed": False,
+                    "safety": safe,
+                }
+            )
+        elif list(argv[-2:]) == ["model", "doctor"] or "model doctor" in key:
+            stdout = "auth_readiness=unknown"
+        elif list(argv[-2:]) == ["ask", "2AM docker feels broken"]:
+            stdout = "Read-only Docker triage ranking\nNo model call. No mutation.\n"
+        elif list(argv[-2:]) == ["ask", "Clean up docker and restart compose to fix it"]:
+            stdout = "I will not execute cleanup or restart from ask. Refused.\n"
+        else:
+            stdout = "ok\n"
+        return qa.RunResult(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setenv("SFAI_QA_BUNDLE_ROOT", str(tmp_path))
+    out = tmp_path / "qa"
+    result = qa.generate_bundle(PR, COMMIT, out=out, runner=fake_runner, include_hygiene=False)
+    assert result["status"] == "passed"
+    ask = next(cmd for cmd in result["commands"] if cmd["key"] == "ask_readonly")
+    assert ask["status"] == "passed"
 
 
 def test_safety_no_forbidden_execution_or_options():
