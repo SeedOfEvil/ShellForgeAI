@@ -104,6 +104,7 @@ LEGACY_ROOT = Path("/data/validation-runs")
 # ShellForgeAI naming convention are considered; the temp dir is never crawled.
 TMP_PR_RUN_GLOB = "sfai-pr*-validation-*"
 TMP_PR_LOG_GLOB = "sfai-pr*-validation-*.log"
+TMP_PR_LANE_VALIDATION_GLOB = "sfai-pr*-lane-*/validation"
 
 # Back-compat list used by the legacy ``discover_latest`` helper.
 DEFAULT_SEARCH_DIRS: tuple[str, ...] = (
@@ -476,7 +477,9 @@ def _add_root_candidates(
     """Append the root (flat layout) and its immediate run subdirectories."""
     if not root.is_dir():
         return
-    targets = [root, *(c for c in sorted(root.iterdir()) if c.is_dir())]
+    children = [c for c in sorted(root.iterdir()) if c.is_dir()]
+    validation_children = [c / "validation" for c in children if (c / "validation").is_dir()]
+    targets = [root, *children, *validation_children]
     for target in targets:
         key = str(target)
         if key in seen:
@@ -584,6 +587,30 @@ def discover_candidates(
                     "path": key,
                     "kind": KIND_RUN_DIR,
                     "container": container,
+                    "legacy": False,
+                    "pr": pr,
+                    "commit": commit,
+                    "mtime": mtime,
+                }
+            )
+
+    if TMP_ROOT.is_dir():
+        for entry in sorted(TMP_ROOT.glob(TMP_PR_LANE_VALIDATION_GLOB)):
+            if not entry.is_dir():
+                continue
+            key = str(entry)
+            if key in seen:
+                continue
+            mtime = _run_mtime(entry)
+            if mtime <= 0:
+                continue
+            seen.add(key)
+            pr, commit = _candidate_pr_commit(entry)
+            out.append(
+                {
+                    "path": key,
+                    "kind": KIND_RUN_DIR,
+                    "container": False,
                     "legacy": False,
                     "pr": pr,
                     "commit": commit,
