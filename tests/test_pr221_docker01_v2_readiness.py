@@ -112,6 +112,62 @@ def report(monkeypatch, tmp_path, **kw):
     return v2.build_report(PR, COMMIT, created_at="2026-06-18T00:00:00Z")[0]
 
 
+def test_merge_readiness_allowlist_exact_shape_and_rejections():
+    allowed = [
+        v2.sys.executable,
+        "scripts/docker01_merge_readiness.py",
+        "--pr",
+        str(PR),
+        "--commit",
+        COMMIT,
+        "--json",
+    ]
+    assert v2.is_command_allowed(allowed)
+    assert not v2.is_command_allowed([*allowed, "--extra"])
+    different_script = allowed.copy()
+    different_script[1] = "scripts/not_merge_readiness.py"
+    assert not v2.is_command_allowed(different_script)
+    for flag in [
+        "--comment",
+        "--out",
+        "--execute",
+        "--cleanup",
+        "--delete",
+        "--prune",
+        "--restart",
+        "--approve",
+        "--merge",
+    ]:
+        assert not v2.is_command_allowed([*allowed, flag])
+    assert not v2.is_command_allowed(["docker", "ps"])
+
+
+def test_primary_user_path_json_human_and_out(monkeypatch, tmp_path, capsys):
+    evidence = tmp_path / "evidence"
+    write_qa(evidence)
+    patch(monkeypatch, evidence)
+    assert v2.main(["--pr", str(PR), "--commit", COMMIT, "--json"]) == 0
+    json_text = capsys.readouterr().out
+    parsed = json.loads(json_text)
+    assert parsed["mode"] == "docker01_v2_readiness"
+    assert parsed["read_only"] is True
+    assert parsed["mutation_performed"] is False
+
+    assert v2.main(["--pr", str(PR), "--commit", COMMIT]) == 0
+    human = capsys.readouterr().out
+    assert "# Docker01 V2 Readiness Evidence" in human
+    assert "SeedOfEvil remains final merge owner" in human
+
+    out = tmp_path / "out"
+    assert v2.main(["--pr", str(PR), "--commit", COMMIT, "--out", str(out)]) == 0
+    capsys.readouterr()
+    assert (out / "v2-readiness.json").is_file()
+    assert (out / "v2-readiness-summary.md").is_file()
+    checksums = json.loads((out / "checksums.json").read_text())
+    assert checksums["files"]["v2-readiness.json"]["sha256"]
+    assert checksums["files"]["v2-readiness-summary.md"]["size"] > 0
+
+
 def test_json_contract_human_and_out(monkeypatch, tmp_path):
     r = report(monkeypatch, tmp_path / "e")
     assert json.loads(v2.strict_json(r))["mode"] == "docker01_v2_readiness"
@@ -195,7 +251,13 @@ def test_missing_evidence_unknown_and_stale_not_current(monkeypatch, tmp_path):
     )
     r, raw = v2.build_report(PR, COMMIT)
     assert r["status"] == "v2_unknown"
+    assert any("unavailable" in warning for warning in r["warnings"])
     assert raw["raw-qa-bundle-summary.json"]["status"] == "not_found"
+    assert raw["raw-merge-readiness.json"]["status"] == "not_available"
+    out = tmp_path / "missing-out"
+    v2.write_out(out, r, raw)
+    raw_merge = json.loads((out / "raw-merge-readiness.json").read_text())
+    assert raw_merge["status"] == "not_available"
     write_qa(tmp_path, commit="1111111111111111111111111111111111111111")
     patch(monkeypatch, tmp_path)
     r, _ = v2.build_report(PR, COMMIT)

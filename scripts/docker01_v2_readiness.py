@@ -92,7 +92,7 @@ def is_command_allowed(argv: list[str]) -> bool:
         return argv[4:] == ["--commit", argv[5], "--status", "--json"] and bool(argv[3])
     if len(argv) == 9 and argv[:4] == [py, "scripts/validation_status.py", "--latest", "--pr"]:
         return argv[5:] == ["--commit", argv[6], "--json", "--explain-selection"] and bool(argv[4])
-    if len(argv) == 8 and argv[:3] == [py, "scripts/docker01_merge_readiness.py", "--pr"]:
+    if len(argv) == 7 and argv[:3] == [py, "scripts/docker01_merge_readiness.py", "--pr"]:
         return argv[4:] == ["--commit", argv[5], "--json"] and bool(argv[3])
     return False
 
