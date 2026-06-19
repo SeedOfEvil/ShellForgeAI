@@ -870,9 +870,18 @@ def _qa_bundle_latest(pr: int, commit: str) -> dict:
     pattern = re.compile(
         r"^sfai-pr(?P<pr>\d+)-(?P<sha>[^-]+)-(?:(?:operator-)?qa-bundle)-(?P<stamp>.+)$"
     )
+    convergence_pattern = re.compile(
+        r"^sfai-pr(?P<pr>\d+)-(?P<sha>[^-]+)-convergence-(?P<stamp>.+)$"
+    )
     if root.is_dir():
-        for path in root.iterdir():
-            match = pattern.match(path.name)
+        direct = [path for path in root.iterdir() if path.is_dir()]
+        nested = list(root.glob(f"sfai-pr{pr}-{commit[:7]}*convergence*/operator-qa"))[:100]
+        for path in [*direct, *nested]:
+            match = (
+                convergence_pattern.match(path.parent.name)
+                if path.name == "operator-qa"
+                else pattern.match(path.name)
+            )
             if not path.is_dir() or not match:
                 continue
             if str(match.group("pr")) != str(pr):

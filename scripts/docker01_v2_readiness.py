@@ -173,14 +173,34 @@ def commit_matches(candidate: str | None, commit: str) -> bool:
     return bool(cand) and (cand == commit or commit.startswith(cand) or cand.startswith(commit[:7]))
 
 
+def _candidate_qa_dirs(root: Path, pr: int, commit: str) -> list[Path]:
+    """Return bounded exact PR/commit QA bundle directory candidates.
+
+    Supports both the original flat bundle names and the Docker01 convergence
+    layout:
+    ``sfai-pr<PR>-<short>-convergence-<stamp>/operator-qa``.
+    """
+    direct = list(root.glob(f"sfai-pr{pr}-{commit[:7]}*qa-bundle*"))[:100]
+    nested = list(root.glob(f"sfai-pr{pr}-{commit[:7]}*convergence*/operator-qa"))[:100]
+    return [path for path in [*direct, *nested] if path.is_dir()]
+
+
+def _qa_dir_matches(path: Path, pr: int, commit: str) -> bool:
+    direct = re.compile(rf"^sfai-pr{pr}-(?P<sha>[^-]+)-(?:(?:operator-)?qa-bundle)-(?P<stamp>.+)$")
+    convergence = re.compile(rf"^sfai-pr{pr}-(?P<sha>[^-]+)-convergence-(?P<stamp>.+)$")
+    if path.name == "operator-qa":
+        match = convergence.match(path.parent.name)
+    else:
+        match = direct.match(path.name)
+    return bool(match and commit_matches(match.group("sha"), commit))
+
+
 def find_qa_bundle(pr: int, commit: str) -> tuple[dict[str, Any], dict[str, Any]]:
     root = Path(os.environ.get(QA_BUNDLE_ROOT_ENV) or tempfile.gettempdir())
-    pattern = re.compile(rf"^sfai-pr{pr}-(?P<sha>[^-]+)-(?:(?:operator-)?qa-bundle)-(?P<stamp>.+)$")
     candidates: list[tuple[int, float, Path, dict[str, Any]]] = []
     if root.is_dir():
-        for path in list(root.glob(f"sfai-pr{pr}-{commit[:7]}*qa-bundle*"))[:100]:
-            match = pattern.match(path.name)
-            if not path.is_dir() or not match or not commit_matches(match.group("sha"), commit):
+        for path in _candidate_qa_dirs(root, pr, commit):
+            if not _qa_dir_matches(path, pr, commit):
                 continue
             qa = (
                 bounded_json(path / "qa-results.json")

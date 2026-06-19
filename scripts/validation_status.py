@@ -637,6 +637,22 @@ def _candidate_evidence_rank(candidate: dict[str, Any]) -> tuple[int, float]:
     setup failures and stale partial artifacts. Non-exact discovery preserves the
     existing kind/time behavior.
     """
+    if candidate.get("kind") == "log":
+        try:
+            text = dve.read_bounded_tail(candidate["path"])
+        except OSError:
+            text = ""
+        classification, _full_validation, _full_pytest, _warnings = _legacy_log_verdict(text)
+        if classification == CLASS_PASSED:
+            return (4, float(candidate.get("mtime") or 0))
+        if classification == CLASS_TEST_FAILURE:
+            return (3, float(candidate.get("mtime") or 0))
+        if classification == CLASS_SETUP_FAILURE:
+            return (2, float(candidate.get("mtime") or 0))
+        if classification == CLASS_INTERRUPTED:
+            return (1, float(candidate.get("mtime") or 0))
+        return (0, float(candidate.get("mtime") or 0))
+
     status_path = Path(candidate["path"]) / "validation-status.json"
     doc = load_json_evidence(status_path, [], label="status") if status_path.is_file() else None
     if not isinstance(doc, dict):
