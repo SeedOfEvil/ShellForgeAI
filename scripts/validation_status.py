@@ -868,12 +868,24 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
         elif status == STATUS_PASSED:
             final_status = STATUS_PASSED
             classification = CLASS_PASSED
-        elif status == STATUS_FAILED:
+        elif status == STATUS_FAILED or data.get("classification") in (
+            CLASS_TEST_FAILURE,
+            "failed",
+        ):
             final_status = STATUS_FAILED
-            classification = "failed"
+            classification = data.get("classification") or "failed"
         else:
             final_status = STATUS_UNKNOWN
             classification = CLASS_UNKNOWN
+        full_pytest_doc = (
+            data.get("full_pytest") if isinstance(data.get("full_pytest"), dict) else {}
+        )
+        full_exit = full_pytest_doc.get("exit_code")
+        if full_exit is None and final_status == STATUS_PASSED:
+            full_exit = 0
+        full_result = full_pytest_doc.get("result")
+        if not full_result or full_result == vh.FULL_UNKNOWN:
+            full_result = vh.FULL_PASSED if final_status == STATUS_PASSED else vh.FULL_UNKNOWN
         return {
             "kind": "docker01_pr_lane",
             "finalizer": True,
@@ -885,10 +897,8 @@ def source_verdict(data: dict[str, Any] | None, *, kind: str) -> dict[str, Any] 
             "phase_status": {},
             "active_phase": None,
             "last_completed_phase": None,
-            "full_pytest_exit_code": 0 if final_status == STATUS_PASSED else None,
-            "full_pytest_result": vh.FULL_PASSED
-            if final_status == STATUS_PASSED
-            else vh.FULL_UNKNOWN,
+            "full_pytest_exit_code": full_exit,
+            "full_pytest_result": full_result,
             "failed_phase": None,
             "conflict": False,
             "stored_status": final_status,
@@ -1533,7 +1543,10 @@ def build_report(
         safe_next_commands = [viewer_command, "python scripts/validation_status.py --latest --json"]
 
     meta = selected_meta or {}
-    source_kind = meta.get("kind") if run_dir is not None else None
+    status_source = status_doc.get("source") if isinstance(status_doc, dict) else {}
+    if not isinstance(status_source, dict):
+        status_source = {}
+    source_kind = meta.get("kind") if run_dir is not None else status_source.get("kind")
     source_pr = meta.get("pr")
     if source_pr is None:
         source_pr = run_meta.get("pr")
@@ -1544,6 +1557,15 @@ def build_report(
     full_meta = _full_validation_metadata(status_doc, manifest_doc)
     lane_meta = _lane_metadata(status_doc, manifest_doc)
     report_selection = dict(selection) if isinstance(selection, dict) else selection
+    if (
+        isinstance(report_selection, dict)
+        and isinstance(status_doc, dict)
+        and (status_doc.get("source") or {}).get("kind") == "legacy_docker01_validation_log"
+    ):
+        report_selection["legacy_log_classified"] = True
+        report_selection["exact_pr_commit_matched"] = True
+        if status_doc.get("classification") == CLASS_PASSED:
+            report_selection["selected_reason"] = "exact_pr_commit_legacy_log_pass_markers"
     if isinstance(report_selection, dict) and merged.get("superseded_non_pass_evidence"):
         report_selection["superseded_non_pass_evidence"] = True
         report_selection["selected_final_attempt_reason"] = merged.get("selected_reason")
@@ -1928,6 +1950,154 @@ def _as_str(value: Path | None) -> str | None:
     return str(value) if value is not None else None
 
 
+def _last_match_index(patterns: tuple[str, ...], text: str) -> int:
+    indexes = [
+        match.start() for pattern in patterns for match in re.finditer(pattern, text, re.I | re.M)
+    ]
+    return max(indexes) if indexes else -1
+
+
+def _legacy_log_verdict(text: str) -> tuple[str, bool, dict[str, Any], list[str]]:
+    """Conservatively classify a legacy Docker01 validation log.
+
+    This is read-only evidence classification for exact PR/commit logs selected
+    by discovery.  It requires terminal success markers for pass eligibility and
+    keeps ambiguous/truncated logs non-pass-eligible.
+    """
+    ruff_pass = (r"\bruff(?: check)? (?:passed|ok|succeeded)\b", r"\bruff passed\b")
+    compile_pass = (
+        r"\bcompileall (?:passed|ok|succeeded)\b",
+        r"python -m compileall\b.*(?:passed|ok|succeeded)",
+    )
+    targeted_pass = (
+        r"\btargeted (?:pr )?(?:tests|pytest) passed\b",
+        r"\bpr\d+ targeted tests passed\b",
+        r"\bv1 quick passed\b",
+        r"\bquick validation passed\b",
+    )
+    full_pass = (
+        r"\bfull pytest passed\b",
+        r"\bfull pytest passed:?\s*100%",
+        r"\bfull pytest\b.*\b100%",
+        r"run_full_pytest\.py completed successfully",
+        r"\bfull validation passed\b",
+    )
+    exit_zero = (
+        r"\bfull pytest\b.*\bexit(?: code)?[ =:]?0\b",
+        r"\bexit(?: code)?[ =:]?0\b",
+        r"\bexit_code[=:]0\b",
+        r"\bexit 0\b",
+    )
+    pytest_fail = (
+        r"\bpytest failed\b",
+        r"\bfull pytest failed\b",
+        r"\bexit(?: code)?[ =:]?[1-9]\d*\b",
+    )
+    ruff_fail = (r"\bruff (?:check )?failed\b",)
+    compile_fail = (r"\bcompileall failed\b", r"python -m compileall\b.*failed")
+    setup_fail = (r"\bsetup[_ -]?failure\b", r"\bsetup failed\b", r"environment preflight failed")
+    interrupted = (r"\binterrupted\b", r"\bincomplete\b", r"\btruncated\b")
+
+    failure_last = max(
+        _last_match_index(pytest_fail, text),
+        _last_match_index(ruff_fail, text),
+        _last_match_index(compile_fail, text),
+    )
+    setup_last = _last_match_index(setup_fail, text)
+    interrupted_last = _last_match_index(interrupted, text)
+    ruff_last = _last_match_index(ruff_pass, text)
+    compile_last = _last_match_index(compile_pass, text)
+    targeted_last = _last_match_index(targeted_pass, text)
+    full_last = _last_match_index(full_pass, text)
+    exit_last = _last_match_index(exit_zero, text)
+    last_success = max(ruff_last, compile_last, targeted_last, full_last, exit_last)
+    last_bad = max(failure_last, setup_last, interrupted_last)
+
+    full_validation = full_last >= 0 or "run_full_pytest.py" in text
+    full_pytest = {"result": vh.FULL_UNKNOWN, "exit_code": None}
+
+    if setup_last > max(failure_last, interrupted_last, last_success):
+        return (
+            CLASS_SETUP_FAILURE,
+            full_validation,
+            full_pytest,
+            [
+                "Legacy validation log final outcome is setup_failure; "
+                "evidence is not pass-eligible."
+            ],
+        )
+    if interrupted_last > max(failure_last, setup_last, last_success):
+        return (
+            CLASS_INTERRUPTED,
+            full_validation,
+            full_pytest,
+            [
+                "Legacy validation log final outcome is interrupted/incomplete; "
+                "evidence is not pass-eligible."
+            ],
+        )
+    if failure_last > last_success:
+        return (
+            CLASS_TEST_FAILURE,
+            full_validation,
+            full_pytest,
+            ["Legacy validation log contains a terminal validation failure marker."],
+        )
+
+    targeted_ok = ruff_last >= 0 and compile_last >= 0 and targeted_last >= 0
+    full_ok = ruff_last >= 0 and compile_last >= 0 and full_last >= 0 and exit_last >= 0
+    if full_ok and last_bad <= max(full_last, exit_last):
+        full_pytest = {"result": vh.FULL_PASSED, "exit_code": 0}
+        return (
+            CLASS_PASSED,
+            True,
+            full_pytest,
+            [
+                "Classified exact legacy validation log using trusted pass markers because "
+                "structured validation-status.json was unavailable."
+            ],
+        )
+    if targeted_ok and not full_validation and last_bad <= targeted_last:
+        return (
+            CLASS_PASSED,
+            False,
+            full_pytest,
+            [
+                "Classified exact legacy validation log using trusted pass markers because "
+                "structured validation-status.json was unavailable."
+            ],
+        )
+    if failure_last >= 0:
+        return (
+            CLASS_TEST_FAILURE,
+            full_validation,
+            full_pytest,
+            [
+                "Legacy validation log contains validation failure markers; "
+                "evidence is not pass-eligible."
+            ],
+        )
+    if setup_last >= 0:
+        return (
+            CLASS_SETUP_FAILURE,
+            full_validation,
+            full_pytest,
+            [
+                "Legacy validation log contains setup failure markers; "
+                "evidence is not pass-eligible."
+            ],
+        )
+    return (
+        CLASS_UNKNOWN,
+        full_validation,
+        full_pytest,
+        [
+            "Legacy validation log did not contain trusted terminal pass markers; "
+            "leaving evidence non-pass-eligible."
+        ],
+    )
+
+
 def _status_from_completed_log(
     log_path: str | None,
     *,
@@ -1943,20 +2113,9 @@ def _status_from_completed_log(
     text = dve.read_bounded_tail(path)
     if not text.strip():
         return None
-    classification, warnings = dve.classify_completed_log(text)
+    classification, full_validation, full_pytest, warnings = _legacy_log_verdict(text)
     status = dve.status_from_classification(classification)
     pass_eligible = classification == CLASS_PASSED
-    low = text.lower()
-    full_validation = any(
-        marker in low
-        for marker in (
-            "full pytest passed",
-            "full pytest: passed",
-            "run_full_pytest.py",
-            "full validation passed",
-            "full pytest completed",
-        )
-    )
     commit_value = commit or (selected_meta or {}).get("commit") or "unknown"
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1970,13 +2129,14 @@ def _status_from_completed_log(
         "short_sha": str(commit_value)[:12],
         "lane": "full" if full_validation else "targeted",
         "full_validation": full_validation,
-        "full_validation_reason": "completed lane log" if full_validation else "",
+        "full_validation_reason": "trusted legacy log markers" if full_validation else "",
         "duplicate_full_pytest_detected": False,
-        "full_pytest": {
-            "result": vh.FULL_PASSED if full_validation and pass_eligible else vh.FULL_UNKNOWN,
-            "exit_code": 0 if full_validation and pass_eligible else None,
+        "full_pytest": full_pytest,
+        "source": {
+            "kind": "legacy_docker01_validation_log",
+            "run_dir": None,
+            "log_path": str(path),
         },
-        "source": {"kind": "docker01_pr_lane_log", "run_dir": None, "log_path": str(path)},
         "warnings": warnings,
     }
 
@@ -2002,6 +2162,10 @@ def generate_report(args: argparse.Namespace) -> dict[str, Any]:
             commit=getattr(args, "commit", None),
             selected_meta=sources.get("selected_meta"),
         )
+    if isinstance(status_doc, dict) and isinstance(status_doc.get("warnings"), list):
+        for warning in status_doc["warnings"]:
+            if isinstance(warning, str) and warning not in warnings:
+                warnings.append(warning)
     manifest_doc = load_manifest(sources["manifest_path"], warnings, required=bool(args.manifest))
     preflight_doc = load_json_evidence(sources["preflight_path"], warnings, label="preflight")
 

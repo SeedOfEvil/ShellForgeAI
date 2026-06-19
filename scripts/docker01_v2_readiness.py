@@ -460,6 +460,11 @@ def build_report(
                 "classification": v_class,
                 "pass_eligible": pass_eligible,
                 "rerun_required": rerun_required,
+                "full_validation": bool(validation.get("full_validation")),
+                "full_pytest": validation.get("full_pytest"),
+                "duplicate_full_pytest_detected": bool(
+                    validation.get("duplicate_full_pytest_detected")
+                ),
                 "run_dir": (validation.get("source") or {}).get("run_dir")
                 if isinstance(validation.get("source"), dict)
                 else validation.get("run_dir"),

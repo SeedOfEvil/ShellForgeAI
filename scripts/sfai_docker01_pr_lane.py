@@ -844,52 +844,24 @@ def _read_compose_image() -> str | None:
 
 
 def _validation_latest(pr: int, commit: str) -> dict:
-    warnings: list[str] = []
-    candidates = validation_status_viewer.discover_candidates(
+    args = argparse.Namespace(
+        latest=True,
+        run_dir=None,
+        heartbeat=None,
+        status_file=None,
+        manifest=None,
+        summary=None,
+        log=None,
+        preflight=None,
+        fallback_packet=None,
         run_root=None,
         include_legacy=False,
-        warnings=warnings,
-        include_default_roots=True,
+        pr=pr,
+        commit=commit,
+        json=True,
+        explain_selection=True,
     )
-    exact: list[dict] = []
-    for candidate in candidates:
-        if not validation_status_viewer._pr_matches(candidate.get("pr"), pr):
-            continue
-        if not validation_status_viewer._commit_matches(candidate.get("commit"), commit):
-            continue
-        status_path = Path(candidate["path"]) / "validation-status.json"
-        if not status_path.is_file():
-            continue
-        try:
-            doc = json.loads(status_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        doc["_candidate_path"] = candidate["path"]
-        doc["_candidate_mtime"] = candidate.get("mtime") or status_path.stat().st_mtime
-        exact.append(doc)
-    if not exact:
-        return {
-            "status": "not_found",
-            "classification": "not_found",
-            "pass_eligible": False,
-            "rerun_required": True,
-            "source": {"kind": "not_found", "run_dir": None},
-            "warnings": warnings,
-        }
-
-    def rank(doc: dict) -> tuple[int, float]:
-        if doc.get("pass_eligible") is True:
-            return (3, float(doc.get("_candidate_mtime") or 0))
-        if doc.get("classification") == "passed" or doc.get("status") == "passed":
-            return (2, float(doc.get("_candidate_mtime") or 0))
-        return (1, float(doc.get("_candidate_mtime") or 0))
-
-    selected = sorted(exact, key=rank, reverse=True)[0]
-    selected.setdefault("source", {})
-    selected["source"]["run_dir"] = selected.get("_candidate_path")
-    selected["source"]["kind"] = "run_dir"
-    selected["warnings"] = warnings
-    return selected
+    return validation_status_viewer.generate_report(args)
 
 
 def _qa_bundle_latest(pr: int, commit: str) -> dict:

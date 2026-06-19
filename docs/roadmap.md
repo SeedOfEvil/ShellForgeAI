@@ -1095,4 +1095,4 @@ The self-check does not run validation, pytest, the operator QA bundle, cleanup,
 
 - PR221 follow-up: targeted Docker01 validation lanes auto-finalize exact PR/commit validation evidence (`lane=targeted`, `full_validation=false`) and immediately self-check discovery; no manual finalizer normalization or duplicate pytest is required, and read-only downstream tools still do not execute validation or QA.
 
-- PR221 follow-up: `validation_status.py --latest` now recognizes completed standard guarded lane logs as bounded evidence for exact PR/commit discovery, preserving full-validation metadata for downstream merge/V2 readiness without manual normalization.
+- PR221 follow-up: `validation_status.py --latest` now recognizes completed standard guarded lane logs as bounded evidence for exact PR/commit discovery, preserving full-validation metadata for downstream merge/V2 readiness without manual normalization. Exact legacy logs are pass-eligible only with trusted terminal pass markers (including full pytest 100%/exit 0 for full lanes); ambiguous, truncated, failed, setup-failure, or interrupted logs remain non-pass-eligible.
