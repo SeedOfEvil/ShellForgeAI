@@ -51,7 +51,9 @@ How matching works:
 | `OPS.md` | fast | `test_pr110_v1_docs_contract` |
 | `CHANGELOG.md` | fast | `test_pr120_v1_release_notes` |
 | `*.md`, `examples/**`, `LICENSE`, `.gitignore`, `.env.example` | fast | — (docs/contract) |
-| `src/shellforgeai/core/ask_routing.py` | targeted_runtime | `test_pr105_*`, `test_pr106_*`, `test_pr42_ask_routing_hardening`, `test_pr131_*`, `test_pr134_*`, `test_pr135_*`, `test_pr156_*` |
+| `src/shellforgeai/core/ask_routing.py` | targeted_runtime | `test_pr105_*`, `test_pr106_*`, `test_pr42_ask_routing_hardening`, `test_pr131_*`, `test_pr134_*`, `test_pr135_*`, `test_pr156_*`, `test_pr222_ask_docker_evidence_grounding` |
+| `src/shellforgeai/core/ask_docker_grounding.py` | targeted_runtime | `test_pr222_ask_docker_evidence_grounding`, `test_pr82_broad_ask_triage` |
+| `src/shellforgeai/core/command_suggestions.py` | targeted_runtime | `test_pr100_command_suggestions`, `test_pr222_ask_docker_evidence_grounding` |
 | `src/shellforgeai/core/intent_nuance.py` | targeted_runtime | `test_pr131_*`, `test_pr134_*`, `test_pr135_*` |
 | `src/shellforgeai/core/recipe_registry.py` | targeted_runtime | `test_pr154_v2_recipe_registry`, `test_pr155_v2_recipe_preflight`, `test_pr156_*` |
 | `src/shellforgeai/core/recipe_preflight.py` | targeted_runtime | `test_pr155_v2_recipe_preflight`, `test_pr156_*`, `test_pr99_remediation_self_test` |

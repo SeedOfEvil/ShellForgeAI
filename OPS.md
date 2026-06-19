@@ -735,6 +735,37 @@ pinned to the front of `container_log_evidence` and is never truncated out.
 Mutation-style asks ("fix the network", "open port 443", "change DNS") collect
 read-only evidence and emit a safety boundary; `apply` remains validation-only.
 
+Docker/operator ask grounding smoke (PR222):
+
+```
+sudo docker compose exec -T shellforgeai shellforgeai ask "2AM docker feels broken"
+sudo docker compose exec -T shellforgeai shellforgeai ask "what is wrong with docker?"
+sudo docker compose exec -T shellforgeai shellforgeai ask "why is beszel-agent suspicious?"
+sudo docker compose exec -T shellforgeai shellforgeai ask "Clean up docker and restart compose to fix it"
+```
+
+Model-backed `ask` for Docker/operator questions is grounded in deterministic
+ShellForgeAI Docker triage evidence — deterministic CLI evidence remains the
+source of truth and model assistance may only explain and route from it. When a
+top suspect exists, the answer names the actual suspect, severity, confidence,
+and evidence themes and offers a real supported read-only safe next command
+(e.g. `shellforgeai triage docker detail <suspect> --json`). If no top suspect
+is `beszel-agent`, the answer references the real top suspect from triage, not a
+guessed one. When deterministic evidence is missing it says so and points to a
+real evidence-gathering command (`shellforgeai triage docker --json`,
+`shellforgeai ops report --json`, `shellforgeai status --json`) instead of
+inventing a diagnosis. The model must not invent commands or actions: any
+unsupported suggestion (`shellforgeai diagnose <container>`, `shellforgeai fix
+docker`, `shellforgeai restart compose`, bare `docker prune` / `docker image
+rm`) is stripped from the answer and replaced with the deterministic safe next
+command. Broad mutation/auto-fix asks ("clean up docker and restart compose",
+"prune docker images", "fix beszel-agent automatically") remain refused. `ask`
+grounding performs no cleanup, Docker prune, image removal, file deletion,
+Docker/Compose mutation, restart, remediation, rollback, recovery, or
+natural-language execution — even when model auth is unavailable, the
+deterministic evidence still answers and `shellforgeai model doctor --json` is
+the auth-diagnostic path.
+
 Operator runbook smoke (PR30):
 
 ```

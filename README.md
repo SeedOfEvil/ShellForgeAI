@@ -315,11 +315,25 @@ shellforgeai ask "find failed containers and explain likely cause"
 shellforgeai ask "show compose context for this restart proposal"
 shellforgeai ask "did the restart work?"
 shellforgeai ask "audit retention status"
+shellforgeai ask "why is beszel-agent suspicious?"
 ```
 
 `ask` collects evidence for ops-shaped questions and refuses mutation
 phrasing with a safety boundary. It never executes; mutation requires the
 explicit CLI lane.
+
+For Docker/operator questions, model-backed `ask` is grounded in deterministic
+ShellForgeAI Docker triage evidence: deterministic CLI evidence is the source of
+truth, and model assistance may only explain and route from it. When a top
+suspect exists the answer names the real suspect, severity, confidence, and
+evidence themes and offers a real supported read-only safe next command
+(`shellforgeai triage docker detail <suspect> --json`); when evidence is missing
+it points to a real evidence-gathering command (`shellforgeai triage docker
+--json`) instead of guessing. The model cannot invent commands — unsupported
+suggestions (`shellforgeai diagnose <container>`, `shellforgeai fix docker`,
+bare `docker prune`/`docker image rm`) are stripped and replaced with the safe
+next command. No cleanup, prune, restart, remediation, rollback, or Docker
+mutation is performed by `ask`.
 
 ## Deeper documentation
 

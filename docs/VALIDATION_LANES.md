@@ -106,6 +106,8 @@ No full `pytest` by default. Estimated runtime class: **short**.
 **Use for**
 
 - ask routing
+- model-backed `ask` Docker evidence grounding + ask-output unsupported-command
+  filtering (read-only deterministic triage evidence; no mutation)
 - intent parsing
 - command dispatch
 - interactive UX
