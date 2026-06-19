@@ -1092,3 +1092,5 @@ The self-check does not run validation, pytest, the operator QA bundle, cleanup,
 - Docker01 V2 readiness evidence snapshot: adds `scripts/docker01_v2_readiness.py`, a read-only report helper that classifies exact PR/commit Docker01 evidence as `v2_candidate`, `v2_not_ready`, or `v2_unknown` without deploy/build/validation/QA/cleanup/restart behavior. SeedOfEvil remains final merge owner.
 
 - PR221 follow-up: V2 readiness now treats missing exact validation/QA evidence as incomplete `v2_unknown` warnings instead of false failures, preserves explicit failures as `v2_not_ready`, and the operator QA read-only Docker ask uses deterministic local triage wording rather than Codex-auth-gated synthesis.
+
+- PR221 follow-up: targeted Docker01 validation lanes auto-finalize exact PR/commit validation evidence (`lane=targeted`, `full_validation=false`) and immediately self-check discovery; no manual finalizer normalization or duplicate pytest is required, and read-only downstream tools still do not execute validation or QA.

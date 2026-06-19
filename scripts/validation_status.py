@@ -1296,6 +1296,18 @@ def _log_path_from_manifest(manifest: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _lane_metadata(status_doc: dict[str, Any] | None, manifest_doc: dict[str, Any] | None) -> str:
+    for doc in (status_doc, manifest_doc):
+        if not isinstance(doc, dict):
+            continue
+        lane = doc.get("lane")
+        if isinstance(lane, str) and lane in {"targeted", "full", "unknown"}:
+            return lane
+        if isinstance(lane, dict):
+            return "full" if lane.get("full_validation_required") is True else "targeted"
+    return "unknown"
+
+
 def _full_validation_metadata(
     status_doc: dict[str, Any] | None, manifest_doc: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -1504,6 +1516,7 @@ def build_report(
         source_commit = run_meta.get("commit")
 
     full_meta = _full_validation_metadata(status_doc, manifest_doc)
+    lane_meta = _lane_metadata(status_doc, manifest_doc)
     report_selection = dict(selection) if isinstance(selection, dict) else selection
     if isinstance(report_selection, dict) and merged.get("superseded_non_pass_evidence"):
         report_selection["superseded_non_pass_evidence"] = True
@@ -1518,6 +1531,7 @@ def build_report(
         "classification": merged["classification"],
         "pass_eligible": bool(merged["pass_eligible"]),
         "rerun_required": bool(merged["rerun_required"]),
+        "lane": lane_meta,
         "full_validation": full_meta["full_validation"],
         "full_validation_reason": full_meta["full_validation_reason"],
         "duplicate_full_pytest_detected": full_meta["duplicate_full_pytest_detected"],

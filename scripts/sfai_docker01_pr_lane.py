@@ -443,17 +443,21 @@ def _default_artifact_path(
     return str(Path(tempfile.gettempdir()) / name)
 
 
+def _validation_discovery_root() -> Path:
+    """Choose the established writable validation evidence discovery root."""
+    env_root = os.environ.get(validation_status_viewer.RUNS_DIR_ENV)
+    if env_root:
+        return Path(env_root)
+    return docker01_validation_evidence.DEFAULT_DISCOVERY_ROOT
+
+
 def _default_validation_run_dir(
     *, pr_number: str | None, short_commit: str | None, created_at: str
 ) -> Path:
     safe_pr = pr_number or "unknown"
     safe_sha = short_commit or "unknown"
     stamp = created_at.replace(":", "").replace("-", "").replace("Z", "")
-    return (
-        Path(tempfile.gettempdir())
-        / "shellforgeai-validation-runs"
-        / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
-    )
+    return _validation_discovery_root() / f"sfai-pr{safe_pr}-{safe_sha}-validation-{stamp}"
 
 
 def _command_record(command: dict, *, status: str, duration: float | None, log_path: str | None):
@@ -577,7 +581,7 @@ def build_validation_evidence_check(
         pr=pr_int,
         commit=commit,
         include_legacy=False,
-        run_root=None,
+        run_root=str(run_dir.parent),
         explain_selection=True,
         run_dir=None,
         heartbeat=None,
@@ -1311,7 +1315,24 @@ def write_lane_validation_evidence(
         created_at=created_at,
         warnings=list(manifest.get("non_blockers") or []),
     )
-    return result["manifest"]
+    artifacts = manifest.setdefault("artifacts", {})
+    evidence_manifest = result["manifest"]
+    artifacts["validation_status_json"] = str(
+        Path(evidence_manifest["run_dir"]) / "validation-status.json"
+    )
+    artifacts["validation_manifest_json"] = str(
+        Path(evidence_manifest["run_dir"]) / "validation-manifest.json"
+    )
+    artifacts["validation_summary_md"] = str(
+        Path(evidence_manifest["run_dir"]) / "validation-summary.md"
+    )
+    artifacts["validation_commands_run_json"] = str(
+        Path(evidence_manifest["run_dir"]) / "commands-run.json"
+    )
+    manifest.setdefault("validation_evidence", {})["run_dir"] = evidence_manifest["run_dir"]
+    manifest["validation_evidence"]["status_file"] = artifacts["validation_status_json"]
+    manifest["validation_evidence"]["manifest_file"] = artifacts["validation_manifest_json"]
+    return evidence_manifest
 
 
 def planned_command_records(plan: dict, *, log_path: str | None = None) -> list[dict]:
@@ -2134,11 +2155,19 @@ def main(argv: list[str] | None = None) -> int:
             validation_run_dir / "validation-evidence-check.md"
         )
         if evidence_check.get("status") != "passed":
-            manifest.setdefault("non_blockers", []).append(
-                "validation evidence lifecycle needs_followup: "
+            message = (
+                "validation evidence lifecycle failed: validation passed but exact "
+                "PR/commit evidence was not discoverable; "
                 f"python3 scripts/validation_status.py --latest --pr {args.pr_number} "
                 f"--commit {head_commit} --json --explain-selection"
             )
+            manifest.setdefault("non_blockers", []).append(message)
+            if manifest.get("status") == "passed":
+                return_code = 1
+                manifest["status"] = "failed"
+                manifest["verdict"] = "fail"
+                manifest["failed_phase"] = "validation_evidence_self_check"
+                manifest["error_summary"] = message
         summary = render_human_summary(manifest)
         write_manifest(manifest, manifest_path)
         write_human_summary(summary, summary_path)
