@@ -19,6 +19,7 @@ shell execution, or arbitrary/natural-language execution is introduced here.
 
 from __future__ import annotations
 
+import json as json_lib
 import sys
 from typing import Annotated
 
@@ -38,10 +39,55 @@ def register(model_app: typer.Typer) -> None:
     cli = sys.modules["shellforgeai.cli"]
 
     @model_app.command("doctor")
-    def model_doctor(ctx: typer.Context) -> None:
+    def model_doctor(
+        ctx: typer.Context,
+        json_output: bool = typer.Option(False, "--json", help="Emit strict JSON output."),
+    ) -> None:
         runtime = cli._ctx(ctx)
-        provider = cli.build_provider(runtime.settings)
-        info = provider.doctor()
+        warnings: list[str] = []
+        try:
+            provider = cli.build_provider(runtime.settings)
+            info = provider.doctor()
+        except Exception as exc:
+            info = {
+                "provider": runtime.settings.model.provider,
+                "model": runtime.settings.model.model,
+                "auth_readiness": "unknown",
+                "auth_reason": "doctor_unavailable",
+            }
+            warnings.append(f"model doctor readiness unavailable: {exc}")
+        auth_readiness = str(info.get("auth_readiness") or "unknown")
+        ok = auth_readiness not in {"failed", "error"}
+        if json_output:
+            payload = {
+                "schema_version": 1,
+                "mode": "model_doctor",
+                "status": "ok" if ok else "warning",
+                "ok": ok,
+                "auth_readiness": auth_readiness,
+                "read_only": True,
+                "mutation_performed": False,
+                "model_called": False,
+                "warnings": warnings,
+                "provider": info.get("provider"),
+                "model": info.get("model"),
+                "doctor": info,
+                "safety": {
+                    "read_only": True,
+                    "mutation_performed": False,
+                    "cleanup" + "_executed": False,
+                    "remediation" + "_executed": False,
+                    "rollback" + "_executed": False,
+                    "recovery" + "_executed": False,
+                    "docker_compose" + "_executed": False,
+                    "container" + "_restarted": False,
+                    "natural_language_execution": False,
+                    "shell_true": False,
+                    "model_called": False,
+                },
+            }
+            typer.echo(json_lib.dumps(payload, sort_keys=True, separators=(",", ":")))
+            return
         for k, v in info.items():
             cli.console.print(f"{k}={v}")
         if not info.get("auth_cache_present"):

@@ -1,28 +1,8 @@
-"""PR197 — V1 safe-next-command guidance must only suggest valid commands.
+"""V1 safe-next-command guidance must only suggest valid commands.
 
-Pre-existing drift (found during PR196 Docker01 QA, present on main before
-PR196): the V1 readiness JSON ``next_safe_commands`` suggested
-``shellforgeai model doctor --json``, which is invalid because ``model
-doctor`` is human-output only and intentionally has no ``--json`` (or
-``--brief``) flag in the current surface.
-
-PR197 corrects the guidance string only:
-
-* V1 quick/standard/full readiness JSON never suggests
-  ``shellforgeai model doctor --json``; it suggests
-  ``shellforgeai model doctor`` instead,
-* every ``next_safe_commands`` entry is a registered ShellForgeAI command
-  whose options all exist (validated via ``--help``),
-* the ``model doctor`` contract is unchanged: human output only, ``--json``
-  still rejected cleanly with exit code 2, no new flags added,
-* machine-readable general health remains ``shellforgeai doctor --json``,
-* docs and tests no longer encode the invalid command (except where they
-  explicitly document that it is invalid), and
-* V1 readiness semantics (status/ci_status/safety flags) are unchanged.
-
-No execution/mutation behavior is touched: no cleanup, remediation,
-rollback, recovery, Docker/Compose mutation, restart, ``shell=True``,
-arbitrary command execution, natural-language execution, or model call.
+``shellforgeai model doctor --json`` is now a valid read-only readiness surface.
+These regression checks keep V1 next-safe guidance resolvable and prove the
+model doctor JSON path remains structured and non-mutating.
 """
 
 from __future__ import annotations
@@ -41,14 +21,9 @@ runner = CliRunner()
 
 REPO = Path(__file__).resolve().parents[1]
 
-INVALID_COMMAND = "shellforgeai model doctor --json"
+JSON_MODEL_COMMAND = "shellforgeai model doctor --json"
 VALID_MODEL_COMMAND = "shellforgeai model doctor"
 PROFILES = ("quick", "standard", "full")
-
-# Markers that make a doc/test mention of the invalid command acceptable:
-# the surrounding line must be documenting that the command is invalid (or
-# recording the drift fix), not suggesting it.
-_INVALIDITY_MARKERS = ("invalid", "no longer", "not ", "drift", "rejected", "absent")
 
 
 @pytest.fixture(scope="module")
@@ -68,24 +43,20 @@ def readiness_payloads(tmp_path_factory) -> dict[str, dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------
-# V1 readiness guidance: invalid command absent, valid guidance present
+# V1 readiness guidance: JSON model doctor command is valid
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("profile", PROFILES)
-def test_profile_json_does_not_suggest_model_doctor_json(readiness_payloads, profile) -> None:
+def test_profile_json_suggests_model_doctor_json(readiness_payloads, profile) -> None:
     commands = readiness_payloads[profile]["next_safe_commands"]
-    assert INVALID_COMMAND not in commands
+    assert JSON_MODEL_COMMAND in commands
 
 
 @pytest.mark.parametrize("profile", PROFILES)
-def test_profile_json_suggests_valid_model_doctor(readiness_payloads, profile) -> None:
+def test_profile_json_keeps_model_doctor_command_valid(readiness_payloads, profile) -> None:
     commands = readiness_payloads[profile]["next_safe_commands"]
-    assert VALID_MODEL_COMMAND in commands
-    # No entry may smuggle a --json flag onto model doctor.
-    for cmd in commands:
-        if cmd.startswith(VALID_MODEL_COMMAND):
-            assert cmd == VALID_MODEL_COMMAND
+    assert any(cmd.startswith(VALID_MODEL_COMMAND) for cmd in commands)
 
 
 @pytest.mark.parametrize("profile", PROFILES)
@@ -139,30 +110,30 @@ def test_profile_safety_flags_remain_non_mutating(readiness_payloads, profile) -
 
 
 # --------------------------------------------------------------------------
-# model doctor contract: human output only, --json still rejected
+# model doctor contract: human and JSON output
 # --------------------------------------------------------------------------
 
 
-def test_model_doctor_help_still_has_no_json_or_brief() -> None:
+def test_model_doctor_help_shows_json_but_not_brief() -> None:
     result = runner.invoke(app, ["model", "doctor", "--help"])
     assert result.exit_code == 0
-    assert "--json" not in result.stdout
+    assert "--json" in result.stdout
     assert "--brief" not in result.stdout
 
 
-def test_model_doctor_json_still_rejected_cleanly(monkeypatch) -> None:
-    # The fix must not hide the drift by adding a --json flag: the invalid
-    # invocation keeps failing with a clean Typer usage error (exit code 2)
-    # and never reaches the handler (no provider is built).
-    def _boom(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("rejected model doctor --json must not build a provider")
+def test_model_doctor_json_is_structured_read_only(monkeypatch) -> None:
+    class _FakeProvider:
+        def doctor(self) -> dict[str, Any]:
+            return {"provider": "openai-codex", "auth_readiness": "unknown"}
 
-    monkeypatch.setattr(cli_mod, "build_provider", _boom)
+    monkeypatch.setattr(cli_mod, "build_provider", lambda *_: _FakeProvider())
     result = runner.invoke(app, ["model", "doctor", "--json"])
-    assert result.exit_code == 2
-    output = result.stdout + (result.stderr or "")
-    assert "no such option" in output.lower()
-    assert "Traceback" not in output
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "model_doctor"
+    assert payload["auth_readiness"] == "unknown"
+    assert payload["read_only"] is True
+    assert payload["mutation_performed"] is False
 
 
 def test_model_doctor_still_exits_cleanly(monkeypatch) -> None:
@@ -190,44 +161,20 @@ def test_doctor_json_replacement_guidance_exits_cleanly(tmp_path) -> None:
 
 
 # --------------------------------------------------------------------------
-# Docs / source / fixtures no longer encode the invalid command
+# Docs / source / fixtures encode the restored JSON surface
 # --------------------------------------------------------------------------
 
 
-def _offending_lines(text: str) -> list[str]:
-    lines = []
-    for line in text.splitlines():
-        if INVALID_COMMAND in line:
-            low = line.lower()
-            if not any(marker in low for marker in _INVALIDITY_MARKERS):
-                lines.append(line.strip())
-    return lines
-
-
-def test_readiness_core_does_not_emit_invalid_command() -> None:
+def test_readiness_core_emits_model_doctor_json() -> None:
     source = (REPO / "src" / "shellforgeai" / "core" / "v1_readiness.py").read_text(
         encoding="utf-8"
     )
-    assert INVALID_COMMAND not in source
+    assert JSON_MODEL_COMMAND in source
 
 
-def test_docs_do_not_suggest_invalid_command() -> None:
-    doc_paths = [REPO / "README.md", REPO / "OPS.md", *sorted((REPO / "docs").rglob("*.md"))]
-    offending: dict[str, list[str]] = {}
-    for path in doc_paths:
-        lines = _offending_lines(path.read_text(encoding="utf-8"))
-        if lines:
-            offending[str(path.relative_to(REPO))] = lines
-    assert not offending, f"docs suggest invalid command: {offending}"
-
-
-def test_tests_and_fixtures_do_not_require_invalid_command() -> None:
-    this_file = Path(__file__).resolve()
-    offending: dict[str, list[str]] = {}
-    for path in sorted((REPO / "tests").rglob("*")):
-        if path.resolve() == this_file or path.suffix not in {".py", ".json", ".md", ".txt"}:
-            continue
-        lines = _offending_lines(path.read_text(encoding="utf-8"))
-        if lines:
-            offending[str(path.relative_to(REPO))] = lines
-    assert not offending, f"tests/fixtures require invalid command: {offending}"
+def test_docs_document_model_doctor_json() -> None:
+    docs_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [REPO / "README.md", REPO / "OPS.md", *sorted((REPO / "docs").rglob("*.md"))]
+    )
+    assert JSON_MODEL_COMMAND in docs_text

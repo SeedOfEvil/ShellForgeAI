@@ -232,8 +232,7 @@ def run_v1_readiness_check(app: Any, profile: str = "standard") -> dict[str, Any
         },
         "next_safe_commands": [
             "shellforgeai doctor --json",
-            # model doctor is human-output only; it has no --json flag.
-            "shellforgeai model doctor",
+            "shellforgeai model doctor --json",
             "shellforgeai ops report --json",
             "shellforgeai remediation self-test --profile standard --json",
         ],
