@@ -1094,3 +1094,5 @@ The self-check does not run validation, pytest, the operator QA bundle, cleanup,
 - PR221 follow-up: V2 readiness now treats missing exact validation/QA evidence as incomplete `v2_unknown` warnings instead of false failures, preserves explicit failures as `v2_not_ready`, and the operator QA read-only Docker ask uses deterministic local triage wording rather than Codex-auth-gated synthesis.
 
 - PR221 follow-up: targeted Docker01 validation lanes auto-finalize exact PR/commit validation evidence (`lane=targeted`, `full_validation=false`) and immediately self-check discovery; no manual finalizer normalization or duplicate pytest is required, and read-only downstream tools still do not execute validation or QA.
+
+- PR221 follow-up: `validation_status.py --latest` now recognizes completed standard guarded lane logs as bounded evidence for exact PR/commit discovery, preserving full-validation metadata for downstream merge/V2 readiness without manual normalization.

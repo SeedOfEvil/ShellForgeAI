@@ -129,6 +129,35 @@ def test_targeted_success_auto_finalizes_discoverable_evidence(tmp_path, monkeyp
     assert lane._validation_latest(PR, COMMIT)["pass_eligible"] is True
 
 
+def test_completed_full_validation_log_is_discoverable_without_manual_finalizer(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(validation_status, "TMP_ROOT", tmp_path)
+    monkeypatch.setattr(validation_status, "MAINLINE_TMP_ROOT", tmp_path / "validation-runs")
+    monkeypatch.setattr(validation_status, "PERSISTED_ROOT", tmp_path / "persisted")
+    log = tmp_path / f"sfai-pr{PR}-{COMMIT[:7]}-validation-20260619T040814Z.log"
+    log.write_text(
+        (
+            "ruff passed\n"
+            "compileall passed\n"
+            "PR221 targeted tests passed\n"
+            "full pytest passed 100%, exit 0\n"
+        ),
+        encoding="utf-8",
+    )
+    report = status_report(tmp_path)
+    assert report["status"] == "passed"
+    assert report["classification"] == "passed"
+    assert report["pass_eligible"] is True
+    assert report["rerun_required"] is False
+    assert report["lane"] == "full"
+    assert report["full_validation"] is True
+    assert report["full_pytest"]["result"] == "passed"
+    assert report["full_pytest"]["exit_code"] == 0
+    assert report["duplicate_full_pytest_detected"] is False
+    assert report["source"]["log_path"] == str(log)
+
+
 def test_targeted_failure_setup_and_interrupted_evidence_are_not_pass_eligible(
     tmp_path, monkeypatch
 ):

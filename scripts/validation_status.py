@@ -55,6 +55,7 @@ HELPER_DIR = Path(__file__).resolve().parent
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
+import docker01_validation_evidence as dve  # noqa: E402
 import validation_heartbeat as vh  # noqa: E402
 
 SCHEMA_VERSION = 1
@@ -102,6 +103,7 @@ LEGACY_ROOT = Path("/data/validation-runs")
 # Bounded glob for PR-specific temp run directories. Only entries matching this
 # ShellForgeAI naming convention are considered; the temp dir is never crawled.
 TMP_PR_RUN_GLOB = "sfai-pr*-validation-*"
+TMP_PR_LOG_GLOB = "sfai-pr*-validation-*.log"
 
 # Back-compat list used by the legacy ``discover_latest`` helper.
 DEFAULT_SEARCH_DIRS: tuple[str, ...] = (
@@ -582,6 +584,30 @@ def discover_candidates(
                     "path": key,
                     "kind": KIND_RUN_DIR,
                     "container": container,
+                    "legacy": False,
+                    "pr": pr,
+                    "commit": commit,
+                    "mtime": mtime,
+                }
+            )
+
+    if TMP_ROOT.is_dir():
+        for entry in sorted(TMP_ROOT.glob(TMP_PR_LOG_GLOB)):
+            if not entry.is_file():
+                continue
+            key = str(entry)
+            if key in seen:
+                continue
+            mtime = entry.stat().st_mtime
+            if mtime <= 0:
+                continue
+            seen.add(key)
+            pr, commit = _candidate_pr_commit(entry)
+            out.append(
+                {
+                    "path": key,
+                    "kind": "log",
+                    "container": False,
                     "legacy": False,
                     "pr": pr,
                     "commit": commit,
@@ -1858,7 +1884,11 @@ def _resolve_sources(args: argparse.Namespace, warnings: list[str]) -> dict[str,
         selection = result["selection"]
         selected_meta = result["selected_meta"]
         if result["run_dir"] is not None:
-            run_dir = result["run_dir"]
+            if selected_meta and selected_meta.get("kind") == "log":
+                log_path = result["run_dir"]
+                run_dir = None
+            else:
+                run_dir = result["run_dir"]
         else:
             not_found = True
             warnings.append("no validation runs found under known artifact roots")
@@ -1898,6 +1928,59 @@ def _as_str(value: Path | None) -> str | None:
     return str(value) if value is not None else None
 
 
+def _status_from_completed_log(
+    log_path: str | None,
+    *,
+    pr: int | None,
+    commit: str | None,
+    selected_meta: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not log_path:
+        return None
+    path = Path(log_path)
+    if not path.is_file():
+        return None
+    text = dve.read_bounded_tail(path)
+    if not text.strip():
+        return None
+    classification, warnings = dve.classify_completed_log(text)
+    status = dve.status_from_classification(classification)
+    pass_eligible = classification == CLASS_PASSED
+    low = text.lower()
+    full_validation = any(
+        marker in low
+        for marker in (
+            "full pytest passed",
+            "full pytest: passed",
+            "run_full_pytest.py",
+            "full validation passed",
+            "full pytest completed",
+        )
+    )
+    commit_value = commit or (selected_meta or {}).get("commit") or "unknown"
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": "docker01_pr_lane_validation_status",
+        "status": status,
+        "classification": classification,
+        "pass_eligible": pass_eligible,
+        "rerun_required": not pass_eligible,
+        "pr": pr if pr is not None else (selected_meta or {}).get("pr"),
+        "commit": commit_value,
+        "short_sha": str(commit_value)[:12],
+        "lane": "full" if full_validation else "targeted",
+        "full_validation": full_validation,
+        "full_validation_reason": "completed lane log" if full_validation else "",
+        "duplicate_full_pytest_detected": False,
+        "full_pytest": {
+            "result": vh.FULL_PASSED if full_validation and pass_eligible else vh.FULL_UNKNOWN,
+            "exit_code": 0 if full_validation and pass_eligible else None,
+        },
+        "source": {"kind": "docker01_pr_lane_log", "run_dir": None, "log_path": str(path)},
+        "warnings": warnings,
+    }
+
+
 def generate_report(args: argparse.Namespace) -> dict[str, Any]:
     warnings: list[str] = []
     sources = _resolve_sources(args, warnings)
@@ -1912,6 +1995,13 @@ def generate_report(args: argparse.Namespace) -> dict[str, Any]:
         sources["heartbeat_path"], warnings, required=bool(args.heartbeat)
     )
     status_doc = load_status(sources["status_path"], warnings, required=bool(args.status_file))
+    if status_doc is None:
+        status_doc = _status_from_completed_log(
+            sources["log_path"],
+            pr=getattr(args, "pr", None),
+            commit=getattr(args, "commit", None),
+            selected_meta=sources.get("selected_meta"),
+        )
     manifest_doc = load_manifest(sources["manifest_path"], warnings, required=bool(args.manifest))
     preflight_doc = load_json_evidence(sources["preflight_path"], warnings, label="preflight")
 
