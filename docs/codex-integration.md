@@ -49,3 +49,12 @@ health, or a general context pass). Confirm with `yes`, `proceed`, `dig
 deeper`, `y`, or `run it`. Normal answers hide internal collector names;
 technical names remain in `/tools` and debug/raw views. Safety unchanged:
 no arbitrary shell, no destructive execution, `apply` validation-only.
+
+
+## Model doctor explicit probe
+
+Codex remains a synthesis provider, not a ShellForgeAI tool executor. Default
+`shellforgeai model doctor` does not call Codex or the network. The explicit
+`--live-probe` flag performs one fixed, bounded readiness/auth probe through the
+existing provider path, with no operator-provided prompt text, no tool execution,
+and no mutation.

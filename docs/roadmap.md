@@ -14,17 +14,25 @@
 `shellforgeai model doctor` and `shellforgeai model doctor --json` are local,
 read-only diagnostics. By default they inspect the configured Codex binary,
 version, and whether local auth material appears present; they do not call the
-model, perform a network probe, write credentials, or mutate the host.
+model, perform a network probe, write credentials, or mutate the host. The
+default no-probe state reports `live_probe_requested=false`,
+`live_probe_performed=false`, and `auth_readiness=not_verified` with
+`auth_reason=auth_cache_present_live_probe_not_run`, meaning live readiness was
+not requested or performed.
 
-When `auth_cache_present=true`, the local cache exists but live auth readiness
-is reported separately. The default no-probe state is
-`auth_readiness=not_verified` with
-`auth_reason=auth_cache_present_live_probe_not_run`, meaning the cache is
-present and live readiness has not been verified. Missing local states are
-classified as `missing_auth_cache` or `missing_binary`. Live statuses such as
-`verified`, `unauthorized`, `network_unavailable`, and `timeout` are reserved
-for an explicit future live probe; this release does not add that probe, so the
-safe next diagnostic remains `shellforgeai model doctor --json`.
+Operators can explicitly request one bounded auth/readiness check with
+`shellforgeai model doctor --live-probe --json` or human output with
+`shellforgeai model doctor --live-probe`. The probe uses a fixed internal
+readiness ping through the configured model client, does not accept operator
+prompt text, does not execute tools, and performs no mutation. Tests use fake
+clients only; no real model or network calls are required in tests.
+
+A bounded, pasteable receipt can be written with
+`shellforgeai model doctor --live-probe --receipt-out /tmp/sfai-model-probe`.
+The directory contains `model-doctor-live-probe.json`,
+`model-doctor-live-probe-summary.md`, `manifest.json`, and `checksums.json`
+with SHA256, size, and read-only/no-mutation safety metadata. Receipt files
+omit secrets, tokens, auth headers, and raw credential material. SeedOfEvil remains the final merge owner.
 - PR196 (June 12, 2026): CLI command-module split continues with the `model` command group. `src/shellforgeai/commands/model.py` now owns Typer registration for `model doctor` (moved from `commands/doctor.py`, where it had lived since PR182) and `model test` (moved from `cli.py`), while `src/shellforgeai/cli.py` remains root app wiring. The command surface and behavior are preserved: `model --help`, `model doctor --help`, and `model test --help` (with the existing positional prompt and `--raw`/`--timeout`/`--model` options) are unchanged; `model doctor` remains the read-only provider-readiness report with the same provider/model/fallback fields, `shutil.which`-based codex binary detection, auth cache presence with `status_unknown` readiness and `codex login --device-auth` recovery hint, sandbox/approval reporting, and no `--json` flag in the current surface. `model doctor` still makes no model inference call and starts no Codex task; `model test` remains the group's only explicit one-shot model call, unchanged. This is extraction-only: no cleanup, arbitrary remediation, rollback, recovery, Docker/Compose mutation, restart, production restart, `shell=True`, arbitrary command execution, natural-language execution, new model command, artifact repair/delete, or intentional runtime behavior change was added. Future CLI refactors should keep running the PR184 command-surface golden guardrail.
 - PR195 (June 12, 2026): CLI command-module split continues with the read-only V1 readiness surface. `src/shellforgeai/commands/v1.py` now owns Typer registration for `v1 check` while `src/shellforgeai/cli.py` remains root/V1 app wiring and keeps the V1 packet lifecycle unchanged. The command surface and behavior are preserved: `v1 --help`, `v1 check --help`, `v1 check --profile quick|standard|full`, `--json`, and `--fail-on-warn` keep the same JSON/human output, pass/fail/warn/skip counts, `status`/`ci_status`, and safety fields. This is extraction-only: no cleanup, arbitrary remediation, rollback, recovery, Docker/Compose mutation, restart, production restart, `shell=True`, arbitrary command execution, natural-language execution, model/Codex call, artifact repair/delete, or intentional runtime behavior change was added. Future CLI refactors should keep running the PR184 command-surface golden guardrail.
 - PR194 (June 12, 2026): CLI command-module split continues with the governed, confirm-gated receipt recovery execution lane. `src/shellforgeai/commands/receipt_recovery_execute.py` now owns Typer registration for `recipes receipt recovery-execute <receipt_ref>` (with its existing explicit `--confirm` option and `--json`), while `src/shellforgeai/cli.py` remains root wiring and keeps governed `recipes execute` behind its existing confirmation gate. The command surface and behavior are preserved: recovery-execute still requires explicit `--confirm`, still re-gates the exact single receipt target (exists, non-production, `shellforgeai.disposable=true`, `shellforgeai.allow_restart=true`, not broad), still executes only the exact argv `["docker", "restart", "<target>"]` with no `shell=True`, still writes and verifies a recovery receipt, and still blocks no-confirm, missing/malformed/unsupported receipts, production/missing/label-drift/broad targets, and Docker command failures with controlled output, `mutation_performed=false`, `recovery_executed=false`, and `container_restarted=false`. Read-only `recovery-status`/`recovery-validate` from PR193 are unchanged. No Docker Compose, cleanup, remediation, rollback, natural-language, model-driven, or broad mutation behavior was added. Future CLI refactors should keep running the PR184 command-surface golden guardrail.

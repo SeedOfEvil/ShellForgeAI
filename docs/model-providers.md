@@ -66,3 +66,13 @@ key via `model.api_key_env`.
 Interactive mode uses the same provider abstraction. If the model is
 unavailable, the REPL shows setup guidance (`shellforgeai model doctor`)
 instead of crashing.
+
+
+## Model doctor live probe
+
+`shellforgeai model doctor` remains no-call/no-network by default. Use
+`--live-probe` only when an operator explicitly wants one bounded readiness/auth
+check through the configured provider. The probe uses a fixed internal payload,
+does not accept operator prompt text, does not execute tools, and performs no
+mutation. `--receipt-out DIR` writes bounded receipt artifacts without secrets.
+Tests for this surface use fake clients and do not call real providers.
