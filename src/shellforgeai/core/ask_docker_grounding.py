@@ -270,6 +270,90 @@ def render_docker_grounding_block(ctx: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def build_docker_evidence_explainability(ctx: dict[str, Any] | None) -> dict[str, Any]:
+    """Build bounded ask evidence explainability metadata (PR224).
+
+    The metadata is render-only and registry-backed. It never executes cleanup,
+    restart, remediation, rollback, recovery, Docker/Compose mutation, a shell,
+    or natural-language instructions.
+    """
+    grounded = bool(ctx and ctx.get("grounded") and ctx.get("top_suspect"))
+    sources = [
+        {
+            "name": "docker_triage",
+            "status": "used" if grounded else "missing",
+            "path": None,
+            "summary": "Top Docker suspect from deterministic triage.",
+        },
+        {
+            "name": "docker_status",
+            "status": "used" if grounded else "missing",
+            "path": None,
+            "summary": "Current Docker status/report evidence.",
+        },
+    ]
+    safe_command = (
+        str(ctx.get("safe_next_command"))
+        if grounded and ctx and ctx.get("safe_next_command")
+        else EVIDENCE_GATHERING_COMMAND
+    )
+    return {
+        "enabled": True,
+        "sources": sources,
+        "missing_sources": [s["name"] for s in sources if s["status"] == "missing"],
+        "top_suspect": ctx.get("top_suspect") if grounded and ctx else None,
+        "severity": ctx.get("severity") if grounded and ctx else None,
+        "confidence": ctx.get("confidence") if grounded and ctx else None,
+        "evidence_themes": list(ctx.get("evidence_themes") or []) if grounded and ctx else [],
+        "safe_next_command": safe_command,
+        "grounding_limits": [
+            "Answer is based on deterministic ShellForgeAI evidence."
+            if grounded
+            else "No diagnosis guessed without deterministic evidence.",
+            "No cleanup performed.",
+            "No restart performed.",
+            "No remediation performed.",
+            "No Docker/Compose mutation performed.",
+        ],
+    }
+
+
+def render_docker_evidence_explainability(ctx: dict[str, Any] | None) -> str:
+    """Render a concise human evidence explanation for ``ask --explain-evidence``."""
+    meta = build_docker_evidence_explainability(ctx)
+    by_name = {str(src["name"]): str(src["status"]) for src in meta["sources"]}
+    lines = [
+        "Evidence used:",
+        f"- Docker triage evidence: {by_name.get('docker_triage', 'missing')}",
+        f"- Docker status / ops report: {by_name.get('docker_status', 'missing')}",
+    ]
+    if meta.get("top_suspect"):
+        lines.extend(
+            [
+                f"- Top suspect: {meta.get('top_suspect')}",
+                f"- Severity: {meta.get('severity')}",
+                f"- Confidence: {meta.get('confidence')}",
+                "- Evidence themes: "
+                + (", ".join(str(t) for t in meta.get("evidence_themes") or []) or "none"),
+                "",
+                "Safe next command:",
+                str(meta.get("safe_next_command") or "no supported safe command is available"),
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "To gather evidence, run:",
+                str(meta.get("safe_next_command") or "no supported safe command is available"),
+            ]
+        )
+    lines.extend(["", "Boundaries:"])
+    for limit in meta["grounding_limits"]:
+        lines.append(f"- {limit}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def docker_grounding_safety_flags() -> dict[str, bool]:
     """Read-only safety flags for the ask-grounding envelope/audit details."""
     return {
@@ -305,6 +389,7 @@ def build_docker_grounding_envelope(
         "confidence": ctx.get("confidence"),
         "evidence_themes": list(ctx.get("evidence_themes") or []),
         "safe_next_command": ctx.get("safe_next_command"),
+        "evidence_explainability": build_docker_evidence_explainability(ctx),
         "safe_command_registry": {
             "validated": True,
             "command_id": ("triage_docker_detail" if ctx.get("top_suspect") else "triage_docker"),

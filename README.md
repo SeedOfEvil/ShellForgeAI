@@ -316,6 +316,7 @@ shellforgeai ask "show compose context for this restart proposal"
 shellforgeai ask "did the restart work?"
 shellforgeai ask "audit retention status"
 shellforgeai ask "why is beszel-agent suspicious?"
+shellforgeai ask "what is wrong with docker?" --explain-evidence
 ```
 
 `ask` collects evidence for ops-shaped questions and refuses mutation
@@ -332,8 +333,7 @@ it points to a real evidence-gathering command (`shellforgeai triage docker
 --json`) instead of guessing. The model cannot invent commands — unsupported
 suggestions (`shellforgeai diagnose <container>`, `shellforgeai fix docker`,
 bare `docker prune`/`docker image rm`) are stripped and replaced with the safe
-next command. No cleanup, prune, restart, remediation, rollback, or Docker
-mutation is performed by `ask`.
+next command. Add `--explain-evidence` to Docker/operator asks to append a concise evidence section showing deterministic sources used or missing, the top suspect/severity/confidence/themes when available, a registry-backed safe next command, and explicit grounding boundaries. If evidence is missing, the explanation suggests only a real read-only evidence-gathering command. No cleanup, prune, restart, remediation, rollback, or Docker mutation is performed by `ask`.
 
 ## Deeper documentation
 
