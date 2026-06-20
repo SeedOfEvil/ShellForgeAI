@@ -78,6 +78,7 @@ from shellforgeai.core.ask_routing import (
     extract_recipe_preflight_target,
     has_compose_artifact_reference_phrase,
     is_apply_approved_intent,
+    is_autofix_mutation_intent,
     is_broad_docker_triage_intent,
     is_compose_mutation_request,
     is_compose_service_mutation_proposal_request,
@@ -9894,6 +9895,11 @@ def _handle_mutation_refusal_ask(question: str) -> bool:
     if any(phrase in normalized for phrase in ("what would happen if", "how would i")):
         return False
     matched = [term for term in _ASK_MUTATION_TERMS if term in normalized]
+    if not matched and is_autofix_mutation_intent(raw):
+        # PR222 — "fix beszel-agent automatically" / "auto-fix docker" name no
+        # explicit mutation verb token but still ask ShellForgeAI to act on its
+        # own. Refuse them like any other natural-language mutation request.
+        matched = ["automatic fix"]
     if not matched:
         return False
     target_match = re.search(
@@ -9946,6 +9952,51 @@ def _handle_mutation_refusal_ask(question: str) -> bool:
     console.print("plan → validate → preflight → execute with explicit confirmation.")
     console.print("Production targets remain blocked.")
     return True
+
+
+def _emit_docker_grounding_answer(
+    runtime: RuntimeContext,
+    question: str,
+    ctx: dict[str, Any],
+    *,
+    removed_commands: list[str] | None = None,
+    model_available: bool = True,
+) -> None:
+    """PR222 — print the deterministic Docker grounding block + read-only audit.
+
+    Read-only ask grounding only. No cleanup, Docker prune, image removal, file
+    deletion, Docker/Compose mutation, restart, remediation, rollback, recovery,
+    natural-language execution, or shell. It only renders deterministic
+    ShellForgeAI triage evidence and records that it did nothing mutating.
+    """
+    from shellforgeai.core.ask_docker_grounding import (
+        build_docker_grounding_envelope,
+        render_docker_grounding_block,
+    )
+
+    console.print(render_docker_grounding_block(ctx), end="")
+    envelope = build_docker_grounding_envelope(ctx, removed_commands=removed_commands)
+    _append_audit_event(
+        runtime,
+        kind="ask",
+        action="docker_evidence_grounded",
+        status="ok",
+        summary="ask grounded in deterministic ShellForgeAI Docker triage evidence",
+        details={
+            "operation": "docker_evidence_grounded",
+            "grounded": bool(ctx.get("grounded")),
+            "topic": "docker",
+            "top_suspect": ctx.get("top_suspect"),
+            "severity": ctx.get("severity"),
+            "confidence": ctx.get("confidence"),
+            "safe_next_command": ctx.get("safe_next_command"),
+            "model_available": bool(model_available),
+            "unsupported_command_suggestions_removed": list(removed_commands or []),
+            "read_only": True,
+            "mutation_performed": False,
+            **envelope["safety"],
+        },
+    )
 
 
 def _handle_incident_search_ask(runtime: RuntimeContext, question: str) -> bool:

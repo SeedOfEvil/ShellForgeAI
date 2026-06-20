@@ -20,6 +20,10 @@ from typing import Any
 
 import typer
 
+from shellforgeai.core.ask_docker_grounding import (
+    build_docker_evidence_context,
+    is_docker_operator_ask,
+)
 from shellforgeai.core.ask_routing import (
     EVIDENCE_BACKED,
     PLAIN,
@@ -32,6 +36,7 @@ from shellforgeai.core.ask_routing import (
     route_ask_intent,
     target_container_status,
 )
+from shellforgeai.core.command_suggestions import filter_unsupported_command_suggestions
 from shellforgeai.core.diagnose import findings_summary_line
 from shellforgeai.core.runbook import build_runbook, render_runbook_md
 from shellforgeai.llm.prompts import build_contextual_prompt
@@ -144,6 +149,12 @@ def register(app: typer.Typer) -> None:
         ctx_mode = "full" if full_context else context
 
         route = AskRoute(mode=PLAIN) if no_evidence else route_ask_intent(question)
+        # PR222 — ground Docker/operator questions in deterministic ShellForgeAI
+        # triage evidence before formatting model assistance. Read-only: this
+        # only reads the current Docker scene; it never mutates anything.
+        docker_grounding: dict[str, Any] | None = None
+        if not no_evidence and is_docker_operator_ask(question):
+            docker_grounding = build_docker_evidence_context()
         evidence_result = None
         evidence_error: str | None = None
         if route.mode == EVIDENCE_BACKED:
@@ -262,6 +273,8 @@ def register(app: typer.Typer) -> None:
                     "when container_log_evidence is non-empty. Do not label the host "
                     "network globally broken unless runtime evidence supports it."
                 )
+            if docker_grounding is not None:
+                prompt_context["deterministic_docker_evidence"] = docker_grounding["prompt_block"]
             # Reachability briefs and target-container blocks need more headroom
             # than 2500 chars to stay intact in the prompt.
             effective_mode = (
@@ -281,6 +294,8 @@ def register(app: typer.Typer) -> None:
                     f"Recognized as ops diagnostic ({route.intent_label}) but read-only "
                     f"evidence collection failed: {evidence_error}. Do not invent findings."
                 )
+            if docker_grounding is not None:
+                prompt_context["deterministic_docker_evidence"] = docker_grounding["prompt_block"]
             prompt = build_contextual_prompt(question, prompt_context, mode=ctx_mode)
         resp = provider.complete(
             ModelRequest(
@@ -292,6 +307,20 @@ def register(app: typer.Typer) -> None:
             )
         )
         if not resp.ok:
+            if docker_grounding is not None:
+                # PR222 — model/auth failed, but deterministic Docker triage
+                # evidence still answers safely. Emit the grounded block plus a
+                # clean auth-diagnostic pointer (a real read-only command), not
+                # an unsupported command or an invented diagnosis.
+                cli._emit_docker_grounding_answer(
+                    runtime, question, docker_grounding, model_available=False
+                )
+                cli.console.print(
+                    "\nModel assistance is unavailable, so the deterministic ShellForgeAI "
+                    "evidence above is the answer."
+                )
+                cli.console.print("Check model auth with: shellforgeai model doctor --json")
+                return
             err_text = (resp.error or "").lower()
             if "not found on path" in err_text or "install" in err_text:
                 cli.console.print(
@@ -317,10 +346,28 @@ def register(app: typer.Typer) -> None:
                     + (f"\n{stderr_snippet}" if stderr_snippet else "")
                 )
             raise typer.Exit(code=1)
-        cli.console.print(resp.text)
+        answer_text = resp.text
+        removed_commands: list[str] = []
+        if docker_grounding is not None:
+            # PR222 — never let model output route operators to unsupported or
+            # mutation-style commands; rewrite them to the deterministic safe
+            # next command before printing.
+            answer_text, removed_commands = filter_unsupported_command_suggestions(
+                resp.text, safe_next_command=docker_grounding.get("safe_next_command")
+            )
+        cli.console.print(answer_text)
         cli.console.print(
             f"\nProvider: {resp.provider}\nModel: {resp.model}\n{cli._usage_line(resp)}"
         )
+        if docker_grounding is not None:
+            cli.console.print("")
+            cli._emit_docker_grounding_answer(
+                runtime,
+                question,
+                docker_grounding,
+                removed_commands=removed_commands,
+                model_available=True,
+            )
         if route.mode == EVIDENCE_BACKED and evidence_result is not None:
             artifact_dir = runtime.session.artifact_dir
             ev_path = artifact_dir / "evidence.json"

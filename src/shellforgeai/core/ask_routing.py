@@ -395,6 +395,42 @@ def is_triage_mutation_intent(text: str) -> bool:
     return any(phrase in lowered or phrase in raw_lower for phrase in _TRIAGE_MUTATION_PHRASES)
 
 
+# PR222 — autonomous "fix it for me" phrasings.
+#
+# ``Fix beszel-agent automatically`` / ``auto-fix the crashloop`` /
+# ``automatically remediate docker`` ask ShellForgeAI to take action on its
+# own. These are mutation requests even though they do not name a specific
+# verb like ``restart`` (so the ``_ASK_MUTATION_TERMS`` substring scan misses
+# them). They must refuse from ask: no remediation/restart/cleanup ever runs
+# from natural language. The detector is deliberately narrow — it requires an
+# explicit "automatically/auto/by yourself"-style autonomy marker next to a
+# fix/repair/resolve/remediate/restart verb so plain read-only questions
+# ("what is wrong with docker?") never match.
+_AUTOFIX_MUTATION_RE = re.compile(
+    r"\b(?:"
+    r"auto[-\s]?(?:fix|heal|remediat\w*|repair|resolve)"
+    r"|(?:automatic(?:ally)?|on your own|by yourself|without me|for me)\s+"
+    r"(?:fix|repair|resolve|remediat\w*|restart|reboot|clean\s*up|recover)"
+    r"|(?:fix|repair|resolve|remediat\w*|restart|reboot|clean\s*up|recover)\b"
+    r"[^.\n]*\b(?:automatic(?:ally)?|on your own|by yourself|without me|for me)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_autofix_mutation_intent(text: str) -> bool:
+    """Detect autonomous "fix it automatically / auto-fix" mutation asks.
+
+    Read-only by contract: this never executes anything. It exists so the
+    ask mutation-refusal path can refuse ``Fix beszel-agent automatically``
+    and similar autonomy requests that name no explicit mutation verb token.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    return bool(_AUTOFIX_MUTATION_RE.search(raw))
+
+
 _LAB_RESTART_ASK_TOKENS = (
     "restart the container",
     "restart container",
