@@ -638,6 +638,23 @@ Completed guarded lane logs named `sfai-pr<PR>-<short>-validation-<timestamp>.lo
 
 `shellforgeai model doctor --json` is part of Docker01 live QA and emits strict read-only model readiness JSON; unavailable or unknown model auth is reported structurally instead of as a CLI option failure.
 
+### Model doctor auth readiness
+
+`shellforgeai model doctor` and `shellforgeai model doctor --json` are local,
+read-only diagnostics. By default they inspect the configured Codex binary,
+version, and whether local auth material appears present; they do not call the
+model, perform a network probe, write credentials, or mutate the host.
+
+When `auth_cache_present=true`, the local cache exists but live auth readiness
+is reported separately. The default no-probe state is
+`auth_readiness=not_verified` with
+`auth_reason=auth_cache_present_live_probe_not_run`, meaning the cache is
+present and live readiness has not been verified. Missing local states are
+classified as `missing_auth_cache` or `missing_binary`. Live statuses such as
+`verified`, `unauthorized`, `network_unavailable`, and `timeout` are reserved
+for an explicit future live probe; this release does not add that probe, so the
+safe next diagnostic remains `shellforgeai model doctor --json`.
+
 For exact PR/commit lane runs, a later successful disposable validation fallback supersedes earlier host setup_failure evidence in `validation_status.py --latest`; the setup failure remains in warnings/process notes, while failed or interrupted evidence without a later exact pass stays non-pass-eligible.
 ## Safe ask command suggestions
 

@@ -75,6 +75,23 @@ inference, start Codex tasks, or mutate anything; `model test` remains the
 group's only explicit one-shot model call, unchanged. PR197 fixes
 pre-existing guidance drift: V1 readiness `next_safe_commands` no longer
 uses `shellforgeai model doctor --json` for read-only structured model readiness; machine-readable general health remains `shellforgeai doctor --json`.
+
+### Model doctor auth readiness
+
+`shellforgeai model doctor` and `shellforgeai model doctor --json` are local,
+read-only diagnostics. By default they inspect the configured Codex binary,
+version, and whether local auth material appears present; they do not call the
+model, perform a network probe, write credentials, or mutate the host.
+
+When `auth_cache_present=true`, the local cache exists but live auth readiness
+is reported separately. The default no-probe state is
+`auth_readiness=not_verified` with
+`auth_reason=auth_cache_present_live_probe_not_run`, meaning the cache is
+present and live readiness has not been verified. Missing local states are
+classified as `missing_auth_cache` or `missing_binary`. Live statuses such as
+`verified`, `unauthorized`, `network_unavailable`, and `timeout` are reserved
+for an explicit future live probe; this release does not add that probe, so the
+safe next diagnostic remains `shellforgeai model doctor --json`.
 Receipt history/inspect/compare/audit/integrity/explain/verify/validate/
 rollback-preview and audit-bundle/export validation stay read-only; export and
 audit-bundle stay bounded ShellForgeAI-owned artifact-only writes;

@@ -344,7 +344,9 @@ def register(app: typer.Typer) -> None:
                     "Model unavailable. Install Codex CLI and login with: codex login --device-auth"
                 )
             elif "auth" in err_text or "login" in err_text:
-                cli.console.print("Codex auth failed. Run: codex login --device-auth")
+                cli.console.print(
+                    "Codex auth failed. Check readiness with: shellforgeai model doctor --json"
+                )
             elif "timed out" in err_text:
                 cli.console.print("Codex timed out before producing a response.")
             elif "argument" in err_text:
