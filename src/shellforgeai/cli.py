@@ -9864,8 +9864,10 @@ def _handle_pressure_mutation_refusal(question: str) -> bool:
         "No restart, cleanup, remediation, rollback, Docker, or Compose command was executed."
     )
     console.print("")
+    from shellforgeai.core.safe_commands import suggest_safe_next_command
+
     console.print("Safe read-only next command:")
-    console.print("- shellforgeai ops report --brief")
+    console.print(f"- {suggest_safe_next_command('ops')}")
     return True
 
 

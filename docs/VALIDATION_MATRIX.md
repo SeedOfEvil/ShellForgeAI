@@ -52,8 +52,9 @@ How matching works:
 | `CHANGELOG.md` | fast | `test_pr120_v1_release_notes` |
 | `*.md`, `examples/**`, `LICENSE`, `.gitignore`, `.env.example` | fast | — (docs/contract) |
 | `src/shellforgeai/core/ask_routing.py` | targeted_runtime | `test_pr105_*`, `test_pr106_*`, `test_pr42_ask_routing_hardening`, `test_pr131_*`, `test_pr134_*`, `test_pr135_*`, `test_pr156_*`, `test_pr222_ask_docker_evidence_grounding` |
-| `src/shellforgeai/core/ask_docker_grounding.py` | targeted_runtime | `test_pr222_ask_docker_evidence_grounding`, `test_pr82_broad_ask_triage` |
-| `src/shellforgeai/core/command_suggestions.py` | targeted_runtime | `test_pr100_command_suggestions`, `test_pr222_ask_docker_evidence_grounding` |
+| `src/shellforgeai/core/ask_docker_grounding.py` | targeted_runtime | `test_pr222_ask_docker_evidence_grounding`, `test_pr223_ask_safe_command_suggestions`, `test_pr82_broad_ask_triage` |
+| `src/shellforgeai/core/command_suggestions.py` | targeted_runtime | `test_pr100_command_suggestions`, `test_pr222_ask_docker_evidence_grounding`, `test_pr223_safe_command_registry`, `test_pr223_ask_safe_command_suggestions` |
+| `src/shellforgeai/core/safe_commands.py` | targeted_runtime | `test_pr223_safe_command_registry`, `test_pr223_ask_safe_command_suggestions`, `test_pr222_ask_docker_evidence_grounding` |
 | `src/shellforgeai/core/intent_nuance.py` | targeted_runtime | `test_pr131_*`, `test_pr134_*`, `test_pr135_*` |
 | `src/shellforgeai/core/recipe_registry.py` | targeted_runtime | `test_pr154_v2_recipe_registry`, `test_pr155_v2_recipe_preflight`, `test_pr156_*` |
 | `src/shellforgeai/core/recipe_preflight.py` | targeted_runtime | `test_pr155_v2_recipe_preflight`, `test_pr156_*`, `test_pr99_remediation_self_test` |
@@ -317,3 +318,7 @@ Nested Docker01 convergence QA bundle directories such as `/tmp/sfai-pr<PR>-<sho
 `shellforgeai model doctor --json` is part of Docker01 live QA and emits strict read-only model readiness JSON; unavailable or unknown model auth is reported structurally instead of as a CLI option failure.
 
 For exact PR/commit lane runs, a later successful disposable validation fallback supersedes earlier host setup_failure evidence in `validation_status.py --latest`; the setup failure remains in warnings/process notes, while failed or interrupted evidence without a later exact pass stays non-pass-eligible.
+
+### Safe ask command suggestion registry
+
+Changes to model-backed ask command suggestions or `src/shellforgeai/core/safe_commands.py` should run the PR223 registry and ask integration tests plus the PR222 Docker grounding regression. The registry is read-only and suggestion-only: it validates real supported ShellForgeAI commands, filters unknown `shellforgeai ...` surfaces, filters Docker cleanup/prune/image-removal/restart/Compose mutation, and rejects shell-like pipes/redirects/passthrough. It must not execute commands, run validation/QA from ask, mutate Docker/Compose, restart containers, delete files, or invoke remediation/rollback/recovery.
