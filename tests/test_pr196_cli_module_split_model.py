@@ -213,7 +213,7 @@ def test_model_doctor_real_provider_path_without_codex_binary(monkeypatch, tmp_p
     # End-to-end through the real provider doctor with the codex binary absent
     # and an isolated HOME: detection must stay shutil.which-based (no codex
     # subprocess runs when the binary is missing) and readiness must degrade
-    # to the controlled login_required hint — no traceback, exit 0.
+    # to the controlled missing_binary hint — no traceback, exit 0.
     monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda _b: None)
@@ -227,9 +227,9 @@ def test_model_doctor_real_provider_path_without_codex_binary(monkeypatch, tmp_p
     assert "Traceback" not in result.stdout
     assert "codex_found=False" in result.stdout
     assert "auth_cache_present=False" in result.stdout
-    assert "auth_readiness=failed" in result.stdout
-    assert "auth_reason=login_required" in result.stdout
-    assert "Suggested login: codex login" in result.stdout
+    assert "auth_readiness=missing_binary" in result.stdout
+    assert "auth_reason=codex_binary_missing" in result.stdout
+    assert "Codex CLI binary is missing" in result.stdout
 
 
 def test_model_test_behavior_preserved(monkeypatch) -> None:

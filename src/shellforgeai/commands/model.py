@@ -9,7 +9,7 @@ exit codes, and safety behavior are preserved exactly.
 
 ``model doctor`` remains the read-only provider-readiness report: it prints
 the provider doctor fields (provider/model/fallback, codex binary detection,
-auth cache/readiness with ``status_unknown``, sandbox/approval) and suggests
+auth cache presence separately from live auth readiness, sandbox/approval) and suggests
 ``codex login`` recovery when the auth cache is missing. It never calls model
 inference, never starts a Codex task, and never mutates anything. ``model
 test`` keeps its existing explicit one-shot model call surface unchanged. No
@@ -56,21 +56,43 @@ def register(model_app: typer.Typer) -> None:
                 "auth_reason": "doctor_unavailable",
             }
             warnings.append(f"model doctor readiness unavailable: {exc}")
+        auth_cache_present = bool(info.get("auth_cache_present"))
         auth_readiness = str(info.get("auth_readiness") or "unknown")
-        ok = auth_readiness not in {"failed", "error"}
+        auth_reason = str(info.get("auth_reason") or "status_unknown")
+        ok = auth_readiness not in {
+            "failed",
+            "error",
+            "missing_binary",
+            "missing_auth_cache",
+            "unauthorized",
+        }
+        live_probe_available = bool(info.get("live_probe_available", False))
+        live_probe_performed = bool(info.get("live_probe_performed", False))
+        safe_next_command = str(info.get("safe_next_command") or "shellforgeai model doctor --json")
         if json_output:
             payload = {
                 "schema_version": 1,
                 "mode": "model_doctor",
                 "status": "ok" if ok else "warning",
                 "ok": ok,
-                "auth_readiness": auth_readiness,
                 "read_only": True,
                 "mutation_performed": False,
-                "model_called": False,
-                "warnings": warnings,
                 "provider": info.get("provider"),
                 "model": info.get("model"),
+                "codex_binary": info.get("codex_binary"),
+                "codex_version": info.get("codex_version"),
+                "auth_cache_present": auth_cache_present,
+                "auth_readiness": auth_readiness,
+                "auth_reason": auth_reason,
+                "auth_verification_status": info.get("auth_verification_status", auth_readiness),
+                "auth_readiness_label": info.get(
+                    "auth_readiness_label", auth_readiness.replace("_", " ")
+                ),
+                "live_probe_available": live_probe_available,
+                "live_probe_performed": live_probe_performed,
+                "model_called": False,
+                "safe_next_command": safe_next_command,
+                "warnings": warnings,
                 "doctor": info,
                 "safety": {
                     "read_only": True,
@@ -90,7 +112,19 @@ def register(model_app: typer.Typer) -> None:
             return
         for k, v in info.items():
             cli.console.print(f"{k}={v}")
-        if not info.get("auth_cache_present"):
+        cli.console.print(f"Auth cache: {'present' if auth_cache_present else 'missing'}")
+        readiness_label = auth_readiness.replace("_", " ")
+        cli.console.print(f"Live auth readiness: {readiness_label}")
+        if auth_reason == "auth_cache_present_live_probe_not_run":
+            cli.console.print("Reason: default model doctor does not call the model")
+        else:
+            cli.console.print(f"Reason: {auth_reason}")
+        cli.console.print(f"Safe next step: {safe_next_command}")
+        if auth_readiness == "missing_binary":
+            cli.console.print(
+                "Codex CLI binary is missing; configure Codex before model-backed synthesis."
+            )
+        elif auth_readiness in {"missing_auth_cache", "failed"} or not auth_cache_present:
             cli.console.print("Suggested login: codex login (or codex login --device-auth)")
 
     @model_app.command("test")

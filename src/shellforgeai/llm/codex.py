@@ -78,8 +78,15 @@ class CodexProvider:
             except Exception:
                 version = "unknown"
         auth_cache_present = auth_cache.exists()
-        auth_readiness = "unknown" if auth_cache_present else "failed"
-        auth_reason = "status_unknown" if auth_cache_present else "login_required"
+        if not found:
+            auth_readiness = "missing_binary"
+            auth_reason = "codex_binary_missing"
+        elif auth_cache_present:
+            auth_readiness = "not_verified"
+            auth_reason = "auth_cache_present_live_probe_not_run"
+        else:
+            auth_readiness = "missing_auth_cache"
+            auth_reason = "auth_cache_missing"
         return {
             "provider": self.name,
             "model": self.default_model,
@@ -90,6 +97,12 @@ class CodexProvider:
             "auth_cache_present": auth_cache_present,
             "auth_readiness": auth_readiness,
             "auth_reason": auth_reason,
+            "auth_verification_status": auth_readiness,
+            "auth_readiness_label": auth_readiness.replace("_", " "),
+            "live_probe_available": False,
+            "live_probe_performed": False,
+            "model_called": False,
+            "safe_next_command": "shellforgeai model doctor --json",
             "auth_next_step": "codex login --device-auth",
             "sandbox": self.sandbox,
             "approval": self.approval,
