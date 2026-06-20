@@ -24,12 +24,12 @@ from shellforgeai.core.ask_routing import (
     is_triage_mutation_intent,
     route_ask_intent,
 )
-from shellforgeai.core.command_suggestions import triage_detail_command
+from shellforgeai.core.command_suggestions import suggest_safe_next_command
 from shellforgeai.interactive.commands import _normalize_intent_text
 
 EVIDENCE_SOURCE = "deterministic_shellforgeai"
 TOPIC = "docker"
-EVIDENCE_GATHERING_COMMAND = "shellforgeai triage docker --json"
+EVIDENCE_GATHERING_COMMAND = suggest_safe_next_command("docker")
 
 # Operator-facing labels for the deterministic triage classes (see
 # ``core.triage_ranking`` CLASS_* constants). Themes are what the operator
@@ -150,14 +150,7 @@ def _evidence_themes(suspect: dict[str, Any]) -> list[str]:
 
 
 def _safe_next_command_for(top_name: str | None) -> str:
-    if not top_name:
-        return EVIDENCE_GATHERING_COMMAND
-    try:
-        return triage_detail_command(top_name, json=True)
-    except ValueError:
-        # Unsafe/odd container name: never echo it back as a command; route to
-        # the broad read-only triage command instead.
-        return EVIDENCE_GATHERING_COMMAND
+    return suggest_safe_next_command("docker", suspect=top_name)
 
 
 def build_docker_evidence_context(*, top: int = 5) -> dict[str, Any]:
@@ -312,6 +305,11 @@ def build_docker_grounding_envelope(
         "confidence": ctx.get("confidence"),
         "evidence_themes": list(ctx.get("evidence_themes") or []),
         "safe_next_command": ctx.get("safe_next_command"),
+        "safe_command_registry": {
+            "validated": True,
+            "command_id": ("triage_docker_detail" if ctx.get("top_suspect") else "triage_docker"),
+            "removed_suggestions": list(removed_commands or []),
+        },
         "unsupported_command_suggestions_removed": list(removed_commands or []),
         "read_only": True,
         "mutation_performed": False,
