@@ -28,35 +28,13 @@ from typing import Annotated, Any
 
 import typer
 
+from shellforgeai.core.read_only_safety import read_only_safety_metadata
 from shellforgeai.llm.schemas import ModelRequest, ModelResponse
 
 MODEL_DOCTOR_PROBE_PROMPT = (
     "ShellForgeAI model doctor readiness probe. Reply with exactly: SFAI_MODEL_DOCTOR_READY"
 )
 MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS = 10
-
-
-def _model_doctor_safety(model_call_performed: bool) -> dict[str, bool]:
-    return {
-        "read_only": True,
-        "mutation_performed": False,
-        "model_call_performed": model_call_performed,
-        "tools_executed": False,
-        "natural_language_execution": False,
-        "shell_true": False,
-        "arbitrary_command_execution": False,
-        "cleanup_executed": False,
-        "docker_prune_executed": False,
-        "docker_image_removed": False,
-        "file_deleted": False,
-        "docker_compose_executed": False,
-        "container_restarted": False,
-        "remediation_executed": False,
-        "rollback_executed": False,
-        "recovery_executed": False,
-        "cloud_apply_merge_push": False,
-        "model_called": model_call_performed,
-    }
 
 
 def _bounded_error(text: object) -> str | None:
@@ -326,7 +304,7 @@ def register(model_app: typer.Typer) -> None:
             "safe_next_command": safe_next_command,
             "warnings": warnings,
             "doctor": info,
-            "safety": _model_doctor_safety(live_probe_performed),
+            "safety": read_only_safety_metadata(model_call_performed=live_probe_performed),
         }
         if live_result is not None:
             payload["probe"] = live_result["probe"]

@@ -44,6 +44,35 @@ def _install(monkeypatch, provider):
     return provider
 
 
+def test_model_module_static_guard_tokens_absent():
+    source = Path("src/shellforgeai/commands/model.py").read_text().lower()
+    for token in (
+        "shell=true",
+        "subprocess.run",
+        "subprocess.popen",
+        "os.system",
+        "docker restart",
+        "docker compose",
+        "compose restart",
+        "production restart",
+        "cleanup_execute",
+        "execute_remediation",
+        "execute_receipt_recovery(",
+        "preview_receipt_rollback(",
+        "run_exact_docker_restart(",
+        "route_input(",
+        "codex exec",
+    ):
+        assert token not in source
+
+
+def _assert_read_only_safety(safety):
+    assert safety["read_only"] is True
+    for key, value in safety.items():
+        if key != "read_only":
+            assert value is False
+
+
 def test_default_no_probe_json_and_human_do_not_call_model(monkeypatch):
     provider = _install(monkeypatch, FakeProvider())
     result = runner.invoke(app, ["model", "doctor", "--json"])
@@ -54,6 +83,7 @@ def test_default_no_probe_json_and_human_do_not_call_model(monkeypatch):
     assert payload["auth_readiness"] == "not_verified"
     assert payload["reason"] == "Live auth probe was not requested."
     assert payload["safety"]["model_call_performed"] is False
+    _assert_read_only_safety(payload["safety"])
     assert provider.calls == []
 
     human = runner.invoke(app, ["model", "doctor"])
@@ -89,6 +119,11 @@ def test_live_probe_success_calls_once_and_suppresses_secrets(monkeypatch):
     assert payload["probe"]["status"] == "passed"
     assert payload["safety"]["model_call_performed"] is True
     assert payload["safety"]["tools_executed"] is False
+    assert all(
+        value is False
+        for key, value in payload["safety"].items()
+        if key not in {"read_only", "model_call_performed", "model_called"}
+    )
     assert "secret" not in result.stdout.lower()
     assert "token" not in result.stdout.lower()
 
@@ -144,6 +179,9 @@ def test_live_probe_receipt_writes_bounded_files(monkeypatch, tmp_path: Path):
         assert (out_dir / name).exists()
     payload = json.loads((out_dir / "model-doctor-live-probe.json").read_text())
     assert payload["live_probe_performed"] is True
+    assert payload["safety"]["read_only"] is True
+    assert payload["safety"]["mutation_performed"] is False
+    assert payload["safety"]["tools_executed"] is False
     checksums = json.loads((out_dir / "checksums.json").read_text())
     for meta in checksums["files"].values():
         assert len(meta["sha256"]) == 64
@@ -152,6 +190,16 @@ def test_live_probe_receipt_writes_bounded_files(monkeypatch, tmp_path: Path):
     assert "No tools were executed." in summary
     assert "No mutation was performed." in summary
     joined = "\n".join(path.read_text() for path in out_dir.iterdir())
+    secret_markers = [
+        "OPENAI_API_KEY",
+        "Authorization:",
+        "Bearer",
+        "sk-",
+        "ghp_",
+        "BEGIN PRIVATE KEY",
+    ]
+    for marker in secret_markers:
+        assert marker.lower() not in joined.lower()
     assert "token" not in joined.lower()
     assert "secret" not in joined.lower()
 
@@ -162,6 +210,8 @@ def test_probe_surface_rejects_freeform_and_unknown_flags_and_source_guardrails(
     unknown = runner.invoke(app, ["model", "doctor", "--probe-prompt", "hello"])
     assert unknown.exit_code != 0
     help_text = runner.invoke(app, ["model", "doctor", "--help"]).stdout
+    assert "--live-probe" in help_text
+    assert "--receipt-out" in help_text
     for forbidden in [
         "--execute",
         "--apply",

@@ -339,8 +339,8 @@ A bounded, pasteable receipt can be written with
 `shellforgeai model doctor --live-probe --receipt-out /tmp/sfai-model-probe`.
 The directory contains `model-doctor-live-probe.json`,
 `model-doctor-live-probe-summary.md`, `manifest.json`, and `checksums.json`
-with SHA256 and size metadata. Receipt files omit secrets, tokens, auth
-headers, and raw credential material. SeedOfEvil remains the final merge owner.
+with SHA256, size, and read-only/no-mutation safety metadata. Receipt files
+omit secrets, tokens, auth headers, and raw credential material. SeedOfEvil remains the final merge owner.
 
 For exact PR/commit lane runs, a later successful disposable validation fallback supersedes earlier host setup_failure evidence in `validation_status.py --latest`; the setup failure remains in warnings/process notes, while failed or interrupted evidence without a later exact pass stays non-pass-eligible.
 
