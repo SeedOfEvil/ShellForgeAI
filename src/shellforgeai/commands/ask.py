@@ -23,6 +23,7 @@ import typer
 from shellforgeai.core.ask_docker_grounding import (
     build_docker_evidence_context,
     is_docker_operator_ask,
+    render_docker_evidence_explainability,
 )
 from shellforgeai.core.ask_routing import (
     EVIDENCE_BACKED,
@@ -59,6 +60,11 @@ def register(app: typer.Typer) -> None:
         raw: bool = typer.Option(False, "--raw"),
         no_evidence: bool = typer.Option(
             False, "--no-evidence", help="Disable evidence-aware routing for this ask."
+        ),
+        explain_evidence: bool = typer.Option(
+            False,
+            "--explain-evidence",
+            help="Show deterministic evidence used/missing for Docker/operator answers.",
         ),
         since: str = typer.Option("30m", "--since"),
     ) -> None:
@@ -100,6 +106,9 @@ def register(app: typer.Typer) -> None:
             if cli._handle_command_help_ask(question):
                 return
             if cli._handle_pressure_mutation_refusal(question):
+                if explain_evidence:
+                    cli.console.print("")
+                    cli.console.print(render_docker_evidence_explainability(None), end="")
                 return
             if cli._handle_v2_triage_ask(question):
                 return
@@ -144,6 +153,9 @@ def register(app: typer.Typer) -> None:
             if cli._handle_create_proposals_ask(runtime, question):
                 return
             if cli._handle_mutation_refusal_ask(question):
+                if explain_evidence:
+                    cli.console.print("")
+                    cli.console.print(render_docker_evidence_explainability(None), end="")
                 return
         provider = cli.build_provider(runtime.settings)
         ctx_mode = "full" if full_context else context
@@ -315,6 +327,11 @@ def register(app: typer.Typer) -> None:
                 cli._emit_docker_grounding_answer(
                     runtime, question, docker_grounding, model_available=False
                 )
+                if explain_evidence:
+                    cli.console.print("")
+                    cli.console.print(
+                        render_docker_evidence_explainability(docker_grounding), end=""
+                    )
                 cli.console.print(
                     "\nModel assistance is unavailable, so the deterministic ShellForgeAI "
                     "evidence above is the answer."
@@ -368,6 +385,9 @@ def register(app: typer.Typer) -> None:
                 removed_commands=removed_commands,
                 model_available=True,
             )
+            if explain_evidence:
+                cli.console.print("")
+                cli.console.print(render_docker_evidence_explainability(docker_grounding), end="")
         if route.mode == EVIDENCE_BACKED and evidence_result is not None:
             artifact_dir = runtime.session.artifact_dir
             ev_path = artifact_dir / "evidence.json"

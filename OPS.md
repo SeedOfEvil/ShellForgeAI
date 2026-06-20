@@ -37,6 +37,8 @@ read-only safety wording. When there are no suspects, the first safe command is 
 read-only status/report command (`shellforgeai status --json`), never a detail
 command for a missing suspect.
 
+`shellforgeai ask "what is wrong with docker?" --explain-evidence` keeps ask read-only while showing what deterministic ShellForgeAI evidence fed a Docker/operator answer. The explanation lists Docker triage/status evidence as used or missing, includes top suspect/severity/confidence/evidence themes when available, and shows only a safe next command from the safe-command registry (for example `shellforgeai triage docker detail <suspect> --json` or `shellforgeai triage docker --json`). Missing evidence is called out explicitly and is not guessed. Mutation requests remain refused; ask does not clean up, prune, restart, remediate, roll back, recover, execute validation/QA, run Docker/Compose mutation, or execute natural language.
+
 
 ## CLI implementation note
 
