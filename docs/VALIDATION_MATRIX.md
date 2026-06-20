@@ -337,6 +337,18 @@ clients only; no real model or network calls are required in tests.
 
 A bounded, pasteable receipt can be written with
 `shellforgeai model doctor --live-probe --receipt-out /tmp/sfai-model-probe`.
+
+Operators can validate an existing live-probe receipt without a new probe or
+model call with
+`shellforgeai model doctor --validate-receipt /tmp/sfai-model-probe --json`.
+Add `--validation-out /tmp/sfai-model-probe-validation` to write validator
+artifacts (`model-doctor-receipt-validation.json`,
+`model-doctor-receipt-validation-summary.md`, `manifest.json`, and
+`checksums.json`). The validator checks required files, JSON parse, manifest,
+SHA256/size metadata, bounded summary Markdown, known secret markers, probe
+metadata, and read-only/no-mutation safety posture. It does not run a live
+probe, call a model/Codex/network, invoke Docker/Compose, clean up, delete,
+restart, remediate, roll back, or recover; SeedOfEvil remains final merge owner.
 The directory contains `model-doctor-live-probe.json`,
 `model-doctor-live-probe-summary.md`, `manifest.json`, and `checksums.json`
 with SHA256, size, and read-only/no-mutation safety metadata. Receipt files
