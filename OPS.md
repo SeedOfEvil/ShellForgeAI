@@ -81,17 +81,25 @@ uses `shellforgeai model doctor --json` for read-only structured model readiness
 `shellforgeai model doctor` and `shellforgeai model doctor --json` are local,
 read-only diagnostics. By default they inspect the configured Codex binary,
 version, and whether local auth material appears present; they do not call the
-model, perform a network probe, write credentials, or mutate the host.
+model, perform a network probe, write credentials, or mutate the host. The
+default no-probe state reports `live_probe_requested=false`,
+`live_probe_performed=false`, and `auth_readiness=not_verified` with
+`auth_reason=auth_cache_present_live_probe_not_run`, meaning live readiness was
+not requested or performed.
 
-When `auth_cache_present=true`, the local cache exists but live auth readiness
-is reported separately. The default no-probe state is
-`auth_readiness=not_verified` with
-`auth_reason=auth_cache_present_live_probe_not_run`, meaning the cache is
-present and live readiness has not been verified. Missing local states are
-classified as `missing_auth_cache` or `missing_binary`. Live statuses such as
-`verified`, `unauthorized`, `network_unavailable`, and `timeout` are reserved
-for an explicit future live probe; this release does not add that probe, so the
-safe next diagnostic remains `shellforgeai model doctor --json`.
+Operators can explicitly request one bounded auth/readiness check with
+`shellforgeai model doctor --live-probe --json` or human output with
+`shellforgeai model doctor --live-probe`. The probe uses a fixed internal
+readiness ping through the configured model client, does not accept operator
+prompt text, does not execute tools, and performs no mutation. Tests use fake
+clients only; no real model or network calls are required in tests.
+
+A bounded, pasteable receipt can be written with
+`shellforgeai model doctor --live-probe --receipt-out /tmp/sfai-model-probe`.
+The directory contains `model-doctor-live-probe.json`,
+`model-doctor-live-probe-summary.md`, `manifest.json`, and `checksums.json`
+with SHA256 and size metadata. Receipt files omit secrets, tokens, auth
+headers, and raw credential material. SeedOfEvil remains the final merge owner.
 Receipt history/inspect/compare/audit/integrity/explain/verify/validate/
 rollback-preview and audit-bundle/export validation stay read-only; export and
 audit-bundle stay bounded ShellForgeAI-owned artifact-only writes;

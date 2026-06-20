@@ -19,13 +19,213 @@ shell execution, or arbitrary/natural-language execution is introduced here.
 
 from __future__ import annotations
 
+import hashlib
 import json as json_lib
 import sys
-from typing import Annotated
+import time
+from pathlib import Path
+from typing import Annotated, Any
 
 import typer
 
-from shellforgeai.llm.schemas import ModelRequest
+from shellforgeai.llm.schemas import ModelRequest, ModelResponse
+
+MODEL_DOCTOR_PROBE_PROMPT = (
+    "ShellForgeAI model doctor readiness probe. Reply with exactly: SFAI_MODEL_DOCTOR_READY"
+)
+MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS = 10
+
+
+def _model_doctor_safety(model_call_performed: bool) -> dict[str, bool]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "model_call_performed": model_call_performed,
+        "tools_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "cloud_apply_merge_push": False,
+        "model_called": model_call_performed,
+    }
+
+
+def _bounded_error(text: object) -> str | None:
+    if text is None:
+        return None
+    value = str(text).replace("\n", " ").replace("\r", " ").strip()
+    lowered = value.lower()
+    if any(
+        word in lowered
+        for word in ("token", "secret", "password", "api_key", "authorization", "bearer")
+    ):
+        return "provider error details redacted"
+    return value[:240]
+
+
+def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[str, Any]:
+    if not bool(info.get("auth_cache_present")) or str(info.get("auth_readiness")) in {
+        "missing_auth_cache",
+        "missing_binary",
+        "not_configured",
+    }:
+        return {
+            "auth_readiness": "not_configured",
+            "probe": {
+                "status": "skipped",
+                "provider": info.get("provider") or runtime.settings.model.provider,
+                "model": info.get("model") or runtime.settings.model.model,
+                "timeout_seconds": MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+                "request_id": None,
+                "latency_ms": 0,
+                "error_class": "not_configured",
+                "error_message": "model credentials are not configured",
+            },
+            "model_call_performed": False,
+        }
+    req = ModelRequest(
+        prompt=MODEL_DOCTOR_PROBE_PROMPT,
+        model=str(info.get("model") or runtime.settings.model.model),
+        provider=str(info.get("provider") or runtime.settings.model.provider),
+        timeout_seconds=MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+        max_output_tokens=8,
+        metadata={
+            "purpose": "model_doctor_live_probe",
+            "tools_allowed": False,
+            "operator_prompt_included": False,
+        },
+    )
+    started = time.monotonic()
+    try:
+        resp: ModelResponse = provider.complete(req)
+    except TimeoutError as exc:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        return {
+            "auth_readiness": "failed",
+            "model_call_performed": True,
+            "probe": {
+                "status": "failed",
+                "provider": req.provider,
+                "model": req.model,
+                "timeout_seconds": MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+                "request_id": None,
+                "latency_ms": latency_ms,
+                "error_class": "timeout",
+                "error_message": _bounded_error(exc) or "probe timed out",
+            },
+        }
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        return {
+            "auth_readiness": "failed",
+            "model_call_performed": True,
+            "probe": {
+                "status": "failed",
+                "provider": req.provider,
+                "model": req.model,
+                "timeout_seconds": MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+                "request_id": None,
+                "latency_ms": latency_ms,
+                "error_class": exc.__class__.__name__,
+                "error_message": _bounded_error(exc),
+            },
+        }
+    latency_ms = int(resp.duration_ms or ((time.monotonic() - started) * 1000))
+    request_id = None
+    if resp.metadata:
+        request_id = resp.metadata.get("request_id") or resp.metadata.get("thread_id")
+    if resp.ok:
+        return {
+            "auth_readiness": "verified",
+            "model_call_performed": True,
+            "probe": {
+                "status": "passed",
+                "provider": resp.provider or req.provider,
+                "model": resp.model or req.model,
+                "timeout_seconds": MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+                "request_id": request_id,
+                "latency_ms": latency_ms,
+                "error_class": None,
+                "error_message": None,
+            },
+        }
+    err = _bounded_error(resp.error) or "live probe failed"
+    err_class = (
+        "timeout" if "timeout" in err.lower() or "timed out" in err.lower() else "provider_error"
+    )
+    return {
+        "auth_readiness": "failed",
+        "model_call_performed": True,
+        "probe": {
+            "status": "failed",
+            "provider": resp.provider or req.provider,
+            "model": resp.model or req.model,
+            "timeout_seconds": MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+            "request_id": request_id,
+            "latency_ms": latency_ms,
+            "error_class": err_class,
+            "error_message": err,
+        },
+    }
+
+
+def _write_model_doctor_receipt(out_dir: Path, payload: dict[str, Any]) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    json_path = out_dir / "model-doctor-live-probe.json"
+    summary_path = out_dir / "model-doctor-live-probe-summary.md"
+    manifest_path = out_dir / "manifest.json"
+    checksums_path = out_dir / "checksums.json"
+    json_path.write_text(json_lib.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    probe = payload.get("probe") or {}
+    summary = (
+        "# Model Doctor live probe receipt\n\n"
+        f"- Auth readiness: {payload.get('auth_readiness')}\n"
+        f"- Live probe requested: {str(payload.get('live_probe_requested')).lower()}\n"
+        f"- Live probe performed: {str(payload.get('live_probe_performed')).lower()}\n"
+        f"- Live probe: {probe.get('status', 'skipped')}\n"
+        "- No tools were executed.\n"
+        "- No mutation was performed.\n"
+    )
+    summary_path.write_text(summary, encoding="utf-8")
+    files = ["model-doctor-live-probe.json", "model-doctor-live-probe-summary.md"]
+    checksums: dict[str, dict[str, object]] = {}
+    for rel in files:
+        data = (out_dir / rel).read_bytes()
+        checksums[rel] = {"sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
+    manifest = {
+        "schema_version": 1,
+        "mode": "model_doctor",
+        "files": files + ["manifest.json", "checksums.json"],
+        "read_only": True,
+        "mutation_performed": False,
+        "checksums": checksums,
+    }
+    manifest_path.write_text(
+        json_lib.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+    data = manifest_path.read_bytes()
+    checksums["manifest.json"] = {
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size_bytes": len(data),
+    }
+    checksums_path.write_text(
+        json_lib.dumps(
+            {"schema_version": 1, "algorithm": "sha256", "files": checksums},
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def register(model_app: typer.Typer) -> None:
@@ -42,9 +242,19 @@ def register(model_app: typer.Typer) -> None:
     def model_doctor(
         ctx: typer.Context,
         json_output: bool = typer.Option(False, "--json", help="Emit strict JSON output."),
+        live_probe: bool = typer.Option(
+            False, "--live-probe", help="Perform one bounded live auth/readiness probe."
+        ),
+        receipt_out: Annotated[
+            Path | None,
+            typer.Option(
+                "--receipt-out", file_okay=False, help="Write bounded model doctor receipt files."
+            ),
+        ] = None,
     ) -> None:
         runtime = cli._ctx(ctx)
         warnings: list[str] = []
+        provider: Any | None = None
         try:
             provider = cli.build_provider(runtime.settings)
             info = provider.doctor()
@@ -69,45 +279,63 @@ def register(model_app: typer.Typer) -> None:
         live_probe_available = bool(info.get("live_probe_available", False))
         live_probe_performed = bool(info.get("live_probe_performed", False))
         safe_next_command = str(info.get("safe_next_command") or "shellforgeai model doctor --json")
+        live_result: dict[str, Any] | None = None
+        if live_probe:
+            if provider is None:
+                live_result = {
+                    "auth_readiness": "failed",
+                    "model_call_performed": False,
+                    "probe": {
+                        "status": "failed",
+                        "provider": info.get("provider"),
+                        "model": info.get("model"),
+                        "timeout_seconds": MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+                        "request_id": None,
+                        "latency_ms": 0,
+                        "error_class": "doctor_unavailable",
+                        "error_message": "model doctor provider unavailable",
+                    },
+                }
+            else:
+                live_result = _run_live_probe(provider, info, runtime)
+            auth_readiness = str(live_result["auth_readiness"])
+            auth_reason = "live_probe_requested"
+            live_probe_available = True
+            live_probe_performed = bool(live_result["model_call_performed"])
+            ok = auth_readiness not in {"failed", "not_configured"}
+        payload = {
+            "schema_version": 1,
+            "mode": "model_doctor",
+            "status": "ok" if ok else "warning",
+            "ok": ok,
+            "read_only": True,
+            "mutation_performed": False,
+            "provider": info.get("provider"),
+            "model": info.get("model"),
+            "codex_binary": info.get("codex_binary"),
+            "codex_version": info.get("codex_version"),
+            "auth_cache_present": auth_cache_present,
+            "auth_readiness": auth_readiness,
+            "auth_reason": auth_reason,
+            "auth_verification_status": auth_readiness,
+            "auth_readiness_label": auth_readiness.replace("_", " "),
+            "live_probe_requested": live_probe,
+            "live_probe_available": live_probe_available,
+            "live_probe_performed": live_probe_performed,
+            "model_called": live_probe_performed,
+            "safe_next_command": safe_next_command,
+            "warnings": warnings,
+            "doctor": info,
+            "safety": _model_doctor_safety(live_probe_performed),
+        }
+        if live_result is not None:
+            payload["probe"] = live_result["probe"]
+        else:
+            payload["reason"] = "Live auth probe was not requested."
+            payload["safety"]["model_call_performed"] = False
+        if receipt_out is not None:
+            _write_model_doctor_receipt(receipt_out, payload)
         if json_output:
-            payload = {
-                "schema_version": 1,
-                "mode": "model_doctor",
-                "status": "ok" if ok else "warning",
-                "ok": ok,
-                "read_only": True,
-                "mutation_performed": False,
-                "provider": info.get("provider"),
-                "model": info.get("model"),
-                "codex_binary": info.get("codex_binary"),
-                "codex_version": info.get("codex_version"),
-                "auth_cache_present": auth_cache_present,
-                "auth_readiness": auth_readiness,
-                "auth_reason": auth_reason,
-                "auth_verification_status": info.get("auth_verification_status", auth_readiness),
-                "auth_readiness_label": info.get(
-                    "auth_readiness_label", auth_readiness.replace("_", " ")
-                ),
-                "live_probe_available": live_probe_available,
-                "live_probe_performed": live_probe_performed,
-                "model_called": False,
-                "safe_next_command": safe_next_command,
-                "warnings": warnings,
-                "doctor": info,
-                "safety": {
-                    "read_only": True,
-                    "mutation_performed": False,
-                    "cleanup" + "_executed": False,
-                    "remediation" + "_executed": False,
-                    "rollback" + "_executed": False,
-                    "recovery" + "_executed": False,
-                    "docker_compose" + "_executed": False,
-                    "container" + "_restarted": False,
-                    "natural_language_execution": False,
-                    "shell_true": False,
-                    "model_called": False,
-                },
-            }
             typer.echo(json_lib.dumps(payload, sort_keys=True, separators=(",", ":")))
             return
         for k, v in info.items():
@@ -115,10 +343,19 @@ def register(model_app: typer.Typer) -> None:
         cli.console.print(f"Auth cache: {'present' if auth_cache_present else 'missing'}")
         readiness_label = auth_readiness.replace("_", " ")
         cli.console.print(f"Live auth readiness: {readiness_label}")
-        if auth_reason == "auth_cache_present_live_probe_not_run":
-            cli.console.print("Reason: default model doctor does not call the model")
+        cli.console.print(f"Auth readiness: {readiness_label}")
+        if live_result is None:
+            if auth_reason == "auth_cache_present_live_probe_not_run":
+                cli.console.print("Reason: default model doctor does not call the model")
+            cli.console.print("Reason: live auth probe was not requested.")
+            cli.console.print("No model call was made.")
         else:
-            cli.console.print(f"Reason: {auth_reason}")
+            probe = live_result["probe"]
+            cli.console.print(f"Live probe: {probe['status']}")
+            if probe.get("error_message"):
+                cli.console.print(f"Reason: {probe['error_message']}")
+            cli.console.print("No tools were executed.")
+            cli.console.print("No mutation was performed.")
         cli.console.print(f"Safe next step: {safe_next_command}")
         if auth_readiness == "missing_binary":
             cli.console.print(
