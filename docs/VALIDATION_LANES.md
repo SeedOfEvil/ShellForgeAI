@@ -113,6 +113,9 @@ No full `pytest` by default. Estimated runtime class: **short**.
 - interactive UX
 - JSON output shape
 - artifact read / validate / export behavior
+- model doctor live-probe receipt validation, including optional validator
+  artifact output, because it reads existing files only and performs no model
+  call or live probe
 - doctor output
 - status / triage / propose / apply-preview / verify / handoff wording or routing
 - recipe registry or preflight **read-only** logic

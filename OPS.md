@@ -39,6 +39,18 @@ command for a missing suspect.
 
 `shellforgeai ask "what is wrong with docker?" --explain-evidence` keeps ask read-only while showing what deterministic ShellForgeAI evidence fed a Docker/operator answer. The explanation lists Docker triage/status evidence as used or missing, includes top suspect/severity/confidence/evidence themes when available, and shows only a safe next command from the safe-command registry (for example `shellforgeai triage docker detail <suspect> --json` or `shellforgeai triage docker --json`). Missing evidence is called out explicitly and is not guessed. Mutation requests remain refused; ask does not clean up, prune, restart, remediate, roll back, recover, execute validation/QA, run Docker/Compose mutation, or execute natural language.
 
+Model doctor remains no-call by default: `shellforgeai model doctor` and
+`shellforgeai model doctor --json` do not run a live probe or call a model.
+When an operator has an existing explicit live-probe receipt, validate it with
+`shellforgeai model doctor --validate-receipt <receipt_dir> --json`; add
+`--validation-out <out_dir>` to write validator JSON/Markdown plus manifest and
+checksums. Receipt validation is read-only against the receipt: it checks
+required files, JSON parse, manifest/checksum metadata, bounded summary
+Markdown, known secret markers, probe metadata, and no-mutation safety posture.
+It does not run a live probe, call a model/Codex/network, invoke Docker/Compose,
+clean up, delete, restart, remediate, roll back, or recover. SeedOfEvil remains
+the final merge owner.
+
 
 ## CLI implementation note
 
@@ -2681,4 +2693,3 @@ For exact PR/commit lane runs, a later successful disposable validation fallback
 Model-backed `ask` may explain deterministic evidence and suggest a next operator command, but those suggestions are now validated through a static safe-command registry. Registry entries are real ShellForgeAI commands, marked `read_only=true` and `mutation=false`, and are suggestion-only: `ask` never executes them. Unknown `shellforgeai ...` suggestions and mutation-shaped commands such as cleanup, prune, image removal, Compose restart, shell pipes, redirects, or shell passthrough are removed or replaced with a registry command such as `shellforgeai triage docker --json`, `shellforgeai triage docker detail <suspect> --json`, or `shellforgeai ops report --json` when appropriate.
 
 Natural-language requests still cannot execute commands. Future mutation recipes must remain named, narrow, auditable, and confirmation-gated outside model-backed ask.
-

@@ -28,6 +28,11 @@ from typing import Annotated, Any
 
 import typer
 
+from shellforgeai.core.model_receipt_validation import (
+    render_model_receipt_validation_markdown,
+    validate_model_doctor_receipt,
+    write_model_receipt_validation,
+)
 from shellforgeai.core.read_only_safety import read_only_safety_metadata
 from shellforgeai.llm.schemas import ModelRequest, ModelResponse
 
@@ -229,7 +234,33 @@ def register(model_app: typer.Typer) -> None:
                 "--receipt-out", file_okay=False, help="Write bounded model doctor receipt files."
             ),
         ] = None,
+        validate_receipt: Annotated[
+            Path | None,
+            typer.Option(
+                "--validate-receipt",
+                file_okay=False,
+                exists=False,
+                help="Validate an existing model doctor receipt directory.",
+            ),
+        ] = None,
+        validation_out: Annotated[
+            Path | None,
+            typer.Option(
+                "--validation-out",
+                file_okay=False,
+                help="Write bounded receipt validation artifacts.",
+            ),
+        ] = None,
     ) -> None:
+        if validate_receipt is not None:
+            result = validate_model_doctor_receipt(validate_receipt)
+            if validation_out is not None:
+                write_model_receipt_validation(validation_out, result)
+            if json_output:
+                typer.echo(json_lib.dumps(result, sort_keys=True, separators=(",", ":")))
+            else:
+                cli.console.print(render_model_receipt_validation_markdown(result))
+            return
         runtime = cli._ctx(ctx)
         warnings: list[str] = []
         provider: Any | None = None
