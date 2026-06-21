@@ -359,3 +359,14 @@ For exact PR/commit lane runs, a later successful disposable validation fallback
 ### Safe ask command suggestion registry
 
 Changes to model-backed ask command suggestions or `src/shellforgeai/core/safe_commands.py` should run the PR223 registry and ask integration tests plus the PR222 Docker grounding regression. Changes to `ask --explain-evidence` or Docker ask explainability should also run `pytest -q tests/test_pr224_ask_evidence_explainability.py`. The registry is read-only and suggestion-only: it validates real supported ShellForgeAI commands, filters unknown `shellforgeai ...` surfaces, filters Docker cleanup/prune/image-removal/restart/Compose mutation, and rejects shell-like pipes/redirects/passthrough. It must not execute commands, run validation/QA from ask, mutate Docker/Compose, restart containers, delete files, or invoke remediation/rollback/recovery.
+
+### Model Doctor receipt history and compare
+
+Existing Model Doctor live-probe receipts can be inspected without a new probe or model call:
+
+```bash
+shellforgeai model receipt history --root /tmp --json
+shellforgeai model receipt compare /tmp/old-receipt /tmp/new-receipt --json
+```
+
+History scans only a bounded root for known Model Doctor receipt-shaped directories, validates each candidate with the same required-file, JSON, manifest, checksum, secret-marker, and safety checks used by receipt validation, and reports valid, invalid, and ignored candidates. Compare validates both receipt directories before reporting status, auth-readiness, latency, timeout, provider, and model drift. These commands are read-only: they do not run a live probe, call a model, call network/Codex, clean/prune/delete, repair/move artifacts, mutate Docker/Compose, restart containers, remediate, roll back, or recover. Default `shellforgeai model doctor` still performs no model call; explicit `--live-probe` remains opt-in and bounded. SeedOfEvil remains final merge owner.

@@ -28,6 +28,12 @@ from typing import Annotated, Any
 
 import typer
 
+from shellforgeai.core.model_receipt_history import (
+    build_model_receipt_compare,
+    build_model_receipt_history,
+    render_model_receipt_compare_markdown,
+    render_model_receipt_history_markdown,
+)
 from shellforgeai.core.model_receipt_validation import (
     render_model_receipt_validation_markdown,
     validate_model_doctor_receipt,
@@ -220,6 +226,37 @@ def register(model_app: typer.Typer) -> None:
     """
 
     cli = sys.modules["shellforgeai.cli"]
+
+    receipt_app = typer.Typer(help="Read-only Model Doctor receipt history and compare.")
+    model_app.add_typer(receipt_app, name="receipt")
+
+    @receipt_app.command("history")
+    def model_receipt_history(
+        root: Annotated[
+            Path,
+            typer.Option(
+                "--root", file_okay=False, help="Bounded root to scan for receipt directories."
+            ),
+        ] = Path("/tmp"),
+        json_output: bool = typer.Option(False, "--json", help="Emit strict JSON output."),
+    ) -> None:
+        result = build_model_receipt_history(root)
+        if json_output:
+            typer.echo(json_lib.dumps(result, sort_keys=True, separators=(",", ":")))
+        else:
+            cli.console.print(render_model_receipt_history_markdown(result))
+
+    @receipt_app.command("compare")
+    def model_receipt_compare(
+        old_receipt_dir: Annotated[Path, typer.Argument(file_okay=False, exists=False)],
+        new_receipt_dir: Annotated[Path, typer.Argument(file_okay=False, exists=False)],
+        json_output: bool = typer.Option(False, "--json", help="Emit strict JSON output."),
+    ) -> None:
+        result = build_model_receipt_compare(old_receipt_dir, new_receipt_dir)
+        if json_output:
+            typer.echo(json_lib.dumps(result, sort_keys=True, separators=(",", ":")))
+        else:
+            cli.console.print(render_model_receipt_compare_markdown(result))
 
     @model_app.command("doctor")
     def model_doctor(
