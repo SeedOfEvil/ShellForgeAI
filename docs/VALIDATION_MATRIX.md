@@ -165,6 +165,16 @@ python scripts/validate_pr.py --changed-files docs/cli.md --full-validation
 
 The hygiene report uses a fixed allowlist for `df` and Docker inspection commands and must not run cleanup, prune, image removal, file deletion, Docker Compose mutation, restart, package install, network, or cloud merge/apply operations.
 
+## Docker01 storage health report checks
+
+| Check | Command | Purpose | Mutates state |
+| --- | --- | --- | --- |
+| Storage health JSON | `python scripts/docker01_storage_health_report.py --json` | Emits strict read-only JSON: root capacity, filesystems/device mapping, disk pressure, Docker data-path pressure, and bounded EXT4/dm/IO-journal-inode kernel warning evidence. | No |
+| Storage health report dir | `python scripts/docker01_storage_health_report.py --out /tmp/sfai-docker01-storage-health --json` | Writes `storage-health-report.json`, `storage-health-summary.md`, `commands-run.json`, `manifest.json`, `checksums.json` (SHA256 + sizes). | No, except writing the report directory |
+| Storage health unit tests | `pytest -q tests/test_pr230_docker01_storage_health_report.py` | Verifies JSON/human output, warning-pattern detection and bounding, output files, partial-on-denied-dmesg, and read-only safety with fakes. | No |
+
+The storage health report uses a fixed read-only command allowlist (`df -P -B1`, `findmnt --json`, `dmesg --level=err,warn --ctime`, `journalctl -k -p warning..alert --no-pager -n <bounded>`) plus `shutil.disk_usage` and `/proc/mounts`, always with `shell=False`. It must not run `fsck`/`e2fsck`/`xfs_repair`, mount/remount/umount, Docker prune/image/volume/container removal, file deletion, restart, Docker/Compose mutation, remediation/rollback/recovery, package install, network, model/Codex, or GitHub/cloud merge/apply operations.
+
 ## Docker01 hygiene validator impact
 
 Changes to `scripts/docker01_hygiene_report.py` validation behavior or `tests/test_pr210_docker01_hygiene_validate.py` are safety/reporting infrastructure changes and should run the focused PR209/PR210 hygiene tests plus full validation when practical:
