@@ -725,5 +725,14 @@ python3 scripts/docker01_artifact_archive_plan.py --root /tmp --out /tmp/sfai-pr
 
 `--out` writes plan metadata files only (`artifact-archive-plan.json`, summary, candidate/excluded manifests, safety notes, manifest, checksums). It does not create an archive and does not copy, move, modify, or delete source candidates. Candidate scope is limited to known ShellForgeAI evidence artifact patterns such as QA bundles, validation artifacts, merge/v2 readiness artifacts, hygiene reports, model receipts, receipt validation, and storage-health reports. Docker volumes/images/containers, Compose/source/runtime paths, `/var/lib/docker`, `/srv/compose`, home directories, system logs, package caches, unmatched arbitrary files, and symlinks remain out of scope.
 
+The helper can validate an existing plan directory read-only with `--validate <plan_dir>` (add `--json` for strict JSON, `--out <dir>` to write validator artifacts):
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan --json
+python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan --out /tmp/sfai-pr232-validation --json
+```
+
+Validation checks the required files, manifest, checksums (SHA256 + size), `plan_id`, the `read_only`/`mutation_performed`/`execution_available` flags, candidate scope (bounded, known patterns only, symlink and out-of-scope candidates rejected and never followed), the `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` confirmation phrase, the future contract, and the safety flags, reporting `status=passed|failed|partial`. It does not create an archive, does not copy/move/delete sources, does not modify the source plan directory, and does not authorize execution.
+
 Any future execution lane would be separate and must require the exact `plan_id`, exact `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, bounded candidate classes, a validated candidate manifest, archive and receipt output targets, a dry-run preview first, and operator review. Future execution must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
 

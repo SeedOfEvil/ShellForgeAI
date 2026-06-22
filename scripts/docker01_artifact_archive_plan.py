@@ -12,6 +12,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,12 +20,43 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 MODE = "docker01_artifact_archive_plan"
+VALIDATION_MODE = "docker01_artifact_archive_plan_validation"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
 DEFAULT_MAX_WARNINGS = 50
 CONFIRMATION_PHRASE = "CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE"
 FIRST_SAFE_COMMAND = "python3 scripts/docker01_artifact_archive_plan.py --root /tmp --json"
+
+PLAN_ID_RE = re.compile(r"^sha256:[0-9a-f]{16}$")
+MAX_PLAN_FILE_BYTES = 5 * 1024 * 1024
+PLAN_MUTATION_FLAGS = (
+    "mutation_performed",
+    "archive_created",
+    "source_deleted",
+    "source_moved",
+    "source_modified",
+    "cleanup_executed",
+    "docker_prune_executed",
+    "docker_image_removed",
+    "file_deleted",
+    "docker_compose_executed",
+    "container_restarted",
+    "remediation_executed",
+    "rollback_executed",
+    "recovery_executed",
+    "natural_language_execution",
+    "shell_true",
+    "arbitrary_command_execution",
+    "cloud_apply_merge_push",
+    "github_post_approve_merge",
+)
+VALIDATION_OUT_FILES = (
+    "artifact-archive-plan-validation.json",
+    "artifact-archive-plan-validation-summary.md",
+    "manifest.json",
+    "checksums.json",
+)
 
 REQUIRED_OUT_FILES = (
     "artifact-archive-plan.json",
@@ -355,17 +387,353 @@ def write_outputs(plan: dict[str, Any], out_dir: str) -> None:
     )
 
 
+def validation_safety_block() -> dict[str, bool]:
+    return {
+        "read_only": True,
+        "validation_only": True,
+        "mutation_performed": False,
+        "archive_created": False,
+        "source_copied": False,
+        "source_moved": False,
+        "source_deleted": False,
+        "source_modified": False,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "cloud_apply_merge_push": False,
+        "github_post_approve_merge": False,
+    }
+
+
+def _load_plan_json(path: Path) -> Any | None:
+    """Read and parse a plan JSON file without following symlinks or over-reading."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        if path.stat().st_size > MAX_PLAN_FILE_BYTES:
+            return None
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def validate_plan(plan_dir: str, *, max_candidates: int = DEFAULT_MAX_RETURNED) -> dict[str, Any]:
+    """Validate an existing PR231 archive-plan directory. Strictly read-only."""
+    plan_path = Path(plan_dir)
+    checks: list[dict[str, str]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    def record(name: str, ok: bool, detail: str = "") -> bool:
+        checks.append({"name": name, "status": "passed" if ok else "failed", "detail": detail})
+        if not ok:
+            errors.append(f"{name}: {detail}" if detail else name)
+        return ok
+
+    # 1. required files exist (and are real files, never symlinks)
+    missing = [
+        name
+        for name in REQUIRED_OUT_FILES
+        if not (plan_path / name).is_file() or (plan_path / name).is_symlink()
+    ]
+    record(
+        "required_files_present",
+        not missing,
+        ("missing/invalid: " + ", ".join(missing)) if missing else "",
+    )
+
+    # 2. JSON files parse + bounded
+    json_names = [n for n in REQUIRED_OUT_FILES if n.endswith(".json")]
+    parsed: dict[str, Any] = {}
+    unparsable: list[str] = []
+    for name in json_names:
+        data = _load_plan_json(plan_path / name)
+        if data is None:
+            unparsable.append(name)
+        else:
+            parsed[name] = data
+    record(
+        "json_parse_ok",
+        not unparsable,
+        ("unparsable: " + ", ".join(unparsable)) if unparsable else "",
+    )
+
+    plan = parsed.get("artifact-archive-plan.json") or {}
+    candidate_manifest = parsed.get("candidate-manifest.json") or {}
+    manifest = parsed.get("manifest.json") or {}
+    checksums_doc = parsed.get("checksums.json") or {}
+    plan_id = plan.get("plan_id") if isinstance(plan, dict) else None
+
+    # 3. plan id present and well-formed
+    record(
+        "plan_id_ok",
+        isinstance(plan_id, str) and bool(PLAN_ID_RE.match(plan_id)),
+        f"plan_id={plan_id!r}",
+    )
+
+    # 4. manifest: every listed file exists with matching size
+    manifest_files = manifest.get("files", []) if isinstance(manifest, dict) else []
+    manifest_ok = isinstance(manifest_files, list) and bool(manifest_files)
+    manifest_detail = ""
+    if not manifest_ok:
+        manifest_detail = "manifest missing files list"
+    else:
+        for entry in manifest_files:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if not name:
+                manifest_ok = False
+                manifest_detail = "manifest entry missing name"
+                break
+            target = plan_path / name
+            if target.is_symlink() or not target.is_file():
+                manifest_ok = False
+                manifest_detail = f"manifest file missing: {name}"
+                break
+            if int(entry.get("size_bytes", -1)) != target.stat().st_size:
+                manifest_ok = False
+                manifest_detail = f"manifest size mismatch: {name}"
+                break
+    record("manifest_ok", manifest_ok, manifest_detail)
+
+    # 5. checksums: sha256 + size metadata match current plan output files
+    checksums = checksums_doc.get("checksums", {}) if isinstance(checksums_doc, dict) else {}
+    checksums_ok = isinstance(checksums, dict) and bool(checksums)
+    checksums_detail = ""
+    if not checksums_ok:
+        checksums_detail = "checksums missing"
+    else:
+        for name, recorded in checksums.items():
+            target = plan_path / name
+            if target.is_symlink() or not target.is_file():
+                checksums_ok = False
+                checksums_detail = f"checksum file missing: {name}"
+                break
+            actual = "sha256:" + sha256_file(target)
+            if actual != recorded:
+                checksums_ok = False
+                checksums_detail = f"checksum mismatch: {name}"
+                break
+    record("checksums_ok", checksums_ok, checksums_detail)
+
+    # 6. read_only / mutation / execution flags on the plan
+    record("read_only", plan.get("read_only") is True, "read_only must be true")
+    record(
+        "mutation_not_performed",
+        plan.get("mutation_performed") is False,
+        "mutation_performed must be false",
+    )
+    record(
+        "execution_unavailable",
+        plan.get("execution_available") is False,
+        "execution_available must be false",
+    )
+
+    # 7. candidate manifest bounded + only known ShellForgeAI patterns / safe paths
+    cands = candidate_manifest.get("candidates", []) if isinstance(candidate_manifest, dict) else []
+    candidate_ok = isinstance(cands, list) and len(cands) <= max_candidates
+    candidate_detail = "" if candidate_ok else f"candidate count exceeds bound ({len(cands)})"
+    symlink_ok = True
+    scope_ok = True
+    for cand in cands if isinstance(cands, list) else []:
+        path_str = cand.get("path", "") if isinstance(cand, dict) else ""
+        cand_path = Path(path_str)
+        # never follow symlinks: reject by lstat-only check
+        if cand_path.is_symlink():
+            symlink_ok = False
+            candidate_detail = candidate_detail or f"symlink candidate rejected: {path_str}"
+            break
+        name = cand_path.name
+        if (
+            name in RUNTIME_NAMES
+            or str(cand_path).startswith(("/var/lib/docker", "/srv/compose", "/workspace"))
+            or class_for_name(name) is None
+        ):
+            scope_ok = False
+            candidate_detail = candidate_detail or f"out-of-scope candidate: {path_str}"
+            break
+        if isinstance(cand, dict) and cand.get("class") != class_for_name(name):
+            scope_ok = False
+            candidate_detail = candidate_detail or f"candidate class mismatch: {path_str}"
+            break
+    record("candidate_symlinks_rejected", symlink_ok, candidate_detail if not symlink_ok else "")
+    record(
+        "candidate_scope_bounded",
+        candidate_ok and scope_ok,
+        candidate_detail if not (candidate_ok and scope_ok) else "",
+    )
+
+    # 8. future confirmation phrase + future contract
+    record(
+        "confirmation_phrase_present",
+        plan.get("future_confirmation_phrase") == CONFIRMATION_PHRASE,
+        "missing CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE phrase",
+    )
+    contract = plan.get("future_archive_contract", {}) if isinstance(plan, dict) else {}
+    record(
+        "future_contract_no_execution",
+        plan.get("execution_available") is False
+        and contract.get("source_deletion_is_not_part_of_this_pr") is True,
+        "future contract must keep execution unavailable and source deletion out of scope",
+    )
+
+    # 9. plan safety flags: no mutation of any kind
+    safety = plan.get("safety", {}) if isinstance(plan, dict) else {}
+    safety_ok = safety.get("read_only") is True
+    safety_detail = "" if safety_ok else "safety.read_only must be true"
+    if safety_ok:
+        for flag in PLAN_MUTATION_FLAGS:
+            if safety.get(flag) is not False:
+                safety_ok = False
+                safety_detail = f"safety flag must be false: {flag}"
+                break
+    if safety_ok and isinstance(manifest, dict):
+        if manifest.get("archive_created") is not False:
+            safety_ok = False
+            safety_detail = "manifest.archive_created must be false"
+        elif manifest.get("candidate_contents_copied") is not False:
+            safety_ok = False
+            safety_detail = "manifest.candidate_contents_copied must be false"
+    record("safety_flags_clear", safety_ok, safety_detail)
+
+    if isinstance(plan, dict) and plan.get("warnings"):
+        warnings.append(f"plan carried {len(plan['warnings'])} discovery warning(s)")
+
+    candidate_count = len(cands) if isinstance(cands, list) else 0
+    status = "failed" if errors else ("partial" if warnings else "passed")
+    passed_checks = sum(1 for c in checks if c["status"] == "passed")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": VALIDATION_MODE,
+        "status": status,
+        "validated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "plan_dir": str(plan_path),
+        "plan_id": plan_id,
+        "read_only": True,
+        "mutation_performed": False,
+        "future_execution_available": False,
+        "future_execution_eligible_for_review": status == "passed",
+        "summary": {
+            "checks_total": len(checks),
+            "checks_passed": passed_checks,
+            "checks_failed": len(checks) - passed_checks,
+            "errors_count": len(errors),
+            "warnings_count": len(warnings),
+            "candidate_items": candidate_count,
+        },
+        "checks": checks,
+        "errors": errors,
+        "warnings": warnings,
+        "safety": validation_safety_block(),
+    }
+
+
+def render_validation_summary(result: dict[str, Any]) -> str:
+    failed = [c["name"] for c in result["checks"] if c["status"] == "failed"]
+    lines = [
+        "# Docker01 ShellForgeAI Artifact Archive Plan Validation",
+        "",
+        f"Plan dir: {result['plan_dir']}",
+        f"Plan ID: {result['plan_id']}",
+        f"Validation status: {result['status']}",
+        "Read-only: yes",
+        "Future execution available: no",
+        "",
+        "## Checks",
+        f"* passed: {result['summary']['checks_passed']}/{result['summary']['checks_total']}",
+        f"* failed: {', '.join(failed) if failed else 'none'}",
+        f"* candidate items: {result['summary']['candidate_items']}",
+    ]
+    if result["errors"]:
+        lines.append("")
+        lines.append("## Errors")
+        lines.extend(f"* {e}" for e in result["errors"])
+    lines += [
+        "",
+        "## Safety",
+        "* no archive created",
+        "* no source copied",
+        "* no source moved",
+        "* no source deleted",
+        "* no cleanup/prune/restart/remediation/rollback/recovery",
+        "* validation is read-only; future execution remains unavailable",
+        "* no " + "shell=" + "True",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_validation_outputs(result: dict[str, Any], out_dir: str) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "artifact-archive-plan-validation.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    (out / "artifact-archive-plan-validation-summary.md").write_text(
+        render_validation_summary(result)
+    )
+    manifest_files = []
+    for name in VALIDATION_OUT_FILES:
+        if name in {"manifest.json", "checksums.json"}:
+            continue
+        p = out / name
+        manifest_files.append({"path": str(p), "name": name, "size_bytes": p.stat().st_size})
+    (out / "manifest.json").write_text(
+        json.dumps(
+            {
+                "plan_id": result["plan_id"],
+                "mode": VALIDATION_MODE,
+                "files": manifest_files,
+                "archive_created": False,
+                "candidate_contents_copied": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    checksum_names = [item["name"] for item in manifest_files] + ["manifest.json"]
+    checksums = {name: "sha256:" + sha256_file(out / name) for name in checksum_names}
+    (out / "checksums.json").write_text(
+        json.dumps({"plan_id": result["plan_id"], "checksums": checksums}, indent=2, sort_keys=True)
+        + "\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build a read-only ShellForgeAI artifact archive plan."
+        description="Build or validate a read-only ShellForgeAI artifact archive plan."
     )
     parser.add_argument("--root", default=DEFAULT_ROOT)
+    parser.add_argument(
+        "--validate",
+        metavar="PLAN_DIR",
+        help="validate an existing archive-plan directory (read-only)",
+    )
     parser.add_argument("--json", action="store_true", help="emit strict JSON")
-    parser.add_argument("--out", help="write plan artifacts to this directory")
+    parser.add_argument("--out", help="write plan or validation artifacts to this directory")
     parser.add_argument("--max-candidates-scanned", type=int, default=DEFAULT_MAX_SCAN)
     parser.add_argument("--max-candidates-returned", type=int, default=DEFAULT_MAX_RETURNED)
     parser.add_argument("--max-warnings-returned", type=int, default=DEFAULT_MAX_WARNINGS)
     args = parser.parse_args(argv)
+
+    if args.validate:
+        result = validate_plan(args.validate, max_candidates=args.max_candidates_returned)
+        if args.out:
+            write_validation_outputs(result, args.out)
+        print(
+            json.dumps(result, sort_keys=True) if args.json else render_validation_summary(result)
+        )
+        return 0 if result["status"] != "failed" else 1
+
     plan = build_plan(
         args.root,
         max_scan=args.max_candidates_scanned,
