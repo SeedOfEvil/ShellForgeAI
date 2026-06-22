@@ -99,6 +99,7 @@ How matching works:
 | `scripts/validation_status.py` | **full** | `test_pr177_*`, `test_pr178_*`, `test_pr179_*` + `python scripts/run_full_pytest.py` |
 | `scripts/run_full_pytest.py` | **full** | `test_pr160_*`, `test_pr176_*` + `python scripts/run_full_pytest.py` |
 | `scripts/docker01_operator_qa_bundle.py` | **full** | `test_pr206_docker01_operator_qa_bundle` + `test_pr207_qa_bundle_lifecycle` + `python scripts/run_full_pytest.py` |
+| `scripts/docker01_artifact_archive_plan.py` | targeted_runtime | `test_pr231_docker01_artifact_archive_plan` + storage/hygiene/QA/command-surface/mutation-refusal targeted checks |
 | `scripts/**` (other) | **full** | + `python scripts/run_full_pytest.py` |
 | `tests/conftest.py` | **full** | shared harness → `python scripts/run_full_pytest.py` |
 | `tests/**` | fast | the changed test files are run directly |

@@ -711,3 +711,19 @@ shellforgeai model receipt compare /tmp/old-receipt /tmp/new-receipt --json
 History scans only a bounded root for known Model Doctor receipt-shaped directories, validates each candidate with the same required-file, JSON, manifest, checksum, secret-marker, and safety checks used by receipt validation, and reports valid, invalid, and ignored candidates. Compare validates both receipt directories before reporting status, auth-readiness, latency, timeout, provider, and model drift. These commands are read-only: they do not run a live probe, call a model, call network/Codex, clean/prune/delete, repair/move artifacts, mutate Docker/Compose, restart containers, remediate, roll back, or recover. Default `shellforgeai model doctor` still performs no model call; explicit `--live-probe` remains opt-in and bounded. SeedOfEvil remains final merge owner.
 
 The Docker01 operator QA bundle surfaces this model receipt evidence in the reviewer handoff by default (`python scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --json`; opt out with `--skip-model-receipts`). It runs only the read-only `model receipt history` reader and records the `model_receipts` block — receipt history status, latest receipt path/validation, latest probe status, latest auth readiness, valid/invalid counts, warnings, and the operator's safe next command — plus `raw/model-receipt-history.json` and `raw/model-receipt-evidence.json`. The QA bundle performs no live probe and no model call (its own `model_receipts.safety` reports `model_called=false`/`live_probe_performed=false`); a historical receipt's `model_called=true` is accepted as evidence of an earlier explicit probe. Empty or unavailable history is a warning, not a QA failure; a secret marker or historical safety drift is surfaced as a blocking safety failure.
+## Docker01 artifact archive plan
+
+`scripts/docker01_artifact_archive_plan.py` is the first governed mutation-runway step for ShellForgeAI-owned historical evidence artifacts. It is a read-only plan contract only: it discovers bounded `/tmp/sfai-*` evidence artifacts, classifies known candidate classes, estimates counts/bytes, emits a deterministic `plan_id`, and documents explicit exclusions plus the future confirmation/receipt/manifest/checksum requirements. Execution is not available in this PR.
+
+Examples:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --root /tmp --json
+python3 scripts/docker01_artifact_archive_plan.py --root /tmp
+python3 scripts/docker01_artifact_archive_plan.py --root /tmp --out /tmp/sfai-pr231-artifact-archive-plan
+```
+
+`--out` writes plan metadata files only (`artifact-archive-plan.json`, summary, candidate/excluded manifests, safety notes, manifest, checksums). It does not create an archive and does not copy, move, modify, or delete source candidates. Candidate scope is limited to known ShellForgeAI evidence artifact patterns such as QA bundles, validation artifacts, merge/v2 readiness artifacts, hygiene reports, model receipts, receipt validation, and storage-health reports. Docker volumes/images/containers, Compose/source/runtime paths, `/var/lib/docker`, `/srv/compose`, home directories, system logs, package caches, unmatched arbitrary files, and symlinks remain out of scope.
+
+Any future execution lane would be separate and must require the exact `plan_id`, exact `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, bounded candidate classes, a validated candidate manifest, archive and receipt output targets, a dry-run preview first, and operator review. Future execution must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
+
