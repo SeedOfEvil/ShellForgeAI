@@ -213,6 +213,16 @@ Review bundles are evidence only. Validation, compare, and bundle output do not 
 
 Hygiene evidence inside the QA bundle is review-only. Missing history/compare evidence is non-blocking; cleanup/prune/delete/restart or Docker/Compose mutation safety flags fail QA safety.
 
+## Docker01 QA bundle model receipt evidence checks
+
+| Check | Command | Purpose | Mutates state |
+| --- | --- | --- | --- |
+| QA bundle with model receipt evidence | `python scripts/docker01_operator_qa_bundle.py --pr 229 --commit <sha> --json` | Adds read-only Model Doctor receipt history status, latest receipt path/validation, latest probe status/auth readiness, and valid/invalid counts to the operator QA bundle without a live probe or model call. | No |
+| QA bundle skipping model receipts | `python scripts/docker01_operator_qa_bundle.py --pr 229 --commit <sha> --skip-model-receipts --json` | Opts out of model receipt evidence collection. | No |
+| QA bundle model receipt tests | `pytest -q tests/test_pr229_docker01_qa_bundle_model_receipts.py` | Verifies the `model_receipts` block, summary section, raw artifacts, empty/unavailable handling, secret/drift safety failure, and that no live probe/model call/Docker mutation is performed. | No |
+
+Model receipt evidence inside the QA bundle is read-only. The QA bundle performs no live probe and no model call (`model_receipts.safety` reports `model_called=false`/`live_probe_performed=false`); a historical receipt's `model_called=true` is accepted as evidence of an earlier explicit probe. Empty/unavailable receipt history is non-blocking; a secret marker or historical safety drift fails QA safety.
+
 ## Docker01 PR-lane manifest discovery
 
 The Docker01 PR lane emits a scoped validation packet under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`. `validation_status.py --latest --pr <PR> --commit <sha>` selects only exact PR/commit evidence and ignores stale packets from other PRs or commits. QA bundles may use the packet's `validation-status.json` and `validation-manifest.json` to populate validation sections without falling back to scoped `not_found` when current lane evidence exists.

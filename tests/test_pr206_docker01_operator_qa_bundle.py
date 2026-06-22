@@ -211,6 +211,33 @@ def _default_outputs() -> dict[tuple[str, ...], tuple[int, str, str]]:
             ),
             "",
         )
+    for spec in qa.model_receipt_command_specs():
+        outputs[tuple(spec.argv)] = (
+            0,
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "mode": "model_doctor_receipt_history",
+                    "status": "empty",
+                    "read_only": True,
+                    "mutation_performed": False,
+                    "summary": {
+                        "valid_receipts": 0,
+                        "invalid_receipts": 0,
+                        "ignored_candidates": 0,
+                    },
+                    "receipts": [],
+                    "invalid_candidates": [],
+                    "warnings": [],
+                    "safety": {
+                        "read_only": True,
+                        "mutation_performed": False,
+                        "model_called": False,
+                    },
+                }
+            ),
+            "",
+        )
     return outputs
 
 
@@ -336,7 +363,9 @@ def test_11_dry_run_lists_planned_commands(tmp_path):
     labels = {c["label"] for c in result["planned_commands"]}
     assert "version" in labels
     assert "ops report" in labels
-    assert len(result["planned_commands"]) == len(_specs()) + len(qa.hygiene_command_specs())
+    assert len(result["planned_commands"]) == (
+        len(_specs()) + len(qa.hygiene_command_specs()) + len(qa.model_receipt_command_specs())
+    )
 
 
 def test_12_dry_run_does_not_execute(tmp_path):

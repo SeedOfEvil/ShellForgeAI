@@ -467,6 +467,7 @@ _SHELLFORGEAI_ALLOWED_FORMS: tuple[tuple[str, ...], ...] = (
     ("verify", "--json"),
     ("handoff", "--json"),
     ("remediation", "self-test", "--profile", "full", "--json"),
+    ("model", "receipt", "history", "--root", DEFAULT_ROOT, "--json"),
 )
 
 
@@ -852,6 +853,7 @@ class SafetyContext:
     restart_count_after: Any = None
     parsed_outputs: list[Any] = field(default_factory=list)
     validation_status: dict[str, Any] = field(default_factory=dict)
+    model_receipts: dict[str, Any] = field(default_factory=dict)
 
 
 def _assertion(name: str, passed: bool, detail: str) -> dict[str, Any]:
@@ -986,6 +988,29 @@ def evaluate_safety_assertions(ctx: SafetyContext) -> dict[str, Any]:
         )
     )
 
+    # Model receipt evidence is read-only: the QA collection must never call the
+    # model or run a live probe, and must surface a secret marker or historical
+    # safety drift as a blocking failure. Empty/missing history is not a failure.
+    mr = ctx.model_receipts or {}
+    mr_safety = mr.get("safety") if isinstance(mr.get("safety"), dict) else {}
+    mr_errors = mr.get("errors") if isinstance(mr.get("errors"), list) else []
+    mr_unsafe = (mr.get("secret_scan_ok") is False) or any(
+        ("secret" in str(e).lower()) or ("safety drift" in str(e).lower()) for e in mr_errors
+    )
+    mr_collection_safe = (
+        mr_safety.get("model_called", False) is False
+        and mr_safety.get("live_probe_performed", False) is False
+        and mr_safety.get("mutation_performed", False) is False
+    )
+    assertions.append(
+        _assertion(
+            "model_receipt_evidence_safe",
+            (not mr_unsafe) and mr_collection_safe,
+            "model receipt evidence is secret-free, no historical safety drift, and "
+            "collection performed no model call or live probe",
+        )
+    )
+
     passed = sum(1 for a in assertions if a["passed"])
     failed = len(assertions) - passed
     return {
@@ -1017,12 +1042,15 @@ def plan_commands(
     commit: str,
     include_hygiene: bool = True,
     include_hygiene_review_bundle: bool = False,
+    include_model_receipts: bool = True,
 ) -> list[dict[str, Any]]:
     """Return the planned command list for pr/commit (used by dry-run and tests)."""
     plan: list[dict[str, Any]] = []
     specs = build_command_specs(pr, commit)
     if include_hygiene:
         specs.extend(hygiene_command_specs(include_hygiene_review_bundle))
+    if include_model_receipts:
+        specs.extend(model_receipt_command_specs())
     for spec in specs:
         plan.append(
             {
@@ -1043,6 +1071,7 @@ def dry_run_result(
     out: Path,
     include_hygiene: bool = True,
     include_hygiene_review_bundle: bool = False,
+    include_model_receipts: bool = True,
 ) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1057,7 +1086,7 @@ def dry_run_result(
         "mutation_performed": False,
         "intended_bundle_path": str(out),
         "planned_commands": plan_commands(
-            pr, commit, include_hygiene, include_hygiene_review_bundle
+            pr, commit, include_hygiene, include_hygiene_review_bundle, include_model_receipts
         ),
     }
 
@@ -1081,6 +1110,7 @@ def generate_bundle(
     now: datetime | None = None,
     include_hygiene: bool = True,
     include_hygiene_review_bundle: bool = False,
+    include_model_receipts: bool = True,
 ) -> dict[str, Any]:
     """Run the QA command set and write the evidence bundle.
 
@@ -1092,7 +1122,9 @@ def generate_bundle(
     out = Path(out)
 
     if dry_run:
-        return dry_run_result(pr, commit, out, include_hygiene, include_hygiene_review_bundle)
+        return dry_run_result(
+            pr, commit, out, include_hygiene, include_hygiene_review_bundle, include_model_receipts
+        )
 
     runner = runner or default_runner
 
@@ -1119,6 +1151,8 @@ def generate_bundle(
     specs = build_command_specs(pr, commit)
     if include_hygiene:
         specs.extend(hygiene_command_specs(include_hygiene_review_bundle))
+    if include_model_receipts:
+        specs.extend(model_receipt_command_specs())
     command_entries: list[dict[str, Any]] = []
     parsed_by_key: dict[str, Any] = {}
     warnings: list[str] = []
@@ -1193,6 +1227,11 @@ def generate_bundle(
     )
     warnings.extend(hygiene.get("warnings", []))
 
+    model_receipts = summarize_model_receipts(
+        parsed_by_key, include_model_receipts, command_entries
+    )
+    warnings.extend(model_receipts.get("warnings", []))
+
     ctx = SafetyContext(
         ops_report=parsed_by_key.get("ops_report"),
         v1_quick=v1_quick,
@@ -1203,6 +1242,7 @@ def generate_bundle(
         restart_count_after=restart_after,
         parsed_outputs=list(parsed_by_key.values()),
         validation_status=validation_status,
+        model_receipts=model_receipts,
     )
     safety_assertions = evaluate_safety_assertions(ctx)
 
@@ -1218,6 +1258,7 @@ def generate_bundle(
         safety_block=safety_block,
         warnings=warnings,
         hygiene=hygiene,
+        model_receipts=model_receipts,
     )
 
     # --- Write bundle files ----------------------------------------------
@@ -1225,6 +1266,7 @@ def generate_bundle(
     _write_json(out / "safety-assertions.json", safety_assertions)
     _write_json(out / "container-state.json", container_state)
     _write_json(out / "validation-status.json", validation_status)
+    _write_model_receipt_raw(out, model_receipts, parsed_by_key.get("model_receipt_history"))
     _write_json(
         out / "commands-run.json",
         {"schema_version": SCHEMA_VERSION, "mode": MODE, "commands": command_entries},
@@ -1417,6 +1459,263 @@ def summarize_hygiene(
     return base
 
 
+# ---------------------------------------------------------------------------
+# Model receipt evidence (read-only; PR229)
+# ---------------------------------------------------------------------------
+#
+# This surfaces the existing Model Doctor live-probe receipt *history* evidence
+# (PR226 receipts, PR227 validator, PR228 history) inside the QA handoff. It is
+# read-only by construction: it runs only the existing read-only product command
+# ``shellforgeai model receipt history --root /tmp --json`` (via the same narrow
+# ``docker exec`` allowlist as the other product smoke commands), which only
+# reads + validates existing receipt directories.
+#
+# It performs **no live probe and no model call**. Historical receipts may carry
+# ``model_called=true`` because an *earlier explicit* live probe called the
+# model, but the QA bundle's own collection never does. The collection command is
+# non-critical: a missing/empty receipt history is reported, not fatal. Only a
+# secret marker or a historical safety drift escalates to a safety failure.
+
+# The receipt root and the safe next command the operator can run to inspect
+# receipts themselves. ``DEFAULT_ROOT`` (/tmp) is where Docker01 receipts land.
+MODEL_RECEIPT_ROOT = DEFAULT_ROOT
+MODEL_RECEIPT_NEXT_COMMAND = (
+    f"shellforgeai model receipt history --root {MODEL_RECEIPT_ROOT} --json"
+)
+
+# Historical-receipt safety keys that, if a receipt history helper ever reported
+# them true, indicate the *evidence trail* itself recorded a mutation/model call
+# — a safety drift that must block, distinct from a benign empty/missing history.
+_MODEL_RECEIPT_DRIFT_KEYS: tuple[str, ...] = (
+    "mutation_performed",
+    "model_called",
+    "live_probe_performed",
+    "cleanup_executed",
+    "docker_prune_executed",
+    "docker_image_removed",
+    "file_deleted",
+    "docker_compose_executed",
+    "container_restarted",
+    "remediation_executed",
+    "rollback_executed",
+    "recovery_executed",
+    "natural_language_execution",
+    "shell_true",
+    "arbitrary_command_execution",
+)
+
+_MODEL_RECEIPT_DRIFT_ERROR = "model receipt history reported safety drift"
+
+
+def model_receipt_command_specs() -> list[CommandSpec]:
+    """Return the bounded, read-only model receipt history evidence command.
+
+    This is the existing ``shellforgeai model receipt history --root /tmp --json``
+    read-only command, run inside the container via the narrow ``docker exec``
+    prefix. It never performs a live probe or model call. It is non-critical: its
+    failure/absence is reported, never fatal to the bundle.
+    """
+    return [
+        CommandSpec(
+            "model_receipt_history",
+            "model receipt history",
+            _sfai("model", "receipt", "history", "--root", MODEL_RECEIPT_ROOT, "--json"),
+            "raw/model-receipt-history.json",
+            parse="json",
+            critical=False,
+        )
+    ]
+
+
+def _model_receipt_collection_safety() -> dict[str, bool]:
+    """The QA bundle's own (always read-only) receipt-collection safety posture.
+
+    This documents what *the QA bundle collection* did, not what a historical
+    receipt recorded. It is constant: collection never calls the model, never
+    runs a live probe, and never mutates anything.
+    """
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "model_called": False,
+        "live_probe_performed": False,
+        "receipt_history_only": True,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "cloud_apply_merge_push": False,
+        "github_post_approve_merge": False,
+    }
+
+
+def _empty_model_receipts_block(enabled: bool) -> dict[str, Any]:
+    return {
+        "enabled": enabled,
+        "status": "not_available",
+        "history_status": "not_available",
+        "latest_receipt_path": None,
+        "latest_receipt_validation_status": "not_available",
+        "latest_probe_status": "not_available",
+        "latest_auth_readiness": "not_available",
+        "latest_live_probe_performed": False,
+        "latest_model_called": False,
+        "receipts_valid": 0,
+        "receipts_invalid": 0,
+        "ignored_candidates": 0,
+        "secret_scan_ok": True,
+        "warnings": [],
+        "errors": [],
+        "safe_next_command": MODEL_RECEIPT_NEXT_COMMAND,
+        "safety": _model_receipt_collection_safety(),
+    }
+
+
+def _not_available_history(reason: str) -> dict[str, Any]:
+    """A small, deterministic raw history doc for the unavailable/skipped case."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": "model_doctor_receipt_history",
+        "status": "not_available",
+        "read_only": True,
+        "mutation_performed": False,
+        "warnings": [reason],
+    }
+
+
+def summarize_model_receipts(
+    parsed_by_key: dict[str, Any],
+    enabled: bool,
+    command_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Summarize read-only Model Doctor receipt history evidence for the QA bundle.
+
+    Reads the parsed ``model receipt history`` command output. Never performs a
+    live probe or model call. Empty/missing receipts are reported as
+    ``empty``/``not_available`` with a warning only; a secret marker or a
+    historical safety drift is surfaced as ``failed`` and blocks QA safety.
+    """
+    block = _empty_model_receipts_block(enabled)
+    if not enabled:
+        block["warnings"].append("model receipt evidence collection skipped")
+        return block
+
+    def entry_status(key: str) -> str | None:
+        if command_entries is None:
+            return "passed" if parsed_by_key.get(key) is not None else None
+        entry = next((c for c in command_entries if c.get("key") == key), None)
+        return str(entry.get("status")) if entry else None
+
+    cmd_status = entry_status("model_receipt_history")
+    history = parsed_by_key.get("model_receipt_history")
+
+    if cmd_status in (None, "failed") and not isinstance(history, dict):
+        # The command did not run, or ran but produced unparseable output. Either
+        # way there is no usable receipt history: report cleanly, do not fail.
+        block["warnings"].append("model receipt history command unavailable")
+        return block
+    if not isinstance(history, dict):
+        block["status"] = "failed"
+        block["history_status"] = "failed"
+        block["errors"].append("model receipt history output could not be parsed")
+        return block
+
+    hist_status = str(history.get("status") or "not_available")
+    summary = history.get("summary") if isinstance(history.get("summary"), dict) else {}
+    receipts = history.get("receipts") if isinstance(history.get("receipts"), list) else []
+    invalid = (
+        history.get("invalid_candidates")
+        if isinstance(history.get("invalid_candidates"), list)
+        else []
+    )
+    hist_warnings = history.get("warnings") if isinstance(history.get("warnings"), list) else []
+    hist_safety = history.get("safety") if isinstance(history.get("safety"), dict) else {}
+
+    latest = receipts[0] if receipts and isinstance(receipts[0], dict) else {}
+    block["history_status"] = hist_status
+    block["latest_receipt_path"] = latest.get("path") or summary.get("latest_valid_receipt")
+    block["latest_receipt_validation_status"] = (
+        str(latest.get("validation_status") or "not_available") if latest else "not_available"
+    )
+    block["latest_probe_status"] = (
+        str(latest.get("probe_status") or summary.get("latest_probe_status") or "unknown")
+        if latest
+        else "not_available"
+    )
+    block["latest_auth_readiness"] = (
+        str(latest.get("auth_readiness") or summary.get("latest_auth_readiness") or "unknown")
+        if latest
+        else "not_available"
+    )
+    block["latest_live_probe_performed"] = (
+        bool(latest.get("live_probe_performed")) if latest else False
+    )
+    block["latest_model_called"] = bool(latest.get("model_called")) if latest else False
+    block["receipts_valid"] = int(summary.get("valid_receipts", len(receipts)) or 0)
+    block["receipts_invalid"] = int(summary.get("invalid_receipts", len(invalid)) or 0)
+    block["ignored_candidates"] = int(summary.get("ignored_candidates", 0) or 0)
+
+    # Safety-fatal signals: a secret marker in any receipt, or a history helper
+    # that recorded a mutation/model call by itself (evidence-trail drift).
+    secret_detected = any(
+        isinstance(item, dict) and item.get("reason") == "secret_marker_detected"
+        for item in invalid
+    )
+    safety_drift = any(hist_safety.get(key) is True for key in _MODEL_RECEIPT_DRIFT_KEYS)
+    block["secret_scan_ok"] = not secret_detected
+
+    warnings: list[str] = [str(w) for w in hist_warnings]
+    errors: list[str] = []
+    if block["receipts_invalid"]:
+        warnings.append(f"{block['receipts_invalid']} invalid receipt candidate(s) present")
+    if secret_detected:
+        errors.append("secret marker detected in model receipt evidence")
+    if safety_drift:
+        errors.append(_MODEL_RECEIPT_DRIFT_ERROR)
+
+    if secret_detected or safety_drift:
+        status = "failed"
+    elif hist_status in ("ok", "empty", "partial", "failed", "not_available"):
+        status = hist_status
+    else:
+        status = "partial"
+    if status == "empty":
+        warnings.append("no model doctor live-probe receipts found")
+    block["status"] = status
+    block["warnings"] = warnings
+    block["errors"] = errors
+    return block
+
+
+def _write_model_receipt_raw(
+    out: Path, model_receipts: dict[str, Any], parsed_history: Any
+) -> None:
+    """Write bounded raw receipt evidence + history files into the bundle.
+
+    ``raw/model-receipt-evidence.json`` always holds the QA summary block.
+    ``raw/model-receipt-history.json`` holds the parsed history when available,
+    otherwise a small deterministic ``not_available`` doc (so a missing history
+    is represented deterministically).
+    """
+    try:
+        _write_json(out / "raw" / "model-receipt-evidence.json", model_receipts)
+        if isinstance(parsed_history, dict):
+            _write_json(out / "raw" / "model-receipt-history.json", parsed_history)
+        else:
+            reason = "; ".join(model_receipts.get("warnings") or []) or "no receipt history"
+            _write_json(out / "raw" / "model-receipt-history.json", _not_available_history(reason))
+    except OSError:  # pragma: no cover - filesystem dependent
+        pass
+
+
 def _build_safety_block(parsed_by_key: dict[str, Any]) -> dict[str, Any]:
     """Helper-guaranteed safety posture plus flags aggregated from outputs."""
     flagged: dict[str, bool] = {}
@@ -1458,6 +1757,7 @@ def _assemble_qa_results(
     safety_block: dict[str, Any],
     warnings: list[str],
     hygiene: dict[str, Any],
+    model_receipts: dict[str, Any],
 ) -> dict[str, Any]:
     passed = sum(1 for c in command_entries if c["status"] == "passed")
     failed = sum(1 for c in command_entries if c["status"] == "failed")
@@ -1495,6 +1795,7 @@ def _assemble_qa_results(
         "commands": command_entries,
         "safety": safety_block,
         "hygiene": hygiene,
+        "model_receipts": model_receipts,
         "first_safe_command": f"cat {out / 'qa-summary.md'}",
         "warnings": warnings,
     }
@@ -1642,6 +1943,25 @@ def render_summary_md(
     lines.append("")
     lines.append("Hygiene evidence is review-only. No cleanup was performed.")
     lines.append("")
+    mr = qa_results.get("model_receipts", {}) or {}
+    mr_warnings = mr.get("warnings") or []
+    lines.append("## Model receipt evidence")
+    lines.append("")
+    lines.append(f"* receipt history: {mr.get('history_status', 'not_available')}")
+    lines.append(f"* latest receipt: {mr.get('latest_receipt_path') or 'none'}")
+    mr_validation = mr.get("latest_receipt_validation_status", "not_available")
+    lines.append(f"* latest receipt validation: {mr_validation}")
+    lines.append(f"* latest probe status: {mr.get('latest_probe_status', 'not_available')}")
+    lines.append(f"* latest auth readiness: {mr.get('latest_auth_readiness', 'not_available')}")
+    lines.append(f"* valid receipts: {mr.get('receipts_valid', 0)}")
+    lines.append(f"* invalid receipts: {mr.get('receipts_invalid', 0)}")
+    lines.append("* warnings: " + ("; ".join(map(str, mr_warnings)) if mr_warnings else "none"))
+    lines.append("")
+    lines.append(
+        "Model receipt evidence is read-only. QA bundle did not perform a live probe or model call."
+    )
+    lines.append(f"Next: {mr.get('safe_next_command', MODEL_RECEIPT_NEXT_COMMAND)}")
+    lines.append("")
     lines.append("## Safety assertions")
     lines.append("")
     lines.append(f"* cleanup execute: {assertion('no_cleanup_executed')}")
@@ -1656,6 +1976,7 @@ def render_summary_md(
     lines.append(f"* artifact repair/delete: {'pass' if artifact_ok else 'FAIL'}")
     lines.append(f"* Docker prune: {flag('docker_prune_executed')}")
     lines.append(f"* cloud apply/merge/push: {flag('cloud_apply_merge_push')}")
+    lines.append(f"* model receipt evidence safe: {assertion('model_receipt_evidence_safe')}")
     lines.append("")
     lines.append("## Bundle result")
     lines.append("")
@@ -2490,6 +2811,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Opt in to bounded hygiene review bundle packaging.",
     )
     parser.add_argument(
+        "--include-model-receipts",
+        action="store_true",
+        default=True,
+        help="Include read-only Model Doctor receipt evidence (default; no model call).",
+    )
+    parser.add_argument(
+        "--skip-model-receipts",
+        action="store_true",
+        help="Skip model receipt evidence collection.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="List planned commands and intended output path; execute nothing and write no bundle.",
@@ -2592,6 +2924,7 @@ def _run_generation(args: argparse.Namespace, parser: argparse.ArgumentParser) -
         dry_run=args.dry_run,
         include_hygiene=not args.skip_hygiene,
         include_hygiene_review_bundle=args.include_hygiene_review_bundle,
+        include_model_receipts=not args.skip_model_receipts,
     )
 
     if args.json:

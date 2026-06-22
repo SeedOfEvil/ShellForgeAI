@@ -2557,6 +2557,19 @@ Default mode runs only the existing hygiene history and compare-latest JSON read
 
 This is review-only evidence. The QA bundle hygiene integration does not clean files, prune Docker, remove images, mutate Docker/Compose, restart containers, run arbitrary shell commands, call a model/Codex, call the network, or install packages. Missing hygiene evidence is a warning, not a core QA failure.
 
+## Docker01 QA bundle model receipt evidence
+
+Docker01 operator QA bundles also surface existing Model Doctor live-probe receipt evidence by default, so a reviewer can see whether model/auth readiness was recently verified by an explicit previous live probe — without the QA bundle itself calling the model:
+
+```bash
+python scripts/docker01_operator_qa_bundle.py --pr 229 --commit <sha> --json
+python scripts/docker01_operator_qa_bundle.py --pr 229 --commit <sha> --skip-model-receipts --json
+```
+
+Default mode runs only the existing read-only `shellforgeai model receipt history --root /tmp --json` reader. The QA bundle records `model_receipts.status`, `history_status`, the latest receipt path and validation status, latest probe status, latest auth readiness, valid/invalid receipt counts, warnings, the operator's safe next command, and raw captures under `raw/model-receipt-history.json` and `raw/model-receipt-evidence.json`.
+
+The QA bundle does **not** perform a live probe and does **not** call the model: the bundle's own `model_receipts.safety` block always reports `model_called=false` and `live_probe_performed=false`. A historical receipt may report `model_called=true` because an *earlier explicit* live probe (PR226) called the model; that is accepted as historical evidence. Empty or unavailable receipt history is reported as `empty`/`not_available` with a warning only — it does not fail the QA bundle. A secret marker or a historical safety drift in the receipt evidence is surfaced as a blocking safety failure. SeedOfEvil remains final merge owner.
+
 ## Docker01 PR-lane validation evidence
 
 After a guarded Docker01 PR-lane validation run, inspect the generated packet:
