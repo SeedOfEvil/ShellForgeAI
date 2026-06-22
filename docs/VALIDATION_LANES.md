@@ -1109,3 +1109,14 @@ Nested Docker01 convergence QA bundle directories such as `/tmp/sfai-pr<PR>-<sho
 `shellforgeai model doctor --json` is part of Docker01 live QA and emits strict read-only model readiness JSON; unavailable or unknown model auth is reported structurally instead of as a CLI option failure. By default no live probe is performed and `auth_readiness=not_verified` means live auth was not requested. `--live-probe` is explicit and bounded; `--receipt-out <dir>` writes requested receipt artifacts with read-only/no-mutation safety metadata and no secrets, cleanup, remediation, rollback, recovery, Docker mutation, or Compose mutation.
 
 For exact PR/commit lane runs, a later successful disposable validation fallback supersedes earlier host setup_failure evidence in `validation_status.py --latest`; the setup failure remains in warnings/process notes, while failed or interrupted evidence without a later exact pass stays non-pass-eligible.
+
+### Model Doctor receipt history and compare
+
+Existing Model Doctor live-probe receipts can be inspected without a new probe or model call:
+
+```bash
+shellforgeai model receipt history --root /tmp --json
+shellforgeai model receipt compare /tmp/old-receipt /tmp/new-receipt --json
+```
+
+History scans only a bounded root for known Model Doctor receipt-shaped directories, validates each candidate with the same required-file, JSON, manifest, checksum, secret-marker, and safety checks used by receipt validation, and reports valid, invalid, and ignored candidates. Compare validates both receipt directories before reporting status, auth-readiness, latency, timeout, provider, and model drift. These commands are read-only: they do not run a live probe, call a model, call network/Codex, clean/prune/delete, repair/move artifacts, mutate Docker/Compose, restart containers, remediate, roll back, or recover. Default `shellforgeai model doctor` still performs no model call; explicit `--live-probe` remains opt-in and bounded. SeedOfEvil remains final merge owner.

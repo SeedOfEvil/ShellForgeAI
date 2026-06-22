@@ -2693,3 +2693,14 @@ For exact PR/commit lane runs, a later successful disposable validation fallback
 Model-backed `ask` may explain deterministic evidence and suggest a next operator command, but those suggestions are now validated through a static safe-command registry. Registry entries are real ShellForgeAI commands, marked `read_only=true` and `mutation=false`, and are suggestion-only: `ask` never executes them. Unknown `shellforgeai ...` suggestions and mutation-shaped commands such as cleanup, prune, image removal, Compose restart, shell pipes, redirects, or shell passthrough are removed or replaced with a registry command such as `shellforgeai triage docker --json`, `shellforgeai triage docker detail <suspect> --json`, or `shellforgeai ops report --json` when appropriate.
 
 Natural-language requests still cannot execute commands. Future mutation recipes must remain named, narrow, auditable, and confirmation-gated outside model-backed ask.
+
+### Model Doctor receipt history and compare
+
+Existing Model Doctor live-probe receipts can be inspected without a new probe or model call:
+
+```bash
+shellforgeai model receipt history --root /tmp --json
+shellforgeai model receipt compare /tmp/old-receipt /tmp/new-receipt --json
+```
+
+History scans only a bounded root for known Model Doctor receipt-shaped directories, validates each candidate with the same required-file, JSON, manifest, checksum, secret-marker, and safety checks used by receipt validation, and reports valid, invalid, and ignored candidates. Compare validates both receipt directories before reporting status, auth-readiness, latency, timeout, provider, and model drift. These commands are read-only: they do not run a live probe, call a model, call network/Codex, clean/prune/delete, repair/move artifacts, mutate Docker/Compose, restart containers, remediate, roll back, or recover. Default `shellforgeai model doctor` still performs no model call; explicit `--live-probe` remains opt-in and bounded. SeedOfEvil remains final merge owner.
