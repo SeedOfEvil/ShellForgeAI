@@ -2749,5 +2749,15 @@ python3 scripts/docker01_artifact_archive_plan.py --root /tmp --out /tmp/sfai-pr
 
 `--out` writes plan metadata files only (`artifact-archive-plan.json`, summary, candidate/excluded manifests, safety notes, manifest, checksums). It does not create an archive and does not copy, move, modify, or delete source candidates. Candidate scope is limited to known ShellForgeAI evidence artifact patterns such as QA bundles, validation artifacts, merge/v2 readiness artifacts, hygiene reports, model receipts, receipt validation, and storage-health reports. Docker volumes/images/containers, Compose/source/runtime paths, `/var/lib/docker`, `/srv/compose`, home directories, system logs, package caches, unmatched arbitrary files, and symlinks remain out of scope.
 
+The same helper validates an existing plan directory with `--validate <plan_dir>` (read-only):
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan --json
+python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan
+python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan --out /tmp/sfai-pr232-validation --json
+```
+
+Validation confirms the required plan files exist and parse, the manifest/checksums match the current plan output files (SHA256 + size), the `plan_id` is present and well-formed, `read_only=true`/`mutation_performed=false`/`execution_available=false`, the candidate manifest is bounded and limited to known ShellForgeAI evidence patterns (out-of-scope paths and symlink candidates are rejected and never followed), the `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` confirmation phrase is present, the future contract keeps execution unavailable and source deletion out of scope, and every safety mutation flag is false. Output is `status=passed|failed|partial` with a concise pasteable summary or strict JSON (`mode=docker01_artifact_archive_plan_validation`). `--out` writes validator artifacts only (`artifact-archive-plan-validation.json`, `artifact-archive-plan-validation-summary.md`, `manifest.json`, `checksums.json`); it does not modify the source plan directory. Validation does not create an archive, does not copy/move/delete sources, and does not authorize execution.
+
 Any future execution lane would be separate and must require the exact `plan_id`, exact `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, bounded candidate classes, a validated candidate manifest, archive and receipt output targets, a dry-run preview first, and operator review. Future execution must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
 
