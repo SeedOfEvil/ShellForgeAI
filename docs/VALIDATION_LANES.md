@@ -954,6 +954,19 @@ The default QA bundle records hygiene history and compare-latest status in `qa-r
 
 QA hygiene integration is evidence-only. It does not run cleanup, Docker prune, Docker image removal, file deletion, Docker/Compose mutation, container restart, model/Codex calls, network calls, or package installs.
 
+## Docker01 QA bundle model receipt evidence
+
+Docker01 operator QA bundles include read-only Model Doctor receipt evidence by default, so a reviewer can see whether model/auth readiness was recently verified by an explicit previous live probe without the QA bundle itself calling the model:
+
+```bash
+python scripts/docker01_operator_qa_bundle.py --pr 229 --commit <sha> --json
+python scripts/docker01_operator_qa_bundle.py --pr 229 --commit <sha> --skip-model-receipts --json
+```
+
+The QA bundle runs only the existing read-only `shellforgeai model receipt history --root /tmp --json` reader and records a `model_receipts` block in `qa-results.json` (receipt history status, latest receipt path/validation, latest probe status, latest auth readiness, valid/invalid counts, warnings, safe next command), a `Model receipt evidence` section in `qa-summary.md`, the command in `commands-run.json`, and `raw/model-receipt-history.json` plus `raw/model-receipt-evidence.json`.
+
+This is evidence-only. The QA bundle performs no live probe and no model call: its `model_receipts.safety` block always reports `model_called=false`/`live_probe_performed=false`. A historical receipt's `model_called=true` is accepted as evidence of an earlier explicit probe (PR226). Empty or unavailable receipt history is non-blocking and reported as `empty`/`not_available` with warnings; a secret marker or a historical safety drift in the receipt evidence is surfaced as a blocking safety failure. The integration runs no cleanup, Docker prune/image removal, file deletion, Docker/Compose mutation, container restart, remediation/rollback/recovery, network call, or package install. SeedOfEvil remains final merge owner.
+
 ## Docker01 PR-lane validation evidence
 
 Guarded Docker01 PR-lane runs write a discoverable validation evidence directory by default at:
