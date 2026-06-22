@@ -2544,6 +2544,24 @@ The default bundle path is `/tmp/sfai-docker01-hygiene-review-bundle-<timestamp>
 
 Bundle mode reads existing report files only. It does not run Docker, generate a report, delete source artifacts, clean up files, prune/remove images, mutate Docker Compose, restart containers, call a model, or authorize cleanup. `partial` or `not_available` history/compare statuses are review warnings, not cleanup approval.
 
+## Docker01 storage health report
+
+PR229 observed two non-PR operational signals on Docker01: the Docker build spent unusually long in a user/group/chown layer, and `dmesg` carried pre-existing EXT4 journal/inode warning/error-count messages on `dm-10`. These are host storage signals, not cleanup/remediation work, so they are tracked through a separate read-only evidence helper:
+
+```bash
+python scripts/docker01_storage_health_report.py --json
+python scripts/docker01_storage_health_report.py
+python scripts/docker01_storage_health_report.py --out /tmp/sfai-docker01-storage-health --json
+```
+
+The helper collects bounded, read-only evidence: filesystem usage, root filesystem capacity, mounted filesystems / device mapping, disk-pressure level, Docker data-path pressure indicators when safely readable, and bounded/sanitized recent kernel storage warning lines if accessible. It scores each kernel-log line against known EXT4, dm/device-mapper, and I/O/journal/inode patterns and reports the counts and an overall `status` (`ok|warning|partial|failed`). Use `--max-dmesg-lines` and `--max-warning-lines` to bound the kernel-log scan.
+
+`status` is `ok` when there is no high disk pressure and no storage/kernel warning patterns, `warning` when disk pressure or relevant kernel warning patterns are found, `partial` when some evidence (for example `dmesg`/`journalctl`) is unavailable but core disk usage is collected, and `failed` only when core disk usage cannot be collected. The helper uses a fixed read-only command allowlist (`df -P -B1`, `findmnt --json`, `dmesg --level=err,warn --ctime`, `journalctl -k -p warning..alert --no-pager -n <bounded>`) plus `shutil.disk_usage` and `/proc/mounts`, always with `shell=False`. When `findmnt` is missing it falls back to `/proc/mounts`; when kernel-log access is denied it records the source as `not_available` and returns `partial`.
+
+With `--out <dir>` it writes `storage-health-report.json`, `storage-health-summary.md`, `commands-run.json`, `manifest.json`, and `checksums.json`; manifest and checksums include SHA256 and sizes, `commands-run.json` records only the read-only commands attempted, and raw logs are not copied in full.
+
+This report is evidence-only. It does not repair filesystems, run `fsck`/`e2fsck`/`xfs_repair`, mount/remount/umount, prune Docker, remove images/volumes/containers, delete files, restart containers, mutate Docker/Compose, or run remediation/rollback/recovery. There are no `--execute`/`--apply`/`--cleanup`/`--delete`/`--prune`/`--repair`/`--fsck`/`--restart`/`--fix` switches. If host storage warnings persist, investigate them outside ShellForgeAI mutation lanes. SeedOfEvil remains final merge owner.
+
 ## Docker01 QA bundle hygiene evidence
 
 Docker01 operator QA bundles summarize existing hygiene evidence by default:

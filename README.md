@@ -565,6 +565,19 @@ The bundle writes a bounded review directory with summary, strict JSON rollup, s
 
 Hygiene discovery treats only directories containing `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` as report directories. Old or malformed review-bundle-shaped directories are reported as bounded ignored candidates instead of cleanup work, and they do not authorize deletion, repair, moves, prune, or restart. `--compare-latest` and `--review-bundle-latest` select valid hygiene reports only.
 
+### Docker01 storage health report
+
+After PR229 observed a slow Docker build chown layer and pre-existing EXT4/dm-10 kernel warnings on Docker01, this read-only helper collects bounded storage/filesystem health evidence:
+
+```bash
+python scripts/docker01_storage_health_report.py --json
+python scripts/docker01_storage_health_report.py --out /tmp/sfai-docker01-storage-health --json
+```
+
+It reports root filesystem capacity, mounted filesystems and device mapping, disk-pressure level, Docker data-path pressure when safely readable, and bounded/sanitized kernel storage warning lines (EXT4, dm/device-mapper, and I/O/journal/inode patterns) from `dmesg` or `journalctl -k` when permitted. Optional flags `--max-dmesg-lines` and `--max-warning-lines` bound the kernel-log scan.
+
+It is evidence-only. It does not repair filesystems, run `fsck`/`e2fsck`/`xfs_repair`, mount/remount, prune Docker, remove images, delete files, restart containers, or mutate Docker/Compose. It uses a fixed read-only command allowlist with `shell=False`. If `dmesg`/`journalctl` access is denied the report returns `partial` with a warning rather than crashing; if optional tools such as `findmnt` are missing it falls back to `/proc/mounts`. With `--out` it writes `storage-health-report.json`, `storage-health-summary.md`, `commands-run.json`, `manifest.json`, and `checksums.json` (SHA256 + sizes). Persistent host storage warnings should be investigated outside ShellForgeAI mutation lanes.
+
 ### Docker01 PR-lane validation evidence
 
 Docker01 PR-lane validation writes discoverable PR/commit-scoped evidence under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, including `validation-status.json`, `validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and `logs/`. Use `python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection` to find current evidence; stale PR/commit packets are ignored.

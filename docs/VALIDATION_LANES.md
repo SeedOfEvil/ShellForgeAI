@@ -941,6 +941,17 @@ python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --j
 
 Bundle mode reads existing report artifacts only. It does not run Docker, generate a new hygiene report, clean up files, prune/remove Docker images, restart containers, mutate Compose, or authorize cleanup. Missing history/compare context is recorded as a warning or `not_available` so the evidence packet can still be reviewed when safe source files are readable.
 
+## Docker01 storage health report lane
+
+`python scripts/docker01_storage_health_report.py --json` emits a strict, read-only storage/filesystem health report; `--out <dir>` additionally writes `storage-health-report.json`, `storage-health-summary.md`, `commands-run.json`, `manifest.json`, and `checksums.json`. This lane exists because PR229 observed a slow Docker build chown layer and pre-existing EXT4/dm-10 kernel warnings on Docker01 that are host storage signals rather than PR cleanup/remediation work.
+
+```bash
+python scripts/docker01_storage_health_report.py --json
+python scripts/docker01_storage_health_report.py --out /tmp/sfai-docker01-storage-health --json
+```
+
+The lane is evidence-only and uses a fixed read-only command allowlist (`df -P -B1`, `findmnt --json`, `dmesg --level=err,warn --ctime`, `journalctl -k -p warning..alert --no-pager -n <bounded>`) plus `shutil.disk_usage` and `/proc/mounts`, always with `shell=False`. Denied `dmesg`/`journalctl` access yields `partial` (not a crash); a missing `findmnt` falls back to `/proc/mounts`. It never runs `fsck`/`e2fsck`/`xfs_repair`, mount/remount/umount, Docker prune/image/volume/container removal, file deletion, container restart, Docker/Compose mutation, or remediation/rollback/recovery, and adds no mutation switches.
+
 ## Docker01 QA bundle hygiene evidence
 
 Docker01 operator QA bundles include hygiene evidence by default using existing history and compare-latest report readers:
