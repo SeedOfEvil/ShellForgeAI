@@ -1169,3 +1169,13 @@ python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr
 
 The helper validates the source plan first, refuses missing/mismatched plan ids, and reports `ready_for_review` only for a valid human-reviewable future lane preview. Receipt output files are metadata only: no archive is created, no source is copied/moved/modified/deleted, the source plan directory is not modified, and cleanup/prune/delete/restart/remediation/rollback/recovery plus Docker/Compose mutation remain unavailable. Future execution remains a separate PR/lane gated by exact plan id and `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`; SeedOfEvil remains final merge owner.
 
+The receipt validator is also read-only:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --plan-dir /tmp/sfai-pr231-artifact-archive-plan --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --plan-dir /tmp/sfai-pr231-artifact-archive-plan --out /tmp/sfai-pr234-artifact-archive-dry-run-validation --json
+```
+
+It validates receipt required files, JSON, manifest, checksums, safety flags, candidate scope, and future contract. With `--plan-dir`, it validates the source plan first and cross-checks plan id, candidate counts/classes/bytes, exclusions, confirmation phrase, and future execution contract consistency; without `--plan-dir`, it records `plan_cross_check_status=not_requested`. `--out` writes validation artifacts only. No archive is created, no source is copied/moved/modified/deleted, source receipt/plan directories are not modified, and future execution remains unavailable.
+

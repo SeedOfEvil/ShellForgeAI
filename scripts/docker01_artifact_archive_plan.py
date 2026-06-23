@@ -22,6 +22,7 @@ SCHEMA_VERSION = 1
 MODE = "docker01_artifact_archive_plan"
 VALIDATION_MODE = "docker01_artifact_archive_plan_validation"
 DRY_RUN_RECEIPT_MODE = "docker01_artifact_archive_dry_run_receipt"
+DRY_RUN_RECEIPT_VALIDATION_MODE = "docker01_artifact_archive_dry_run_receipt_validation"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
@@ -55,6 +56,13 @@ PLAN_MUTATION_FLAGS = (
 VALIDATION_OUT_FILES = (
     "artifact-archive-plan-validation.json",
     "artifact-archive-plan-validation-summary.md",
+    "manifest.json",
+    "checksums.json",
+)
+
+DRY_RUN_RECEIPT_VALIDATION_OUT_FILES = (
+    "artifact-archive-dry-run-receipt-validation.json",
+    "artifact-archive-dry-run-receipt-validation-summary.md",
     "manifest.json",
     "checksums.json",
 )
@@ -982,6 +990,427 @@ def write_dry_run_receipt_outputs(receipt: dict[str, Any], out_dir: str) -> None
     )
 
 
+def receipt_validation_safety_block() -> dict[str, bool]:
+    safety = validation_safety_block()
+    safety["dry_run_only"] = True
+    safety["docker_volume_removed"] = False
+    return safety
+
+
+def _add_check(
+    checks: list[dict[str, str]],
+    errors: list[str],
+    warnings: list[str],
+    name: str,
+    status: str,
+    detail: str = "",
+) -> None:
+    checks.append({"name": name, "status": status, "detail": detail})
+    if status == "failed":
+        errors.append(f"{name}: {detail}" if detail else name)
+    elif status == "warning":
+        warnings.append(f"{name}: {detail}" if detail else name)
+
+
+def _safe_candidates(candidates: Any) -> tuple[bool, str, int, int, dict[str, dict[str, int]]]:
+    if not isinstance(candidates, list):
+        return False, "candidates must be a list", 0, 0, _candidate_class_summary([])
+    total_bytes = 0
+    for item in candidates:
+        if not isinstance(item, dict):
+            return False, "candidate entry must be object", 0, 0, _candidate_class_summary([])
+        path_str = item.get("path", "")
+        cand_path = Path(path_str)
+        if cand_path.is_symlink():
+            return (
+                False,
+                f"symlink candidate rejected: {path_str}",
+                0,
+                0,
+                _candidate_class_summary([]),
+            )
+        class_name = class_for_name(cand_path.name)
+        if (
+            not path_str
+            or cand_path.name in RUNTIME_NAMES
+            or str(cand_path).startswith(("/var/lib/docker", "/srv/compose", "/workspace"))
+            or class_name is None
+        ):
+            return False, f"out-of-scope candidate: {path_str}", 0, 0, _candidate_class_summary([])
+        if item.get("class") != class_name:
+            return (
+                False,
+                f"candidate class mismatch: {path_str}",
+                0,
+                0,
+                _candidate_class_summary([]),
+            )
+        total_bytes += int(item.get("size_bytes", 0) or 0)
+    return True, "", len(candidates), total_bytes, _candidate_class_summary(candidates)
+
+
+def validate_dry_run_receipt(
+    receipt_dir: str,
+    *,
+    plan_dir: str | None = None,
+    max_candidates: int = DEFAULT_MAX_RETURNED,
+) -> dict[str, Any]:
+    """Validate a PR233 dry-run receipt directory. Strictly read-only."""
+    receipt_path = Path(receipt_dir)
+    checks: list[dict[str, str]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    missing = [
+        name
+        for name in DRY_RUN_RECEIPT_OUT_FILES
+        if not (receipt_path / name).is_file() or (receipt_path / name).is_symlink()
+    ]
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "required_files_present",
+        "failed" if missing else "passed",
+        ", ".join(missing),
+    )
+
+    parsed: dict[str, Any] = {}
+    unparsable: list[str] = []
+    for name in [n for n in DRY_RUN_RECEIPT_OUT_FILES if n.endswith(".json")]:
+        data = _load_plan_json(receipt_path / name)
+        if data is None:
+            unparsable.append(name)
+        else:
+            parsed[name] = data
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "json_parse_ok",
+        "failed" if unparsable else "passed",
+        ", ".join(unparsable),
+    )
+
+    receipt = parsed.get("artifact-archive-dry-run-receipt.json") or {}
+    candidate_manifest = parsed.get("candidate-manifest.json") or {}
+    excluded_doc = parsed.get("excluded-candidates.json") or {}
+    manifest = parsed.get("manifest.json") or {}
+    checksums_doc = parsed.get("checksums.json") or {}
+    plan_id = receipt.get("plan_id") if isinstance(receipt, dict) else None
+
+    manifest_files = manifest.get("files", []) if isinstance(manifest, dict) else []
+    manifest_ok = isinstance(manifest_files, list) and bool(manifest_files)
+    manifest_detail = "" if manifest_ok else "manifest missing files list"
+    if manifest_ok:
+        for entry in manifest_files:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            target = receipt_path / str(name)
+            if not name or target.is_symlink() or not target.is_file():
+                manifest_ok = False
+                manifest_detail = f"manifest file missing: {name}"
+                break
+            if int(entry.get("size_bytes", -1)) != target.stat().st_size:
+                manifest_ok = False
+                manifest_detail = f"manifest size mismatch: {name}"
+                break
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "manifest_ok",
+        "passed" if manifest_ok else "failed",
+        manifest_detail,
+    )
+
+    checksums = checksums_doc.get("checksums", {}) if isinstance(checksums_doc, dict) else {}
+    checksums_ok = isinstance(checksums, dict) and bool(checksums)
+    checksums_detail = "" if checksums_ok else "checksums missing"
+    if checksums_ok:
+        for name, recorded in checksums.items():
+            target = receipt_path / name
+            if target.is_symlink() or not target.is_file():
+                checksums_ok = False
+                checksums_detail = f"checksum file missing: {name}"
+                break
+            if "sha256:" + sha256_file(target) != recorded:
+                checksums_ok = False
+                checksums_detail = f"checksum mismatch: {name}"
+                break
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "checksums_ok",
+        "passed" if checksums_ok else "failed",
+        checksums_detail,
+    )
+
+    safety = receipt.get("safety", {}) if isinstance(receipt, dict) else {}
+    unsafe_flags = [
+        "mutation_performed",
+        "archive_created",
+        "source_copied",
+        "source_moved",
+        "source_deleted",
+        "source_modified",
+        "cleanup_executed",
+        "docker_prune_executed",
+        "docker_image_removed",
+        "docker_volume_removed",
+        "file_deleted",
+        "docker_compose_executed",
+        "container_restarted",
+        "remediation_executed",
+        "rollback_executed",
+        "recovery_executed",
+        "natural_language_execution",
+        "shell_true",
+        "arbitrary_command_execution",
+        "cloud_apply_merge_push",
+        "github_post_approve_merge",
+    ]
+    safety_ok = receipt.get("read_only") is True and receipt.get("mutation_performed") is False
+    safety_detail = ""
+    if safety_ok and receipt.get("execution_available") is not False:
+        safety_ok = False
+        safety_detail = "execution_available must be false"
+    if safety_ok and safety.get("read_only") is not True:
+        safety_ok = False
+        safety_detail = "safety.read_only must be true"
+    if safety_ok:
+        for flag in unsafe_flags:
+            if safety.get(flag) is not False:
+                safety_ok = False
+                safety_detail = f"safety flag must be false: {flag}"
+                break
+    if safety_ok and isinstance(manifest, dict):
+        for flag in ("archive_created", "candidate_contents_copied"):
+            if manifest.get(flag) is not False:
+                safety_ok = False
+                safety_detail = f"manifest.{flag} must be false"
+                break
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "receipt_safety_ok",
+        "passed" if safety_ok else "failed",
+        safety_detail,
+    )
+
+    contract = receipt.get("future_execution_contract", {}) if isinstance(receipt, dict) else {}
+    future_ok = (
+        isinstance(plan_id, str)
+        and bool(PLAN_ID_RE.match(plan_id))
+        and contract.get("future_execution_available_in_this_pr") is False
+        and contract.get("future_confirmation_phrase") == CONFIRMATION_PHRASE
+        and contract.get("future_execution_requires_confirmation") is True
+    )
+    will_not = (
+        " ".join(receipt.get("will_not_do", []))
+        if isinstance(receipt.get("will_not_do"), list)
+        else ""
+    )
+    if "delete source" not in will_not and "source files" not in will_not:
+        future_ok = False
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "future_contract_ok",
+        "passed" if future_ok else "failed",
+        "confirmation/deletion/execution contract invalid" if not future_ok else "",
+    )
+
+    candidates = (
+        candidate_manifest.get("candidates", []) if isinstance(candidate_manifest, dict) else []
+    )
+    cand_ok, cand_detail, cand_count, cand_bytes, cand_classes = _safe_candidates(candidates)
+    if cand_count > max_candidates:
+        cand_ok = False
+        cand_detail = "candidate count exceeds bound"
+    summary = receipt.get("summary", {}) if isinstance(receipt, dict) else {}
+    if cand_ok and (
+        summary.get("candidate_items") != cand_count or summary.get("candidate_bytes") != cand_bytes
+    ):
+        cand_ok = False
+        cand_detail = "receipt candidate totals mismatch manifest"
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "candidate_manifest_ok",
+        "passed" if cand_ok else "failed",
+        cand_detail,
+    )
+
+    cross_status = "not_requested"
+    if plan_dir:
+        plan_validation = validate_plan(plan_dir, max_candidates=max_candidates)
+        if plan_validation["status"] == "failed":
+            cross_status = "failed"
+            _add_check(
+                checks, errors, warnings, "plan_cross_check", "failed", "plan validation failed"
+            )
+        else:
+            plan_path = Path(plan_dir)
+            plan_candidate_doc = _load_plan_json(plan_path / "candidate-manifest.json") or {}
+            plan_excluded_doc = _load_plan_json(plan_path / "excluded-candidates.json") or {}
+            plan_candidates = (
+                plan_candidate_doc.get("candidates", [])
+                if isinstance(plan_candidate_doc, dict)
+                else []
+            )
+            p_ok, _, p_count, p_bytes, p_classes = _safe_candidates(plan_candidates)
+            plan_excluded = (
+                plan_excluded_doc.get("excluded", []) if isinstance(plan_excluded_doc, dict) else []
+            )
+            excluded = excluded_doc.get("excluded", []) if isinstance(excluded_doc, dict) else []
+            same_excluded = (
+                len(excluded) <= len(plan_excluded)
+                if isinstance(excluded, list) and isinstance(plan_excluded, list)
+                else False
+            )
+            ok = (
+                p_ok
+                and plan_validation.get("plan_id") == plan_id
+                and p_count == cand_count
+                and p_bytes == cand_bytes
+                and p_classes == cand_classes
+                and same_excluded
+                and contract.get("future_confirmation_phrase") == CONFIRMATION_PHRASE
+            )
+            cross_status = "passed" if ok else "failed"
+            _add_check(
+                checks,
+                errors,
+                warnings,
+                "plan_cross_check",
+                cross_status,
+                "receipt does not match supplied plan" if not ok else "",
+            )
+    else:
+        _add_check(checks, errors, warnings, "plan_cross_check", "warning", "not_requested")
+
+    blocker_errors = [e for e in errors if not e.startswith("plan_cross_check: not_requested")]
+    status = "failed" if blocker_errors else ("partial" if warnings else "passed")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": DRY_RUN_RECEIPT_VALIDATION_MODE,
+        "status": status,
+        "receipt_dir": str(receipt_path),
+        "plan_dir": str(Path(plan_dir)) if plan_dir else None,
+        "plan_id": plan_id,
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "read_only": True,
+        "mutation_performed": False,
+        "summary": {
+            "required_files_present": not missing,
+            "json_parse_ok": not unparsable,
+            "manifest_ok": manifest_ok,
+            "checksums_ok": checksums_ok,
+            "receipt_safety_ok": safety_ok,
+            "future_contract_ok": future_ok,
+            "candidate_manifest_ok": cand_ok,
+            "plan_cross_check_status": cross_status,
+            "candidate_items": cand_count,
+            "candidate_bytes": cand_bytes,
+            "validation_errors": len(blocker_errors),
+            "validation_warnings": len(warnings),
+        },
+        "checks": checks,
+        "errors": blocker_errors,
+        "warnings": warnings,
+        "future_execution_eligible_for_review": status in {"passed", "partial"}
+        and not blocker_errors,
+        "future_execution_available": False,
+        "safety": receipt_validation_safety_block(),
+        "first_safe_command": (
+            "python3 scripts/docker01_artifact_archive_plan.py "
+            "--validate-dry-run-receipt <dry_run_receipt_dir> --json"
+        ),
+    }
+
+
+def render_dry_run_receipt_validation_summary(result: dict[str, Any]) -> str:
+    by_name = {c["name"]: c["status"] for c in result["checks"]}
+    return "\n".join(
+        [
+            "# Docker01 Artifact Archive Dry-Run Receipt Validation",
+            "",
+            f"Receipt: {result['receipt_dir']}",
+            f"Plan: {result['plan_dir']}",
+            f"Plan ID: {result['plan_id']}",
+            f"Status: {result['status']}",
+            "Read-only: yes",
+            "Execution available: no",
+            "",
+            "## Checks",
+            f"* required files: {by_name.get('required_files_present')}",
+            f"* JSON parse: {by_name.get('json_parse_ok')}",
+            f"* manifest: {by_name.get('manifest_ok')}",
+            f"* checksums: {by_name.get('checksums_ok')}",
+            f"* receipt safety: {by_name.get('receipt_safety_ok')}",
+            f"* candidate manifest: {by_name.get('candidate_manifest_ok')}",
+            f"* future contract: {by_name.get('future_contract_ok')}",
+            f"* plan cross-check: {result['summary']['plan_cross_check_status']}",
+            "",
+            "## Result",
+            f"* {result['status']}",
+            "",
+            "## Safety",
+            "* validation only",
+            "* no archive created",
+            "* no source copied",
+            "* no source moved",
+            "* no source deleted",
+            "* no cleanup/prune/delete/restart",
+            "* no remediation/rollback/recovery",
+            "* no natural-language execution",
+            "* no " + "shell=" + "True",
+            "",
+        ]
+    )
+
+
+def write_dry_run_receipt_validation_outputs(result: dict[str, Any], out_dir: str) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "artifact-archive-dry-run-receipt-validation.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    (out / "artifact-archive-dry-run-receipt-validation-summary.md").write_text(
+        render_dry_run_receipt_validation_summary(result)
+    )
+    manifest_files = []
+    for name in DRY_RUN_RECEIPT_VALIDATION_OUT_FILES:
+        if name in {"manifest.json", "checksums.json"}:
+            continue
+        p = out / name
+        manifest_files.append({"path": str(p), "name": name, "size_bytes": p.stat().st_size})
+    (out / "manifest.json").write_text(
+        json.dumps(
+            {
+                "plan_id": result["plan_id"],
+                "mode": DRY_RUN_RECEIPT_VALIDATION_MODE,
+                "files": manifest_files,
+                "archive_created": False,
+                "candidate_contents_copied": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    checksum_names = [item["name"] for item in manifest_files] + ["manifest.json"]
+    checksums = {name: "sha256:" + sha256_file(out / name) for name in checksum_names}
+    (out / "checksums.json").write_text(
+        json.dumps({"plan_id": result["plan_id"], "checksums": checksums}, indent=2, sort_keys=True)
+        + "\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Build or validate a read-only ShellForgeAI artifact archive plan."
@@ -997,6 +1426,14 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PLAN_DIR",
         help="build a dry-run receipt for an existing archive-plan directory (read-only)",
     )
+    parser.add_argument(
+        "--validate-dry-run-receipt",
+        metavar="RECEIPT_DIR",
+        help="validate an existing dry-run receipt directory (read-only)",
+    )
+    parser.add_argument(
+        "--plan-dir", help="optional source archive-plan directory for receipt validation"
+    )
     parser.add_argument("--plan-id", help="required exact plan id for dry-run receipt")
     parser.add_argument("--json", action="store_true", help="emit strict JSON")
     parser.add_argument("--out", help="write plan or validation artifacts to this directory")
@@ -1011,6 +1448,21 @@ def main(argv: list[str] | None = None) -> int:
             write_validation_outputs(result, args.out)
         print(
             json.dumps(result, sort_keys=True) if args.json else render_validation_summary(result)
+        )
+        return 0 if result["status"] != "failed" else 1
+
+    if args.validate_dry_run_receipt:
+        result = validate_dry_run_receipt(
+            args.validate_dry_run_receipt,
+            plan_dir=args.plan_dir,
+            max_candidates=args.max_candidates_returned,
+        )
+        if args.out:
+            write_dry_run_receipt_validation_outputs(result, args.out)
+        print(
+            json.dumps(result, sort_keys=True)
+            if args.json
+            else render_dry_run_receipt_validation_summary(result)
         )
         return 0 if result["status"] != "failed" else 1
 

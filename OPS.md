@@ -2769,5 +2769,16 @@ python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr
 
 The dry-run receipt summarizes the future archive preview (candidate counts/classes/bytes and explicit exclusions), repeats the future confirmation phrase, and records receipt/manifest/checksum/rollback/source-preservation requirements. `--out` writes receipt metadata only (`artifact-archive-dry-run-receipt.json`, `artifact-archive-dry-run-summary.md`, candidate/excluded manifests, future checklist, safety notes, manifest, checksums). It never creates an archive, never copies/moves/modifies/deletes source artifacts, never touches the source plan directory, and never runs cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, network/model/Codex, GitHub, or cloud apply/merge/push behavior. `execution_available=false` remains explicit; future execution is a separate PR/lane only and would require the exact plan id plus `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`.
 
+The helper can validate a PR233 dry-run receipt directory with `--validate-dry-run-receipt <receipt_dir>`. Standalone validation checks the receipt required files, JSON parseability, manifest, checksums, safety flags, candidate scope, and future execution contract while recording `plan_cross_check_status=not_requested`. Supplying `--plan-dir <plan_dir>` first validates the original PR231/PR232 plan and cross-checks plan id, candidate counts/classes/bytes, exclusions, confirmation phrase, and future execution contract consistency. `--out <dir>` writes validator artifacts only (`artifact-archive-dry-run-receipt-validation.json`, `artifact-archive-dry-run-receipt-validation-summary.md`, `manifest.json`, `checksums.json`).
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --plan-dir /tmp/sfai-pr231-artifact-archive-plan --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --plan-dir /tmp/sfai-pr231-artifact-archive-plan --out /tmp/sfai-pr234-artifact-archive-dry-run-validation --json
+```
+
+Dry-run receipt validation is read-only and never creates an archive, copies/moves/modifies/deletes source artifacts, modifies the source receipt or plan directories, runs cleanup/prune/delete/restart/remediation/rollback/recovery, executes Docker/Compose mutation, invokes validation/pytest/QA from the helper, uses natural-language execution or `shell=True`, or authorizes future execution. `future_execution_available=false` remains explicit; future archive execution remains a separate PR/lane.
+
+
 Any future execution lane would be separate and must require the exact `plan_id`, exact `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, bounded candidate classes, a validated candidate manifest, archive and receipt output targets, a dry-run preview first, and operator review. Future execution must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
 
