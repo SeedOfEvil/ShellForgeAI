@@ -734,5 +734,15 @@ python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-art
 
 Validation checks the required files, manifest, checksums (SHA256 + size), `plan_id`, the `read_only`/`mutation_performed`/`execution_available` flags, candidate scope (bounded, known patterns only, symlink and out-of-scope candidates rejected and never followed), the `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` confirmation phrase, the future contract, and the safety flags, reporting `status=passed|failed|partial`. It does not create an archive, does not copy/move/delete sources, does not modify the source plan directory, and does not authorize execution.
 
+The helper can also emit a dry-run receipt for a validated plan. The receipt requires the exact plan id and first runs the same read-only validation checks; missing or mismatched `--plan-id` fails clearly and never reports `ready_for_review`.
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --json
+python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id>
+python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --out /tmp/sfai-pr233-artifact-archive-dry-run --json
+```
+
+The dry-run receipt summarizes the future archive preview (candidate counts/classes/bytes and explicit exclusions), repeats the future confirmation phrase, and records receipt/manifest/checksum/rollback/source-preservation requirements. `--out` writes receipt metadata only (`artifact-archive-dry-run-receipt.json`, `artifact-archive-dry-run-summary.md`, candidate/excluded manifests, future checklist, safety notes, manifest, checksums). It never creates an archive, never copies/moves/modifies/deletes source artifacts, never touches the source plan directory, and never runs cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, network/model/Codex, GitHub, or cloud apply/merge/push behavior. `execution_available=false` remains explicit; future execution is a separate PR/lane only and would require the exact plan id plus `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`.
+
 Any future execution lane would be separate and must require the exact `plan_id`, exact `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, bounded candidate classes, a validated candidate manifest, archive and receipt output targets, a dry-run preview first, and operator review. Future execution must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
 

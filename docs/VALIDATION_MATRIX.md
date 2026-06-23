@@ -174,6 +174,17 @@ The hygiene report uses a fixed allowlist for `df` and Docker inspection command
 | Storage health report dir | `python scripts/docker01_storage_health_report.py --out /tmp/sfai-docker01-storage-health --json` | Writes `storage-health-report.json`, `storage-health-summary.md`, `commands-run.json`, `manifest.json`, `checksums.json` (SHA256 + sizes). | No, except writing the report directory |
 | Storage health unit tests | `pytest -q tests/test_pr230_docker01_storage_health_report.py` | Verifies JSON/human output, warning-pattern detection and bounding, output files, partial-on-denied-dmesg, and read-only safety with fakes. | No |
 
+## Docker01 artifact archive dry-run receipt checks
+
+| Check | Command | Purpose | Mutates state |
+| --- | --- | --- | --- |
+| Archive plan | `python3 scripts/docker01_artifact_archive_plan.py --root /tmp --out /tmp/sfai-pr231-artifact-archive-plan` | Writes read-only plan metadata for bounded ShellForgeAI evidence artifacts. | No, except writing the plan directory |
+| Plan validation | `python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan --json` | Validates required files, manifest/checksums, plan id, candidate scope, confirmation contract, and safety flags. | No |
+| Dry-run receipt | `python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --json` | Produces strict read-only receipt JSON after validation and exact plan-id match. | No |
+| Dry-run receipt dir | `python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --out /tmp/sfai-pr233-artifact-archive-dry-run --json` | Writes receipt metadata, future checklist, manifest, and checksums only. | No, except writing the receipt directory |
+
+The dry-run receipt lane never creates an archive, copies/moves/modifies/deletes source artifacts, modifies the source plan directory, runs cleanup/prune/delete/restart/remediation/rollback/recovery, executes Docker/Compose mutation, runs validation/pytest/QA from the helper, calls network/model/Codex/GitHub/cloud actions, or uses `shell=True`. `execution_available=false` remains explicit; any real archive execution would be a separate PR/lane requiring exact plan id and `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`. SeedOfEvil remains final merge owner.
+
 The storage health report uses a fixed read-only command allowlist (`df -P -B1`, `findmnt --json`, `dmesg --level=err,warn --ctime`, `journalctl -k -p warning..alert --no-pager -n <bounded>`) plus `shutil.disk_usage` and `/proc/mounts`, always with `shell=False`. It must not run `fsck`/`e2fsck`/`xfs_repair`, mount/remount/umount, Docker prune/image/volume/container removal, file deletion, restart, Docker/Compose mutation, remediation/rollback/recovery, package install, network, model/Codex, or GitHub/cloud merge/apply operations.
 
 ## Docker01 hygiene validator impact
