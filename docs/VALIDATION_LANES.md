@@ -1160,3 +1160,12 @@ python3 scripts/docker01_artifact_archive_plan.py --root /tmp --out /tmp/sfai-pr
 
 Any future execution lane would be separate and must require the exact `plan_id`, exact `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, bounded candidate classes, a validated candidate manifest, archive and receipt output targets, a dry-run preview first, and operator review. Future execution must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
 
+The dry-run receipt step remains read-only and requires an exact validated plan id:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --json
+python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --out /tmp/sfai-pr233-artifact-archive-dry-run --json
+```
+
+The helper validates the source plan first, refuses missing/mismatched plan ids, and reports `ready_for_review` only for a valid human-reviewable future lane preview. Receipt output files are metadata only: no archive is created, no source is copied/moved/modified/deleted, the source plan directory is not modified, and cleanup/prune/delete/restart/remediation/rollback/recovery plus Docker/Compose mutation remain unavailable. Future execution remains a separate PR/lane gated by exact plan id and `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`; SeedOfEvil remains final merge owner.
+
