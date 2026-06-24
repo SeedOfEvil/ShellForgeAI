@@ -1179,3 +1179,12 @@ python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tm
 
 It validates receipt required files, JSON, manifest, checksums, safety flags, candidate scope, and future contract. With `--plan-dir`, it validates the source plan first and cross-checks plan id, candidate counts/classes/bytes, exclusions, confirmation phrase, and future execution contract consistency; without `--plan-dir`, it records `plan_cross_check_status=not_requested`. `--out` writes validation artifacts only. No archive is created, no source is copied/moved/modified/deleted, source receipt/plan directories are not modified, and future execution remains unavailable.
 
+The execution-readiness gate is the final read-only evidence-chain report before any future archive mutation lane exists:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --out /tmp/sfai-pr235-artifact-archive-readiness --json
+```
+
+It validates the plan and dry-run receipt chain, optionally consumes prior receipt-validation output, cross-checks plan id, candidates, exclusions, confirmation phrase, future contract, and safety flags, and writes readiness report artifacts only when `--out` is supplied. `ready_for_execution_review` is human-review evidence for a future separate PR/lane only; execution remains unavailable. No archive creation, source copy/move/delete/modify, cleanup/prune/delete/restart, remediation/rollback/recovery, Docker/Compose mutation, helper-triggered validation/pytest/QA, natural-language execution, or `shell=True` is allowed. SeedOfEvil remains final merge owner.
+
