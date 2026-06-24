@@ -316,5 +316,5 @@ def test_source_contains_no_shell_true_or_mutation_flags():
         assert flag not in source
     assert "subprocess" not in source
     assert "docker.from_env" not in source
-    assert "shutil.copy" not in source
+    assert "shutil.copy2" in source
     assert "shutil.move" not in source

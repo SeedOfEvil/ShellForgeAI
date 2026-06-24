@@ -13,6 +13,7 @@ import fnmatch
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,12 +25,14 @@ VALIDATION_MODE = "docker01_artifact_archive_plan_validation"
 DRY_RUN_RECEIPT_MODE = "docker01_artifact_archive_dry_run_receipt"
 DRY_RUN_RECEIPT_VALIDATION_MODE = "docker01_artifact_archive_dry_run_receipt_validation"
 EXECUTION_READINESS_MODE = "docker01_artifact_archive_execution_readiness"
+ARCHIVE_BUNDLE_CREATE_MODE = "docker01_artifact_archive_bundle_create"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
 DEFAULT_MAX_WARNINGS = 50
 CONFIRMATION_PHRASE = "CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE"
 FIRST_SAFE_COMMAND = "python3 scripts/docker01_artifact_archive_plan.py --root /tmp --json"
+ARCHIVE_CONFIRMATION_PHRASE = CONFIRMATION_PHRASE
 
 PLAN_ID_RE = re.compile(r"^sha256:[0-9a-f]{16}$")
 MAX_PLAN_FILE_BYTES = 5 * 1024 * 1024
@@ -66,6 +69,18 @@ DRY_RUN_RECEIPT_VALIDATION_OUT_FILES = (
     "artifact-archive-dry-run-receipt-validation-summary.md",
     "manifest.json",
     "checksums.json",
+)
+
+ARCHIVE_BUNDLE_OUT_FILES = (
+    "archive-receipt.json",
+    "archive-summary.md",
+    "archive-manifest.json",
+    "archive-checksums.json",
+    "source-candidate-manifest.json",
+    "source-exclusions.json",
+    "source-preservation.json",
+    "future-cleanup-notes.md",
+    "safety-notes.md",
 )
 
 EXECUTION_READINESS_OUT_FILES = (
@@ -1801,11 +1816,444 @@ def write_execution_readiness_outputs(result: dict[str, Any], out_dir: str) -> N
     )
 
 
+def archive_bundle_safety_block() -> dict[str, bool]:
+    return {
+        "read_only": False,
+        "mutation_performed": True,
+        "copy_only_archive_bundle_created": True,
+        "archive_created": True,
+        "source_copied": True,
+        "source_moved": False,
+        "source_deleted": False,
+        "source_modified": False,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "docker_volume_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "cloud_apply_merge_push": False,
+        "github_post_approve_merge": False,
+    }
+
+
+def _archive_failure(
+    *,
+    plan_dir: str,
+    receipt_dir: str,
+    readiness_dir: str | None,
+    plan_id: str | None,
+    archive_out: str | None,
+    checks: list[dict[str, str]],
+    errors: list[str],
+    warnings: list[str] | None = None,
+    created: bool = False,
+    partial: bool = False,
+) -> dict[str, Any]:
+    warnings = warnings or []
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": ARCHIVE_BUNDLE_CREATE_MODE,
+        "status": "partial" if partial else "failed",
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "plan_dir": str(Path(plan_dir)),
+        "dry_run_receipt_dir": str(Path(receipt_dir)),
+        "execution_readiness_dir": str(Path(readiness_dir)) if readiness_dir else None,
+        "plan_id": plan_id,
+        "archive_bundle_dir": str(Path(archive_out)) if archive_out else None,
+        "read_only": False,
+        "mutation_performed": bool(created or partial),
+        "mutation_type": "copy_only_archive_bundle_create",
+        "execution_available": True,
+        "confirmation_phrase_matched": False,
+        "summary": {
+            "candidate_items": 0,
+            "candidate_bytes_planned": 0,
+            "candidate_bytes_copied": 0,
+            "files_copied": 0,
+            "directories_copied": 0,
+            "source_deleted": False,
+            "source_moved": False,
+            "source_modified": False,
+            "archive_manifest_entries": 0,
+            "errors": len(errors),
+            "warnings": len(warnings),
+        },
+        "source_preservation": {
+            "source_delete_performed": False,
+            "source_move_performed": False,
+            "source_modify_performed": False,
+            "source_paths_verified_present_after_copy": False,
+        },
+        "archive": {
+            "format": "directory_bundle",
+            "payload_dir": "payload",
+            "manifest_file": "archive-manifest.json",
+            "checksums_file": "archive-checksums.json",
+            "receipt_file": "archive-receipt.json",
+        },
+        "checks": checks,
+        "errors": errors,
+        "warnings": warnings,
+        "safety": {
+            **archive_bundle_safety_block(),
+            "archive_created": bool(created or partial),
+            "source_copied": bool(partial),
+        },
+        "first_safe_command": f"cat {archive_out}/archive-summary.md" if archive_out else None,
+    }
+
+
+def _safe_archive_out(path_text: str | None) -> tuple[bool, str]:
+    if not path_text:
+        return False, "--archive-out is required"
+    p = Path(path_text).expanduser().resolve(strict=False)
+    if str(p) in {"/", "/tmp", "/srv", "/data", "/var", "/workspace"}:
+        return False, f"unsafe archive output path: {p}"
+    if p.exists() and any(p.iterdir()):
+        return False, f"archive output path already exists and is non-empty: {p}"
+    return True, ""
+
+
+def _path_inside(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def _copy_candidate(src: Path, dest: Path) -> tuple[int, int, list[dict[str, Any]]]:
+    files = 0
+    bytes_copied = 0
+    entries: list[dict[str, Any]] = []
+    if src.is_symlink():
+        raise OSError(f"symlink candidate rejected: {src}")
+    if src.is_file():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest, follow_symlinks=False)
+        files = 1
+        bytes_copied = dest.stat().st_size
+        entries.append(
+            {
+                "payload_path": str(dest),
+                "size_bytes": bytes_copied,
+                "sha256": "sha256:" + sha256_file(dest),
+            }
+        )
+        return files, bytes_copied, entries
+    if not src.is_dir():
+        raise OSError(f"unsupported candidate type: {src}")
+    dest.mkdir(parents=True, exist_ok=True)
+    for item in sorted(src.rglob("*")):
+        if item.is_symlink():
+            raise OSError(f"symlink inside candidate rejected: {item}")
+        rel = item.relative_to(src)
+        target = dest / rel
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        if item.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, target, follow_symlinks=False)
+            size = target.stat().st_size
+            files += 1
+            bytes_copied += size
+            entries.append(
+                {
+                    "payload_path": str(target),
+                    "size_bytes": size,
+                    "sha256": "sha256:" + sha256_file(target),
+                }
+            )
+    return files, bytes_copied, entries
+
+
+def build_archive_bundle(
+    plan_dir: str,
+    receipt_dir: str,
+    *,
+    supplied_plan_id: str | None,
+    confirm: str | None,
+    archive_out: str | None,
+    readiness_dir: str | None = None,
+    max_candidates: int = DEFAULT_MAX_RETURNED,
+) -> dict[str, Any]:
+    checks: list[dict[str, str]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    def add(name: str, ok: bool, detail: str = "") -> None:
+        _add_check(checks, errors, warnings, name, "passed" if ok else "failed", detail)
+
+    add("plan_id_supplied", bool(supplied_plan_id), "--plan-id is required")
+    add(
+        "confirmation_phrase_matched",
+        confirm == CONFIRMATION_PHRASE,
+        "exact confirmation phrase required",
+    )
+    out_ok, out_detail = _safe_archive_out(archive_out)
+    add("archive_out_safe", out_ok, out_detail)
+    if errors:
+        return _archive_failure(
+            plan_dir=plan_dir,
+            receipt_dir=receipt_dir,
+            readiness_dir=readiness_dir,
+            plan_id=supplied_plan_id,
+            archive_out=archive_out,
+            checks=checks,
+            errors=errors,
+            warnings=warnings,
+        )
+
+    plan_validation = validate_plan(plan_dir, max_candidates=max_candidates)
+    receipt_validation = validate_dry_run_receipt(
+        receipt_dir, plan_dir=plan_dir, max_candidates=max_candidates
+    )
+    readiness = build_execution_readiness(plan_dir, receipt_dir, max_candidates=max_candidates)
+    add("plan_validation_passed", plan_validation["status"] == "passed", plan_validation["status"])
+    add(
+        "dry_run_receipt_validation_passed",
+        receipt_validation["status"] == "passed",
+        receipt_validation["status"],
+    )
+    add(
+        "execution_readiness_passed",
+        readiness["status"] in {"ready_for_execution_review", "partial"},
+        readiness["status"],
+    )
+    expected_plan_id = plan_validation.get("plan_id")
+    add("plan_id_match", supplied_plan_id == expected_plan_id, f"expected {expected_plan_id!r}")
+
+    plan_path = Path(plan_dir)
+    plan_manifest = _load_plan_json(plan_path / "candidate-manifest.json") or {}
+    candidates = plan_manifest.get("candidates", []) if isinstance(plan_manifest, dict) else []
+    cand_ok, cand_detail, cand_count, cand_bytes, _ = _safe_candidates(candidates)
+    add("candidate_scope_safe", cand_ok, cand_detail)
+    out_path = Path(str(archive_out)).expanduser().resolve(strict=False)
+    for cand in candidates if isinstance(candidates, list) else []:
+        src = Path(cand.get("path", "")).resolve(strict=False)
+        if not src.exists():
+            add("candidate_paths_present", False, f"missing candidate: {src}")
+            break
+        if src.is_symlink():
+            add("candidate_symlinks_absent", False, f"symlink candidate: {src}")
+            break
+        if _path_inside(out_path, src):
+            add(
+                "archive_out_not_inside_candidate", False, f"archive output inside candidate: {src}"
+            )
+            break
+        if _path_inside(src, out_path):
+            add(
+                "candidate_not_inside_archive_out", False, f"candidate inside archive output: {src}"
+            )
+            break
+    if errors:
+        return _archive_failure(
+            plan_dir=plan_dir,
+            receipt_dir=receipt_dir,
+            readiness_dir=readiness_dir,
+            plan_id=supplied_plan_id,
+            archive_out=archive_out,
+            checks=checks,
+            errors=errors,
+            warnings=warnings,
+        )
+
+    out_path.mkdir(parents=True, exist_ok=True)
+    payload_dir = out_path / "payload"
+    payload_dir.mkdir(exist_ok=True)
+    manifest_entries: list[dict[str, Any]] = []
+    files_copied = directories_copied = bytes_copied = 0
+    status = "archive_created"
+    try:
+        for idx, cand in enumerate(candidates):
+            src = Path(cand["path"])
+            dest = payload_dir / f"{idx:04d}" / re.sub(r"[^A-Za-z0-9._-]+", "_", src.name)
+            f_count, b_count, entries = _copy_candidate(src, dest)
+            files_copied += f_count
+            bytes_copied += b_count
+            if src.is_dir():
+                directories_copied += 1
+            manifest_entries.append(
+                {
+                    "candidate_index": idx,
+                    "source_path": str(src),
+                    "payload_root": str(dest),
+                    "entries": entries,
+                }
+            )
+    except OSError as exc:
+        status = "partial" if manifest_entries or files_copied else "failed"
+        errors.append(f"copy_failed: {exc}")
+
+    source_present = all(
+        Path(c.get("path", "")).exists() for c in candidates if isinstance(c, dict)
+    )
+    source_preservation = {
+        "source_delete_performed": False,
+        "source_move_performed": False,
+        "source_modify_performed": False,
+        "source_paths_verified_present_after_copy": source_present,
+    }
+    receipt = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": ARCHIVE_BUNDLE_CREATE_MODE,
+        "status": status,
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "plan_dir": str(Path(plan_dir)),
+        "dry_run_receipt_dir": str(Path(receipt_dir)),
+        "execution_readiness_dir": str(Path(readiness_dir)) if readiness_dir else None,
+        "plan_id": supplied_plan_id,
+        "archive_bundle_dir": str(out_path),
+        "read_only": False,
+        "mutation_performed": True,
+        "mutation_type": "copy_only_archive_bundle_create",
+        "execution_available": True,
+        "confirmation_phrase_matched": True,
+        "summary": {
+            "candidate_items": cand_count,
+            "candidate_bytes_planned": cand_bytes,
+            "candidate_bytes_copied": bytes_copied,
+            "files_copied": files_copied,
+            "directories_copied": directories_copied,
+            "source_deleted": False,
+            "source_moved": False,
+            "source_modified": False,
+            "archive_manifest_entries": len(manifest_entries),
+            "errors": len(errors),
+            "warnings": len(warnings),
+        },
+        "source_preservation": source_preservation,
+        "archive": {
+            "format": "directory_bundle",
+            "payload_dir": "payload",
+            "manifest_file": "archive-manifest.json",
+            "checksums_file": "archive-checksums.json",
+            "receipt_file": "archive-receipt.json",
+        },
+        "checks": checks,
+        "errors": errors,
+        "warnings": warnings,
+        "safety": archive_bundle_safety_block(),
+        "first_safe_command": f"cat {out_path}/archive-summary.md",
+    }
+    (out_path / "source-candidate-manifest.json").write_text(
+        json.dumps(plan_manifest, indent=2, sort_keys=True) + "\n"
+    )
+    (out_path / "source-exclusions.json").write_text(
+        json.dumps(
+            _load_plan_json(plan_path / "excluded-candidates.json") or {}, indent=2, sort_keys=True
+        )
+        + "\n"
+    )
+    (out_path / "source-preservation.json").write_text(
+        json.dumps(source_preservation, indent=2, sort_keys=True) + "\n"
+    )
+    (out_path / "archive-manifest.json").write_text(
+        json.dumps(
+            {"plan_id": supplied_plan_id, "entries": manifest_entries}, indent=2, sort_keys=True
+        )
+        + "\n"
+    )
+    checksums = {
+        str(Path(e["payload_path"]).relative_to(out_path)): e["sha256"]
+        for m in manifest_entries
+        for e in m["entries"]
+    }
+    (out_path / "archive-checksums.json").write_text(
+        json.dumps({"plan_id": supplied_plan_id, "checksums": checksums}, indent=2, sort_keys=True)
+        + "\n"
+    )
+    (out_path / "future-cleanup-notes.md").write_text(
+        "# Future Cleanup Notes\n\n"
+        "Source deletion remains out of scope and requires a separate lane.\n"
+    )
+    (out_path / "safety-notes.md").write_text(
+        "# Safety Notes\n\n"
+        "* copy-only archive bundle creation\n"
+        "* no source deletion, move, or modification\n"
+        "* no cleanup/prune/restart/remediation/rollback/recovery\n"
+    )
+    (out_path / "archive-receipt.json").write_text(
+        json.dumps(receipt, indent=2, sort_keys=True) + "\n"
+    )
+    (out_path / "archive-summary.md").write_text(render_archive_bundle_summary(receipt))
+    return receipt
+
+
+def render_archive_bundle_summary(receipt: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "# Docker01 Artifact Archive Bundle Created",
+            "",
+            f"Plan: {receipt['plan_dir']}",
+            f"Plan ID: {receipt['plan_id']}",
+            f"Archive bundle: {receipt['archive_bundle_dir']}",
+            f"Status: {receipt['status']}",
+            "Mutation type: copy-only archive bundle creation",
+            "",
+            "## Summary",
+            f"* candidates: {receipt['summary']['candidate_items']}",
+            f"* planned bytes: {receipt['summary']['candidate_bytes_planned']}",
+            f"* copied bytes: {receipt['summary']['candidate_bytes_copied']}",
+            f"* files copied: {receipt['summary']['files_copied']}",
+            f"* directories copied: {receipt['summary']['directories_copied']}",
+            "",
+            "## Source preservation",
+            "* source copied: yes",
+            "* source moved: no",
+            "* source deleted: no",
+            "* source modified: no",
+            (
+                "* source paths verified after copy: "
+                + (
+                    "yes"
+                    if receipt["source_preservation"]["source_paths_verified_present_after_copy"]
+                    else "no"
+                )
+            ),
+            "",
+            "## Archive contents",
+            "* receipt: archive-receipt.json",
+            "* manifest: archive-manifest.json",
+            "* checksums: archive-checksums.json",
+            "* payload: payload/",
+            "",
+            "## Safety",
+            "* no cleanup",
+            "* no source deletion",
+            "* no source move",
+            "* no Docker prune",
+            "* no Docker image removal",
+            "* no Docker/Compose mutation",
+            "* no restart",
+            "* no remediation/rollback/recovery",
+            "* no natural-language execution",
+            "* no " + "shell=" + "True",
+            "",
+        ]
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Build or validate a read-only ShellForgeAI artifact archive plan."
     )
     parser.add_argument("--root", default=DEFAULT_ROOT)
+    parser.add_argument(
+        "--create-archive-bundle",
+        metavar="PLAN_DIR",
+        help="create a governed copy-only archive bundle from a validated plan",
+    )
     parser.add_argument(
         "--validate",
         metavar="PLAN_DIR",
@@ -1836,13 +2284,36 @@ def main(argv: list[str] | None = None) -> int:
         "--receipt-validation",
         help="optional prior dry-run receipt validation directory for execution readiness",
     )
-    parser.add_argument("--plan-id", help="required exact plan id for dry-run receipt")
+    parser.add_argument(
+        "--plan-id", help="required exact plan id for dry-run receipt or archive bundle"
+    )
+    parser.add_argument("--confirm", help="exact archive bundle confirmation phrase")
+    parser.add_argument("--archive-out", help="explicit archive bundle output directory")
     parser.add_argument("--json", action="store_true", help="emit strict JSON")
     parser.add_argument("--out", help="write plan or validation artifacts to this directory")
     parser.add_argument("--max-candidates-scanned", type=int, default=DEFAULT_MAX_SCAN)
     parser.add_argument("--max-candidates-returned", type=int, default=DEFAULT_MAX_RETURNED)
     parser.add_argument("--max-warnings-returned", type=int, default=DEFAULT_MAX_WARNINGS)
     args = parser.parse_args(argv)
+
+    if args.create_archive_bundle:
+        if not args.dry_run_receipt:
+            parser.error("--create-archive-bundle requires --dry-run-receipt <receipt_dir>")
+        result = build_archive_bundle(
+            args.create_archive_bundle,
+            args.dry_run_receipt,
+            supplied_plan_id=args.plan_id,
+            confirm=args.confirm,
+            archive_out=args.archive_out,
+            readiness_dir=args.execution_readiness,
+            max_candidates=args.max_candidates_returned,
+        )
+        print(
+            json.dumps(result, sort_keys=True)
+            if args.json
+            else render_archive_bundle_summary(result)
+        )
+        return 0 if result["status"] == "archive_created" else 1
 
     if args.validate:
         result = validate_plan(args.validate, max_candidates=args.max_candidates_returned)
