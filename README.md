@@ -754,6 +754,17 @@ python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tm
 
 Dry-run receipt validation is read-only and never creates an archive, copies/moves/modifies/deletes source artifacts, modifies the source receipt or plan directories, runs cleanup/prune/delete/restart/remediation/rollback/recovery, executes Docker/Compose mutation, invokes validation/pytest/QA from the helper, uses natural-language execution or `shell=True`, or authorizes future execution. `future_execution_available=false` remains explicit; future archive execution remains a separate PR/lane.
 
+The helper also provides a final read-only execution-readiness gate that combines the validated plan, dry-run receipt, and optionally a prior receipt-validation directory. It validates the plan, validates (or reads) the dry-run receipt validation, then cross-checks the exact plan id, candidate paths/counts/classes/bytes, exclusions, confirmation phrase, future source-delete/source-move defaults, and safety contract. `ready_for_execution_review` means only that the evidence chain is internally consistent for human review of a future separate PR/lane; it does not authorize execution and `execution_available=false` remains explicit.
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run
+python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --receipt-validation /tmp/sfai-pr235-artifact-archive-dry-run-validation --json
+python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --out /tmp/sfai-pr235-artifact-archive-readiness --json
+```
+
+With `--out`, readiness writes report artifacts only (`artifact-archive-execution-readiness.json`, `artifact-archive-execution-readiness-summary.md`, `future-execution-checklist.md`, `safety-notes.md`, `manifest.json`, `checksums.json`). It never creates an archive, never copies/moves/modifies/deletes source artifacts, never modifies the source plan or receipt directories, never runs cleanup/prune/delete/restart/remediation/rollback/recovery, never performs Docker/Compose mutation, never runs validation/pytest/QA from the helper, never uses natural-language execution or `shell=True`, and never performs network/model/Codex/package/GitHub/cloud actions. Future execution remains unavailable and would require a separate PR/lane with the exact plan id and `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`; SeedOfEvil remains final merge owner.
+
 
 Any future execution lane would be separate and must require the exact `plan_id`, exact `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, bounded candidate classes, a validated candidate manifest, archive and receipt output targets, a dry-run preview first, and operator review. Future execution must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
 

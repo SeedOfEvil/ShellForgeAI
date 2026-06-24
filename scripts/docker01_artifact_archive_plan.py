@@ -23,6 +23,7 @@ MODE = "docker01_artifact_archive_plan"
 VALIDATION_MODE = "docker01_artifact_archive_plan_validation"
 DRY_RUN_RECEIPT_MODE = "docker01_artifact_archive_dry_run_receipt"
 DRY_RUN_RECEIPT_VALIDATION_MODE = "docker01_artifact_archive_dry_run_receipt_validation"
+EXECUTION_READINESS_MODE = "docker01_artifact_archive_execution_readiness"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
@@ -63,6 +64,15 @@ VALIDATION_OUT_FILES = (
 DRY_RUN_RECEIPT_VALIDATION_OUT_FILES = (
     "artifact-archive-dry-run-receipt-validation.json",
     "artifact-archive-dry-run-receipt-validation-summary.md",
+    "manifest.json",
+    "checksums.json",
+)
+
+EXECUTION_READINESS_OUT_FILES = (
+    "artifact-archive-execution-readiness.json",
+    "artifact-archive-execution-readiness-summary.md",
+    "future-execution-checklist.md",
+    "safety-notes.md",
     "manifest.json",
     "checksums.json",
 )
@@ -1411,6 +1421,386 @@ def write_dry_run_receipt_validation_outputs(result: dict[str, Any], out_dir: st
     )
 
 
+def execution_readiness_safety_block() -> dict[str, bool]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "readiness_gate_only": True,
+        "archive_created": False,
+        "source_copied": False,
+        "source_moved": False,
+        "source_deleted": False,
+        "source_modified": False,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "docker_volume_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "cloud_apply_merge_push": False,
+        "github_post_approve_merge": False,
+    }
+
+
+def _load_receipt_validation(validation_dir: str | None) -> dict[str, Any] | None:
+    if not validation_dir:
+        return None
+    data = _load_plan_json(
+        Path(validation_dir) / "artifact-archive-dry-run-receipt-validation.json"
+    )
+    return data if isinstance(data, dict) else None
+
+
+def _same_candidates(plan_candidates: list[Any], receipt_candidates: list[Any]) -> bool:
+    def key(candidate: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            candidate.get("path"),
+            candidate.get("class"),
+            candidate.get("type"),
+            int(candidate.get("size_bytes", 0) or 0),
+            candidate.get("future_action"),
+        )
+
+    return sorted(key(c) for c in plan_candidates if isinstance(c, dict)) == sorted(
+        key(c) for c in receipt_candidates if isinstance(c, dict)
+    )
+
+
+def _same_exclusions(plan_excluded: Any, receipt_excluded: Any) -> bool:
+    if not isinstance(plan_excluded, list) or not isinstance(receipt_excluded, list):
+        return False
+
+    def key(exclusion: dict[str, Any]) -> tuple[Any, ...]:
+        return (exclusion.get("path"), exclusion.get("reason"))
+
+    return sorted(key(e) for e in plan_excluded if isinstance(e, dict)) == sorted(
+        key(e) for e in receipt_excluded if isinstance(e, dict)
+    )
+
+
+def build_execution_readiness(
+    plan_dir: str,
+    receipt_dir: str,
+    *,
+    receipt_validation_dir: str | None = None,
+    max_candidates: int = DEFAULT_MAX_RETURNED,
+) -> dict[str, Any]:
+    checks: list[dict[str, str]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    plan_path = Path(plan_dir)
+    receipt_path = Path(receipt_dir)
+
+    def add(name: str, ok: bool, detail: str = "", *, warning: bool = False) -> None:
+        status = "warning" if warning else "passed" if ok else "failed"
+        _add_check(checks, errors, warnings, name, status, detail)
+
+    plan_validation = validate_plan(str(plan_path), max_candidates=max_candidates)
+    receipt_validation = _load_receipt_validation(receipt_validation_dir)
+    if receipt_validation is None:
+        receipt_validation = validate_dry_run_receipt(
+            str(receipt_path), plan_dir=str(plan_path), max_candidates=max_candidates
+        )
+        if receipt_validation_dir:
+            add("receipt_validation_supplied", False, "could not parse supplied validation")
+    elif receipt_validation.get("mode") != DRY_RUN_RECEIPT_VALIDATION_MODE:
+        add("receipt_validation_supplied", False, "wrong receipt-validation mode")
+    else:
+        supplied_matches = receipt_validation.get("receipt_dir") == str(
+            receipt_path
+        ) and receipt_validation.get("plan_dir") == str(plan_path)
+        add(
+            "receipt_validation_supplied",
+            supplied_matches,
+            "used supplied receipt validation"
+            if supplied_matches
+            else "supplied validation does not match plan/receipt dirs",
+        )
+
+    add("plan_validation_passed", plan_validation["status"] == "passed", plan_validation["status"])
+    add(
+        "dry_run_receipt_validation_passed",
+        receipt_validation.get("status") == "passed",
+        str(receipt_validation.get("status")),
+    )
+
+    plan = _load_plan_json(plan_path / "artifact-archive-plan.json") or {}
+    receipt = _load_plan_json(receipt_path / "artifact-archive-dry-run-receipt.json") or {}
+    plan_manifest = _load_plan_json(plan_path / "candidate-manifest.json") or {}
+    receipt_manifest = _load_plan_json(receipt_path / "candidate-manifest.json") or {}
+    plan_excluded_doc = _load_plan_json(plan_path / "excluded-candidates.json") or {}
+    receipt_excluded_doc = _load_plan_json(receipt_path / "excluded-candidates.json") or {}
+
+    plan_id = plan.get("plan_id") if isinstance(plan, dict) else None
+    receipt_plan_id = receipt.get("plan_id") if isinstance(receipt, dict) else None
+    plan_id_match = isinstance(plan_id, str) and plan_id == receipt_plan_id
+    add("plan_id_match", plan_id_match, f"plan={plan_id!r} receipt={receipt_plan_id!r}")
+
+    plan_candidates = plan_manifest.get("candidates", []) if isinstance(plan_manifest, dict) else []
+    receipt_candidates = (
+        receipt_manifest.get("candidates", []) if isinstance(receipt_manifest, dict) else []
+    )
+    p_ok, p_detail, p_count, p_bytes, p_classes = _safe_candidates(plan_candidates)
+    r_ok, r_detail, r_count, r_bytes, r_classes = _safe_candidates(receipt_candidates)
+    add("candidate_paths_safe", p_ok and r_ok, p_detail or r_detail)
+    add("candidate_count_match", p_count == r_count, f"plan={p_count} receipt={r_count}")
+    add("candidate_bytes_match", p_bytes == r_bytes, f"plan={p_bytes} receipt={r_bytes}")
+    add("candidate_class_match", p_classes == r_classes, "candidate class totals differ")
+    candidate_manifest_match = (
+        p_ok and r_ok and _same_candidates(plan_candidates, receipt_candidates)
+    )
+    add("candidate_manifest_match", candidate_manifest_match, "candidate manifest differs")
+
+    exclusions_match = _same_exclusions(
+        plan_excluded_doc.get("excluded", []) if isinstance(plan_excluded_doc, dict) else [],
+        receipt_excluded_doc.get("excluded", []) if isinstance(receipt_excluded_doc, dict) else [],
+    )
+    add("exclusions_match", exclusions_match, "excluded candidate manifests differ")
+
+    plan_contract = plan.get("future_archive_contract", {}) if isinstance(plan, dict) else {}
+    receipt_contract = (
+        receipt.get("future_execution_contract", {}) if isinstance(receipt, dict) else {}
+    )
+    future_contract_match = (
+        plan.get("future_confirmation_phrase") == CONFIRMATION_PHRASE
+        and receipt_contract.get("future_confirmation_phrase") == CONFIRMATION_PHRASE
+        and plan_contract.get("delete_sources_by_default") is False
+        and plan_contract.get("move_sources_by_default") is False
+        and receipt_contract.get("future_source_delete_default") is False
+        and receipt_contract.get("future_source_move_default") is False
+        and receipt_contract.get("future_execution_available_in_this_pr") is False
+    )
+    add("future_contract_match", future_contract_match, "future execution contract mismatch")
+
+    unsafe_seen = False
+    for doc in (plan, receipt):
+        if isinstance(doc, dict):
+            if (
+                doc.get("execution_available") is not False
+                or doc.get("mutation_performed") is not False
+            ):
+                unsafe_seen = True
+            safety = doc.get("safety", {})
+            if isinstance(safety, dict):
+                for flag in execution_readiness_safety_block():
+                    if flag in {"read_only", "readiness_gate_only"}:
+                        continue
+                    if flag in safety and safety.get(flag) is not False:
+                        unsafe_seen = True
+    safety_contract_ok = not unsafe_seen
+    add("safety_contract_ok", safety_contract_ok, "unsafe mutation/execution flag present")
+
+    optional_missing = []
+    for name in (
+        "artifact-archive-plan-summary.md",
+        "artifact-archive-dry-run-summary.md",
+        "future-execution-checklist.md",
+        "safety-notes.md",
+    ):
+        base = plan_path if name == "artifact-archive-plan-summary.md" else receipt_path
+        if not (base / name).is_file():
+            optional_missing.append(name)
+    if optional_missing:
+        add("optional_human_summaries_present", True, ", ".join(optional_missing), warning=True)
+
+    core_ok = (
+        plan_validation["status"] == "passed"
+        and receipt_validation.get("status") == "passed"
+        and plan_id_match
+        and candidate_manifest_match
+        and exclusions_match
+        and future_contract_match
+        and safety_contract_ok
+        and not errors
+    )
+    status = (
+        "ready_for_execution_review"
+        if core_ok and not warnings
+        else "partial"
+        if core_ok
+        else "not_ready"
+    )
+    if not isinstance(plan, dict) or not isinstance(receipt, dict):
+        status = "failed"
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": EXECUTION_READINESS_MODE,
+        "status": status,
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "plan_dir": str(plan_path),
+        "dry_run_receipt_dir": str(receipt_path),
+        "receipt_validation_dir": str(Path(receipt_validation_dir))
+        if receipt_validation_dir
+        else None,
+        "plan_id": plan_id,
+        "read_only": True,
+        "mutation_performed": False,
+        "execution_available": False,
+        "future_execution_review_only": True,
+        "summary": {
+            "plan_validation_status": plan_validation["status"],
+            "dry_run_receipt_validation_status": receipt_validation.get("status", "failed"),
+            "plan_id_match": plan_id_match,
+            "candidate_manifest_match": candidate_manifest_match,
+            "exclusions_match": exclusions_match,
+            "future_contract_match": future_contract_match,
+            "safety_contract_ok": safety_contract_ok,
+            "candidate_items": p_count,
+            "candidate_bytes": p_bytes,
+            "candidate_classes": p_classes,
+            "readiness_errors": len(errors),
+            "readiness_warnings": len(warnings),
+        },
+        "checks": checks,
+        "future_execution_requirements": {
+            "separate_pr_required": True,
+            "exact_plan_id_required": True,
+            "exact_confirmation_phrase_required": True,
+            "future_confirmation_phrase": CONFIRMATION_PHRASE,
+            "archive_must_be_created_before_any_source_change": True,
+            "archive_manifest_required": True,
+            "archive_checksums_required": True,
+            "archive_receipt_required": True,
+            "archive_validation_required": True,
+            "source_delete_default": False,
+            "source_move_default": False,
+            "operator_review_required": True,
+        },
+        "will_not_do": [
+            "create archive in this PR",
+            "copy source files in this PR",
+            "move source files in this PR",
+            "delete source files in this PR",
+            "cleanup/prune/delete/restart/remediate/rollback/recover",
+        ],
+        "errors": errors,
+        "warnings": warnings,
+        "safety": execution_readiness_safety_block(),
+        "first_safe_command": (
+            "python3 scripts/docker01_artifact_archive_plan.py --execution-readiness "
+            "<plan_dir> --dry-run-receipt <receipt_dir> --json"
+        ),
+    }
+
+
+def render_execution_readiness_summary(result: dict[str, Any]) -> str:
+    classes = result["summary"]["candidate_classes"]
+    active = [
+        f"{k}: {v['items']} items / {v['bytes']} bytes" for k, v in classes.items() if v["items"]
+    ]
+    return "\n".join(
+        [
+            "# Docker01 Artifact Archive Execution Readiness",
+            "",
+            f"Plan: {result['plan_dir']}",
+            f"Dry-run receipt: {result['dry_run_receipt_dir']}",
+            f"Plan ID: {result['plan_id']}",
+            f"Status: {result['status']}",
+            "Read-only: yes",
+            "Execution available: no",
+            "",
+            "## Evidence chain",
+            f"* plan validation: {result['summary']['plan_validation_status']}",
+            (
+                "* dry-run receipt validation: "
+                f"{result['summary']['dry_run_receipt_validation_status']}"
+            ),
+            f"* plan id match: {result['summary']['plan_id_match']}",
+            f"* candidate manifest match: {result['summary']['candidate_manifest_match']}",
+            f"* exclusions match: {result['summary']['exclusions_match']}",
+            f"* future contract: {result['summary']['future_contract_match']}",
+            f"* safety contract: {result['summary']['safety_contract_ok']}",
+            "",
+            "## Candidate summary",
+            f"* items: {result['summary']['candidate_items']}",
+            f"* estimated bytes: {result['summary']['candidate_bytes']}",
+            f"* classes: {'; '.join(active) if active else 'none'}",
+            "",
+            "## Future execution requirements",
+            "* separate PR/lane required",
+            "* exact plan id required",
+            "* confirmation phrase required",
+            "* archive must be created and verified before any source change",
+            "* source delete default: false",
+            "* source move default: false",
+            "",
+            "## Safety",
+            "* readiness gate only",
+            "* no archive created",
+            "* no source copied",
+            "* no source moved",
+            "* no source deleted",
+            "* no cleanup/prune/delete/restart",
+            "* no remediation/rollback/recovery",
+            "* no natural-language execution",
+            "* no " + "shell=" + "True",
+            "",
+        ]
+    )
+
+
+def write_execution_readiness_outputs(result: dict[str, Any], out_dir: str) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "artifact-archive-execution-readiness.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    (out / "artifact-archive-execution-readiness-summary.md").write_text(
+        render_execution_readiness_summary(result)
+    )
+    (out / "future-execution-checklist.md").write_text(
+        "# Future Execution Checklist\n\n"
+        "* separate PR/lane required\n"
+        f"* exact plan id required: {result['plan_id']}\n"
+        f"* confirmation phrase: {CONFIRMATION_PHRASE}\n"
+        "* archive must be created and verified before any source change\n"
+        "* source delete default: false\n"
+        "* source move default: false\n"
+    )
+    (out / "safety-notes.md").write_text(
+        "# Safety Notes\n\n"
+        "* execution-readiness gate only\n"
+        "* no archive created\n"
+        "* no source copied, moved, modified, or deleted\n"
+        "* no cleanup/prune/delete/restart/remediation/rollback/recovery\n"
+        "* execution remains unavailable\n"
+    )
+    manifest_files = []
+    for name in EXECUTION_READINESS_OUT_FILES:
+        if name in {"manifest.json", "checksums.json"}:
+            continue
+        p = out / name
+        manifest_files.append({"path": str(p), "name": name, "size_bytes": p.stat().st_size})
+    (out / "manifest.json").write_text(
+        json.dumps(
+            {
+                "plan_id": result["plan_id"],
+                "mode": EXECUTION_READINESS_MODE,
+                "files": manifest_files,
+                "archive_created": False,
+                "candidate_contents_copied": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    checksum_names = [item["name"] for item in manifest_files] + ["manifest.json"]
+    checksums = {name: "sha256:" + sha256_file(out / name) for name in checksum_names}
+    (out / "checksums.json").write_text(
+        json.dumps({"plan_id": result["plan_id"], "checksums": checksums}, indent=2, sort_keys=True)
+        + "\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Build or validate a read-only ShellForgeAI artifact archive plan."
@@ -1424,7 +1814,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run-receipt",
         metavar="PLAN_DIR",
-        help="build a dry-run receipt for an existing archive-plan directory (read-only)",
+        help=(
+            "build a dry-run receipt for a plan, or pair with --execution-readiness as "
+            "the dry-run receipt directory"
+        ),
+    )
+    parser.add_argument(
+        "--execution-readiness",
+        metavar="PLAN_DIR",
+        help="read-only execution-readiness gate for a plan plus dry-run receipt",
     )
     parser.add_argument(
         "--validate-dry-run-receipt",
@@ -1433,6 +1831,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--plan-dir", help="optional source archive-plan directory for receipt validation"
+    )
+    parser.add_argument(
+        "--receipt-validation",
+        help="optional prior dry-run receipt validation directory for execution readiness",
     )
     parser.add_argument("--plan-id", help="required exact plan id for dry-run receipt")
     parser.add_argument("--json", action="store_true", help="emit strict JSON")
@@ -1465,6 +1867,24 @@ def main(argv: list[str] | None = None) -> int:
             else render_dry_run_receipt_validation_summary(result)
         )
         return 0 if result["status"] != "failed" else 1
+
+    if args.execution_readiness:
+        if not args.dry_run_receipt:
+            parser.error("--execution-readiness requires --dry-run-receipt <receipt_dir>")
+        result = build_execution_readiness(
+            args.execution_readiness,
+            args.dry_run_receipt,
+            receipt_validation_dir=args.receipt_validation,
+            max_candidates=args.max_candidates_returned,
+        )
+        if args.out:
+            write_execution_readiness_outputs(result, args.out)
+        print(
+            json.dumps(result, sort_keys=True)
+            if args.json
+            else render_execution_readiness_summary(result)
+        )
+        return 0 if result["status"] in {"ready_for_execution_review", "partial"} else 1
 
     if args.dry_run_receipt:
         receipt = build_dry_run_receipt(
