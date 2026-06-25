@@ -1177,6 +1177,6 @@ Natural-language requests still cannot execute commands. Future mutation recipes
 
 The first mutation lane in the Docker01 artifact archive runway is copy-only archive bundle creation from validated ShellForgeAI-owned evidence artifacts. It requires exact plan id, exact confirmation phrase, explicit archive output directory, validated dry-run/readiness evidence, and preserves sources without cleanup, prune, restart, remediation, rollback, recovery, or Docker/Compose mutation. Source deletion remains future work requiring a separate lane.
 
-### Archive-backed cleanup eligibility review
+### Archive-backed archive eligibility review
 
-Artifact cleanup remains unavailable by default. The archive helper can now produce a read-only cleanup eligibility report from a validated archive bundle, original plan, and dry-run receipt. The report cross-checks archive/source-preservation evidence and rechecks sources with read-only stats, but it does not authorize or perform cleanup. Any source deletion or movement remains a separate future PR/lane with a new confirmation phrase, dry-run deletion manifest, source recheck, and operator review; SeedOfEvil remains final merge owner.
+Artifact cleanup remains unavailable by default. The archive helper can now produce a read-only archive eligibility review report from a validated archive bundle, original plan, and dry-run receipt. The report cross-checks archive/source-preservation evidence and rechecks sources with read-only stats, but it does not authorize or perform cleanup. Any source deletion or movement remains a separate future PR/lane with a new confirmation phrase, dry-run deletion manifest, source recheck, and operator review; SeedOfEvil remains final merge owner.

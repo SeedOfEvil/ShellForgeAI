@@ -27,7 +27,7 @@ DRY_RUN_RECEIPT_VALIDATION_MODE = "docker01_artifact_archive_dry_run_receipt_val
 EXECUTION_READINESS_MODE = "docker01_artifact_archive_execution_readiness"
 ARCHIVE_BUNDLE_CREATE_MODE = "docker01_artifact_archive_bundle_create"
 ARCHIVE_BUNDLE_VALIDATION_MODE = "docker01_artifact_archive_bundle_validation"
-CLEANUP_ELIGIBILITY_MODE = "docker01_artifact_archive_cleanup_eligibility"
+ARCHIVE_ELIGIBILITY_REVIEW_MODE = "docker01_artifact_archive_eligibility_review"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
@@ -35,7 +35,7 @@ DEFAULT_MAX_WARNINGS = 50
 CONFIRMATION_PHRASE = "CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE"
 FIRST_SAFE_COMMAND = "python3 scripts/docker01_artifact_archive_plan.py --root /tmp --json"
 ARCHIVE_CONFIRMATION_PHRASE = CONFIRMATION_PHRASE
-CLEANUP_CONFIRMATION_PHRASE = "CONFIRM_SHELLFORGEAI_ARTIFACT_CLEANUP_AFTER_ARCHIVE"
+SOURCE_ACTION_REVIEW_CONFIRMATION_PHRASE = "CONFIRM_SHELLFORGEAI_SOURCE_ACTION_REVIEW_AFTER_ARCHIVE"
 
 PLAN_ID_RE = re.compile(r"^sha256:[0-9a-f]{16}$")
 MAX_PLAN_FILE_BYTES = 5 * 1024 * 1024
@@ -81,11 +81,11 @@ ARCHIVE_BUNDLE_VALIDATION_OUT_FILES = (
     "checksums.json",
 )
 
-CLEANUP_ELIGIBILITY_OUT_FILES = (
-    "artifact-cleanup-eligibility.json",
-    "artifact-cleanup-eligibility-summary.md",
-    "candidate-cleanup-review.json",
-    "future-cleanup-checklist.md",
+ARCHIVE_ELIGIBILITY_REVIEW_OUT_FILES = (
+    "artifact-archive-eligibility-review.json",
+    "artifact-archive-eligibility-review-summary.md",
+    "candidate-archive-eligibility-review.json",
+    "future-source-action-review-checklist.md",
     "safety-notes.md",
     "manifest.json",
     "checksums.json",
@@ -2670,9 +2670,9 @@ def validate_archive_bundle(
     }
 
 
-def cleanup_eligibility_safety_block() -> dict[str, bool]:
+def archive_eligibility_review_safety_block() -> dict[str, bool]:
     safety = validation_safety_block()
-    safety["cleanup_eligibility_review_only"] = True
+    safety["archive_eligibility_review_only"] = True
     safety["docker_volume_removed"] = False
     safety["cleanup_executed"] = False
     return safety
@@ -2698,7 +2698,7 @@ def _archive_payload_for_source(archive_manifest: dict[str, Any], source_path: s
     return None
 
 
-def build_cleanup_eligibility(
+def build_archive_eligibility_review(
     archive_bundle_dir: str,
     *,
     plan_dir: str,
@@ -2706,7 +2706,7 @@ def build_cleanup_eligibility(
     archive_validation_dir: str | None = None,
     max_candidates: int = DEFAULT_MAX_RETURNED,
 ) -> dict[str, Any]:
-    """Review archive-backed cleanup eligibility. Read-only; cleanup remains unavailable."""
+    """Review archive-backed eligibility review. Read-only; cleanup remains unavailable."""
     checks: list[dict[str, str]] = []
     errors: list[str] = []
     warnings: list[str] = []
@@ -2956,7 +2956,7 @@ def build_cleanup_eligibility(
 
     return {
         "schema_version": SCHEMA_VERSION,
-        "mode": CLEANUP_ELIGIBILITY_MODE,
+        "mode": ARCHIVE_ELIGIBILITY_REVIEW_MODE,
         "status": status,
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "archive_bundle_dir": str(bundle),
@@ -2993,7 +2993,7 @@ def build_cleanup_eligibility(
             "exact_plan_id_required": True,
             "exact_archive_bundle_required": True,
             "exact_confirmation_phrase_required": True,
-            "future_confirmation_phrase": CLEANUP_CONFIRMATION_PHRASE,
+            "future_confirmation_phrase": SOURCE_ACTION_REVIEW_CONFIRMATION_PHRASE,
             "archive_validation_required": True,
             "source_recheck_required": True,
             "dry_run_deletion_manifest_required": True,
@@ -3010,19 +3010,19 @@ def build_cleanup_eligibility(
         "checks": checks,
         "errors": errors,
         "warnings": warnings,
-        "safety": cleanup_eligibility_safety_block(),
+        "safety": archive_eligibility_review_safety_block(),
         "first_safe_command": (
-            "python3 scripts/docker01_artifact_archive_plan.py --cleanup-eligibility "
+            "python3 scripts/docker01_artifact_archive_plan.py --archive-eligibility-review "
             "<archive_bundle_dir> --plan-dir <plan_dir> --dry-run-receipt "
             "<dry_run_receipt_dir> --json"
         ),
     }
 
 
-def render_cleanup_eligibility_summary(result: dict[str, Any]) -> str:
+def render_archive_eligibility_review_summary(result: dict[str, Any]) -> str:
     return "\n".join(
         [
-            "# Docker01 Artifact Cleanup Eligibility Review",
+            "# Docker01 Artifact Archive Eligibility Review",
             "",
             f"Archive bundle: {result['archive_bundle_dir']}",
             f"Plan: {result['plan_dir']}",
@@ -3051,7 +3051,7 @@ def render_cleanup_eligibility_summary(result: dict[str, Any]) -> str:
             f"* warning: {result['summary']['warning_candidates']}",
             f"* unknown: {result['summary']['unknown_candidates']}",
             "",
-            "## Future cleanup requirements",
+            "## Future source-action review requirements",
             "* separate PR/lane required",
             "* exact plan id required",
             "* exact archive bundle required",
@@ -3075,16 +3075,16 @@ def render_cleanup_eligibility_summary(result: dict[str, Any]) -> str:
     )
 
 
-def write_cleanup_eligibility_outputs(result: dict[str, Any], out_dir: str) -> None:
+def write_archive_eligibility_review_outputs(result: dict[str, Any], out_dir: str) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "artifact-cleanup-eligibility.json").write_text(
+    (out / "artifact-archive-eligibility-review.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n"
     )
-    (out / "artifact-cleanup-eligibility-summary.md").write_text(
-        render_cleanup_eligibility_summary(result)
+    (out / "artifact-archive-eligibility-review-summary.md").write_text(
+        render_archive_eligibility_review_summary(result)
     )
-    (out / "candidate-cleanup-review.json").write_text(
+    (out / "candidate-archive-eligibility-review.json").write_text(
         json.dumps(
             {"plan_id": result["plan_id"], "candidates": result["candidate_review"]},
             indent=2,
@@ -3092,13 +3092,13 @@ def write_cleanup_eligibility_outputs(result: dict[str, Any], out_dir: str) -> N
         )
         + "\n"
     )
-    (out / "future-cleanup-checklist.md").write_text(
-        "# Future Cleanup Checklist\n\n"
+    (out / "future-source-action-review-checklist.md").write_text(
+        "# Future Source-Action Review Checklist\n\n"
         "* separate PR/lane required\n"
         "* exact plan id required\n"
         "* exact archive bundle required\n"
         "* confirmation phrase required: "
-        + CLEANUP_CONFIRMATION_PHRASE
+        + SOURCE_ACTION_REVIEW_CONFIRMATION_PHRASE
         + "\n* source recheck required\n"
         "* dry-run deletion manifest required\n"
         "* source delete default: false\n"
@@ -3106,13 +3106,13 @@ def write_cleanup_eligibility_outputs(result: dict[str, Any], out_dir: str) -> N
     )
     (out / "safety-notes.md").write_text(
         "# Safety Notes\n\n"
-        "* cleanup eligibility review only\n"
+        "* archive eligibility review only\n"
         "* no source copied, moved, modified, or deleted\n"
         "* no cleanup/prune/delete/restart/remediation/rollback/recovery\n"
         "* cleanup remains unavailable\n"
     )
     manifest_files = []
-    for name in CLEANUP_ELIGIBILITY_OUT_FILES:
+    for name in ARCHIVE_ELIGIBILITY_REVIEW_OUT_FILES:
         if name in {"manifest.json", "checksums.json"}:
             continue
         p = out / name
@@ -3121,7 +3121,7 @@ def write_cleanup_eligibility_outputs(result: dict[str, Any], out_dir: str) -> N
         json.dumps(
             {
                 "plan_id": result["plan_id"],
-                "mode": CLEANUP_ELIGIBILITY_MODE,
+                "mode": ARCHIVE_ELIGIBILITY_REVIEW_MODE,
                 "files": manifest_files,
                 "archive_created": False,
                 "candidate_contents_copied": False,
@@ -3252,9 +3252,9 @@ def main(argv: list[str] | None = None) -> int:
         help="validate an existing copy-only archive bundle (read-only)",
     )
     parser.add_argument(
-        "--cleanup-eligibility",
+        "--archive-eligibility-review",
         metavar="ARCHIVE_BUNDLE_DIR",
-        help="read-only archive-backed cleanup eligibility review",
+        help="read-only archive-backed eligibility review",
     )
     parser.add_argument(
         "--validate",
@@ -3288,7 +3288,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--archive-validation",
-        help="optional prior archive bundle validation directory for cleanup eligibility",
+        help="optional prior archive bundle validation directory for archive eligibility review",
     )
     parser.add_argument(
         "--plan-id", help="required exact plan id for dry-run receipt or archive bundle"
@@ -3302,22 +3302,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-warnings-returned", type=int, default=DEFAULT_MAX_WARNINGS)
     args = parser.parse_args(argv)
 
-    if args.cleanup_eligibility:
+    if args.archive_eligibility_review:
         if not args.plan_dir or not args.dry_run_receipt:
-            parser.error("--cleanup-eligibility requires --plan-dir and --dry-run-receipt")
-        result = build_cleanup_eligibility(
-            args.cleanup_eligibility,
+            parser.error("--archive-eligibility-review requires --plan-dir and --dry-run-receipt")
+        result = build_archive_eligibility_review(
+            args.archive_eligibility_review,
             plan_dir=args.plan_dir,
             dry_run_receipt_dir=args.dry_run_receipt,
             archive_validation_dir=args.archive_validation,
             max_candidates=args.max_candidates_returned,
         )
         if args.out:
-            write_cleanup_eligibility_outputs(result, args.out)
+            write_archive_eligibility_review_outputs(result, args.out)
         print(
             json.dumps(result, sort_keys=True)
             if args.json
-            else render_cleanup_eligibility_summary(result)
+            else render_archive_eligibility_review_summary(result)
         )
         return 0 if result["status"] in {"eligible_for_review", "partial"} else 1
 

@@ -150,6 +150,7 @@ def test_source_contains_no_shell_true_or_mutation_flags():
         "--execute",
         "--apply",
         "--archive-now",
+        "--cleanup",
         "--delete",
         "--move",
         "--prune",

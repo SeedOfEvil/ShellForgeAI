@@ -222,6 +222,7 @@ def test_no_mutation_cli_or_shell_true_introduced():
         "--execute",
         "--apply",
         "--archive-now",
+        "--cleanup",
         "--delete",
         "--move",
         "--prune",

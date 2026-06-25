@@ -10,10 +10,10 @@ HELPER_PATH = REPO_ROOT / "scripts" / "docker01_artifact_archive_plan.py"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("pr238_cleanup_eligibility", HELPER_PATH)
+    spec = importlib.util.spec_from_file_location("pr238_archive_eligibility_review", HELPER_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
-    sys.modules["pr238_cleanup_eligibility"] = module
+    sys.modules["pr238_archive_eligibility_review"] = module
     spec.loader.exec_module(module)
     return module
 
@@ -49,12 +49,12 @@ def make_chain(tmp_path: Path):
 
 def test_happy_path_strict_json_and_human_output(tmp_path):
     _, _, _, plan, plan_dir, dry_dir, bundle_dir = make_chain(tmp_path)
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     loaded = json.loads(json.dumps(result))
     assert loaded["schema_version"] == 1
-    assert loaded["mode"] == "docker01_artifact_archive_cleanup_eligibility"
+    assert loaded["mode"] == "docker01_artifact_archive_eligibility_review"
     assert loaded["status"] == "eligible_for_review"
     assert loaded["plan_id"] == plan["plan_id"]
     assert loaded["read_only"] is True
@@ -68,8 +68,8 @@ def test_happy_path_strict_json_and_human_output(tmp_path):
     assert loaded["summary"]["source_preservation_ok"] is True
     assert loaded["summary"]["eligible_candidates"] == 2
     assert all(c["status"] == "eligible" and c["source_exists"] for c in loaded["candidate_review"])
-    human = h.render_cleanup_eligibility_summary(result)
-    assert human.startswith("# Docker01 Artifact Cleanup Eligibility Review")
+    human = h.render_archive_eligibility_review_summary(result)
+    assert human.startswith("# Docker01 Artifact Archive Eligibility Review")
     assert "Cleanup available: no" in human
     assert "* no source deleted" in human
     assert "* no cleanup/prune/delete/restart" in human
@@ -77,15 +77,15 @@ def test_happy_path_strict_json_and_human_output(tmp_path):
 
 def test_out_writes_report_artifacts_and_checksums(tmp_path):
     _, _, _, _, plan_dir, dry_dir, bundle_dir = make_chain(tmp_path)
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     out = tmp_path / "eligibility"
-    h.write_cleanup_eligibility_outputs(result, str(out))
-    for name in h.CLEANUP_ELIGIBILITY_OUT_FILES:
+    h.write_archive_eligibility_review_outputs(result, str(out))
+    for name in h.ARCHIVE_ELIGIBILITY_REVIEW_OUT_FILES:
         assert (out / name).is_file(), name
     manifest = json.loads((out / "manifest.json").read_text())
-    assert manifest["mode"] == "docker01_artifact_archive_cleanup_eligibility"
+    assert manifest["mode"] == "docker01_artifact_archive_eligibility_review"
     assert manifest["cleanup_available"] is False
     checksums = json.loads((out / "checksums.json").read_text())["checksums"]
     for name, digest in checksums.items():
@@ -96,7 +96,7 @@ def test_review_does_not_modify_inputs_or_sources(tmp_path):
     root, candidate_dir, candidate_file, _, plan_dir, dry_dir, bundle_dir = make_chain(tmp_path)
     watched = [*bundle_dir.rglob("*"), *plan_dir.rglob("*"), *dry_dir.rglob("*"), *root.rglob("*")]
     before = {p: (p.stat().st_mtime_ns, p.stat().st_size) for p in watched if p.is_file()}
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] == "eligible_for_review"
@@ -119,7 +119,7 @@ def test_invalid_required_evidence_fails(tmp_path, target, filename):
     _, _, _, _, plan_dir, dry_dir, bundle_dir = make_chain(tmp_path)
     dirs = {"bundle": bundle_dir, "plan": plan_dir, "dry": dry_dir}
     (dirs[target] / filename).write_text("{")
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -132,7 +132,7 @@ def test_plan_id_and_candidate_manifest_mismatch_block(tmp_path):
     receipt = json.loads(receipt_path.read_text())
     receipt["plan_id"] = "sha256:0000000000000000"
     receipt_path.write_text(json.dumps(receipt))
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -143,7 +143,7 @@ def test_plan_id_and_candidate_manifest_mismatch_block(tmp_path):
     manifest = json.loads(manifest_path.read_text())
     manifest["candidates"].pop()
     manifest_path.write_text(json.dumps(manifest))
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -154,7 +154,7 @@ def test_checksum_and_source_preservation_and_unsafe_flags_block(tmp_path):
     _, _, _, _, plan_dir, dry_dir, bundle_dir = make_chain(tmp_path)
     payload = next((bundle_dir / "payload").rglob("*.txt"))
     payload.write_text("tampered")
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -165,7 +165,7 @@ def test_checksum_and_source_preservation_and_unsafe_flags_block(tmp_path):
     preservation = json.loads(preservation_path.read_text())
     preservation["source_delete_performed"] = True
     preservation_path.write_text(json.dumps(preservation))
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -176,7 +176,7 @@ def test_checksum_and_source_preservation_and_unsafe_flags_block(tmp_path):
     receipt = json.loads(receipt_path.read_text())
     receipt["safety"]["container_restarted"] = True
     receipt_path.write_text(json.dumps(receipt))
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -189,7 +189,7 @@ def test_unsafe_candidate_paths_block(tmp_path, name):
     manifest = json.loads(manifest_path.read_text())
     manifest["candidates"][0]["path"] = str(tmp_path / name)
     manifest_path.write_text(json.dumps(manifest))
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -206,7 +206,7 @@ def test_symlink_candidate_blocks_and_is_not_followed(tmp_path):
     manifest["candidates"][0]["path"] = str(link)
     manifest["candidates"][0]["class"] = "qa_bundle_artifacts"
     manifest_path.write_text(json.dumps(manifest))
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] in {"not_eligible", "failed"}
@@ -217,7 +217,7 @@ def test_missing_source_can_be_partial_when_archive_and_preservation_are_clean(t
     _, candidate_dir, _, _, plan_dir, dry_dir, bundle_dir = make_chain(tmp_path)
     (candidate_dir / "evidence.txt").unlink()
     candidate_dir.rmdir()
-    result = h.build_cleanup_eligibility(
+    result = h.build_archive_eligibility_review(
         str(bundle_dir), plan_dir=str(plan_dir), dry_run_receipt_dir=str(dry_dir)
     )
     assert result["status"] == "partial"
@@ -227,6 +227,7 @@ def test_missing_source_can_be_partial_when_archive_and_preservation_are_clean(t
 def test_no_cleanup_execution_flags_or_shell_true_literal_introduced():
     source = HELPER_PATH.read_text()
     for forbidden in [
+        "--cleanup",
         "--execute-cleanup",
         "--cleanup-now",
         "--delete",

@@ -1202,12 +1202,12 @@ python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp
 
 The validator checks the archive receipt, manifest, checksums, payload files, source-preservation metadata, safety flags, and optional plan/dry-run receipt cross-checks. It never creates an archive, copies sources, moves sources, deletes sources, authorizes cleanup, runs cleanup/prune/delete/restart/remediation/rollback/recovery, or performs Docker/Compose mutation. `future_cleanup_eligible_for_review=true` is evidence for future human review only; source deletion/move remains out of scope and would require a separate PR/lane with a new confirmation. `--out` writes validator artifacts only (`artifact-archive-bundle-validation.json`, summary, manifest, checksums). SeedOfEvil remains final merge owner.
 
-### Docker01 artifact cleanup eligibility review
+### Docker01 artifact archive eligibility review
 
-The artifact archive helper includes a read-only cleanup eligibility review:
+The artifact archive helper includes a read-only archive eligibility review:
 
 ```bash
-python3 scripts/docker01_artifact_archive_plan.py --cleanup-eligibility /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --archive-eligibility-review /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run --json
 ```
 
 This lane validates archive-bundle evidence, source-preservation metadata, the source plan, and the dry-run receipt, then uses read-only stat checks to classify archived candidates for future review. It never deletes, moves, modifies, or copies sources; never creates archives; never runs cleanup/prune/delete/restart/remediation/rollback/recovery; and never mutates Docker/Compose. `eligible_for_review` is not cleanup authorization, and `cleanup_available=false` remains explicit. Future cleanup requires a separate PR/lane, new confirmation phrase, dry-run deletion manifest, fresh source recheck, operator review, and SeedOfEvil final merge ownership.
