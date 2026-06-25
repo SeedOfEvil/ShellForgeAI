@@ -407,3 +407,13 @@ shellforgeai model receipt compare /tmp/old-receipt /tmp/new-receipt --json
 ```
 
 History scans only a bounded root for known Model Doctor receipt-shaped directories, validates each candidate with the same required-file, JSON, manifest, checksum, secret-marker, and safety checks used by receipt validation, and reports valid, invalid, and ignored candidates. Compare validates both receipt directories before reporting status, auth-readiness, latency, timeout, provider, and model drift. These commands are read-only: they do not run a live probe, call a model, call network/Codex, clean/prune/delete, repair/move artifacts, mutate Docker/Compose, restart containers, remediate, roll back, or recover. Default `shellforgeai model doctor` still performs no model call; explicit `--live-probe` remains opt-in and bounded. SeedOfEvil remains final merge owner.
+
+## Docker01 artifact archive bundle validation checks
+
+| Lane | Command | Purpose | Mutates sources? |
+| --- | --- | --- | --- |
+| Archive bundle validation | `python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --json` | Validates PR236 archive receipt, archive manifest, archive checksums, payload files, source-preservation metadata, and validator safety flags. | No |
+| Bundle validation + evidence chain | `python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --plan-dir /tmp/sfai-pr237-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr237-artifact-archive-dry-run --json` | Also cross-checks plan id, candidate counts/classes/bytes, source paths, payload coverage, and confirmation phrase consistency against the original plan and dry-run receipt. | No |
+| Bundle validation dir | `python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --out /tmp/sfai-pr237-artifact-archive-bundle-validation --json` | Writes validator JSON, summary, manifest, and checksums only. | No, except writing the validation directory |
+
+Archive bundle validation is read-only. The archive receipt may record that PR236 created a copy-only bundle, but the PR237 validator reports `archive_created=false`, `source_copied=false`, and `mutation_performed=false` for itself. It does not authorize cleanup/deletion; source deletion/move remains a separate future lane requiring a separate PR and confirmation. No cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, `shell=True`, network/model/Codex/GitHub/cloud action, or package install is performed. SeedOfEvil remains final merge owner.

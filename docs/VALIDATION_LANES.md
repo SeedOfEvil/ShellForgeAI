@@ -1189,3 +1189,15 @@ python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfa
 
 It validates the plan and dry-run receipt chain, optionally consumes prior receipt-validation output, cross-checks plan id, candidates, exclusions, confirmation phrase, future contract, and safety flags, and writes readiness report artifacts only when `--out` is supplied. `ready_for_execution_review` is human-review evidence for a future separate PR/lane only; execution remains unavailable. No archive creation, source copy/move/delete/modify, cleanup/prune/delete/restart, remediation/rollback/recovery, Docker/Compose mutation, helper-triggered validation/pytest/QA, natural-language execution, or `shell=True` is allowed. SeedOfEvil remains final merge owner.
 
+
+### Docker01 artifact archive bundle validation
+
+PR237 adds a read-only validator for PR236 copy-only archive bundles:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --plan-dir /tmp/sfai-pr237-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr237-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --out /tmp/sfai-pr237-artifact-archive-bundle-validation --json
+```
+
+The validator checks the archive receipt, manifest, checksums, payload files, source-preservation metadata, safety flags, and optional plan/dry-run receipt cross-checks. It never creates an archive, copies sources, moves sources, deletes sources, authorizes cleanup, runs cleanup/prune/delete/restart/remediation/rollback/recovery, or performs Docker/Compose mutation. `future_cleanup_eligible_for_review=true` is evidence for future human review only; source deletion/move remains out of scope and would require a separate PR/lane with a new confirmation. `--out` writes validator artifacts only (`artifact-archive-bundle-validation.json`, summary, manifest, checksums). SeedOfEvil remains final merge owner.

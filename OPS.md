@@ -2806,3 +2806,15 @@ python3 scripts/docker01_artifact_archive_plan.py --create-archive-bundle /tmp/s
 
 The bundle writes `archive-receipt.json`, `archive-summary.md`, `archive-manifest.json`, `archive-checksums.json`, `source-candidate-manifest.json`, `source-exclusions.json`, `source-preservation.json`, `future-cleanup-notes.md`, `safety-notes.md`, and `payload/`. This lane is copy-only: it does not delete, move, or modify sources; does not clean/prune/restart/remediate/rollback/recover; does not mutate Docker/Compose; does not run validation/pytest/QA from the helper; and does not use natural-language execution or `shell=True`. Source deletion remains out of scope and would require a separate lane and confirmation.
 
+
+## Docker01 artifact archive bundle validation
+
+After a governed copy-only archive bundle is created, validate it before any future cleanup discussion:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --plan-dir /tmp/sfai-pr237-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr237-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --out /tmp/sfai-pr237-artifact-archive-bundle-validation --json
+```
+
+This validation lane is read-only. It validates the archive receipt, manifest, checksums, payload, source-preservation metadata, and optional original plan/dry-run receipt evidence chain. It does not create archives, copy sources, move sources, delete sources, modify source artifacts, authorize cleanup, run prune/delete/restart/remediation/rollback/recovery, or mutate Docker/Compose state. Future cleanup/deletion would require a separate PR/lane and a new explicit confirmation; SeedOfEvil remains final merge owner.
