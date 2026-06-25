@@ -1211,3 +1211,16 @@ python3 scripts/docker01_artifact_archive_plan.py --archive-eligibility-review /
 ```
 
 This lane validates archive-bundle evidence, source-preservation metadata, the source plan, and the dry-run receipt, then uses read-only stat checks to classify archived candidates for future review. It never deletes, moves, modifies, or copies sources; never creates archives; never runs cleanup/prune/delete/restart/remediation/rollback/recovery; and never mutates Docker/Compose. `eligible_for_review` is not cleanup authorization, and `cleanup_available=false` remains explicit. Future cleanup requires a separate PR/lane, new confirmation phrase, dry-run deletion manifest, fresh source recheck, operator review, and SeedOfEvil final merge ownership.
+
+### Docker01 archive-backed source-action dry run
+
+The artifact archive helper can produce a read-only, archive-backed source-action dry-run manifest after a governed archive bundle and archive eligibility review exist:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-dry-run /tmp/sfai-pr239-artifact-archive-bundle --plan-dir /tmp/sfai-pr239-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr239-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr239-artifact-eligibility-review --plan-id sha256:<plan-id> --json
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-dry-run /tmp/sfai-pr239-artifact-archive-bundle --plan-dir /tmp/sfai-pr239-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr239-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr239-artifact-eligibility-review --plan-id sha256:<plan-id> --out /tmp/sfai-pr239-source-action-dry-run --json
+```
+
+This lane validates the archive bundle, plan, dry-run receipt, and PR238 archive eligibility review, then cross-checks exact plan id, archive receipt, candidate manifests, source paths, classes, bytes, payload files, checksums, source-preservation metadata, and eligibility status. It stats candidate source paths read-only and classifies each candidate as `would_review_for_source_action`, `blocked`, `warning`, or `unknown`. `ready_for_source_action_review` means reviewable by a human in a future separate PR/lane; it does not authorize cleanup, source deletion, source movement, or any executable action, and `source_action_available=false` remains explicit.
+
+With `--out`, the helper writes dry-run report artifacts only: `archive-source-action-dry-run.json`, `archive-source-action-dry-run-summary.md`, `candidate-source-action-manifest.json`, `future-source-action-checklist.md`, `safety-notes.md`, `manifest.json`, and `checksums.json`. It does not modify the archive bundle, plan, dry-run receipt, eligibility review, or source artifacts; does not create archives; does not copy/move/delete/modify sources; and does not run cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, model/Codex, network, GitHub, package install, or cloud apply/merge/push behavior. Future source action remains a separate confirmation-gated PR/lane using `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`; SeedOfEvil remains final merge owner.

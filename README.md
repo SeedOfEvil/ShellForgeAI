@@ -806,3 +806,13 @@ python3 scripts/docker01_artifact_archive_plan.py --archive-eligibility-review /
 The review validates the archive bundle, source-preservation metadata, source plan, and dry-run receipt, then cross-checks the plan id, candidate manifest, source paths, classes, bytes, exclusions, confirmation phrase, archive receipt, payload checksums, and safety flags. It performs read-only source rechecks with filesystem stat checks only and classifies candidates as `eligible`, `blocked`, `warning`, or `unknown` for future human review. `eligible_for_review` means only that a future separate source-action PR/lane could be reviewed; it does not authorize cleanup and `cleanup_available=false` remains explicit.
 
 With `--out`, the helper writes report artifacts only: `artifact-archive-eligibility-review.json`, `artifact-archive-eligibility-review-summary.md`, `candidate-archive-eligibility-review.json`, `future-source-action-review-checklist.md`, `safety-notes.md`, `manifest.json`, and `checksums.json`. It does not modify the archive bundle, plan, dry-run receipt, or source artifacts; does not create archives; does not copy/move/delete/modify sources; and does not run cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, model/Codex, network, GitHub, package install, or cloud apply/merge/push behavior. Future source action remains a separate PR/lane requiring a new exact confirmation phrase, dry-run deletion manifest, source recheck, operator review, and SeedOfEvil final merge ownership.
+
+### Docker01 archive-backed source-action dry run
+
+The artifact archive runway includes a read-only source-action dry-run manifest command:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-dry-run /tmp/sfai-pr239-artifact-archive-bundle --plan-dir /tmp/sfai-pr239-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr239-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr239-artifact-eligibility-review --plan-id sha256:<plan-id> --json
+```
+
+It is archive-backed, eligibility-backed, exact-plan-id-bound, and non-executable. It validates the archive bundle, source-preservation metadata, plan, dry-run receipt, eligibility review, payload checksums, candidate consistency, and read-only source stats, then classifies candidates for future human review only. It does not create archives, copy/move/delete/modify sources, authorize cleanup, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, or call model/Codex/network/GitHub/cloud services. `ready_for_source_action_review` means reviewable by a human in a separate future PR/lane; SeedOfEvil remains final merge owner.
