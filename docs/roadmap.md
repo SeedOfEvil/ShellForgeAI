@@ -1168,3 +1168,8 @@ For exact PR/commit lane runs, a later successful disposable validation fallback
 Model-backed `ask` may explain deterministic evidence and suggest a next operator command, but those suggestions are now validated through a static safe-command registry. Registry entries are real ShellForgeAI commands, marked `read_only=true` and `mutation=false`, and are suggestion-only: `ask` never executes them. Unknown `shellforgeai ...` suggestions and mutation-shaped commands such as cleanup, prune, image removal, Compose restart, shell pipes, redirects, or shell passthrough are removed or replaced with a registry command such as `shellforgeai triage docker --json`, `shellforgeai triage docker detail <suspect> --json`, or `shellforgeai ops report --json` when appropriate.
 
 Natural-language requests still cannot execute commands. Future mutation recipes must remain named, narrow, auditable, and confirmation-gated outside model-backed ask.
+
+
+## Governed artifact archive runway
+
+The first mutation lane in the Docker01 artifact archive runway is copy-only archive bundle creation from validated ShellForgeAI-owned evidence artifacts. It requires exact plan id, exact confirmation phrase, explicit archive output directory, validated dry-run/readiness evidence, and preserves sources without cleanup, prune, restart, remediation, rollback, recovery, or Docker/Compose mutation. Source deletion remains future work requiring a separate lane.

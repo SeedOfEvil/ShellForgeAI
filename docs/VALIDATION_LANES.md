@@ -113,6 +113,7 @@ No full `pytest` by default. Estimated runtime class: **short**.
 - interactive UX
 - JSON output shape
 - artifact read / validate / export behavior
+- governed copy-only archive bundle creation when bounded by exact plan id, exact confirmation phrase, explicit output directory, targeted safety tests, and no source deletion/move/cleanup/Docker mutation
 - model doctor live-probe receipt validation, including optional validator
   artifact output, because it reads existing files only and performs no model
   call or live probe
