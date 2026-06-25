@@ -1180,3 +1180,7 @@ The first mutation lane in the Docker01 artifact archive runway is copy-only arc
 ### Archive-backed archive eligibility review
 
 Artifact cleanup remains unavailable by default. The archive helper can now produce a read-only archive eligibility review report from a validated archive bundle, original plan, and dry-run receipt. The report cross-checks archive/source-preservation evidence and rechecks sources with read-only stats, but it does not authorize or perform cleanup. Any source deletion or movement remains a separate future PR/lane with a new confirmation phrase, dry-run deletion manifest, source recheck, and operator review; SeedOfEvil remains final merge owner.
+
+### Archive-backed source-action dry-run manifest
+
+The governed archive runway now has a read-only source-action dry-run manifest step. It is backed by the existing archive bundle, dry-run receipt, source-preservation evidence, and archive eligibility review, requires the exact plan id, and emits only non-executable report artifacts. It does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, or authorize product runtime cleanup behavior. Any future source action remains a separate PR/lane with `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`, fresh source recheck, archive validation, operator review, and SeedOfEvil final merge ownership.
