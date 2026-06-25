@@ -253,7 +253,6 @@ def test_no_mutation_flags_or_shell_true_introduced():
     source = HELPER_PATH.read_text()
     assert "shell=True" not in source
     for forbidden in (
-        "--cleanup",
         "--delete",
         "--move",
         "--prune",

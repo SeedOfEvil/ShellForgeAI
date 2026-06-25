@@ -2818,3 +2818,17 @@ python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp
 ```
 
 This validation lane is read-only. It validates the archive receipt, manifest, checksums, payload, source-preservation metadata, and optional original plan/dry-run receipt evidence chain. It does not create archives, copy sources, move sources, delete sources, modify source artifacts, authorize cleanup, run prune/delete/restart/remediation/rollback/recovery, or mutate Docker/Compose state. Future cleanup/deletion would require a separate PR/lane and a new explicit confirmation; SeedOfEvil remains final merge owner.
+
+### Docker01 artifact cleanup eligibility review
+
+ShellForgeAI can perform a read-only cleanup eligibility review after a governed archive bundle has been created and validated:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --cleanup-eligibility /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --cleanup-eligibility /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run
+python3 scripts/docker01_artifact_archive_plan.py --cleanup-eligibility /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run --out /tmp/sfai-pr238-artifact-cleanup-eligibility --json
+```
+
+The review validates the archive bundle, source-preservation metadata, source plan, and dry-run receipt, then cross-checks the plan id, candidate manifest, source paths, classes, bytes, exclusions, confirmation phrase, archive receipt, payload checksums, and safety flags. It performs read-only source rechecks with filesystem stat checks only and classifies candidates as `eligible`, `blocked`, `warning`, or `unknown` for future human review. `eligible_for_review` means only that a future separate cleanup PR/lane could be reviewed; it does not authorize cleanup and `cleanup_available=false` remains explicit.
+
+With `--out`, the helper writes report artifacts only: `artifact-cleanup-eligibility.json`, `artifact-cleanup-eligibility-summary.md`, `candidate-cleanup-review.json`, `future-cleanup-checklist.md`, `safety-notes.md`, `manifest.json`, and `checksums.json`. It does not modify the archive bundle, plan, dry-run receipt, or source artifacts; does not create archives; does not copy/move/delete/modify sources; and does not run cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, model/Codex, network, GitHub, package install, or cloud apply/merge/push behavior. Future cleanup/deletion remains a separate PR/lane requiring a new exact confirmation phrase, dry-run deletion manifest, source recheck, operator review, and SeedOfEvil final merge ownership.

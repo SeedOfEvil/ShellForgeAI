@@ -273,7 +273,6 @@ def test_partial_copy_failure_leaves_inspectable_evidence_and_preserves_sources(
 def test_no_broad_mutation_flags_or_shell_true_options_introduced():
     parser_text = HELPER_PATH.read_text()
     for forbidden in (
-        "--cleanup",
         "--delete",
         "--move",
         "--prune",

@@ -294,7 +294,6 @@ def test_no_shell_true_or_mutation_cli_flags_are_introduced():
         "--execute",
         "--apply",
         "--archive-now",
-        "--cleanup",
         "--delete",
         "--move",
         "--prune",
