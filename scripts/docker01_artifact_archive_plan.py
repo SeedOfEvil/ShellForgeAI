@@ -29,6 +29,7 @@ ARCHIVE_BUNDLE_CREATE_MODE = "docker01_artifact_archive_bundle_create"
 ARCHIVE_BUNDLE_VALIDATION_MODE = "docker01_artifact_archive_bundle_validation"
 ARCHIVE_ELIGIBILITY_REVIEW_MODE = "docker01_artifact_archive_eligibility_review"
 SOURCE_ACTION_DRY_RUN_MODE = "docker01_artifact_archive_source_action_dry_run"
+SOURCE_ACTION_DRY_RUN_VALIDATION_MODE = "docker01_artifact_archive_source_action_dry_run_validation"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
@@ -97,6 +98,16 @@ SOURCE_ACTION_DRY_RUN_OUT_FILES = (
     "archive-source-action-dry-run-summary.md",
     "candidate-source-action-manifest.json",
     "future-source-action-checklist.md",
+    "safety-notes.md",
+    "manifest.json",
+    "checksums.json",
+)
+
+SOURCE_ACTION_DRY_RUN_VALIDATION_OUT_FILES = (
+    "archive-source-action-dry-run-validation.json",
+    "archive-source-action-dry-run-validation-summary.md",
+    "candidate-source-action-validation.json",
+    "future-source-action-review-checklist.md",
     "safety-notes.md",
     "manifest.json",
     "checksums.json",
@@ -3516,6 +3527,555 @@ def write_archive_source_action_dry_run_outputs(result: dict[str, Any], out_dir:
     )
 
 
+def source_action_dry_run_validation_safety_block() -> dict[str, bool]:
+    safety = validation_safety_block()
+    safety["source_action_dry_run_validation_only"] = True
+    safety["archive_created"] = False
+    safety["source_copied"] = False
+    safety["source_moved"] = False
+    safety["source_deleted"] = False
+    safety["source_modified"] = False
+    safety["docker_volume_removed"] = False
+    return safety
+
+
+def _validate_output_manifest_checksums(
+    base: Path, required_files: tuple[str, ...], mode: str
+) -> tuple[dict[str, Any], list[dict[str, str]], list[str], list[str]]:
+    checks: list[dict[str, str]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    missing = [
+        name for name in required_files if not (base / name).is_file() or (base / name).is_symlink()
+    ]
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "source_action_dry_run_required_files",
+        "failed" if missing else "passed",
+        ", ".join(missing),
+    )
+
+    parsed: dict[str, Any] = {}
+    unparsable: list[str] = []
+    for name in [n for n in required_files if n.endswith(".json")]:
+        data = _load_plan_json(base / name)
+        if data is None:
+            unparsable.append(name)
+        else:
+            parsed[name] = data
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "json_parse_ok",
+        "failed" if unparsable else "passed",
+        ", ".join(unparsable),
+    )
+
+    manifest = parsed.get("manifest.json") or {}
+    manifest_files = manifest.get("files", []) if isinstance(manifest, dict) else []
+    manifest_ok = (
+        isinstance(manifest_files, list)
+        and bool(manifest_files)
+        and manifest.get("mode", mode) == mode
+    )
+    manifest_detail = "" if manifest_ok else "manifest missing files list or mode mismatch"
+    if manifest_ok:
+        for entry in manifest_files:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if not name:
+                manifest_ok = False
+                manifest_detail = "manifest entry missing name"
+                break
+            target = base / name
+            if target.is_symlink() or not target.is_file():
+                manifest_ok = False
+                manifest_detail = f"manifest file missing: {name}"
+                break
+            if int(entry.get("size_bytes", -1)) != target.stat(follow_symlinks=False).st_size:
+                manifest_ok = False
+                manifest_detail = f"manifest size mismatch: {name}"
+                break
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "manifest_ok",
+        "passed" if manifest_ok else "failed",
+        manifest_detail,
+    )
+
+    checksums_doc = parsed.get("checksums.json") or {}
+    checksums = checksums_doc.get("checksums", {}) if isinstance(checksums_doc, dict) else {}
+    checksums_ok = isinstance(checksums, dict) and bool(checksums)
+    checksums_detail = "" if checksums_ok else "checksums missing"
+    if checksums_ok:
+        for name, recorded in checksums.items():
+            target = base / str(name)
+            if target.is_symlink() or not target.is_file():
+                checksums_ok = False
+                checksums_detail = f"checksum file missing: {name}"
+                break
+            if "sha256:" + sha256_file(target) != recorded:
+                checksums_ok = False
+                checksums_detail = f"checksum mismatch: {name}"
+                break
+    _add_check(
+        checks,
+        errors,
+        warnings,
+        "checksums_ok",
+        "passed" if checksums_ok else "failed",
+        checksums_detail,
+    )
+    return parsed, checks, errors, warnings
+
+
+def validate_archive_source_action_dry_run(
+    source_action_dry_run_dir: str,
+    *,
+    archive_bundle_dir: str | None = None,
+    plan_dir: str | None = None,
+    dry_run_receipt_dir: str | None = None,
+    archive_eligibility_review_dir: str | None = None,
+    max_candidates: int = DEFAULT_MAX_RETURNED,
+) -> dict[str, Any]:
+    """Validate a PR239 source-action dry-run directory. Strictly read-only."""
+    dry_dir = Path(source_action_dry_run_dir)
+    parsed, checks, errors, warnings = _validate_output_manifest_checksums(
+        dry_dir, SOURCE_ACTION_DRY_RUN_OUT_FILES, SOURCE_ACTION_DRY_RUN_MODE
+    )
+
+    def add(name: str, status: str, detail: str = "") -> None:
+        _add_check(checks, errors, warnings, name, status, detail)
+
+    dry_run = parsed.get("archive-source-action-dry-run.json") or {}
+    candidate_doc = parsed.get("candidate-source-action-manifest.json") or {}
+    plan_id = dry_run.get("plan_id") if isinstance(dry_run, dict) else None
+    plan_id_ok = isinstance(plan_id, str) and bool(PLAN_ID_RE.match(plan_id))
+    add("plan_id_ok", "passed" if plan_id_ok else "failed", f"plan_id={plan_id!r}")
+
+    safety = dry_run.get("safety", {}) if isinstance(dry_run, dict) else {}
+    summary = dry_run.get("summary", {}) if isinstance(dry_run, dict) else {}
+    source_contract_ok = (
+        isinstance(dry_run, dict)
+        and dry_run.get("read_only") is True
+        and dry_run.get("mutation_performed") is False
+        and dry_run.get("source_action_available") is False
+        and dry_run.get("future_source_action_review_only") is True
+    )
+    add(
+        "source_action_contract_ok",
+        "passed" if source_contract_ok else "failed",
+        "dry run must remain read-only and source_action_available=false",
+    )
+
+    unsafe_flags = (
+        "mutation_performed",
+        "archive_created",
+        "source_deleted",
+        "source_moved",
+        "source_modified",
+        "source_copied",
+        "cleanup_executed",
+        "docker_prune_executed",
+        "docker_image_removed",
+        "docker_volume_removed",
+        "file_deleted",
+        "docker_compose_executed",
+        "container_restarted",
+        "remediation_executed",
+        "rollback_executed",
+        "recovery_executed",
+        "natural_language_execution",
+        "shell_true",
+        "arbitrary_command_execution",
+        "cloud_apply_merge_push",
+        "github_post_approve_merge",
+    )
+    unsafe_seen = any(
+        isinstance(scope, dict) and any(scope.get(flag) is True for flag in unsafe_flags)
+        for scope in (dry_run, summary, safety)
+    )
+    will_not_do = " ".join(str(x).lower() for x in dry_run.get("will_not_do", []))
+    executable_claim = any(
+        token in will_not_do
+        for token in (
+            "execute source",
+            "source action available",
+            "delete is available",
+            "move is available",
+        )
+    )
+    safety_contract_ok = (
+        isinstance(safety, dict)
+        and safety.get("read_only") is True
+        and safety.get("mutation_performed") is False
+        and not unsafe_seen
+        and not executable_claim
+    )
+    add(
+        "safety_contract_ok",
+        "passed" if safety_contract_ok else "failed",
+        "unsafe source-action or mutation flag detected",
+    )
+
+    candidates = (
+        candidate_doc.get("candidates", [])
+        if isinstance(candidate_doc, dict)
+        else dry_run.get("candidate_source_action_manifest", [])
+        if isinstance(dry_run, dict)
+        else []
+    )
+    cand_ok, cand_detail, cand_count, _, _ = _safe_candidates(
+        [
+            {
+                "path": c.get("source_path"),
+                "class": c.get("class"),
+                "type": c.get("source_type"),
+                "size_bytes": 0,
+            }
+            for c in candidates
+            if isinstance(c, dict)
+        ]
+    )
+    if cand_count > max_candidates:
+        cand_ok = False
+        cand_detail = "candidate count exceeds bound"
+    add("candidate_manifest_ok", "passed" if cand_ok else "failed", cand_detail)
+
+    bundle_validation: dict[str, Any] | None = None
+    archive_cross = plan_cross = receipt_cross = eligibility_cross = "not_requested"
+    if archive_bundle_dir:
+        bundle_validation = validate_archive_bundle(
+            archive_bundle_dir,
+            plan_dir=plan_dir,
+            dry_run_receipt_dir=dry_run_receipt_dir,
+            max_candidates=max_candidates,
+        )
+        archive_cross = str(bundle_validation.get("status", "failed"))
+        add("archive_bundle_cross_check", archive_cross, str(bundle_validation.get("status")))
+    else:
+        add("archive_bundle_cross_check", "passed", "not_requested")
+    if plan_dir:
+        plan_validation = validate_plan(plan_dir, max_candidates=max_candidates)
+        plan_doc = _load_plan_json(Path(plan_dir) / "artifact-archive-plan.json") or {}
+        plan_cross = (
+            "passed"
+            if plan_validation["status"] == "passed" and plan_doc.get("plan_id") == plan_id
+            else "failed"
+        )
+        add("plan_cross_check", plan_cross, str(plan_validation.get("status")))
+    else:
+        add("plan_cross_check", "passed", "not_requested")
+    if dry_run_receipt_dir:
+        receipt_validation = validate_dry_run_receipt(
+            dry_run_receipt_dir, plan_dir=plan_dir, max_candidates=max_candidates
+        )
+        receipt_doc = (
+            _load_plan_json(Path(dry_run_receipt_dir) / "artifact-archive-dry-run-receipt.json")
+            or {}
+        )
+        receipt_cross = (
+            "passed"
+            if receipt_validation["status"] == "passed" and receipt_doc.get("plan_id") == plan_id
+            else "failed"
+        )
+        add("dry_run_receipt_cross_check", receipt_cross, str(receipt_validation.get("status")))
+    else:
+        add("dry_run_receipt_cross_check", "passed", "not_requested")
+    if archive_eligibility_review_dir:
+        eligibility = _load_archive_eligibility_review(archive_eligibility_review_dir) or {}
+        eligibility_cross = (
+            "passed"
+            if eligibility.get("plan_id") == plan_id
+            and eligibility.get("status") in {"eligible_for_review", "partial"}
+            else "failed"
+        )
+        add("archive_eligibility_cross_check", eligibility_cross, str(eligibility.get("status")))
+    else:
+        add("archive_eligibility_cross_check", "passed", "not_requested")
+
+    candidate_validation: list[dict[str, Any]] = []
+    for cand in candidates if isinstance(candidates, list) else []:
+        if not isinstance(cand, dict):
+            continue
+        source = str(cand.get("source_path", ""))
+        source_path = Path(source)
+        blockers: list[str] = []
+        cand_warnings: list[str] = []
+        if source_path.is_symlink():
+            blockers.append("source path is a symlink")
+        source_exists = source_path.exists() and not source_path.is_symlink()
+        if not source_exists:
+            cand_warnings.append("source path unavailable for read-only recheck")
+        if cand.get("status") not in {
+            "would_review_for_source_action",
+            "blocked",
+            "warning",
+            "unknown",
+        }:
+            blockers.append("unknown dry-run status")
+        if any(cand.get(k) is True for k in ("source_deleted", "source_moved", "source_modified")):
+            blockers.append("candidate claims source mutation")
+        candidate_validation.append(
+            {
+                "source_path": source,
+                "class": cand.get("class"),
+                "archive_payload_path": cand.get("archive_payload_path"),
+                "dry_run_status": cand.get("status", "unknown"),
+                "validation_status": "failed"
+                if blockers
+                else "warning"
+                if cand_warnings
+                else "passed",
+                "source_exists": source_exists,
+                "archive_payload_exists": cand.get("archive_payload_exists") is True,
+                "archive_checksum_verified": cand.get("archive_checksum_verified") is True,
+                "source_recheck_ok": source_exists,
+                "blockers": blockers,
+                "warnings": cand_warnings,
+            }
+        )
+    blocked = sum(1 for c in candidate_validation if c["dry_run_status"] == "blocked")
+    warning_count = sum(1 for c in candidate_validation if c["validation_status"] == "warning")
+    unknown = sum(1 for c in candidate_validation if c["dry_run_status"] == "unknown")
+    would = sum(
+        1 for c in candidate_validation if c["dry_run_status"] == "would_review_for_source_action"
+    )
+    if any(c["validation_status"] == "failed" for c in candidate_validation):
+        add("candidate_validation_ok", "failed", "candidate validation blockers exist")
+    else:
+        add("candidate_validation_ok", "passed", "")
+
+    blocker_errors = [e for e in errors if ": not_requested" not in e]
+    optional_absent = any(
+        x is None
+        for x in (
+            archive_bundle_dir,
+            plan_dir,
+            dry_run_receipt_dir,
+            archive_eligibility_review_dir,
+        )
+    )
+    status = (
+        "failed" if blocker_errors else ("partial" if warnings or optional_absent else "passed")
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": SOURCE_ACTION_DRY_RUN_VALIDATION_MODE,
+        "status": status,
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "source_action_dry_run_dir": str(dry_dir),
+        "archive_bundle_dir": str(Path(archive_bundle_dir)) if archive_bundle_dir else None,
+        "plan_dir": str(Path(plan_dir)) if plan_dir else None,
+        "dry_run_receipt_dir": str(Path(dry_run_receipt_dir)) if dry_run_receipt_dir else None,
+        "archive_eligibility_review_dir": str(Path(archive_eligibility_review_dir))
+        if archive_eligibility_review_dir
+        else None,
+        "plan_id": plan_id,
+        "read_only": True,
+        "mutation_performed": False,
+        "source_action_available": False,
+        "future_source_action_review_only": True,
+        "summary": {
+            "required_files_present": not any(
+                c["name"] == "source_action_dry_run_required_files" and c["status"] == "failed"
+                for c in checks
+            ),
+            "json_parse_ok": not any(
+                c["name"] == "json_parse_ok" and c["status"] == "failed" for c in checks
+            ),
+            "manifest_ok": not any(
+                c["name"] == "manifest_ok" and c["status"] == "failed" for c in checks
+            ),
+            "checksums_ok": not any(
+                c["name"] == "checksums_ok" and c["status"] == "failed" for c in checks
+            ),
+            "source_action_contract_ok": source_contract_ok,
+            "safety_contract_ok": safety_contract_ok,
+            "candidate_manifest_ok": cand_ok,
+            "archive_bundle_cross_check_status": archive_cross,
+            "plan_cross_check_status": plan_cross,
+            "dry_run_receipt_cross_check_status": receipt_cross,
+            "archive_eligibility_cross_check_status": eligibility_cross,
+            "candidate_items": len(candidate_validation),
+            "would_review_candidates": would,
+            "blocked_candidates": blocked,
+            "warning_candidates": warning_count,
+            "unknown_candidates": unknown,
+            "validation_errors": len(blocker_errors),
+            "validation_warnings": len(warnings),
+        },
+        "candidate_validation": candidate_validation,
+        "future_source_action_requirements": {
+            "separate_pr_required": True,
+            "exact_plan_id_required": True,
+            "exact_archive_bundle_required": True,
+            "exact_archive_eligibility_review_required": True,
+            "exact_source_action_dry_run_required": True,
+            "exact_confirmation_phrase_required": True,
+            "future_confirmation_phrase": SOURCE_ACTION_REVIEW_CONFIRMATION_PHRASE,
+            "source_recheck_required": True,
+            "archive_validation_required": True,
+            "operator_review_required": True,
+            "source_delete_default": False,
+            "source_move_default": False,
+        },
+        "will_not_do": [
+            "delete source files in this PR",
+            "move source files in this PR",
+            "modify source files in this PR",
+            "copy source files in this PR",
+            "create archive in this PR",
+            "cleanup/prune/delete/restart/remediate/rollback/recover",
+        ],
+        "checks": checks,
+        "errors": blocker_errors,
+        "warnings": warnings,
+        "safety": source_action_dry_run_validation_safety_block(),
+        "first_safe_command": (
+            "python3 scripts/docker01_artifact_archive_plan.py "
+            "--validate-archive-source-action-dry-run <source_action_dry_run_dir> --json"
+        ),
+    }
+
+
+def render_archive_source_action_dry_run_validation_summary(result: dict[str, Any]) -> str:
+    s = result["summary"]
+    return "\n".join(
+        [
+            "# Docker01 Archive Source-Action Dry-Run Validation",
+            "",
+            f"Source-action dry run: {result['source_action_dry_run_dir']}",
+            f"Archive bundle: {result['archive_bundle_dir']}",
+            f"Plan: {result['plan_dir']}",
+            f"Dry-run receipt: {result['dry_run_receipt_dir']}",
+            f"Archive eligibility review: {result['archive_eligibility_review_dir']}",
+            f"Plan ID: {result['plan_id']}",
+            f"Status: {result['status']}",
+            "Read-only: yes",
+            "Source action available: no",
+            "",
+            "## Checks",
+            f"* required files: {s['required_files_present']}",
+            f"* JSON parse: {s['json_parse_ok']}",
+            f"* manifest: {s['manifest_ok']}",
+            f"* checksums: {s['checksums_ok']}",
+            f"* source-action contract: {s['source_action_contract_ok']}",
+            f"* safety contract: {s['safety_contract_ok']}",
+            f"* candidate manifest: {s['candidate_manifest_ok']}",
+            f"* archive bundle cross-check: {s['archive_bundle_cross_check_status']}",
+            f"* plan cross-check: {s['plan_cross_check_status']}",
+            f"* dry-run receipt cross-check: {s['dry_run_receipt_cross_check_status']}",
+            f"* archive eligibility cross-check: {s['archive_eligibility_cross_check_status']}",
+            "",
+            "## Candidate summary",
+            f"* candidates: {s['candidate_items']}",
+            f"* would review: {s['would_review_candidates']}",
+            f"* blocked: {s['blocked_candidates']}",
+            f"* warning: {s['warning_candidates']}",
+            f"* unknown: {s['unknown_candidates']}",
+            "",
+            "## Future source-action requirements",
+            "* separate PR/lane required",
+            "* exact plan id required",
+            "* exact archive bundle required",
+            "* exact source-action dry run required",
+            "* confirmation phrase required",
+            "* source recheck required",
+            "* source delete default: false",
+            "* source move default: false",
+            "",
+            "## Safety",
+            "* source-action dry-run validation only",
+            "* no source deleted",
+            "* no source moved",
+            "* no source modified",
+            "* no source copied",
+            "* no archive created",
+            "* no cleanup/prune/delete/restart",
+            "* no remediation/rollback/recovery",
+            "* no natural-language execution",
+            "* no " + "shell=" + "True",
+            "",
+        ]
+    )
+
+
+def write_archive_source_action_dry_run_validation_outputs(
+    result: dict[str, Any], out_dir: str
+) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "archive-source-action-dry-run-validation.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    (out / "archive-source-action-dry-run-validation-summary.md").write_text(
+        render_archive_source_action_dry_run_validation_summary(result)
+    )
+    (out / "candidate-source-action-validation.json").write_text(
+        json.dumps(
+            {"plan_id": result["plan_id"], "candidates": result["candidate_validation"]},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    (out / "future-source-action-review-checklist.md").write_text(
+        "# Future Source-Action Review Checklist\n\n"
+        "* separate PR/lane required\n"
+        "* exact plan id required\n"
+        "* exact archive bundle required\n"
+        "* exact source-action dry run required\n"
+        "* confirmation phrase required: "
+        + SOURCE_ACTION_REVIEW_CONFIRMATION_PHRASE
+        + "\n* source recheck required\n"
+        "* archive validation required\n"
+        "* source delete default: false\n"
+        "* source move default: false\n"
+    )
+    (out / "safety-notes.md").write_text(
+        "# Safety Notes\n\n"
+        "* source-action dry-run validation only\n"
+        "* no source copied, moved, modified, or deleted\n"
+        "* no archive created by validator\n"
+        "* no cleanup/prune/delete/restart/remediation/rollback/recovery\n"
+    )
+    manifest_files = []
+    for name in SOURCE_ACTION_DRY_RUN_VALIDATION_OUT_FILES:
+        if name in {"manifest.json", "checksums.json"}:
+            continue
+        p = out / name
+        manifest_files.append({"path": str(p), "name": name, "size_bytes": p.stat().st_size})
+    (out / "manifest.json").write_text(
+        json.dumps(
+            {
+                "plan_id": result["plan_id"],
+                "mode": SOURCE_ACTION_DRY_RUN_VALIDATION_MODE,
+                "files": manifest_files,
+                "archive_created": False,
+                "candidate_contents_copied": False,
+                "source_action_available": False,
+                "source_deleted": False,
+                "source_moved": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    names = [item["name"] for item in manifest_files] + ["manifest.json"]
+    checksums = {name: "sha256:" + sha256_file(out / name) for name in names}
+    (out / "checksums.json").write_text(
+        json.dumps({"plan_id": result["plan_id"], "checksums": checksums}, indent=2, sort_keys=True)
+        + "\n"
+    )
+
+
 def render_archive_eligibility_review_summary(result: dict[str, Any]) -> str:
     return "\n".join(
         [
@@ -3759,6 +4319,12 @@ def main(argv: list[str] | None = None) -> int:
         help="read-only archive-backed source-action dry-run manifest",
     )
     parser.add_argument(
+        "--validate-archive-source-action-dry-run",
+        metavar="SOURCE_ACTION_DRY_RUN_DIR",
+        help="read-only validation for an archive-backed source-action dry-run manifest",
+    )
+    parser.add_argument("--archive-bundle", help="optional archive bundle directory cross-check")
+    parser.add_argument(
         "--validate",
         metavar="PLAN_DIR",
         help="validate an existing archive-plan directory (read-only)",
@@ -3803,6 +4369,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-candidates-returned", type=int, default=DEFAULT_MAX_RETURNED)
     parser.add_argument("--max-warnings-returned", type=int, default=DEFAULT_MAX_WARNINGS)
     args = parser.parse_args(argv)
+
+    if args.validate_archive_source_action_dry_run:
+        result = validate_archive_source_action_dry_run(
+            args.validate_archive_source_action_dry_run,
+            archive_bundle_dir=args.archive_bundle,
+            plan_dir=args.plan_dir,
+            dry_run_receipt_dir=args.dry_run_receipt,
+            archive_eligibility_review_dir=args.archive_eligibility_review,
+            max_candidates=args.max_candidates_returned,
+        )
+        if args.out:
+            write_archive_source_action_dry_run_validation_outputs(result, args.out)
+        print(
+            json.dumps(result, sort_keys=True)
+            if args.json
+            else render_archive_source_action_dry_run_validation_summary(result)
+        )
+        return 0 if result["status"] in {"passed", "partial"} else 1
 
     if args.archive_source_action_dry_run:
         if (

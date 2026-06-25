@@ -2843,3 +2843,14 @@ python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-dry-ru
 ```
 
 The report validates the archive bundle, source preservation, source plan, dry-run receipt, eligibility review, payload checksums, exact plan id, and source recheck evidence. It writes dry-run report files only when `--out` is supplied and never creates archives, copies sources, moves sources, deletes sources, modifies sources, runs cleanup/prune/delete/restart/remediation/rollback/recovery, mutates Docker/Compose, invokes validation/pytest/QA, calls model/Codex/network/GitHub, installs packages, or applies cloud changes. `ready_for_source_action_review` is human review evidence only; `source_action_available=false` remains explicit. SeedOfEvil remains final merge owner.
+
+### Docker01 archive source-action dry-run validation
+
+The archive helper can validate a previously written source-action dry-run packet without making it executable:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-source-action-dry-run /tmp/sfai-pr240-source-action-dry-run --json
+python3 scripts/docker01_artifact_archive_plan.py --validate-archive-source-action-dry-run /tmp/sfai-pr240-source-action-dry-run --archive-bundle /tmp/sfai-pr240-artifact-archive-bundle --plan-dir /tmp/sfai-pr240-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr240-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr240-artifact-eligibility-review --out /tmp/sfai-pr240-source-action-dry-run-validation --json
+```
+
+The validator checks the PR239 dry-run JSON, candidate manifest, manifest, checksums, read-only/source-action-unavailable contract, safety flags, source stats, and optional archive bundle, plan, dry-run receipt, and eligibility review evidence chain. `passed` means the packet is human-reviewable for a future separate lane only; it does not authorize source action and `source_action_available=false` remains explicit. With `--out`, it writes `archive-source-action-dry-run-validation.json`, `archive-source-action-dry-run-validation-summary.md`, `candidate-source-action-validation.json`, `future-source-action-review-checklist.md`, `safety-notes.md`, `manifest.json`, and `checksums.json` only. The validator does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes. Future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`; SeedOfEvil remains final merge owner.
