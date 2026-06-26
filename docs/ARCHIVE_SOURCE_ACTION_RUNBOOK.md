@@ -120,3 +120,17 @@ This workflow is docs/runbook/evidence oriented. It preserves no-cleanup-shaped 
 ## Future PR/lane requirements
 
 Future source action would require a separate PR/lane, explicit command-surface review, safety tests, validation evidence, and SeedOfEvil final merge ownership. The future lane would need to define a named, narrow, auditable recipe and prove that it does not expand into broad cleanup, arbitrary shell execution, Docker/Compose mutation, remediation, rollback, recovery, or natural-language execution. This runbook is not that lane.
+
+### Fixture source-action rehearsal audit
+
+ShellForgeAI includes a read-only auditor for fixture-only source-action rehearsal evidence. The auditor inspects an existing PR246-style fixture rehearsal output directory with:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py \
+  --archive-source-action-fixture-audit <fixture_rehearsal_dir> \
+  --json
+```
+
+The audit validates required evidence files, JSON parsing, manifest/checksum integrity, fixture-only flags, rollback/restore proof, path guards, and the non-execution safety contract. It does not repeat rehearsal, create fixture files, archive files, restore files, or touch production paths. It can write audit artifacts only when `--out <fixture_audit_dir>` is supplied, and it can compare two fixture rehearsal evidence directories with `--compare-to <previous_fixture_rehearsal_dir>`.
+
+A passing fixture audit is evidence quality control only. It is not production readiness, does not enable production source action, and does not enable production cleanup. Future production source action still requires a separate reviewed lane and PR. SeedOfEvil remains final merge owner.

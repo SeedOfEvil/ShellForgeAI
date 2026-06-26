@@ -35,6 +35,7 @@ SOURCE_ACTION_DECISION_RECEIPT_MODE = "docker01_artifact_archive_source_action_d
 SOURCE_ACTION_READINESS_GATE_MODE = "docker01_artifact_archive_source_action_readiness_gate"
 SOURCE_ACTION_STATUS_REPORT_MODE = "docker01_artifact_archive_source_action_status_report"
 SOURCE_ACTION_FIXTURE_REHEARSAL_MODE = "docker01_artifact_archive_source_action_fixture_rehearsal"
+SOURCE_ACTION_FIXTURE_AUDIT_MODE = "docker01_artifact_archive_source_action_fixture_audit"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
@@ -177,6 +178,16 @@ SOURCE_ACTION_FIXTURE_REHEARSAL_OUT_FILES = (
     "fixture-archive-manifest.json",
     "fixture-rollback-proof.json",
     "fixture-safety-notes.md",
+    "manifest.json",
+    "checksums.json",
+)
+
+SOURCE_ACTION_FIXTURE_AUDIT_OUT_FILES = (
+    "fixture-source-action-audit.json",
+    "fixture-source-action-audit-summary.md",
+    "fixture-candidate-audit.json",
+    "fixture-rehearsal-comparison.json",
+    "fixture-audit-safety-notes.md",
     "manifest.json",
     "checksums.json",
 )
@@ -6203,6 +6214,406 @@ def write_archive_source_action_fixture_rehearsal_outputs(
     )
 
 
+def _audit_safety_block() -> dict[str, bool]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "fixture_audit_only": True,
+        "fixture_only": True,
+        "production_source_action_available": False,
+        "production_cleanup_available": False,
+        "archive_created": False,
+        "source_copied": False,
+        "source_moved": False,
+        "source_deleted": False,
+        "source_modified": False,
+        "fixture_source_created": False,
+        "fixture_source_archived": False,
+        "fixture_source_rehearsed": False,
+        "fixture_source_restored": False,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "docker_volume_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "cloud_apply_merge_push": False,
+        "github_post_approve_merge": False,
+    }
+
+
+def _audit_base(fixture_dir: str, compare_to: str | None, out_dir: str | None) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": SOURCE_ACTION_FIXTURE_AUDIT_MODE,
+        "status": "audit_failed",
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "fixture_rehearsal_dir": fixture_dir,
+        "compare_to_dir": compare_to,
+        "out_dir": out_dir,
+        "plan_id": None,
+        "read_only": True,
+        "mutation_performed": False,
+        "fixture_only": True,
+        "audit_only": True,
+        "production_source_action_available": False,
+        "production_cleanup_available": False,
+        "this_is_not_production_source_action": True,
+        "this_is_not_cleanup": True,
+        "summary": {
+            "required_files_present": False,
+            "json_parse_ok": False,
+            "manifest_ok": False,
+            "checksums_ok": False,
+            "fixture_contract_ok": False,
+            "rollback_proof_ok": False,
+            "restore_proof_ok": False,
+            "path_guard_ok": False,
+            "safety_contract_ok": False,
+            "fixture_candidates": 0,
+            "fixture_files_archived": 0,
+            "fixture_files_rehearsed": 0,
+            "fixture_files_restored": 0,
+            "comparison_status": "not_requested" if not compare_to else "failed",
+            "audit_errors": 0,
+            "audit_warnings": 0,
+        },
+        "fixture_candidate_audit": [],
+        "comparison": {
+            "requested": bool(compare_to),
+            "status": "not_requested" if not compare_to else "failed",
+            "plan_id_match": None,
+            "candidate_count_match": None,
+            "safety_contract_match": None,
+            "restore_proof_match": None,
+            "differences": [],
+        },
+        "will_not_do": [
+            "create fixture files in this PR command",
+            "rehearse source action in this PR command",
+            "restore fixture files in this PR command",
+            "delete source files in this PR",
+            "move source files in this PR",
+            "modify source files in this PR",
+            "copy source files in this PR",
+            "create production archive in this PR",
+            "cleanup/prune/delete/restart/remediate/rollback/recover",
+        ],
+        "checks": [],
+        "errors": [],
+        "warnings": [],
+        "safety": _audit_safety_block(),
+        "first_safe_command": "cat <out_dir>/fixture-source-action-audit-summary.md",
+    }
+
+
+def _read_json_file(path: Path, errors: list[str]) -> Any:
+    try:
+        return json.loads(path.read_text())
+    except Exception as exc:
+        errors.append(f"invalid JSON in {path.name}: {exc}")
+        return None
+
+
+def _validate_rehearsal_dir(directory: Path, result: dict[str, Any]) -> dict[str, Any] | None:
+    missing = [
+        name
+        for name in SOURCE_ACTION_FIXTURE_REHEARSAL_OUT_FILES
+        if not (directory / name).is_file()
+    ]
+    if missing:
+        result["errors"].append("missing required fixture rehearsal files: " + ", ".join(missing))
+        return None
+    result["summary"]["required_files_present"] = True
+    parsed: dict[str, Any] = {}
+    for name in (
+        "fixture-source-action-rehearsal.json",
+        "fixture-candidate-manifest.json",
+        "fixture-archive-manifest.json",
+        "fixture-rollback-proof.json",
+        "manifest.json",
+        "checksums.json",
+    ):
+        value = _read_json_file(directory / name, result["errors"])
+        if value is None:
+            return None
+        parsed[name] = value
+    result["summary"]["json_parse_ok"] = True
+    manifest = parsed["manifest.json"]
+    checksums = parsed["checksums.json"].get("checksums", {})
+    manifest_names = [item.get("name") for item in manifest.get("files", [])]
+    if all(
+        name in manifest_names
+        for name in SOURCE_ACTION_FIXTURE_REHEARSAL_OUT_FILES
+        if name not in {"manifest.json", "checksums.json"}
+    ):
+        result["summary"]["manifest_ok"] = True
+    else:
+        result["errors"].append("manifest does not list all required rehearsal artifacts")
+    checksum_ok = True
+    for name in manifest_names + ["manifest.json"]:
+        path = directory / name
+        expected = checksums.get(name)
+        if not expected or not path.is_file() or expected != "sha256:" + sha256_file(path):
+            checksum_ok = False
+            result["errors"].append(f"checksum mismatch for {name}")
+    result["summary"]["checksums_ok"] = checksum_ok
+    rehearsal = parsed["fixture-source-action-rehearsal.json"]
+    result["plan_id"] = rehearsal.get("plan_id")
+    summary = rehearsal.get("summary", {})
+    result["summary"].update(
+        {
+            "fixture_candidates": int(summary.get("fixture_candidates", 0) or 0),
+            "fixture_files_archived": int(summary.get("fixture_files_archived", 0) or 0),
+            "fixture_files_rehearsed": int(summary.get("fixture_files_rehearsed", 0) or 0),
+            "fixture_files_restored": int(summary.get("fixture_files_restored", 0) or 0),
+        }
+    )
+    unsafe_true = ["production_source_action_available", "production_cleanup_available"]
+    if rehearsal.get("fixture_only") is True and not any(
+        rehearsal.get(k) is True for k in unsafe_true
+    ):
+        result["summary"]["fixture_contract_ok"] = True
+    else:
+        result["errors"].append("fixture contract failed")
+    proof = parsed["fixture-rollback-proof.json"]
+    rollback_ok = proof.get("rollback_available") is True and proof.get("rollback_tested") is True
+    restore_ok = proof.get("restored_source_matches_original") is True
+    result["summary"]["rollback_proof_ok"] = rollback_ok
+    result["summary"]["restore_proof_ok"] = restore_ok
+    if not rollback_ok or not restore_ok:
+        result["errors"].append("rollback/restore proof missing or invalid")
+    safety = rehearsal.get("safety", {})
+    forbidden = [
+        "source_deleted",
+        "source_moved",
+        "source_modified",
+        "source_copied",
+        "cleanup_executed",
+        "docker_prune_executed",
+        "container_restarted",
+        "remediation_executed",
+        "rollback_executed",
+        "recovery_executed",
+    ]
+    safety_ok = all(safety.get(k) is not True and rehearsal.get(k) is not True for k in forbidden)
+    result["summary"]["safety_contract_ok"] = safety_ok
+    if not safety_ok:
+        result["errors"].append("safety contract claims forbidden production action")
+    root = Path(str(rehearsal.get("fixture_root", ""))).resolve(strict=False)
+    path_ok = True
+    for cand in rehearsal.get("fixture_candidate_manifest", []):
+        audit = {
+            **cand,
+            "status": "passed",
+            "path_escape": False,
+            "symlink_detected": False,
+            "blockers": [],
+            "warnings": list(cand.get("warnings", [])),
+        }
+        for key in ("fixture_source_path", "archive_payload_path", "held_path"):
+            p = Path(str(cand.get(key, "")))
+            if p.is_symlink() or any(part.is_symlink() for part in p.parents if part.exists()):
+                audit["symlink_detected"] = True
+                audit["status"] = "failed"
+                audit["blockers"].append(f"symlink in {key}")
+                path_ok = False
+            if not _path_inside(p, root):
+                audit["path_escape"] = True
+                audit["status"] = "failed"
+                audit["blockers"].append(f"path escape in {key}")
+                path_ok = False
+            if _path_has_production_shape(p):
+                audit["production_path"] = True
+                audit["status"] = "failed"
+                audit["blockers"].append(f"production-shaped path in {key}")
+                path_ok = False
+        audit.setdefault("production_path", False)
+        audit.setdefault("source_inside_fixture_root", not audit["path_escape"])
+        result["fixture_candidate_audit"].append(audit)
+    result["summary"]["path_guard_ok"] = path_ok
+    if not path_ok:
+        result["errors"].append("fixture path guard failed")
+    return rehearsal
+
+
+def build_archive_source_action_fixture_audit(
+    fixture_rehearsal_dir: str, compare_to: str | None = None, out_dir: str | None = None
+) -> dict[str, Any]:
+    result = _audit_base(fixture_rehearsal_dir, compare_to, out_dir)
+    main = _validate_rehearsal_dir(Path(fixture_rehearsal_dir), result)
+    if main and compare_to:
+        other_result = _audit_base(compare_to, None, None)
+        other = _validate_rehearsal_dir(Path(compare_to), other_result)
+        diffs = result["comparison"]["differences"]
+        if other:
+            checks = {
+                "plan_id_match": main.get("plan_id") == other.get("plan_id"),
+                "candidate_count_match": len(main.get("fixture_candidate_manifest", []))
+                == len(other.get("fixture_candidate_manifest", [])),
+                "safety_contract_match": main.get("production_source_action_available")
+                == other.get("production_source_action_available")
+                and main.get("production_cleanup_available")
+                == other.get("production_cleanup_available"),
+                "restore_proof_match": main.get("rollback_proof", {}).get(
+                    "restored_source_matches_original"
+                )
+                == other.get("rollback_proof", {}).get("restored_source_matches_original"),
+            }
+            result["comparison"].update(checks)
+            for key, ok in checks.items():
+                if not ok:
+                    diffs.append(key)
+            result["comparison"]["status"] = "passed" if not diffs else "failed"
+            result["summary"]["comparison_status"] = result["comparison"]["status"]
+            if diffs:
+                result["errors"].append("comparison failed: " + ", ".join(diffs))
+        else:
+            result["errors"].append("compare-to rehearsal evidence failed audit")
+    ok_keys = [
+        "required_files_present",
+        "json_parse_ok",
+        "manifest_ok",
+        "checksums_ok",
+        "fixture_contract_ok",
+        "rollback_proof_ok",
+        "restore_proof_ok",
+        "path_guard_ok",
+        "safety_contract_ok",
+    ]
+    core_ok = all(result["summary"].get(k) is True for k in ok_keys)
+    comp_ok = result["summary"]["comparison_status"] in {"not_requested", "passed"}
+    result["status"] = "audit_passed" if core_ok and comp_ok else "audit_failed"
+    result["summary"]["audit_errors"] = len(result["errors"])
+    result["summary"]["audit_warnings"] = len(result["warnings"])
+    for name, key in (
+        ("required files", "required_files_present"),
+        ("JSON parse", "json_parse_ok"),
+        ("manifest", "manifest_ok"),
+        ("checksums", "checksums_ok"),
+        ("fixture contract", "fixture_contract_ok"),
+        ("rollback proof", "rollback_proof_ok"),
+        ("restore proof", "restore_proof_ok"),
+        ("path guard", "path_guard_ok"),
+        ("safety contract", "safety_contract_ok"),
+    ):
+        result["checks"].append(
+            {
+                "name": name.replace(" ", "_"),
+                "status": "passed" if result["summary"].get(key) else "failed",
+                "detail": name,
+            }
+        )
+    return result
+
+
+def render_archive_source_action_fixture_audit(result: dict[str, Any]) -> str:
+    s = result.get("summary", {})
+
+    def yn(value: Any) -> str:
+        return "passed" if value else "failed"
+
+    return "\n".join(
+        [
+            "# Docker01 Fixture Source-Action Rehearsal Audit",
+            "",
+            f"Fixture rehearsal: {result.get('fixture_rehearsal_dir')}",
+            f"Compare to: {result.get('compare_to_dir')}",
+            f"Plan ID: {result.get('plan_id')}",
+            f"Status: {result.get('status')}",
+            "Read-only: yes",
+            "Fixture only: yes",
+            "Production source action available: no",
+            "Production cleanup available: no",
+            "",
+            "## Checks",
+            f"* required files: {yn(s.get('required_files_present'))}",
+            f"* JSON parse: {yn(s.get('json_parse_ok'))}",
+            f"* manifest: {yn(s.get('manifest_ok'))}",
+            f"* checksums: {yn(s.get('checksums_ok'))}",
+            f"* fixture contract: {yn(s.get('fixture_contract_ok'))}",
+            "* rollback/restore proof: "
+            f"{yn(s.get('rollback_proof_ok') and s.get('restore_proof_ok'))}",
+            f"* path guard: {yn(s.get('path_guard_ok'))}",
+            f"* safety contract: {yn(s.get('safety_contract_ok'))}",
+            f"* comparison: {s.get('comparison_status')}",
+            "",
+            "## Fixture summary",
+            f"* candidates: {s.get('fixture_candidates', 0)}",
+            f"* files archived: {s.get('fixture_files_archived', 0)}",
+            f"* files rehearsed: {s.get('fixture_files_rehearsed', 0)}",
+            f"* files restored: {s.get('fixture_files_restored', 0)}",
+            "",
+            "## Safety",
+            "* audit only",
+            "* no fixture mutation",
+            "* no production source action",
+            "* no production cleanup",
+            "* no source deleted",
+            "* no source moved",
+            "* no source modified",
+            "* no Docker prune",
+            "* no Docker/Compose mutation",
+            "* no restart",
+            "* no remediation/rollback/recovery",
+            "* no natural-language execution",
+            "* no " + "shell=" + "True",
+            "",
+        ]
+    )
+
+
+def write_archive_source_action_fixture_audit_outputs(result: dict[str, Any], out_dir: str) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    _write_json(out / "fixture-source-action-audit.json", result)
+    (out / "fixture-source-action-audit-summary.md").write_text(
+        render_archive_source_action_fixture_audit(result)
+    )
+    _write_json(
+        out / "fixture-candidate-audit.json",
+        {"plan_id": result.get("plan_id"), "candidates": result["fixture_candidate_audit"]},
+    )
+    _write_json(out / "fixture-rehearsal-comparison.json", result["comparison"])
+    (out / "fixture-audit-safety-notes.md").write_text(
+        "# Fixture audit safety notes\n\n"
+        "Read-only fixture rehearsal evidence audit only. "
+        "No production source action. No production cleanup.\n"
+    )
+    files = []
+    for name in SOURCE_ACTION_FIXTURE_AUDIT_OUT_FILES:
+        if name in {"manifest.json", "checksums.json"}:
+            continue
+        files.append(
+            {"path": str(out / name), "name": name, "size_bytes": (out / name).stat().st_size}
+        )
+    _write_json(
+        out / "manifest.json",
+        {
+            "plan_id": result.get("plan_id"),
+            "mode": SOURCE_ACTION_FIXTURE_AUDIT_MODE,
+            "files": files,
+            "fixture_only": True,
+            "audit_only": True,
+        },
+    )
+    names = [i["name"] for i in files] + ["manifest.json"]
+    _write_json(
+        out / "checksums.json",
+        {
+            "plan_id": result.get("plan_id"),
+            "checksums": {name: "sha256:" + sha256_file(out / name) for name in names},
+        },
+    )
+
+
 def write_archive_source_action_status_report_outputs(result: dict[str, Any], out_dir: str) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -6940,6 +7351,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="confirmation-gated fixture-only source-action rehearsal",
     )
+    parser.add_argument(
+        "--archive-source-action-fixture-audit",
+        metavar="FIXTURE_REHEARSAL_DIR",
+        help="read-only audit for fixture-only source-action rehearsal evidence",
+    )
+    parser.add_argument(
+        "--compare-to",
+        metavar="PREVIOUS_FIXTURE_REHEARSAL_DIR",
+        help="optional read-only fixture rehearsal evidence comparison",
+    )
     parser.add_argument("--archive-bundle", help="optional archive bundle directory cross-check")
     parser.add_argument(
         "--fixture-root", help="explicit safe /tmp/sfai-fixture-source-action-* root"
@@ -7005,6 +7426,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-candidates-returned", type=int, default=DEFAULT_MAX_RETURNED)
     parser.add_argument("--max-warnings-returned", type=int, default=DEFAULT_MAX_WARNINGS)
     args = parser.parse_args(argv)
+
+    if args.archive_source_action_fixture_audit:
+        result = build_archive_source_action_fixture_audit(
+            args.archive_source_action_fixture_audit, compare_to=args.compare_to, out_dir=args.out
+        )
+        if args.out:
+            write_archive_source_action_fixture_audit_outputs(result, args.out)
+            result["first_safe_command"] = (
+                f"cat {Path(args.out) / 'fixture-source-action-audit-summary.md'}"
+            )
+        print(
+            json.dumps(result, sort_keys=True)
+            if args.json
+            else render_archive_source_action_fixture_audit(result)
+        )
+        return 0 if result["status"] in {"audit_passed", "partial"} else 1
 
     if args.archive_source_action_fixture_rehearsal:
         if not args.fixture_root or not args.plan_id or not args.out:
