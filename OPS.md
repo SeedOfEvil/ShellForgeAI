@@ -2882,3 +2882,14 @@ With `--out`, the helper writes report artifacts only: `archive-source-action-de
 ### Docker01 archive source-action readiness gate
 
 The archive helper now provides a final read-only source-action readiness gate for the PR239–PR242 evidence chain. It consumes the operator decision receipt, human review packet, source-action dry run, source-action validation, archive bundle, original plan, dry-run receipt, and archive eligibility review with an exact plan id, then reports whether a future separate source-action PR/lane would be reviewable by SeedOfEvil. `ready_for_future_pr_review` is not approval, not execution, and does not authorize cleanup or source action; `source_action_available=false` remains explicit. With `--out`, it writes only readiness/report artifacts (`archive-source-action-readiness-gate.json`, summary, candidate readiness summary, future PR checklist, non-execution contract, safety notes, manifest, and checksums). The gate does not create archives, copy/move/delete/modify sources, add a source-action command, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes.
+### Docker01 archive source-action operator status report
+
+The archive helper can now summarize the completed archive-backed source-action evidence chain with a read-only operator status report:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-status-report /tmp/sfai-pr244-source-action-readiness-gate --json
+```
+
+When optional evidence directories are supplied, the report requires an exact `--plan-id` and cross-checks the readiness gate against the decision receipt, review packet, source-action dry run, source-action validation, archive bundle, plan, dry-run receipt, and archive eligibility review. With `--out <status_report_dir>`, it writes status/report artifacts only: `archive-source-action-status-report.json`, `archive-source-action-operator-status.md`, `candidate-status-summary.json`, `operator-next-steps.md`, `non-execution-contract.md`, `safety-notes.md`, `manifest.json`, and `checksums.json`.
+
+`ready_for_operator_review` means the evidence is inspectable by an operator for a future separate PR/lane; it is not approval, not execution, and does not authorize cleanup or source action. The report does not create a source-action command, create archives, copy/move/modify/delete sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA from the helper, use natural-language execution or `shell=True`, or perform model/Codex/network/GitHub/package/cloud actions. `source_action_available=false` remains explicit, source delete/move defaults remain false, and SeedOfEvil remains final merge owner.

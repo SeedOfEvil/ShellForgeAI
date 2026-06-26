@@ -33,6 +33,7 @@ SOURCE_ACTION_DRY_RUN_VALIDATION_MODE = "docker01_artifact_archive_source_action
 SOURCE_ACTION_REVIEW_PACKET_MODE = "docker01_artifact_archive_source_action_review_packet"
 SOURCE_ACTION_DECISION_RECEIPT_MODE = "docker01_artifact_archive_source_action_decision_receipt"
 SOURCE_ACTION_READINESS_GATE_MODE = "docker01_artifact_archive_source_action_readiness_gate"
+SOURCE_ACTION_STATUS_REPORT_MODE = "docker01_artifact_archive_source_action_status_report"
 DEFAULT_ROOT = "/tmp"
 DEFAULT_MAX_SCAN = 1000
 DEFAULT_MAX_RETURNED = 500
@@ -148,6 +149,17 @@ SOURCE_ACTION_READINESS_GATE_OUT_FILES = (
     "archive-source-action-readiness-summary.md",
     "candidate-readiness-summary.json",
     "future-source-action-pr-checklist.md",
+    "non-execution-contract.md",
+    "safety-notes.md",
+    "manifest.json",
+    "checksums.json",
+)
+
+SOURCE_ACTION_STATUS_REPORT_OUT_FILES = (
+    "archive-source-action-status-report.json",
+    "archive-source-action-operator-status.md",
+    "candidate-status-summary.json",
+    "operator-next-steps.md",
     "non-execution-contract.md",
     "safety-notes.md",
     "manifest.json",
@@ -5277,6 +5289,576 @@ def build_archive_source_action_readiness_gate(
     }
 
 
+def source_action_status_report_safety_block() -> dict[str, bool]:
+    return {
+        "read_only": True,
+        "mutation_performed": False,
+        "operator_status_report_only": True,
+        "source_action_available": False,
+        "archive_created": False,
+        "source_copied": False,
+        "source_moved": False,
+        "source_deleted": False,
+        "source_modified": False,
+        "cleanup_executed": False,
+        "docker_prune_executed": False,
+        "docker_image_removed": False,
+        "docker_volume_removed": False,
+        "file_deleted": False,
+        "docker_compose_executed": False,
+        "container_restarted": False,
+        "remediation_executed": False,
+        "rollback_executed": False,
+        "recovery_executed": False,
+        "natural_language_execution": False,
+        "shell_true": False,
+        "arbitrary_command_execution": False,
+        "cloud_apply_merge_push": False,
+        "github_post_approve_merge": False,
+    }
+
+
+def _candidate_digest(candidates: list[Any]) -> str:
+    normalized = [
+        {
+            "source_path": c.get("source_path"),
+            "class": c.get("class"),
+            "archive_payload_path": c.get("archive_payload_path"),
+        }
+        for c in candidates
+        if isinstance(c, dict)
+    ]
+    return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
+
+
+def build_archive_source_action_status_report(
+    readiness_gate_dir: str,
+    *,
+    decision_receipt_dir: str | None = None,
+    review_packet_dir: str | None = None,
+    source_action_dry_run_dir: str | None = None,
+    source_action_validation_dir: str | None = None,
+    archive_bundle_dir: str | None = None,
+    plan_dir: str | None = None,
+    dry_run_receipt_dir: str | None = None,
+    archive_eligibility_review_dir: str | None = None,
+    supplied_plan_id: str | None = None,
+    out_dir: str | None = None,
+) -> dict[str, Any]:
+    """Build a read-only operator status report from source-action readiness evidence."""
+    checks: list[dict[str, str]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    def add(name: str, ok: bool, detail: str = "", *, warning: bool = False) -> None:
+        _add_check(
+            checks,
+            errors,
+            warnings,
+            name,
+            "warning" if warning else "passed" if ok else "failed",
+            detail,
+        )
+
+    readiness_path = Path(readiness_gate_dir)
+    parsed, rc, re, rw = _validate_output_manifest_checksums(
+        readiness_path, SOURCE_ACTION_READINESS_GATE_OUT_FILES, SOURCE_ACTION_READINESS_GATE_MODE
+    )
+    checks.extend(rc)
+    errors.extend(re)
+    warnings.extend(rw)
+    readiness = parsed.get("archive-source-action-readiness-gate.json") or {}
+    candidate_doc = parsed.get("candidate-readiness-summary.json") or {}
+    plan_id = str(readiness.get("plan_id") or supplied_plan_id or "")
+
+    add("readiness_gate_validated", bool(readiness), "readiness gate JSON parsed")
+    add(
+        "readiness_source_action_unavailable",
+        readiness.get("source_action_available") is False,
+        "source_action_available must be false",
+    )
+    add(
+        "readiness_no_mutation",
+        readiness.get("mutation_performed") is False,
+        "mutation_performed must be false",
+    )
+    add(
+        "readiness_not_authorizing",
+        readiness.get("this_is_not_approval") is True
+        and readiness.get("this_is_not_execution") is True
+        and readiness.get("this_does_not_authorize_source_action") is True,
+        "readiness gate must not approve, execute, or authorize",
+    )
+    ok, detail = _safety_flags_clean(readiness)
+    add("readiness_safety_contract", ok, detail)
+    if readiness.get("safety", {}).get("archive_created") is True:
+        add("status_report_no_archive_created", False, "safety.archive_created=true")
+
+    optional_dirs = {
+        "decision_receipt_dir": decision_receipt_dir,
+        "review_packet_dir": review_packet_dir,
+        "source_action_dry_run_dir": source_action_dry_run_dir,
+        "source_action_validation_dir": source_action_validation_dir,
+        "archive_bundle_dir": archive_bundle_dir,
+        "plan_dir": plan_dir,
+        "dry_run_receipt_dir": dry_run_receipt_dir,
+        "archive_eligibility_review_dir": archive_eligibility_review_dir,
+    }
+    supplied = {k: v for k, v in optional_dirs.items() if v}
+    if supplied and supplied_plan_id != plan_id:
+        add("supplied_plan_id_exact", False, "optional evidence requires exact --plan-id")
+    elif supplied:
+        add("supplied_plan_id_exact", True, "")
+    elif not supplied:
+        _add_check(
+            checks,
+            errors,
+            warnings,
+            "optional_evidence_absent",
+            "warning",
+            "standalone readiness gate status only",
+        )
+
+    evidence_docs: list[dict[str, Any]] = [readiness]
+    expected = (
+        (
+            "decision_receipt_dir",
+            decision_receipt_dir,
+            SOURCE_ACTION_DECISION_RECEIPT_OUT_FILES,
+            SOURCE_ACTION_DECISION_RECEIPT_MODE,
+            "archive-source-action-decision-receipt.json",
+        ),
+        (
+            "review_packet_dir",
+            review_packet_dir,
+            SOURCE_ACTION_REVIEW_PACKET_OUT_FILES,
+            SOURCE_ACTION_REVIEW_PACKET_MODE,
+            "archive-source-action-review-packet.json",
+        ),
+        (
+            "source_action_dry_run_dir",
+            source_action_dry_run_dir,
+            SOURCE_ACTION_DRY_RUN_OUT_FILES,
+            SOURCE_ACTION_DRY_RUN_MODE,
+            "archive-source-action-dry-run.json",
+        ),
+        (
+            "source_action_validation_dir",
+            source_action_validation_dir,
+            SOURCE_ACTION_DRY_RUN_VALIDATION_OUT_FILES,
+            SOURCE_ACTION_DRY_RUN_VALIDATION_MODE,
+            "archive-source-action-dry-run-validation.json",
+        ),
+        (
+            "archive_eligibility_review_dir",
+            archive_eligibility_review_dir,
+            ARCHIVE_ELIGIBILITY_REVIEW_OUT_FILES,
+            ARCHIVE_ELIGIBILITY_REVIEW_MODE,
+            "artifact-archive-eligibility-review.json",
+        ),
+    )
+    for label, directory, files, mode, main_name in expected:
+        if not directory:
+            continue
+        parsed_optional, oc, oe, ow = _validate_output_manifest_checksums(
+            Path(directory), files, mode
+        )
+        checks.extend(oc)
+        errors.extend(oe)
+        warnings.extend(ow)
+        doc = parsed_optional.get(main_name) or {}
+        evidence_docs.append(doc)
+        add(f"{label}_plan_id_match", doc.get("plan_id") == plan_id, str(doc.get("plan_id")))
+        clean, clean_detail = _safety_flags_clean(doc)
+        add(f"{label}_safety_contract", clean, clean_detail)
+
+    candidates = (
+        candidate_doc.get("candidates")
+        if isinstance(candidate_doc.get("candidates"), list)
+        else readiness.get("candidate_readiness", [])
+    )
+    if not isinstance(candidates, list):
+        candidates = []
+    candidate_status = []
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        source = str(cand.get("source_path", ""))
+        blockers = list(cand.get("blockers", [])) if isinstance(cand.get("blockers"), list) else []
+        cand_warnings = (
+            list(cand.get("warnings", [])) if isinstance(cand.get("warnings"), list) else []
+        )
+        path_blocker = _readiness_path_blocker(source)
+        if path_blocker:
+            blockers.append(path_blocker)
+        source_exists = Path(source).exists() and not Path(source).is_symlink()
+        readiness_status = cand.get("readiness_status", "unknown")
+        if blockers:
+            readiness_status = "blocked"
+        elif readiness_status not in {
+            "ready_for_future_pr_review",
+            "blocked",
+            "warning",
+            "unknown",
+        }:
+            readiness_status = "unknown"
+        candidate_status.append(
+            {
+                "source_path": source,
+                "class": cand.get("class"),
+                "archive_payload_path": cand.get("archive_payload_path"),
+                "readiness_status": readiness_status,
+                "source_exists": source_exists,
+                "archive_payload_exists": cand.get("archive_payload_exists") is True,
+                "archive_checksum_verified": cand.get("archive_checksum_verified") is True,
+                "status_summary": "ready for future PR review only"
+                if readiness_status == "ready_for_future_pr_review"
+                else readiness_status,
+                "blockers": blockers,
+                "warnings": cand_warnings,
+            }
+        )
+    if any(c["blockers"] for c in candidate_status):
+        add("candidate_paths_safe", False, "candidate blockers exist")
+    else:
+        add("candidate_paths_safe", True, "")
+
+    if source_action_validation_dir:
+        validation = (
+            _load_plan_json(
+                Path(source_action_validation_dir) / "candidate-source-action-validation.json"
+            )
+            or {}
+        )
+        validation_candidates = (
+            validation.get("candidates", []) if isinstance(validation, dict) else []
+        )
+        add(
+            "candidate_manifest_match",
+            _candidate_digest(candidates) == _candidate_digest(validation_candidates),
+            "readiness vs validation candidates",
+        )
+    else:
+        add("candidate_manifest_match", True, "standalone readiness gate")
+
+    if archive_bundle_dir:
+        archive_validation = validate_archive_bundle(
+            archive_bundle_dir,
+            plan_dir=plan_dir,
+            dry_run_receipt_dir=dry_run_receipt_dir,
+        )
+        checks.extend(archive_validation.get("checks", []))
+        errors.extend(archive_validation.get("errors", []))
+        warnings.extend(archive_validation.get("warnings", []))
+        add(
+            "archive_payload_verified",
+            archive_validation.get("summary", {}).get("payload_ok") is True,
+            "archive payload checksum verification",
+        )
+        add(
+            "source_preservation_ok",
+            archive_validation.get("summary", {}).get("source_preservation_ok") is True,
+            "source preservation",
+        )
+    else:
+        add(
+            "archive_payload_verified",
+            readiness.get("summary", {}).get("archive_payload_verified") is True,
+            "readiness gate summary",
+        )
+        add(
+            "source_preservation_ok",
+            readiness.get("summary", {}).get("source_preservation_ok") is True,
+            "readiness gate summary",
+        )
+
+    for doc in evidence_docs:
+        if not isinstance(doc, dict):
+            continue
+        if (
+            doc.get("source_action_available") is True
+            or doc.get("executable_source_action") is True
+        ):
+            add("executable_source_action_absent", False, "executable source action claimed")
+        if any(
+            doc.get(k) is True
+            for k in ("this_is_approval", "this_is_execution", "this_authorizes_source_action")
+        ):
+            add(
+                "approval_execution_authorization_absent",
+                False,
+                "approval/execution/authorization claimed",
+            )
+
+    ready = sum(
+        1 for c in candidate_status if c["readiness_status"] == "ready_for_future_pr_review"
+    )
+    blocked = sum(1 for c in candidate_status if c["readiness_status"] == "blocked")
+    warning_count = sum(1 for c in candidate_status if c["readiness_status"] == "warning")
+    unknown = sum(1 for c in candidate_status if c["readiness_status"] == "unknown")
+    has_failed = any(c.get("status") == "failed" for c in checks)
+    if not readiness or any(
+        "json_parse" in e or "checksums" in e or "manifest" in e or "required_files" in e
+        for e in errors
+    ):
+        status = "failed"
+    elif has_failed or blocked or readiness.get("status") in {"not_ready", "failed"}:
+        status = "not_ready"
+    elif warnings or warning_count or not supplied:
+        status = "partial"
+    else:
+        status = "ready_for_operator_review"
+
+    summary = readiness.get("summary", {}) if isinstance(readiness.get("summary"), dict) else {}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mode": SOURCE_ACTION_STATUS_REPORT_MODE,
+        "status": status,
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "readiness_gate_dir": str(readiness_path),
+        "decision_receipt_dir": str(Path(decision_receipt_dir)) if decision_receipt_dir else None,
+        "review_packet_dir": str(Path(review_packet_dir)) if review_packet_dir else None,
+        "source_action_dry_run_dir": str(Path(source_action_dry_run_dir))
+        if source_action_dry_run_dir
+        else None,
+        "source_action_validation_dir": str(Path(source_action_validation_dir))
+        if source_action_validation_dir
+        else None,
+        "archive_bundle_dir": str(Path(archive_bundle_dir)) if archive_bundle_dir else None,
+        "plan_dir": str(Path(plan_dir)) if plan_dir else None,
+        "dry_run_receipt_dir": str(Path(dry_run_receipt_dir)) if dry_run_receipt_dir else None,
+        "archive_eligibility_review_dir": str(Path(archive_eligibility_review_dir))
+        if archive_eligibility_review_dir
+        else None,
+        "plan_id": plan_id,
+        "read_only": True,
+        "mutation_performed": False,
+        "source_action_available": False,
+        "operator_status_report_only": True,
+        "this_is_not_approval": True,
+        "this_is_not_execution": True,
+        "this_does_not_authorize_source_action": True,
+        "summary": {
+            "readiness_gate_status": readiness.get("status", "failed"),
+            "decision": summary.get("decision"),
+            "future_source_action_pr_required": True,
+            "plan_id_match": supplied_plan_id in {None, plan_id},
+            "candidate_manifest_match": not any(
+                c["name"] == "candidate_manifest_match" and c["status"] == "failed" for c in checks
+            ),
+            "archive_payload_verified": not any(
+                c["name"] == "archive_payload_verified" and c["status"] == "failed" for c in checks
+            ),
+            "source_preservation_ok": not any(
+                c["name"] == "source_preservation_ok" and c["status"] == "failed" for c in checks
+            ),
+            "source_action_contract_ok": True,
+            "candidate_items": len(candidate_status),
+            "ready_candidates": ready,
+            "blocked_candidates": blocked,
+            "warning_candidates": warning_count,
+            "unknown_candidates": unknown,
+            "status_errors": len(errors),
+            "status_warnings": len(warnings),
+        },
+        "operator_status": {
+            "plain_language_state": (
+                "Evidence chain is reviewable for a future separate PR/lane; "
+                "no source action is available here."
+            ),
+            "next_safe_operator_step": (
+                "review evidence or create a future separate PR prompt; "
+                "do not execute source action from this report"
+            ),
+            "separate_pr_required": True,
+            "seedofevil_final_merge_owner": True,
+            "source_delete_default": False,
+            "source_move_default": False,
+        },
+        "candidate_status": candidate_status,
+        "will_not_do": [
+            "delete source files in this PR",
+            "move source files in this PR",
+            "modify source files in this PR",
+            "copy source files in this PR",
+            "create archive in this PR",
+            "cleanup/prune/delete/restart/remediate/rollback/recover",
+        ],
+        "checks": checks,
+        "errors": errors,
+        "warnings": warnings,
+        "safety": source_action_status_report_safety_block(),
+        "first_safe_command": f"cat {Path(out_dir) / 'archive-source-action-operator-status.md'}"
+        if out_dir
+        else "cat <status_report_dir>/archive-source-action-operator-status.md",
+    }
+
+
+def render_archive_source_action_status_report(result: dict[str, Any]) -> str:
+    s = result["summary"]
+    return "\n".join(
+        [
+            "# Docker01 Archive Source-Action Operator Status",
+            "",
+            f"Plan ID: {result['plan_id']}",
+            f"Readiness gate: {result['readiness_gate_dir']}",
+            f"Status: {result['status']}",
+            "Read-only: yes",
+            "Source action available: no",
+            "",
+            "## Plain language",
+            "",
+            (
+                "Evidence chain is reviewable for a future separate PR/lane. "
+                "No source action is available from this report."
+            ),
+            "",
+            "## Evidence chain",
+            "",
+            f"* readiness gate: {s['readiness_gate_status']}",
+            (
+                "* decision receipt: "
+                + ("supplied" if result["decision_receipt_dir"] else "not supplied")
+            ),
+            f"* review packet: {'supplied' if result['review_packet_dir'] else 'not supplied'}",
+            (
+                "* source-action validation: "
+                + ("supplied" if result["source_action_validation_dir"] else "not supplied")
+            ),
+            (
+                "* source-action dry run: "
+                + ("supplied" if result["source_action_dry_run_dir"] else "not supplied")
+            ),
+            (
+                "* archive eligibility: "
+                + ("supplied" if result["archive_eligibility_review_dir"] else "not supplied")
+            ),
+            f"* archive bundle: {'supplied' if result['archive_bundle_dir'] else 'not supplied'}",
+            f"* plan id match: {s['plan_id_match']}",
+            f"* candidate manifest: {s['candidate_manifest_match']}",
+            f"* source preservation: {s['source_preservation_ok']}",
+            "",
+            "## Candidate summary",
+            "",
+            f"* candidates: {s['candidate_items']}",
+            f"* ready: {s['ready_candidates']}",
+            f"* blocked: {s['blocked_candidates']}",
+            f"* warning: {s['warning_candidates']}",
+            f"* unknown: {s['unknown_candidates']}",
+            "",
+            "## Next safe operator step",
+            "",
+            "* Review evidence",
+            "* Keep SeedOfEvil as final merge owner",
+            "* Future action requires a separate PR/lane",
+            "* Future action requires exact plan id and explicit confirmation phrase",
+            "* Source delete default: false",
+            "* Source move default: false",
+            "",
+            "## Safety",
+            "",
+            "* status report only",
+            "* not approval",
+            "* not execution",
+            "* does not authorize source action",
+            "* no source action available",
+            "* no source deleted",
+            "* no source moved",
+            "* no source modified",
+            "* no source copied",
+            "* no archive created",
+            "* no cleanup/prune/delete/restart",
+            "* no remediation/rollback/recovery",
+            "* no natural-language execution",
+            "* no " + "shell=" + "True",
+            "",
+        ]
+    )
+
+
+def write_archive_source_action_status_report_outputs(result: dict[str, Any], out_dir: str) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "archive-source-action-status-report.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    (out / "archive-source-action-operator-status.md").write_text(
+        render_archive_source_action_status_report(result)
+    )
+    (out / "candidate-status-summary.json").write_text(
+        json.dumps(
+            {"plan_id": result["plan_id"], "candidates": result["candidate_status"]},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    (out / "operator-next-steps.md").write_text(
+        "# Operator Next Steps\n\n"
+        "* review evidence only\n"
+        "* not approval\n"
+        "* not execution\n"
+        "* does not authorize source action\n"
+        "* future action would require a separate PR/lane\n"
+        "* future action would require exact plan id\n"
+        "* future action would require exact confirmation phrase\n"
+        "* source delete default is false\n"
+        "* source move default is false\n"
+        "* SeedOfEvil remains final merge owner\n"
+    )
+    (out / "non-execution-contract.md").write_text(
+        "# Non-Execution Contract\n\n"
+        "* status report only\n"
+        "* not approval\n"
+        "* not execution\n"
+        "* does not authorize source action\n"
+        "* source action is unavailable\n"
+    )
+    (out / "safety-notes.md").write_text(
+        "# Safety Notes\n\n"
+        "* no source copied, moved, modified, or deleted\n"
+        "* no archive created by status report\n"
+        "* no cleanup/prune/delete/restart/remediation/rollback/recovery\n"
+    )
+    manifest_files = []
+    for name in SOURCE_ACTION_STATUS_REPORT_OUT_FILES:
+        if name in {"manifest.json", "checksums.json"}:
+            continue
+        target = out / name
+        manifest_files.append(
+            {"path": str(target), "name": name, "size_bytes": target.stat().st_size}
+        )
+    (out / "manifest.json").write_text(
+        json.dumps(
+            {
+                "plan_id": result["plan_id"],
+                "mode": SOURCE_ACTION_STATUS_REPORT_MODE,
+                "files": manifest_files,
+                "archive_created": False,
+                "candidate_contents_copied": False,
+                "source_action_available": False,
+                "source_deleted": False,
+                "source_moved": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    names = [item["name"] for item in manifest_files] + ["manifest.json"]
+    (out / "checksums.json").write_text(
+        json.dumps(
+            {
+                "plan_id": result["plan_id"],
+                "checksums": {name: "sha256:" + sha256_file(out / name) for name in names},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
 def render_archive_source_action_readiness_gate(result: dict[str, Any]) -> str:
     s = result["summary"]
     return "\n".join(
@@ -5921,12 +6503,20 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DECISION_RECEIPT_DIR",
         help="read-only final source-action readiness gate",
     )
+    parser.add_argument(
+        "--archive-source-action-status-report",
+        metavar="READINESS_GATE_DIR",
+        help="read-only archive source-action operator status report",
+    )
     parser.add_argument("--archive-bundle", help="optional archive bundle directory cross-check")
     parser.add_argument(
         "--source-action-validation", help="source-action dry-run validation directory"
     )
     parser.add_argument("--source-action-dry-run", help="optional source-action dry-run directory")
     parser.add_argument("--review-packet", help="source-action human review packet directory")
+    parser.add_argument(
+        "--decision-receipt", help="source-action operator decision receipt directory"
+    )
     parser.add_argument(
         "--decision", choices=ALLOWED_SOURCE_ACTION_DECISIONS, help="operator decision enum"
     )
@@ -5975,6 +6565,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-candidates-returned", type=int, default=DEFAULT_MAX_RETURNED)
     parser.add_argument("--max-warnings-returned", type=int, default=DEFAULT_MAX_WARNINGS)
     args = parser.parse_args(argv)
+
+    if args.archive_source_action_status_report:
+        optional_supplied = any(
+            (
+                args.decision_receipt,
+                args.review_packet,
+                args.source_action_dry_run,
+                args.source_action_validation,
+                args.archive_bundle,
+                args.plan_dir,
+                args.dry_run_receipt,
+                args.archive_eligibility_review,
+            )
+        )
+        if optional_supplied and not args.plan_id:
+            parser.error(
+                "--archive-source-action-status-report requires --plan-id "
+                "when optional evidence dirs are supplied"
+            )
+        result = build_archive_source_action_status_report(
+            args.archive_source_action_status_report,
+            decision_receipt_dir=args.decision_receipt,
+            review_packet_dir=args.review_packet,
+            source_action_dry_run_dir=args.source_action_dry_run,
+            source_action_validation_dir=args.source_action_validation,
+            archive_bundle_dir=args.archive_bundle,
+            plan_dir=args.plan_dir,
+            dry_run_receipt_dir=args.dry_run_receipt,
+            archive_eligibility_review_dir=args.archive_eligibility_review,
+            supplied_plan_id=args.plan_id,
+            out_dir=args.out,
+        )
+        if args.out:
+            write_archive_source_action_status_report_outputs(result, args.out)
+        print(
+            json.dumps(result, sort_keys=True)
+            if args.json
+            else render_archive_source_action_status_report(result)
+        )
+        return 0 if result["status"] in {"ready_for_operator_review", "partial"} else 1
 
     if args.archive_source_action_readiness_gate:
         if (
