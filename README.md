@@ -7,7 +7,7 @@ stages mutation proposals behind explicit approval/mission/apply gates,
 verifies outcomes, and writes auditable receipts. The default LLM (OpenAI
 Codex CLI) is used only for advisory synthesis; it never executes commands.
 
-ShellForgeAI is strongest at evidence-backed Docker/Linux triage, guarded operator workflows, audit-friendly receipts and manifests, and deterministic refusal of unsafe broad mutation. It is designed to help operators collect proof, compare validation evidence, and prepare reviewed decisions without turning advisory output into automatic infrastructure changes.
+ShellForgeAI is strongest at evidence-backed Docker/Linux triage, guarded operator workflows, audit-friendly receipts and manifests, and deterministic refusal of unsafe broad mutation. It is designed to help operators collect proof, compare validation evidence, and prepare reviewed decisions without turning advisory output into automatic infrastructure changes. The archive/source-action review chain is documented as an operator runbook in [`docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md`](docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md), where readiness means reviewable evidence rather than executable source action.
 
 > Status: alpha. Mutation is gated to two narrow lanes: ShellForgeAI-owned
 > metadata cleanup, and exact-container Docker restart (with a separate,
