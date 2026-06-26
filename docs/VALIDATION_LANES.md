@@ -1247,3 +1247,16 @@ python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-review
 ```
 
 The packet cross-checks exact plan id, candidate manifests, archive payload checksums, source-preservation metadata, eligibility status, dry-run status, and validation status. `ready_for_human_review` means only that a human has a complete pasteable review packet; it is not approval, not execution, and not authorization. `source_action_available=false` remains explicit. With `--out`, it writes `archive-source-action-review-packet.json`, `archive-source-action-human-review.md`, `candidate-review-summary.json`, `operator-review-checklist.md`, `future-source-action-signoff-template.md`, `safety-notes.md`, `manifest.json`, and `checksums.json` only. The review-packet command does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes. Future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`; SeedOfEvil remains final merge owner.
+### Docker01 archive source-action operator decision receipt
+
+The archive helper can record a read-only operator decision receipt from the source-action human review packet:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-decision-receipt /tmp/sfai-pr242-source-action-review-packet --plan-id sha256:<plan-id> --decision ready_for_future_pr_review --json
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-decision-receipt /tmp/sfai-pr242-source-action-review-packet --plan-id sha256:<plan-id> --decision defer --out /tmp/sfai-pr242-source-action-decision-receipt --json
+```
+
+`--decision` accepts only `ready_for_future_pr_review`, `defer`, `reject`, or `needs_more_evidence`; free-form decisions are rejected. The command validates the review packet structure, manifest, checksums, exact plan id, safety contract, candidate summary, and operator review contract, and can optionally cross-check source-action dry-run, validation, archive bundle, plan, dry-run receipt, and eligibility-review evidence directories. `decision_recorded` means evidence was recorded only: it is not approval, not execution, and does not authorize cleanup or source action. `source_action_available=false` remains explicit, and any future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`, exact evidence, source recheck, archive validation, operator review, and SeedOfEvil final merge ownership.
+
+With `--out`, the helper writes report artifacts only: `archive-source-action-decision-receipt.json`, `archive-source-action-decision-receipt-summary.md`, `candidate-decision-summary.json`, `future-source-action-requirements.md`, `safety-notes.md`, `manifest.json`, and `checksums.json`. It does not modify the review packet or optional evidence directories; does not create archives; does not copy/move/delete/modify sources; and does not run cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, model/Codex, network, GitHub, package install, or cloud apply/merge/push behavior.
+
