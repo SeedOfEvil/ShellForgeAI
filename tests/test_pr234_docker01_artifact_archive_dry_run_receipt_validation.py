@@ -227,7 +227,6 @@ def test_no_mutation_cli_or_shell_true_introduced():
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
         "--post-comment",

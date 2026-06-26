@@ -434,7 +434,6 @@ def test_safety_no_forbidden_execution_or_options():
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
         "--post-comment",

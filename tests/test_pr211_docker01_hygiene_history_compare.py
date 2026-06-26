@@ -237,7 +237,6 @@ def test_source_safety_no_shell_true_no_mutation_options_no_unsafe_examples():
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ]:

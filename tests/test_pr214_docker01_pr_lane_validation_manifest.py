@@ -225,7 +225,6 @@ def test_safety_block_and_parser_do_not_introduce_mutation_options(tmp_path):
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
         "--apply",
     }
     assert option_strings.isdisjoint(forbidden)

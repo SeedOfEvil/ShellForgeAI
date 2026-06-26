@@ -34,6 +34,9 @@ COMMAND_FLAGS = [
     "--archive-source-action-decision-receipt",
     "--archive-source-action-readiness-gate",
     "--archive-source-action-status-report",
+    "--archive-source-action-fixture-rehearsal",
+    "--fixture-root",
+    "--restore-before-exit",
 ]
 
 FORBIDDEN_NEW_FLAGS = [
@@ -108,6 +111,7 @@ def test_runbook_includes_artifact_map_and_decision_matrix_contracts():
         "archive-source-action-decision-receipt.json",
         "archive-source-action-readiness-gate.json",
         "archive-source-action-status-report.json",
+        "fixture-source-action-rehearsal.json",
     ]:
         assert artifact in text
 

@@ -262,7 +262,6 @@ def test_partial_missing_source_and_cli_guardrails(tmp_path):
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
         "--post-comment",

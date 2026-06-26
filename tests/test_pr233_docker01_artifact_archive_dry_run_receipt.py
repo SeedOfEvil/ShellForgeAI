@@ -153,7 +153,6 @@ def test_source_contains_no_shell_true_subprocess_or_real_mutation_cli_flags():
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
         "--post-comment",

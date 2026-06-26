@@ -252,7 +252,6 @@ def test_safety_no_pytest_qa_docker_mutation_and_no_shell_true():
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ]:

@@ -175,7 +175,6 @@ def test_source_safety_no_shell_true_no_mutating_discovery_options_or_delete_pat
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ):

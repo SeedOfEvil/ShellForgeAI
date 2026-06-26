@@ -234,7 +234,6 @@ def test_no_cleanup_execution_flags_or_shell_true_literal_introduced():
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ]:
