@@ -7,6 +7,8 @@ stages mutation proposals behind explicit approval/mission/apply gates,
 verifies outcomes, and writes auditable receipts. The default LLM (OpenAI
 Codex CLI) is used only for advisory synthesis; it never executes commands.
 
+ShellForgeAI is strongest at evidence-backed Docker/Linux triage, guarded operator workflows, audit-friendly receipts and manifests, and deterministic refusal of unsafe broad mutation. It is designed to help operators collect proof, compare validation evidence, and prepare reviewed decisions without turning advisory output into automatic infrastructure changes.
+
 > Status: alpha. Mutation is gated to two narrow lanes: ShellForgeAI-owned
 > metadata cleanup, and exact-container Docker restart (with a separate,
 > disposable-only Compose service restart lane that remains environment-gated
@@ -827,3 +829,15 @@ python3 scripts/docker01_artifact_archive_plan.py --validate-archive-source-acti
 ```
 
 The validator checks the PR239 dry-run JSON, candidate manifest, manifest, checksums, read-only/source-action-unavailable contract, safety flags, source stats, and optional archive bundle, plan, dry-run receipt, and eligibility review evidence chain. `passed` means the packet is human-reviewable for a future separate lane only; it does not authorize source action and `source_action_available=false` remains explicit. With `--out`, it writes `archive-source-action-dry-run-validation.json`, `archive-source-action-dry-run-validation-summary.md`, `candidate-source-action-validation.json`, `future-source-action-review-checklist.md`, `safety-notes.md`, `manifest.json`, and `checksums.json` only. The validator does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes. Future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`; SeedOfEvil remains final merge owner.
+
+
+### Docker01 archive source-action human review packet
+
+The archive helper can now create a read-only human review packet from the PR239 source-action dry run, PR240 source-action validation, archive bundle, plan, dry-run receipt, and archive eligibility review evidence chain:
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-review-packet /tmp/sfai-pr241-source-action-dry-run --source-action-validation /tmp/sfai-pr241-source-action-validation --archive-bundle /tmp/sfai-pr241-artifact-archive-bundle --plan-dir /tmp/sfai-pr241-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr241-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr241-archive-eligibility-review --plan-id sha256:<plan-id> --json
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-review-packet /tmp/sfai-pr241-source-action-dry-run --source-action-validation /tmp/sfai-pr241-source-action-validation --archive-bundle /tmp/sfai-pr241-artifact-archive-bundle --plan-dir /tmp/sfai-pr241-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr241-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr241-archive-eligibility-review --plan-id sha256:<plan-id> --out /tmp/sfai-pr241-source-action-review-packet --json
+```
+
+The packet cross-checks exact plan id, candidate manifests, archive payload checksums, source-preservation metadata, eligibility status, dry-run status, and validation status. `ready_for_human_review` means only that a human has a complete pasteable review packet; it is not approval, not execution, and not authorization. `source_action_available=false` remains explicit. With `--out`, it writes `archive-source-action-review-packet.json`, `archive-source-action-human-review.md`, `candidate-review-summary.json`, `operator-review-checklist.md`, `future-source-action-signoff-template.md`, `safety-notes.md`, `manifest.json`, and `checksums.json` only. The review-packet command does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes. Future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`; SeedOfEvil remains final merge owner.
