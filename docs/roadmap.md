@@ -1184,3 +1184,8 @@ Artifact cleanup remains unavailable by default. The archive helper can now prod
 ### Archive-backed source-action dry-run manifest
 
 The governed archive runway now has a read-only source-action dry-run manifest step. It is backed by the existing archive bundle, dry-run receipt, source-preservation evidence, and archive eligibility review, requires the exact plan id, and emits only non-executable report artifacts. It does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, or authorize product runtime cleanup behavior. Any future source action remains a separate PR/lane with `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`, fresh source recheck, archive validation, operator review, and SeedOfEvil final merge ownership.
+
+
+### Archive-backed source-action dry-run validation
+
+The governed archive runway now includes a read-only validator for the PR239 source-action dry-run packet. It checks required files, JSON, manifest, checksums, the source-action-unavailable safety contract, read-only source stats, and optional archive bundle/plan/dry-run receipt/eligibility cross-checks. `passed` means human-reviewable only; no archive is created, no source is copied/moved/deleted/modified, no cleanup/prune/delete/restart/remediation/rollback/recovery runs, and future source action remains a separate confirmation-gated PR/lane with SeedOfEvil as final merge owner.
