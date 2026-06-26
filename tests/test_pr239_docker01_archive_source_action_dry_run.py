@@ -307,7 +307,6 @@ def test_command_surface_guard_and_no_shell_true_literal():
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ]:

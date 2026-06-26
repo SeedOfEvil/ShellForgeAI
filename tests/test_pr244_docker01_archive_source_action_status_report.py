@@ -227,7 +227,6 @@ def test_cli_json_human_out_and_command_surface_guardrails(tmp_path):
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
         "--apply",

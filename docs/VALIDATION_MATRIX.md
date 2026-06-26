@@ -481,3 +481,9 @@ When optional evidence directories are supplied, the report requires an exact `-
 ## Archive/source-action operator runbook docs lane
 
 `docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md` and its docs/golden tests are Lane A when the script command surface and runtime behavior are unchanged. The runbook documents the existing PR239-PR244 archive/source-action evidence chain, points operators to the current command sequence, and keeps the status chain non-executable. It adds no execution command and must not introduce new source-action, cleanup, delete, move, prune, restart, approval, merge, apply, or execution command flags.
+
+### Docker01 fixture-only source-action rehearsal
+
+ShellForgeAI includes a narrow `--archive-source-action-fixture-rehearsal` helper mode for synthetic fixtures only. It requires `--fixture-root`, an exact `--plan-id`, `--out`, and `--confirm CONFIRM_SHELLFORGEAI_FIXTURE_SOURCE_ACTION_REHEARSAL`; `--restore-before-exit` can restore synthetic fixture sources before the command exits. The fixture root must be a safe absolute `/tmp/sfai-fixture-source-action-*` path, outside the repository and outside `/srv`, `/data`, `/var`, `/etc`, `/home`, `/root`, `/opt`, Docker, Compose, and runtime paths, with no symlinks and no non-fixture content.
+
+The lane may create synthetic fixture files, archive those fixture files, rehearse a reversible fixture-only hold state, and write `fixture-source-action-rehearsal.json`, summary, fixture candidate and archive manifests, rollback proof, safety notes, manifest, and checksums under `--out`. `mutation_performed=true` applies only to these helper-owned fixture files. It is not production cleanup, not production source action, does not target real artifact evidence, and does not copy, move, delete, or modify production sources. Future production source action remains a separate PR/lane with SeedOfEvil as final merge owner.

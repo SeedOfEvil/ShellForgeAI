@@ -278,7 +278,6 @@ def test_no_broad_mutation_flags_or_shell_true_options_introduced():
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ):

@@ -1223,3 +1223,9 @@ The archive helper now provides a final read-only source-action readiness gate f
 ## Archive/source-action evidence-chain usability
 
 The archive/source-action evidence chain now has an operator runbook at [`ARCHIVE_SOURCE_ACTION_RUNBOOK.md`](ARCHIVE_SOURCE_ACTION_RUNBOOK.md). This adds no execution command and is a documentation and docs-golden-test consolidation step only: it explains the current non-executable review path, reinforces that source action remains unavailable, and keeps any future source-action capability in a separate PR/lane with SeedOfEvil as final merge owner.
+
+### Docker01 fixture-only source-action rehearsal
+
+ShellForgeAI includes a narrow `--archive-source-action-fixture-rehearsal` helper mode for synthetic fixtures only. It requires `--fixture-root`, an exact `--plan-id`, `--out`, and `--confirm CONFIRM_SHELLFORGEAI_FIXTURE_SOURCE_ACTION_REHEARSAL`; `--restore-before-exit` can restore synthetic fixture sources before the command exits. The fixture root must be a safe absolute `/tmp/sfai-fixture-source-action-*` path, outside the repository and outside `/srv`, `/data`, `/var`, `/etc`, `/home`, `/root`, `/opt`, Docker, Compose, and runtime paths, with no symlinks and no non-fixture content.
+
+The lane may create synthetic fixture files, archive those fixture files, rehearse a reversible fixture-only hold state, and write `fixture-source-action-rehearsal.json`, summary, fixture candidate and archive manifests, rollback proof, safety notes, manifest, and checksums under `--out`. `mutation_performed=true` applies only to these helper-owned fixture files. It is not production cleanup, not production source action, does not target real artifact evidence, and does not copy, move, delete, or modify production sources. Future production source action remains a separate PR/lane with SeedOfEvil as final merge owner.

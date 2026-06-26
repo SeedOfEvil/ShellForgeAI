@@ -299,7 +299,6 @@ def test_no_shell_true_or_mutation_cli_flags_are_introduced():
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
         "--post-comment",

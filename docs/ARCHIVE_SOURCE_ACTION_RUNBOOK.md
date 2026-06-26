@@ -71,6 +71,20 @@ python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-status
 | Readiness gate | `--archive-source-action-readiness-gate` | `archive-source-action-readiness-gate.json` | `archive-source-action-readiness-summary.md` | Final reviewability gate for a future PR/lane only. |
 | Operator status report | `--archive-source-action-status-report` | `archive-source-action-status-report.json` | `archive-source-action-operator-status.md` | Human/machine status report; no copy, source action, cleanup, or execution. |
 
+
+## Fixture-only source-action rehearsal
+
+The archive helper also has one confirmation-gated fixture-only rehearsal lane. It is not production cleanup, not production source action, and not an archive command for real evidence. It creates synthetic ShellForgeAI-like candidate files only under an explicit safe fixture root, archives those synthetic files into fixture payload evidence, rehearses a reversible fixture-only hold state, and writes rollback proof. `mutation_performed=true` is expected only because the lane mutates helper-created fixture files under the fixture root. Production source action and production cleanup remain unavailable.
+
+```bash
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-fixture-rehearsal --fixture-root /tmp/sfai-fixture-source-action-example --plan-id sha256:<plan-id> --confirm CONFIRM_SHELLFORGEAI_FIXTURE_SOURCE_ACTION_REHEARSAL --out /tmp/sfai-fixture-source-action-rehearsal --json
+python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-fixture-rehearsal --fixture-root /tmp/sfai-fixture-source-action-example --plan-id sha256:<plan-id> --confirm CONFIRM_SHELLFORGEAI_FIXTURE_SOURCE_ACTION_REHEARSAL --restore-before-exit --out /tmp/sfai-fixture-source-action-rehearsal --json
+```
+
+Fixture roots must be absolute, under a dedicated `/tmp/sfai-fixture-source-action-*` path, marked with `.shellforgeai-fixture-root.json`, empty or already marked as a ShellForgeAI fixture root, outside the repository, and free of symlinks. The helper refuses `/tmp` itself, broad existing directories, `/srv`, `/data`, `/var`, `/etc`, `/home`, `/root`, `/opt`, Docker/Compose/runtime paths, repository paths, unsafe or non-empty output directories, output directories under fixture source candidates, fixture roots under output directories, mismatched plan ids, and missing or wrong confirmation.
+
+With `--out`, the fixture rehearsal writes only rehearsal artifacts: `fixture-source-action-rehearsal.json`, `fixture-source-action-rehearsal-summary.md`, `fixture-candidate-manifest.json`, `fixture-archive-manifest.json`, `fixture-rollback-proof.json`, `fixture-safety-notes.md`, `manifest.json`, and `checksums.json`. Future production source action still requires a separate PR/lane, explicit command-surface review, safety tests, and SeedOfEvil final merge ownership.
+
 ## Operator decision matrix
 
 | Status | What it means | Operator may do next | Operator must not do | Source action available | Cleanup available | Execution available |

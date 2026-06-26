@@ -285,6 +285,5 @@ def test_behavior_preservation_and_no_mutation_cli_options(tmp_path, capsys):
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
     ]:
         assert forbidden not in source

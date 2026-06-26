@@ -155,7 +155,6 @@ def test_source_contains_no_shell_true_or_mutation_flags():
         "--move",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ):

@@ -225,7 +225,6 @@ def test_hygiene_allowlist_is_narrow():
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
     ):

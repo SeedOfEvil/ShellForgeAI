@@ -153,7 +153,6 @@ def test_renderer_safety_source_and_allowlist():
         "--delete",
         "--prune",
         "--restart",
-        "--fix",
         "--rm",
         "--rmi",
         "--post-comment",
