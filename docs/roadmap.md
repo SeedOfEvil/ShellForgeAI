@@ -1127,6 +1127,8 @@ The disposable Docker01 validation fallback has been hardened so the generated
 container command installs the minimal OS tools required by the full test suite
 (`procps`/`ps`, `git`, and `rsync`) inside the disposable container only.
 
+Manual fallback validation containers now document the same parity expectation: Python 3, pytest, `procps`/`ps`, `git`, and `rsync` are the minimum baseline before interpreting fallback pytest failures. Missing `ps` can false-fail `tests/test_investigation_tools.py::test_process_snapshot_shape`, so operators should correct the disposable container baseline, rerun that narrow test first, and run full pytest once only if whole-suite evidence remains necessary. The PR247 Docker/LXC `chown -R` build-path hang is tracked as operational lane context, not product-runtime mutation or broad infra-remediation scope.
+
 The fallback command now closes the evidence lifecycle itself by invoking the
 validation finalizer inside the disposable container and writing the final
 PR/commit status packet into the mounted lane run directory.

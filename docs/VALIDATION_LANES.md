@@ -1072,6 +1072,16 @@ and running validation. This package installation is part of the generated
 container command only; the packet generator does not install host packages and
 does not change the production container.
 
+Manual fallback validation containers use the same minimum baseline as the official Docker01 lane helper: `python3`, `pytest`, `procps`/`ps`, `git`, and `rsync`. In particular, `tests/test_investigation_tools.py::test_process_snapshot_shape` requires `ps`; if that test fails because `ps` is absent, treat it as validation-environment drift, install the missing baseline package in the disposable container, rerun only that narrow test first, and run full pytest once only if whole-suite evidence is still needed.
+
+```bash
+apt-get update
+apt-get install -y --no-install-recommends procps git rsync
+python3 -m pytest -q tests/test_investigation_tools.py::test_process_snapshot_shape
+```
+
+This snippet is not a production Docker/Compose mutation workflow and must not be expanded into cleanup, prune, restart, remediation, rollback, recovery, or broad infrastructure repair. The PR247 Docker/LXC `chown -R` build-path hang remains operational setup context, separate from ShellForgeAI's read-only runtime posture.
+
 The generated disposable fallback command also invokes the validation evidence
 finalizer inside the copied repo after the container validation command exits,
 writing final `validation-status.json`, `validation-manifest.json`,

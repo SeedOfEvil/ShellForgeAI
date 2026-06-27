@@ -2661,6 +2661,18 @@ Disposable validation fallback packets now bootstrap the disposable
 `rsync` inside the container before validation. This is not a Docker01 host
 package install and does not modify the production ShellForgeAI container.
 
+Manual fallback validation containers must keep parity with that official Docker01 lane helper baseline: Python 3, pytest, `procps`/`ps`, `git`, and `rsync` must be present before validation is interpreted as product evidence. A missing `ps` can false-fail `tests/test_investigation_tools.py::test_process_snapshot_shape`; fix the disposable validation environment first, then rerun that narrow test before considering one final full pytest run. Do not duplicate full pytest runs after a missing-tool false failure; full pytest should run once only when the corrected validation environment still requires whole-suite evidence. The PR247 Docker/LXC `chown -R` build-path hang is operational context for lane setup, not ShellForgeAI runtime mutation behavior or a reason for broad infrastructure remediation in this fallback parity path.
+
+Manual disposable fallback container baseline example:
+
+```bash
+apt-get update
+apt-get install -y --no-install-recommends procps git rsync
+python3 -m pytest -q tests/test_investigation_tools.py::test_process_snapshot_shape
+```
+
+Keep this as operator fallback guidance only: do not add package installation to product runtime helpers, do not mutate production Docker/Compose, and do not turn missing-tool validation setup into cleanup, prune, restart, remediation, rollback, or recovery work.
+
 When operators run the generated disposable fallback command, it finalizes the
 completed validation result back into the mounted lane evidence directory
 (`/artifacts` inside the container). Do not run a separate manual finalizer after

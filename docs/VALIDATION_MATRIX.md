@@ -302,6 +302,8 @@ step (`apt-get update` plus `procps`, `git`, and `rsync`) so tests that inspect
 process state have `ps` available. The generator still writes inert command
 text/argv evidence only and performs no host package installation.
 
+Manual fallback containers must preserve that parity baseline before their results are trusted: `python3`, `pytest`, `procps`/`ps`, `git`, and `rsync`. Missing `ps` is a known validation-environment false-failure mode for `tests/test_investigation_tools.py::test_process_snapshot_shape`; fix the container baseline and rerun that narrow test before any single, final full pytest run. Do not duplicate full pytest to chase a missing-tool setup failure, and do not convert the fallback snippet into production Docker/Compose mutation, cleanup, prune, restart, remediation, rollback, or recovery.
+
 When the disposable fallback command completes, it calls the evidence finalizer
 inside the container and writes final PR/commit validation evidence into the
 mounted run directory. That directory is the same lane evidence directory read
