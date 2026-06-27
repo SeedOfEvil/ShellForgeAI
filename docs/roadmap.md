@@ -1251,3 +1251,23 @@ A passing fixture audit is evidence quality control only. It is not production r
 ShellForgeAI includes a small read-only Docker01 build path diagnostic report for operators investigating the PR247/PR248 Docker/LXC build hang observed around the Dockerfile `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` layer. Docker01 Compose uses the external Dockerfile path `/srv/compose/shellforgeai/Dockerfile`, and the helper supports `--dockerfile /srv/compose/shellforgeai/Dockerfile` to inspect that path from synced source. The helper reports Dockerfile evidence, known path stat metadata, and baseline investigation-tool presence without running Docker/Compose or changing Docker state.
 
 This diagnostic is intentionally not remediation and does not fix the chown-layer hang. It does not build, restart, prune, chown, chmod, install packages, clean up, roll back, recover, or mutate Docker/Compose. Any Dockerfile/build remediation remains future work and must be proposed in a separate PR. Manual fallback validation containers should keep `procps`, `git`, and `rsync` available; a missing `procps`/`ps` baseline should trigger a narrow rerun, not duplicate full pytest.
+
+## Docker01 build path ownership proposal
+
+The Docker01 build-path investigation now has a read-only ownership proposal
+step after the PR249 diagnostic report. Operators can scan the external Dockerfile
+path with:
+
+```bash
+python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+```
+
+The report detects broad `chown -R` ownership over `/data`,
+`/home/appuser/.codex`, and `/opt/shellforgeai`, then proposes safer future
+patterns such as direct ownership on empty runtime directories and `COPY --chown`
+for app source where applicable. This is proposal only and does not edit
+Dockerfile, does not run Docker or Compose, and does not run chown/chmod/chgrp or
+any remediation. Any Dockerfile/build fix remains future work in a separate PR or
+operator-reviewed change. Build-path investigation work should stay narrow and
+should not duplicate full pytest unless shared runtime or safety machinery
+changes.

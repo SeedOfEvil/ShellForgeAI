@@ -2943,3 +2943,31 @@ python3 scripts/docker01_build_path_diagnostic_report.py --dockerfile /srv/compo
 Docker01 Compose uses an external Dockerfile path at `/srv/compose/shellforgeai/Dockerfile`, so pass that path with `--dockerfile` when collecting Docker01 evidence from synced source. Without `--dockerfile`, the helper keeps the repo-default `Dockerfile` lookup for local fixtures. The report scans only the selected Dockerfile for broad recursive ownership or permission operations, records the involved known paths (`/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`), stats only those named paths when present, and checks whether `ps`, `git`, and `rsync` are available for investigation. It is read-only and not remediation: it does not run Docker or Docker Compose, does not build, restart, prune, chown, chmod, install packages, clean up, roll back, recover, or mutate Docker/Compose. It does not fix the chown-layer hang. Report files are written only under an explicit `--out` directory, which must be empty.
 
 Any Dockerfile or build-path remediation must be handled in a separate PR. If a manual fallback validation container is missing `procps`/`ps`, fix the disposable validation environment and rerun the narrow process snapshot check first; no duplicate full pytest should be triggered just because that manual fallback baseline was incomplete.
+
+## Docker01 build path ownership proposal report
+
+After collecting the PR249 Docker01 build path diagnostic, operators can produce a
+read-only Docker01 build path ownership proposal report for the same external
+Dockerfile path:
+
+```bash
+python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile
+python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --diagnostic <diagnostic_report_dir> --out <proposal_report_dir> --json
+```
+
+The helper scans only the explicitly supplied Dockerfile, such as
+`/srv/compose/shellforgeai/Dockerfile`, and can optionally cross-check a PR249
+diagnostic report directory. It detects broad recursive ownership patterns such
+as `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` and
+returns proposal-only guidance: prefer direct ownership on empty runtime
+directories, prefer `COPY --chown` for app source where applicable, and avoid
+recursive ownership over `/data` during image builds.
+
+This is read-only and proposal only. It does not edit Dockerfile, does not run
+Docker, Docker Compose, build, chown, chmod, chgrp, package install, cleanup,
+prune, restart, remediation, rollback, or recovery. When `--out` is supplied it
+writes proposal/report artifacts only into an empty explicit output directory.
+Any actual Dockerfile/build remediation must be a separate PR or
+operator-reviewed change. No duplicate full pytest should be triggered just
+because a Docker01 build-path investigation is ongoing.
