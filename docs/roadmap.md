@@ -1271,3 +1271,13 @@ any remediation. Any Dockerfile/build fix remains future work in a separate PR o
 operator-reviewed change. Build-path investigation work should stay narrow and
 should not duplicate full pytest unless shared runtime or safety machinery
 changes.
+
+## Docker01 build path ownership patch preview
+
+The Docker01 build-path investigation now includes a read-only patch preview step after the PR249 diagnostic report and PR250 ownership proposal. Operators can scan the external Dockerfile path with:
+
+```bash
+python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+```
+
+The helper detects broad `chown -R` ownership over `/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`, then creates review-only patch-preview artifacts under an explicit empty `--out` directory when requested. The preview Dockerfile text replaces broad recursive ownership with targeted runtime-directory ownership guidance and `COPY --chown` guidance where applicable, and the static verifier confirms the preview text no longer contains broad recursive ownership over those known risky paths. This is patch preview only and does not edit Dockerfile, edit Compose, run Docker/Compose/build, run chown/chmod/chgrp, install packages, or perform remediation. Any Dockerfile/build fix remains future work in a separate PR or operator-reviewed change. Build-path investigation work should stay narrow and should not duplicate full pytest unless shared runtime or safety machinery changes.

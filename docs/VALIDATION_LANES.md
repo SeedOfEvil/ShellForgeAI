@@ -1345,3 +1345,15 @@ and does not remediate. Future Dockerfile/build remediation must be a separate
 PR or operator-reviewed change. This lane should not cause duplicate full pytest;
 full pytest should run once only if the change broadens into shared runtime,
 Dockerfile/Compose/deploy, or safety machinery.
+
+## Docker01 build path ownership patch preview lane
+
+The Docker01 build path ownership patch preview helper is a targeted/default read-only lane when only `scripts/docker01_build_path_patch_preview.py`, its tests, and docs change:
+
+```bash
+python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out <patch_preview_dir> --json
+python3 scripts/docker01_build_path_patch_preview.py --proposal <ownership_proposal_dir> --out <patch_preview_dir> --json
+```
+
+It follows the PR249 Docker01 build path diagnostic report and PR250 ownership proposal report. The helper scans the explicit external Dockerfile path, reports broad `chown -R` ownership risks, emits a review-only diff/preview Dockerfile under an empty explicit output directory, and statically verifies that the preview removes broad recursive ownership over `/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`. This is patch preview only: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build/chown/chmod/chgrp/package install, and does not remediate. Future Dockerfile/build remediation must be a separate PR or operator-reviewed change. This lane should not cause duplicate full pytest; full pytest should run once only if the change broadens into shared runtime, Dockerfile/Compose/deploy, or safety machinery.

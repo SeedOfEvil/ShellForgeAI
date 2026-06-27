@@ -2971,3 +2971,20 @@ writes proposal/report artifacts only into an empty explicit output directory.
 Any actual Dockerfile/build remediation must be a separate PR or
 operator-reviewed change. No duplicate full pytest should be triggered just
 because a Docker01 build-path investigation is ongoing.
+
+## Docker01 build path ownership patch preview
+
+After the PR249 diagnostic and PR250 ownership proposal, operators can produce a read-only Docker01 build path ownership patch preview for the same external Dockerfile path:
+
+```bash
+python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile
+python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out <patch_preview_dir> --json
+python3 scripts/docker01_build_path_patch_preview.py --proposal <ownership_proposal_dir> --out <patch_preview_dir> --json
+```
+
+This helper is patch preview only. It reads only the explicit Dockerfile path, or a PR250 proposal directory that identifies that path, detects broad recursive ownership such as `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai`, and can write review-only preview artifacts under an empty explicit `--out` directory. The artifacts include a unified diff, a preview Dockerfile text, static verification JSON, a manifest, and checksums.
+
+The preview replaces the broad recursive ownership line in preview text with targeted runtime-directory ownership guidance and `COPY --chown` guidance for application source ownership where applicable. Static verification proves the preview text no longer contains broad recursive ownership over `/data`, `/home/appuser/.codex`, or `/opt/shellforgeai`; it does not prove the preview builds or is production-ready.
+
+This remains read-only and not remediation: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp, does not install packages, and does not clean up, prune, restart, remediate, roll back, or recover. Any real Dockerfile/build remediation must be a separate PR or operator-reviewed change. No duplicate full pytest should be triggered just because Docker01 build-path investigation or patch-preview reporting is ongoing.
