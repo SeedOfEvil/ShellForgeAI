@@ -2988,3 +2988,16 @@ This helper is patch preview only. It reads only the explicit Dockerfile path, o
 The preview replaces the broad recursive ownership line in preview text with targeted runtime-directory ownership guidance and `COPY --chown` guidance for application source ownership where applicable. Static verification proves the preview text no longer contains broad recursive ownership over `/data`, `/home/appuser/.codex`, or `/opt/shellforgeai`; it does not prove the preview builds or is production-ready.
 
 This remains read-only and not remediation: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp, does not install packages, and does not clean up, prune, restart, remediate, roll back, or recover. Any real Dockerfile/build remediation must be a separate PR or operator-reviewed change. No duplicate full pytest should be triggered just because Docker01 build-path investigation or patch-preview reporting is ongoing.
+
+## Docker01 build path ownership patch rehearsal
+
+After the PR249 diagnostic, PR250 ownership proposal, and PR251 patch preview, operators can rehearse the preview as a copied Dockerfile artifact without touching the real Docker01 Dockerfile or Compose file:
+
+```bash
+python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --patch-preview <patch_preview_dir> --out <patch_rehearsal_dir> --json
+python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --preview-dockerfile <path/to/dockerfile-ownership-preview.Dockerfile> --out <patch_rehearsal_dir>
+```
+
+The rehearsal reads the explicitly supplied original Dockerfile and PR251 preview artifacts, writes only copied rehearsal/report artifacts under an empty explicit `--out` directory, records original Dockerfile SHA256 before/after, and statically verifies the rehearsed Dockerfile no longer contains broad recursive ownership over `/data`, `/home/appuser/.codex`, or `/opt/shellforgeai`. It also checks for targeted runtime-directory ownership guidance and `COPY --chown` guidance.
+
+This is artifact-only rehearsal, not remediation. It does not edit the real Dockerfile, does not edit Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp, does not install packages, and does not clean up, prune, restart, remediate, roll back, or recover. Any actual Dockerfile/build remediation must be a separate PR or operator-reviewed change. No duplicate full pytest should be triggered just because Docker01 build-path investigation or patch-rehearsal reporting is ongoing.
