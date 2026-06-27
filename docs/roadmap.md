@@ -1281,3 +1281,13 @@ python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/s
 ```
 
 The helper detects broad `chown -R` ownership over `/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`, then creates review-only patch-preview artifacts under an explicit empty `--out` directory when requested. The preview Dockerfile text replaces broad recursive ownership with targeted runtime-directory ownership guidance and `COPY --chown` guidance where applicable, and the static verifier confirms the preview text no longer contains broad recursive ownership over those known risky paths. This is patch preview only and does not edit Dockerfile, edit Compose, run Docker/Compose/build, run chown/chmod/chgrp, install packages, or perform remediation. Any Dockerfile/build fix remains future work in a separate PR or operator-reviewed change. Build-path investigation work should stay narrow and should not duplicate full pytest unless shared runtime or safety machinery changes.
+
+## Docker01 build path ownership patch rehearsal
+
+The Docker01 build-path investigation now includes an artifact-only patch rehearsal step after the PR249 diagnostic report, PR250 ownership proposal, and PR251 patch preview. Operators can rehearse a PR251 preview directory with:
+
+```bash
+python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --patch-preview <patch_preview_dir> --out <patch_rehearsal_dir> --json
+```
+
+The helper copies the preview Dockerfile into a rehearsal artifact, emits a rehearsal diff and reports under explicit `--out`, proves the real Dockerfile SHA256 is unchanged, and statically verifies the rehearsed artifact no longer contains broad recursive ownership over `/data`, `/home/appuser/.codex`, or `/opt/shellforgeai`. This is not Dockerfile remediation: it does not edit Dockerfile or Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp or package install, and does not clean up, prune, restart, remediate, roll back, or recover. Any actual Dockerfile/build fix remains future work in a separate PR or operator-reviewed change. Build-path investigation work should stay narrow and should not duplicate full pytest unless shared runtime or safety machinery changes.

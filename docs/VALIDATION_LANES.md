@@ -1357,3 +1357,14 @@ python3 scripts/docker01_build_path_patch_preview.py --proposal <ownership_propo
 ```
 
 It follows the PR249 Docker01 build path diagnostic report and PR250 ownership proposal report. The helper scans the explicit external Dockerfile path, reports broad `chown -R` ownership risks, emits a review-only diff/preview Dockerfile under an empty explicit output directory, and statically verifies that the preview removes broad recursive ownership over `/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`. This is patch preview only: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build/chown/chmod/chgrp/package install, and does not remediate. Future Dockerfile/build remediation must be a separate PR or operator-reviewed change. This lane should not cause duplicate full pytest; full pytest should run once only if the change broadens into shared runtime, Dockerfile/Compose/deploy, or safety machinery.
+
+## Docker01 build path ownership patch rehearsal lane
+
+The Docker01 build path ownership patch rehearsal helper is a targeted/default artifact-only lane when only `scripts/docker01_build_path_patch_rehearsal.py`, its tests, and docs change:
+
+```bash
+python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --patch-preview <patch_preview_dir> --out <patch_rehearsal_dir> --json
+python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --preview-dockerfile <path/to/dockerfile-ownership-preview.Dockerfile> --out <patch_rehearsal_dir> --json
+```
+
+It follows the PR249 diagnostic, PR250 ownership proposal, and PR251 patch preview. The helper consumes the review-only preview Dockerfile/diff artifacts, writes copied rehearsal Dockerfile/diff/report artifacts only under an empty explicit output directory, proves the original Dockerfile SHA256 is unchanged, and statically verifies that the rehearsed artifact removes broad recursive ownership over `/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`. This is patch rehearsal only: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build/chown/chmod/chgrp/package install, and does not remediate. Future Dockerfile/build remediation must be a separate PR or operator-reviewed change. This lane should not cause duplicate full pytest; full pytest should run once only if the change broadens into shared runtime, Dockerfile/Compose/deploy, or safety machinery.
