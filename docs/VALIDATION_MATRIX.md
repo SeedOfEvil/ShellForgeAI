@@ -512,3 +512,18 @@ A passing fixture audit is evidence quality control only. It is not production r
 | Docker01 report artifacts | `python3 scripts/docker01_build_path_diagnostic_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out /tmp/sfai-build-path-diagnostic --json` | Writes report artifacts only into an empty explicit output directory. |
 
 The diagnostic exists for the PR247/PR248 Docker/LXC chown-layer operational context (`chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai`). Docker01 Compose uses the external Dockerfile path `/srv/compose/shellforgeai/Dockerfile`, and the helper supports `--dockerfile` for that path. It is read-only and not remediation: it does not build, run Docker/Compose, chown, chmod, install packages, prune, restart, roll back, recover, or mutate Docker/Compose. It does not fix the chown-layer hang. Any Dockerfile/build remediation belongs in a separate PR. Missing manual-fallback `procps`/`ps` should be resolved in the disposable validation environment and checked narrowly; no duplicate full pytest is required for that baseline-only issue.
+
+## Docker01 build path ownership proposal
+
+| Area | Command | Expected behavior |
+| --- | --- | --- |
+| Docker01 ownership proposal | `python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json` | Emits strict JSON for a read-only Docker01 build path ownership proposal, including detected recursive ownership operations, known risky paths, `apply_available=false`, and safety flags. |
+| Docker01 proposal artifacts | `python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --diagnostic <diagnostic_report_dir> --out <proposal_report_dir> --json` | Writes proposal/report artifacts only into an empty explicit output directory and can cross-check the PR249 diagnostic report. |
+
+The helper is for the Docker/LXC build-path `chown -R appuser:appuser /data
+/home/appuser/.codex /opt/shellforgeai` risk. It is read-only and proposal only:
+it does not edit Dockerfile, does not run Docker/Compose/build, does not run
+chown/chmod/chgrp, does not install packages, and does not perform cleanup,
+prune, restart, remediation, rollback, or recovery. Actual Dockerfile/build
+remediation remains a separate PR or operator-reviewed change. No duplicate full
+pytest is required for a Docker01 build-path investigation-only change.

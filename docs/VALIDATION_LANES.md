@@ -1324,3 +1324,24 @@ python3 scripts/docker01_build_path_diagnostic_report.py --dockerfile /srv/compo
 This is a targeted/default-lane evidence capture helper. Docker01 Compose uses an external Dockerfile path at `/srv/compose/shellforgeai/Dockerfile`; pass it with `--dockerfile` when checking the real Docker01 build path. The helper is read-only, does not run Docker/Compose, does not remediate, and does not perform cleanup, restart, prune, package install, chown, chmod, rollback, or recovery. It does not fix the chown-layer hang. With `--out <diagnostic_report_dir>` it writes only report artifacts into an empty operator-supplied directory. Future Dockerfile/build remediation must be a separate PR.
 
 The manual fallback validation-container guidance still applies: install the expected disposable-container baseline such as `procps`, `git`, and `rsync`, rerun the narrow missing-tool check, and avoid duplicate full pytest churn. Full pytest should run once only when the change scope requires it.
+
+## Docker01 build path ownership proposal lane
+
+The Docker01 build path ownership proposal helper is a targeted/default
+read-only lane when only `scripts/docker01_build_path_ownership_proposal.py`, its
+tests, and docs change:
+
+```bash
+python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_build_path_ownership_proposal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --diagnostic <diagnostic_report_dir> --out <proposal_report_dir> --json
+```
+
+It follows the PR249 Docker01 build path diagnostic report and may consume that
+report for cross-checking. The proposal helper is read-only and proposal only: it
+scans the explicit external Dockerfile path, reports `chown -R` ownership risks,
+and explains safer future patterns. It does not edit Dockerfile, does not run
+Docker or Docker Compose, does not run build/chown/chmod/chgrp/package install,
+and does not remediate. Future Dockerfile/build remediation must be a separate
+PR or operator-reviewed change. This lane should not cause duplicate full pytest;
+full pytest should run once only if the change broadens into shared runtime,
+Dockerfile/Compose/deploy, or safety machinery.
