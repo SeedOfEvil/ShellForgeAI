@@ -83,19 +83,22 @@ def _sha256(data: bytes) -> str:
 
 
 def _scan_dockerfile(
-    repo_root: Path,
+    path: Path,
+    source: str,
 ) -> tuple[dict[str, Any], list[str], list[str], list[dict[str, str]]]:
-    path = repo_root / "Dockerfile"
+    path = path.expanduser().resolve(strict=False)
     warnings: list[str] = []
     errors: list[str] = []
     checks: list[dict[str, str]] = []
     result: dict[str, Any] = {
-        "path": "Dockerfile",
+        "path": str(path),
+        "source": source,
+        "exists": False,
         "sha256": None,
         "recursive_ownership_lines": [],
     }
     if not path.exists():
-        errors.append("Dockerfile was not found at repository root.")
+        errors.append(f"Dockerfile was not found: {path}")
         checks.append(
             {"name": "dockerfile_scanned", "status": "failed", "detail": "Dockerfile not found."}
         )
@@ -113,6 +116,7 @@ def _scan_dockerfile(
     try:
         data = path.read_bytes()
         text = data.decode("utf-8", errors="replace")
+        result["exists"] = True
     except OSError as exc:
         errors.append(f"Dockerfile could not be read safely: {exc}")
         checks.append({"name": "dockerfile_scanned", "status": "failed", "detail": str(exc)})
@@ -188,9 +192,13 @@ def _tool_report() -> tuple[dict[str, bool], list[str], list[dict[str, str]]]:
     return tools, warnings, checks
 
 
-def build_report(repo_root: Path | None = None) -> dict[str, Any]:
+def build_report(
+    repo_root: Path | None = None, dockerfile_path: Path | None = None
+) -> dict[str, Any]:
     root = repo_root or _repo_root()
-    dockerfile, warnings, errors, checks = _scan_dockerfile(root)
+    selected_dockerfile = dockerfile_path or (root / "Dockerfile")
+    source = "explicit_argument" if dockerfile_path is not None else "repo_default"
+    dockerfile, warnings, errors, checks = _scan_dockerfile(selected_dockerfile, source)
     tools, tool_warnings, tool_checks = _tool_report()
     warnings.extend(tool_warnings)
     checks.extend(tool_checks)
@@ -208,7 +216,7 @@ def build_report(repo_root: Path | None = None) -> dict[str, Any]:
         "read_only": True,
         "mutation_performed": False,
         "summary": {
-            "dockerfile_found": not errors and dockerfile["sha256"] is not None,
+            "dockerfile_found": dockerfile["exists"],
             "broad_chown_detected": broad,
             "recursive_ownership_operations": len(dockerfile["recursive_ownership_lines"]),
             "known_chown_paths_detected": known_detected,
@@ -254,11 +262,13 @@ def render_human(report: dict[str, Any]) -> str:
         [
             "# Docker01 Build Path Diagnostic Report",
             "",
+            f"Dockerfile: {report['dockerfile']['path']}",
+            f"Source: {report['dockerfile']['source'].replace('_', ' ')}",
             f"Status: {report['status']}",
             "Read-only: yes",
             "Mutation performed: no",
             "",
-            "## Dockerfile",
+            "## Dockerfile ownership scan",
             f"* Dockerfile found: {str(summary['dockerfile_found']).lower()}",
             f"* Broad recursive chown detected: {str(summary['broad_chown_detected']).lower()}",
             f"* Recursive ownership lines: {summary['recursive_ownership_operations']}",
@@ -330,9 +340,14 @@ def main() -> int:
         description="Emit a read-only Docker01 build-path diagnostic report."
     )
     parser.add_argument("--json", action="store_true", help="emit strict JSON instead of Markdown")
+    parser.add_argument(
+        "--dockerfile",
+        type=Path,
+        help="read this Dockerfile path instead of the repository-root default",
+    )
     parser.add_argument("--out", type=Path, help="write report artifacts into an empty directory")
     args = parser.parse_args()
-    report = build_report()
+    report = build_report(dockerfile_path=args.dockerfile)
     if args.out:
         write_artifacts(args.out, report)
     if args.json:

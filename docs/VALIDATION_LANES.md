@@ -1317,8 +1317,10 @@ For the Docker/LXC build-path symptom seen during PR247/PR248, where image build
 
 ```bash
 python3 scripts/docker01_build_path_diagnostic_report.py --json
+python3 scripts/docker01_build_path_diagnostic_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_build_path_diagnostic_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out /tmp/sfai-build-path-diagnostic --json
 ```
 
-This is a targeted/default-lane evidence capture helper. It is read-only, does not run Docker/Compose, does not remediate, and does not perform cleanup, restart, prune, package install, chown, chmod, rollback, or recovery. With `--out <diagnostic_report_dir>` it writes only report artifacts into an empty operator-supplied directory. Future Dockerfile/build remediation must be a separate PR.
+This is a targeted/default-lane evidence capture helper. Docker01 Compose uses an external Dockerfile path at `/srv/compose/shellforgeai/Dockerfile`; pass it with `--dockerfile` when checking the real Docker01 build path. The helper is read-only, does not run Docker/Compose, does not remediate, and does not perform cleanup, restart, prune, package install, chown, chmod, rollback, or recovery. It does not fix the chown-layer hang. With `--out <diagnostic_report_dir>` it writes only report artifacts into an empty operator-supplied directory. Future Dockerfile/build remediation must be a separate PR.
 
 The manual fallback validation-container guidance still applies: install the expected disposable-container baseline such as `procps`, `git`, and `rsync`, rerun the narrow missing-tool check, and avoid duplicate full pytest churn. Full pytest should run once only when the change scope requires it.

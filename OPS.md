@@ -2935,11 +2935,11 @@ A passing fixture audit is evidence quality control only. It is not production r
 When Docker01 source validation is safe but a fresh Docker/LXC image build is blocked around the Dockerfile `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` layer observed during the PR247/PR248 work, capture evidence with the read-only Docker01 build path diagnostic report:
 
 ```bash
-python3 scripts/docker01_build_path_diagnostic_report.py
 python3 scripts/docker01_build_path_diagnostic_report.py --json
-python3 scripts/docker01_build_path_diagnostic_report.py --out <diagnostic_report_dir> --json
+python3 scripts/docker01_build_path_diagnostic_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_build_path_diagnostic_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out /tmp/sfai-build-path-diagnostic --json
 ```
 
-The report scans the repository Dockerfile for broad recursive ownership or permission operations, records the involved known paths (`/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`), stats only those named paths when present, and checks whether `ps`, `git`, and `rsync` are available for investigation. It is read-only and not remediation: it does not run Docker or Docker Compose, does not build, restart, prune, chown, chmod, install packages, clean up, roll back, recover, or mutate Docker/Compose. Report files are written only under an explicit `--out` directory, which must be empty.
+Docker01 Compose uses an external Dockerfile path at `/srv/compose/shellforgeai/Dockerfile`, so pass that path with `--dockerfile` when collecting Docker01 evidence from synced source. Without `--dockerfile`, the helper keeps the repo-default `Dockerfile` lookup for local fixtures. The report scans only the selected Dockerfile for broad recursive ownership or permission operations, records the involved known paths (`/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`), stats only those named paths when present, and checks whether `ps`, `git`, and `rsync` are available for investigation. It is read-only and not remediation: it does not run Docker or Docker Compose, does not build, restart, prune, chown, chmod, install packages, clean up, roll back, recover, or mutate Docker/Compose. It does not fix the chown-layer hang. Report files are written only under an explicit `--out` directory, which must be empty.
 
 Any Dockerfile or build-path remediation must be handled in a separate PR. If a manual fallback validation container is missing `procps`/`ps`, fix the disposable validation environment and rerun the narrow process snapshot check first; no duplicate full pytest should be triggered just because that manual fallback baseline was incomplete.
