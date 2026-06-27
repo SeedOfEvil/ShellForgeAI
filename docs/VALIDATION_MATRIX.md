@@ -527,3 +527,13 @@ chown/chmod/chgrp, does not install packages, and does not perform cleanup,
 prune, restart, remediation, rollback, or recovery. Actual Dockerfile/build
 remediation remains a separate PR or operator-reviewed change. No duplicate full
 pytest is required for a Docker01 build-path investigation-only change.
+
+## Docker01 build path ownership patch preview
+
+| Area | Command | Expected behavior |
+| --- | --- | --- |
+| Docker01 ownership patch preview | `python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json` | Emits strict JSON for a read-only Docker01 build path ownership patch preview, including detected recursive ownership operations, known risky paths, `apply_available=false`, `dockerfile_modified=false`, `compose_modified=false`, and safety flags. |
+| Docker01 patch preview artifacts | `python3 scripts/docker01_build_path_patch_preview.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out <patch_preview_dir> --json` | Writes review-only preview/report artifacts into an empty explicit output directory, including a unified diff, preview Dockerfile text, static verification JSON, manifest, and checksums. |
+| Docker01 patch preview from PR250 proposal | `python3 scripts/docker01_build_path_patch_preview.py --proposal <ownership_proposal_dir> --out <patch_preview_dir> --json` | Consumes a PR250 ownership proposal directory when present, cross-checks the Dockerfile path/SHA, and still writes only patch-preview artifacts under the explicit output directory. |
+
+The helper is for the Docker/LXC build-path `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` risk. It follows the PR249 diagnostic and PR250 proposal and remains read-only and patch preview only: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp, does not install packages, and does not perform cleanup, prune, restart, remediation, rollback, or recovery. Static verification proves only that the preview text removes broad recursive ownership over the known risky paths and includes targeted ownership plus `COPY --chown` guidance; actual Dockerfile/build remediation remains a separate PR or operator-reviewed change. No duplicate full pytest is required for a Docker01 build-path investigation-only patch preview change.
