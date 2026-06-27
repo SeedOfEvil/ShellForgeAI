@@ -1245,3 +1245,9 @@ python3 scripts/docker01_artifact_archive_plan.py \
 The audit validates required evidence files, JSON parsing, manifest/checksum integrity, fixture-only flags, rollback/restore proof, path guards, and the non-execution safety contract. It does not repeat rehearsal, create fixture files, archive files, restore files, or touch production paths. It can write audit artifacts only when `--out <fixture_audit_dir>` is supplied, and it can compare two fixture rehearsal evidence directories with `--compare-to <previous_fixture_rehearsal_dir>`.
 
 A passing fixture audit is evidence quality control only. It is not production readiness, does not enable production source action, and does not enable production cleanup. Future production source action still requires a separate reviewed lane and PR. SeedOfEvil remains final merge owner.
+
+## Docker01 build path diagnostics
+
+ShellForgeAI includes a small read-only Docker01 build path diagnostic report for operators investigating the PR247/PR248 Docker/LXC build hang observed around the Dockerfile `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` layer. The helper reports Dockerfile evidence, known path stat metadata, and baseline investigation-tool presence without running Docker/Compose or changing Docker state.
+
+This diagnostic is intentionally not remediation. It does not build, restart, prune, chown, chmod, install packages, clean up, roll back, recover, or mutate Docker/Compose. Any Dockerfile/build remediation remains future work and must be proposed in a separate PR. Manual fallback validation containers should keep `procps`, `git`, and `rsync` available; a missing `procps`/`ps` baseline should trigger a narrow rerun, not duplicate full pytest.

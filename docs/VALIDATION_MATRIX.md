@@ -503,3 +503,12 @@ python3 scripts/docker01_artifact_archive_plan.py \
 The audit validates required evidence files, JSON parsing, manifest/checksum integrity, fixture-only flags, rollback/restore proof, path guards, and the non-execution safety contract. It does not repeat rehearsal, create fixture files, archive files, restore files, or touch production paths. It can write audit artifacts only when `--out <fixture_audit_dir>` is supplied, and it can compare two fixture rehearsal evidence directories with `--compare-to <previous_fixture_rehearsal_dir>`.
 
 A passing fixture audit is evidence quality control only. It is not production readiness, does not enable production source action, and does not enable production cleanup. Future production source action still requires a separate reviewed lane and PR. SeedOfEvil remains final merge owner.
+
+## Docker01 build path diagnostic report
+
+| Area | Command | Expected behavior |
+| --- | --- | --- |
+| Docker01 build-path evidence | `python3 scripts/docker01_build_path_diagnostic_report.py --json` | Emits strict JSON describing Dockerfile recursive ownership/permission lines, known paths, named path stat metadata, tool availability, and safety flags. |
+| Docker01 report artifacts | `python3 scripts/docker01_build_path_diagnostic_report.py --out <diagnostic_report_dir> --json` | Writes report artifacts only into an empty explicit output directory. |
+
+The diagnostic exists for the PR247/PR248 Docker/LXC chown-layer operational context (`chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai`). It is read-only and not remediation: it does not build, run Docker/Compose, chown, chmod, install packages, prune, restart, roll back, recover, or mutate Docker/Compose. Any Dockerfile/build remediation belongs in a separate PR. Missing manual-fallback `procps`/`ps` should be resolved in the disposable validation environment and checked narrowly; no duplicate full pytest is required for that baseline-only issue.

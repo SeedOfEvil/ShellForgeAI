@@ -1310,3 +1310,15 @@ python3 scripts/docker01_artifact_archive_plan.py \
 The audit validates required evidence files, JSON parsing, manifest/checksum integrity, fixture-only flags, rollback/restore proof, path guards, and the non-execution safety contract. It does not repeat rehearsal, create fixture files, archive files, restore files, or touch production paths. It can write audit artifacts only when `--out <fixture_audit_dir>` is supplied, and it can compare two fixture rehearsal evidence directories with `--compare-to <previous_fixture_rehearsal_dir>`.
 
 A passing fixture audit is evidence quality control only. It is not production readiness, does not enable production source action, and does not enable production cleanup. Future production source action still requires a separate reviewed lane and PR. SeedOfEvil remains final merge owner.
+
+## Docker01 build path diagnostic lane
+
+For the Docker/LXC build-path symptom seen during PR247/PR248, where image build progress can hang around the Dockerfile `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` layer, use the standalone Docker01 build path diagnostic before considering any infrastructure or Dockerfile change:
+
+```bash
+python3 scripts/docker01_build_path_diagnostic_report.py --json
+```
+
+This is a targeted/default-lane evidence capture helper. It is read-only, does not run Docker/Compose, does not remediate, and does not perform cleanup, restart, prune, package install, chown, chmod, rollback, or recovery. With `--out <diagnostic_report_dir>` it writes only report artifacts into an empty operator-supplied directory. Future Dockerfile/build remediation must be a separate PR.
+
+The manual fallback validation-container guidance still applies: install the expected disposable-container baseline such as `procps`, `git`, and `rsync`, rerun the narrow missing-tool check, and avoid duplicate full pytest churn. Full pytest should run once only when the change scope requires it.
