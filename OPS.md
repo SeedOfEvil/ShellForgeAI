@@ -3014,3 +3014,17 @@ python3 scripts/docker01_build_path_candidate_verify.py --candidate ops/docker/D
 ```
 
 For report artifacts, provide an empty output directory with `--out`. Optional comparison against `/srv/compose/shellforgeai/Dockerfile` reads that source Dockerfile only when explicitly supplied. The helper does not edit `/srv/compose/shellforgeai/Dockerfile`, does not edit Compose, does not run Docker/Compose/build, does not run `chown`/`chmod`/`chgrp`, does not install packages, and does not remediate, roll back, recover, prune, clean up, or restart anything. Any real Dockerfile/build remediation must be a separate PR or operator-reviewed change.
+
+## Docker01 ownership handoff packet
+
+`scripts/docker01_build_path_ownership_handoff_packet.py` is a read-only handoff/report helper that bridges the PR249 diagnostic, PR250 proposal, PR251 preview, PR252 rehearsal, and PR253 repository-owned candidate verifier toward a future operator-reviewed Dockerfile change. It reads the external Docker01 Dockerfile only when explicitly supplied with `--source-dockerfile`, reads the repository-owned candidate supplied with `--candidate`, optionally reads PR253 candidate-verification artifacts, computes source/candidate SHA256 values, detects the known broad recursive ownership risk, and writes review artifacts only under an empty explicit `--out` directory.
+
+Run it with:
+
+```bash
+python3 scripts/docker01_build_path_ownership_handoff_packet.py --source-dockerfile /srv/compose/shellforgeai/Dockerfile --candidate ops/docker/Dockerfile.docker01.ownership-candidate
+python3 scripts/docker01_build_path_ownership_handoff_packet.py --source-dockerfile /srv/compose/shellforgeai/Dockerfile --candidate ops/docker/Dockerfile.docker01.ownership-candidate --json
+python3 scripts/docker01_build_path_ownership_handoff_packet.py --source-dockerfile /srv/compose/shellforgeai/Dockerfile --candidate ops/docker/Dockerfile.docker01.ownership-candidate --out <handoff_packet_dir> --json
+```
+
+The handoff packet is not remediation, not approval, not execution, and does not authorize Dockerfile changes. It does not edit `/srv/compose/shellforgeai/Dockerfile`, does not edit Compose, does not run Docker/Compose/build, does not run `chown`/`chmod`/`chgrp`, does not install packages, and does not clean up, prune, restart, remediate, roll back, or recover. Future Dockerfile/build remediation must be a separate PR or operator-reviewed change, and Docker01 build-path investigation alone should not trigger duplicate full pytest runs.
