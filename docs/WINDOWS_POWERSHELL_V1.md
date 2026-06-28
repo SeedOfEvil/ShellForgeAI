@@ -57,15 +57,17 @@ Windows V1 does not:
 
 ## Platform detection direction
 
-ShellForgeAI should eventually detect platform early through a read-only, safe platform detector. Linux/Docker lanes must not accidentally run Windows logic, and Windows lanes must not pretend Docker/Linux evidence exists.
+ShellForgeAI now includes a narrow read-only platform detector and `shellforgeai platform doctor` status command. This foundation recognizes Linux, Windows, Darwin, and unknown platforms using Python standard library metadata only. It does not run PowerShell, WinRM/PSRemoting, Docker, Compose, host probing, service inventory, process inventory, event-log reads, network calls, model calls, secret reads, installs, or mutations.
 
-On unsupported platforms or unsupported commands, ShellForgeAI should emit a graceful structured message instead of throwing an implementation-specific traceback or silently switching lanes. A future Windows V1 platform result could look like:
+ShellForgeAI should detect platform early through a read-only, safe platform detector. Linux/Docker lanes must not accidentally run Windows logic, and Windows lanes must not pretend Docker/Linux evidence exists.
+
+On unsupported platforms or unsupported commands, ShellForgeAI should emit a graceful structured message instead of throwing an implementation-specific traceback or silently switching lanes. The current platform doctor reports Linux as the supported Linux/Docker operational lane, Windows as recognized with Windows V1 planned but not evidence-collecting yet, and Darwin/unknown as unsupported for current operational lanes. A platform result can look like:
 
 ```json
 {
   "platform": "windows",
-  "supported": true,
-  "lane": "windows_v1_read_only",
+  "supported": false,
+  "lane": "windows_v1_planned",
   "read_only": true,
   "mutation_performed": false
 }
@@ -77,10 +79,11 @@ Unsupported Windows commands, unsupported Linux/Docker commands on Windows, and 
 
 ## Future command shape
 
-The following examples are future design sketches only; this PR does not implement them:
+The platform doctor command is available now; Windows-specific commands remain future design sketches only:
 
 ```bash
 shellforgeai platform doctor --json
+shellforgeai platform doctor
 shellforgeai windows doctor --json
 shellforgeai windows status --json
 shellforgeai ask "It is 2AM and this Windows server feels broken. What should I check first?"
@@ -104,7 +107,7 @@ The Windows lane preserves ShellForgeAI's core safety model:
 
 ## Proposed implementation sequence
 
-1. Add a read-only platform detector and graceful unsupported message contract.
+1. Add a read-only platform detector and graceful unsupported message contract. (Current foundation.)
 2. Prototype a Windows read-only doctor for local OS info, PowerShell version, execution policy, and host context.
 3. Prototype a Windows read-only status/report for services, processes, disks, network basics, event logs, and safe update/firewall/roles signals.
 4. Run a packaging/install spike after the evidence path is clear.

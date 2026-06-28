@@ -28,6 +28,7 @@ from shellforgeai.commands import handoff as handoff_commands
 from shellforgeai.commands import interactive as interactive_commands
 from shellforgeai.commands import model as model_commands
 from shellforgeai.commands import ops as ops_commands
+from shellforgeai.commands import platform as platform_commands
 from shellforgeai.commands import propose as propose_commands
 from shellforgeai.commands import receipt_audit as receipt_audit_commands
 from shellforgeai.commands import receipt_recovery_execute as receipt_recovery_execute_commands
@@ -271,6 +272,7 @@ mission_app.add_typer(mission_restart_app, name="restart")
 mission_app.add_typer(mission_compose_restart_app, name="compose-restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 ops_app = typer.Typer(help="Read-only operator status board.")
+platform_app = typer.Typer(help="Read-only platform detection and support status.")
 session_app = typer.Typer(help="Session handoff artifact utilities (read-only metadata).")
 session_summary_app = typer.Typer(help="Interactive session summary artifact workflow.")
 ops_report_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
@@ -327,6 +329,8 @@ app.add_typer(guard_app, name="guard")
 app.add_typer(mission_app, name="mission")
 app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
+app.add_typer(platform_app, name="platform")
+platform_commands.register(platform_app)
 app.add_typer(session_app, name="session")
 ops_app.add_typer(ops_report_app, name="report")
 session_app.add_typer(session_summary_app, name="summary")
