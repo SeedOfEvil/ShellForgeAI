@@ -163,6 +163,7 @@ def test_unknown_unclassified_handlers_warn_instead_of_claiming_certainty(tmp_pa
         "interactive.py",
         "model.py",
         "ops.py",
+        "platform.py",
         "propose.py",
         "receipt_audit.py",
         "receipt_recovery_execute.py",

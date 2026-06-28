@@ -5,13 +5,13 @@ This map is an inventory aid for command-module extraction planning. It is not a
 ## Status
 
 - Status: `ok`
-- Extracted command modules: 18
+- Extracted command modules: 19
 - Remaining inline CLI handlers: 99
 - Unknown inline handlers: 0
 
 ## cli.py inline-handler debt
 
-- `src/shellforgeai/cli.py` line count: 13964 (threshold 14500, within: true)
+- `src/shellforgeai/cli.py` line count: 14021 (threshold 14500, within: true)
 - Inline Typer handlers in cli.py: 99 (threshold 105, within: true)
 - `cli.py` remains Typer/app wiring plus the explicitly inventoried remaining inline handlers below; the PR202 enforcement guardrail (`tests/test_pr202_cli_refactor_inventory_enforcement.py`) fails if a new large inline handler is added without lowering the debt or updating these thresholds and docs.
 
@@ -20,12 +20,12 @@ This map is an inventory aid for command-module extraction planning. It is not a
 - Closure status: `ok`
 - `cli.py` role: `typer_wiring`
 - Command-surface guardrail (PR184): `present`
-- Extracted command modules: 18
+- Extracted command modules: 19
 - Missing expected modules: none
 - Intentional Typer wiring/glue (callbacks) left in cli.py: `audit_index_main`, `main`, `v1_packet`
 - Classified inline command handlers remaining (future-extraction candidates): 96
 - Unexpected (unclassified) inline handlers: none
-- Recommendation: cli split enforced and behavior-preserving: 18 command modules extracted; 96 classified inline command handlers remain as documented future-extraction candidates; 3 Typer callbacks intentionally remain as wiring; 0 unexpected inline handlers; PR184/PR202 guardrails present
+- Recommendation: cli split enforced and behavior-preserving: 19 command modules extracted; 96 classified inline command handlers remain as documented future-extraction candidates; 3 Typer callbacks intentionally remain as wiring; 0 unexpected inline handlers; PR184/PR202 guardrails present
 
 ## CLI wiring-only enforcement (`--check`)
 
@@ -145,6 +145,7 @@ Default, JSON, and Markdown modes are read-only. `--write-doc` writes only the e
 | `interactive` | `src/shellforgeai/commands/interactive.py` | `read_only` | PR200 |
 | `model` | `src/shellforgeai/commands/model.py` | `read_only` | PR196 |
 | `ops` | `src/shellforgeai/commands/ops.py` | `read_only` | PR183 |
+| `platform doctor` | `src/shellforgeai/commands/platform.py` | `read_only` | PR259 |
 | `propose` | `src/shellforgeai/commands/propose.py` | `artifact_only` | PR187 |
 | `receipt audit` | `src/shellforgeai/commands/receipt_audit.py` | `artifact_only` | PR191 |
 | `receipt recovery execute` | `src/shellforgeai/commands/receipt_recovery_execute.py` | `confirm_gated_mutation` | PR194 |

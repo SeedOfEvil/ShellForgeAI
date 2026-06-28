@@ -147,6 +147,7 @@ EXTRACTED_MODULES: dict[str, dict[str, Any]] = {
     "interactive": {"module": "interactive.py", "category": "read_only", "known_pr": 200},
     "model": {"module": "model.py", "category": "read_only", "known_pr": 196},
     "ops": {"module": "ops.py", "category": "read_only", "known_pr": 183},
+    "platform doctor": {"module": "platform.py", "category": "read_only", "known_pr": 259},
     "propose": {"module": "propose.py", "category": "artifact_only", "known_pr": 187},
     "receipt audit": {"module": "receipt_audit.py", "category": "artifact_only", "known_pr": 191},
     "receipt recovery execute": {

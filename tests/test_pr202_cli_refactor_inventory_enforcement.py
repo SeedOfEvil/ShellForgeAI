@@ -48,6 +48,7 @@ EXPECTED_COMMAND_MODULES = {
     "interactive",
     "model",
     "ops",
+    "platform",
     "propose",
     "receipt_audit",
     "receipt_recovery_execute",
