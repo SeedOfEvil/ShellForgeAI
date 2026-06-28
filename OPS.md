@@ -3028,3 +3028,37 @@ python3 scripts/docker01_build_path_ownership_handoff_packet.py --source-dockerf
 ```
 
 The handoff packet is not remediation, not approval, not execution, and does not authorize Dockerfile changes. It does not edit `/srv/compose/shellforgeai/Dockerfile`, does not edit Compose, does not run Docker/Compose/build, does not run `chown`/`chmod`/`chgrp`, does not install packages, and does not clean up, prune, restart, remediate, roll back, or recover. Future Dockerfile/build remediation must be a separate PR or operator-reviewed change, and Docker01 build-path investigation alone should not trigger duplicate full pytest runs.
+
+## Guarded Docker01 external Dockerfile ownership update recipe
+
+ShellForgeAI includes a narrow Docker01 recipe, `scripts/docker01_external_dockerfile_ownership_update.py`, for the external Dockerfile ownership path. It follows the PR249 diagnostic, PR250 proposal, PR251 preview, PR252 rehearsal, PR253 repository-owned candidate verifier, and PR254 handoff packet. The recipe is explicitly confirmed, verifies exact source and candidate SHA256 values, creates a backup before writing, and writes only `/srv/compose/shellforgeai/Dockerfile` in production mode.
+
+Read-only preflight shape:
+
+```bash
+python3 scripts/docker01_external_dockerfile_ownership_update.py \
+  --preflight \
+  --source-dockerfile /srv/compose/shellforgeai/Dockerfile \
+  --candidate ops/docker/Dockerfile.docker01.ownership-candidate \
+  --expected-source-sha256 <current_external_dockerfile_sha256> \
+  --expected-candidate-sha256 <repo_candidate_sha256> \
+  --out <preflight_report_dir> \
+  --json
+```
+
+Future operator-controlled write shape (not for Codex/PR tasks):
+
+```bash
+python3 scripts/docker01_external_dockerfile_ownership_update.py \
+  --write-external-dockerfile \
+  --source-dockerfile /srv/compose/shellforgeai/Dockerfile \
+  --candidate ops/docker/Dockerfile.docker01.ownership-candidate \
+  --expected-source-sha256 <current_external_dockerfile_sha256> \
+  --expected-candidate-sha256 <repo_candidate_sha256> \
+  --backup-dir /srv/compose/shellforgeai \
+  --confirm CONFIRM_SHELLFORGEAI_DOCKER01_OWNERSHIP_DOCKERFILE_UPDATE \
+  --out <update_receipt_dir> \
+  --json
+```
+
+The helper stops before Docker build, Compose config, recreate, restart, prune, cleanup, remediation, rollback, or recovery. Any build/recreate validation belongs in a separate guarded operator lane after the file update. SeedOfEvil remains final merge owner.

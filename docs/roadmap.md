@@ -1293,3 +1293,7 @@ python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose
 ```
 
 The helper copies the preview Dockerfile into a rehearsal artifact, emits a rehearsal diff and reports under explicit `--out`, proves the real Dockerfile SHA256 is unchanged, and statically verifies the rehearsed artifact no longer contains broad recursive ownership over `/data`, `/home/appuser/.codex`, or `/opt/shellforgeai`. This is not Dockerfile remediation: it does not edit Dockerfile or Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp or package install, and does not clean up, prune, restart, remediate, roll back, or recover. Any actual Dockerfile/build fix remains future work in a separate PR or operator-reviewed change. Build-path investigation work should stay narrow and should not duplicate full pytest unless shared runtime or safety machinery changes.
+
+## Docker01 ownership update recipe
+
+The Docker01 ownership path now has a guarded external Dockerfile update recipe after the diagnostic, proposal, preview, rehearsal, candidate verifier, and handoff packet stages. It is capability-first but intentionally narrow: exact SHA guards, explicit confirmation, backup-before-write, and only the external Dockerfile target. It does not build, validate Compose, recreate, restart, prune, cleanup, remediate, roll back, or recover; those actions remain separate guarded operator lanes. SeedOfEvil remains final merge owner.
