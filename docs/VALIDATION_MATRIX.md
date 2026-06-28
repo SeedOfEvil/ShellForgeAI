@@ -557,3 +557,18 @@ The helper is for artifact-only review of the Docker/LXC build-path `chown -R ap
 Future Dockerfile/build remediation is not part of this lane; it must be a separate PR or operator-reviewed change.
 
 | Docker01 external Dockerfile ownership update recipe | `python3 scripts/docker01_external_dockerfile_ownership_update.py --preflight ... --json` | Read-only preflight for exact source/candidate SHA guards and candidate safety. Future confirmed write creates a backup and updates only `/srv/compose/shellforgeai/Dockerfile`; it stops before Docker build, Compose config, recreate, restart, prune, cleanup, remediation, rollback, or recovery. Codex/PR tasks must not run production write mode. |
+
+### Docker01 external Dockerfile ownership update validator
+
+| Surface | Command | Expected result | Mutates runtime? |
+| --- | --- | --- | --- |
+| Current target status | `python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --target /srv/compose/shellforgeai/Dockerfile --json` | Reports `validated`, `not_updated`, `partial`, or `failed` from static Dockerfile analysis. | No |
+| Receipt audit | `python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --receipt <ownership_update_receipt_dir> --target /srv/compose/shellforgeai/Dockerfile --json` | Validates receipt JSON, manifest, checksums, backup metadata, allowed scope, and safety flags. | No |
+| Artifact report | `python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --target /srv/compose/shellforgeai/Dockerfile --out <validation_report_dir> --json` | Writes validation/report artifacts only under `--out`. | Report artifacts only |
+
+The validator is read-only and not remediation. It does not execute the guarded
+recipe, edit `/srv/compose/shellforgeai/Dockerfile`, edit Compose, run Docker or
+Compose, run build/recreate validation, run `chown`/`chmod`/`chgrp`, install
+packages, clean up, prune, restart, remediate, roll back, or recover. Docker
+build/recreate validation is a separate operator action/change window after an
+actual recipe run.

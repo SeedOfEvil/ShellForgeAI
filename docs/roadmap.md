@@ -1297,3 +1297,21 @@ The helper copies the preview Dockerfile into a rehearsal artifact, emits a rehe
 ## Docker01 ownership update recipe
 
 The Docker01 ownership path now has a guarded external Dockerfile update recipe after the diagnostic, proposal, preview, rehearsal, candidate verifier, and handoff packet stages. It is capability-first but intentionally narrow: exact SHA guards, explicit confirmation, backup-before-write, and only the external Dockerfile target. It does not build, validate Compose, recreate, restart, prune, cleanup, remediate, roll back, or recover; those actions remain separate guarded operator lanes. SeedOfEvil remains final merge owner.
+
+### Docker01 ownership update audit status
+
+The Docker01 ownership path now includes a read-only receipt/status validator for
+the guarded external Dockerfile ownership update recipe:
+
+```bash
+python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --target /srv/compose/shellforgeai/Dockerfile --json
+```
+
+With `--receipt`, it audits the recipe receipt, manifest, checksums, backup
+metadata, allowed scope, and safety flags. With `--out`, it writes validation
+artifacts only to the requested report directory. This is read-only and not
+remediation: no recipe execution, no production Dockerfile edit, no Compose edit,
+no Docker build/Compose run, no `chown`/`chmod`/`chgrp`, no package install, no
+cleanup/prune/restart, and no rollback/recovery. Docker build/recreate validation
+remains a separate operator action after a confirmed recipe run; do not duplicate
+full pytest merely because Docker01 build-path investigation is active.

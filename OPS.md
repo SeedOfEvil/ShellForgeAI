@@ -3062,3 +3062,25 @@ python3 scripts/docker01_external_dockerfile_ownership_update.py \
 ```
 
 The helper stops before Docker build, Compose config, recreate, restart, prune, cleanup, remediation, rollback, or recovery. Any build/recreate validation belongs in a separate guarded operator lane after the file update. SeedOfEvil remains final merge owner.
+
+## Docker01 external Dockerfile ownership update validation
+
+Operators can audit the guarded external Dockerfile ownership update recipe with
+this read-only validator:
+
+```bash
+python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --target /srv/compose/shellforgeai/Dockerfile
+python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --target /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --receipt <ownership_update_receipt_dir> --target /srv/compose/shellforgeai/Dockerfile --json
+```
+
+The validator inspects the current target Dockerfile and, when supplied, receipt
+artifacts from the guarded ownership update recipe. It is read-only and not
+remediation: it does not execute the recipe, edit `/srv/compose/shellforgeai/Dockerfile`,
+edit Compose, run Docker/Compose/build, run `chown`/`chmod`/`chgrp`, install
+packages, clean up, prune, restart, remediate, roll back, or recover. When
+`--out <validation_report_dir>` is supplied, it writes validation/report artifacts
+only in that output directory. Docker build/recreate validation after an actual
+recipe run is a separate operator action/change window, not part of this helper.
+Do not trigger duplicate full pytest solely because Docker01 build-path
+investigation is ongoing.
