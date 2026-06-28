@@ -552,5 +552,6 @@ The helper is for artifact-only review of the Docker/LXC build-path `chown -R ap
 | Change area | Default lane | Required focus |
 | --- | --- | --- |
 | Repository-owned Docker01 ownership candidate artifact, README, and static verifier | Lane B targeted/default | Run the PR-specific candidate verifier tests, PR250/PR251/PR252 build-path verifier regressions, compile checks, ruff, and command-surface/mutation-refusal guardrails. The helper must remain review-only: no production Dockerfile or Compose edits, no Docker/Compose/build, no ownership commands, no package installs, and no remediation/rollback/recovery/cleanup/prune/restart. |
+| Docker01 ownership handoff packet helper, tests, and docs | Lane B targeted/default | Run the PR-specific handoff-packet tests, PR253/PR252/PR251 build-path regressions, compile checks, ruff, and command-surface/mutation-refusal guardrails. The helper writes handoff/report artifacts only under explicit `--out`; it must not edit `/srv/compose/shellforgeai/Dockerfile`, edit Compose, run Docker/Compose/build, run ownership commands, install packages, or perform remediation/rollback/recovery/cleanup/prune/restart. Future Dockerfile/build remediation remains a separate PR or operator-reviewed change. |
 
 Future Dockerfile/build remediation is not part of this lane; it must be a separate PR or operator-reviewed change.
