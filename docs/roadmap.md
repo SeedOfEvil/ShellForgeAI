@@ -218,6 +218,10 @@ and [`V2_COMMAND_CONTRACT.md`](V2_COMMAND_CONTRACT.md).
 
 ## Next
 
+- Planned: platform detector with graceful unsupported output so Linux/Docker lanes do not run Windows logic and Windows lanes do not pretend Docker/Linux evidence exists.
+- Planned: Windows read-only doctor prototype for local Windows Server 2025 evidence first.
+- Planned: packaging/install spike comparing uv-managed runtime and frozen/bundled options without changing the read-only safety model.
+
 - Model-driven hand-off into a richer plan synthesis surface (still
   validation-only at the boundary).
 - `apply` execution behind explicit operator approval and policy gating.

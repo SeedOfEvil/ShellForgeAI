@@ -23,6 +23,10 @@ where readiness means reviewable evidence rather than executable source action.
 > "run whatever command is needed" prompts are refused and redirected to safe
 > read-only evidence or proposal surfaces.
 
+## Future platform support
+
+Linux/Docker is the current core. Windows/PowerShell V1 is planned as read-only local evidence for a Windows Server 2025 test VM first, with packaging strategy work tracking easier operator installs. The safety model remains unchanged: no natural-language command execution, no arbitrary PowerShell execution, no WinRM lane in V1, and no broad mutation. See [`docs/WINDOWS_POWERSHELL_V1.md`](docs/WINDOWS_POWERSHELL_V1.md) and [`docs/PACKAGING_STRATEGY.md`](docs/PACKAGING_STRATEGY.md).
+
 ## What it helps with
 
 - Docker/container state review: status snapshots, Compose context, logs/errors,
