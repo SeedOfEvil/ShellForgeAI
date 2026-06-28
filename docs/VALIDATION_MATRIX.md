@@ -546,3 +546,11 @@ The helper is for the Docker/LXC build-path `chown -R appuser:appuser /data /hom
 | Docker01 standalone preview Dockerfile rehearsal | `python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose/shellforgeai/Dockerfile --preview-dockerfile <path/to/dockerfile-ownership-preview.Dockerfile> --out <patch_rehearsal_dir> --json` | Treats the supplied preview Dockerfile as the candidate rehearsed artifact and still writes only under `--out`. |
 
 The helper is for artifact-only review of the Docker/LXC build-path `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` risk. It follows the PR249 diagnostic, PR250 proposal, and PR251 preview and remains patch rehearsal only: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp, does not install packages, and does not perform cleanup, prune, restart, remediation, rollback, or recovery. Static verification proves only that the rehearsed artifact removes broad recursive ownership over the known risky paths and includes targeted ownership plus `COPY --chown` guidance; actual Dockerfile/build remediation remains a separate PR or operator-reviewed change. No duplicate full pytest is required for a Docker01 build-path investigation-only patch rehearsal change.
+
+## Docker01 ownership candidate/static verifier
+
+| Change area | Default lane | Required focus |
+| --- | --- | --- |
+| Repository-owned Docker01 ownership candidate artifact, README, and static verifier | Lane B targeted/default | Run the PR-specific candidate verifier tests, PR250/PR251/PR252 build-path verifier regressions, compile checks, ruff, and command-surface/mutation-refusal guardrails. The helper must remain review-only: no production Dockerfile or Compose edits, no Docker/Compose/build, no ownership commands, no package installs, and no remediation/rollback/recovery/cleanup/prune/restart. |
+
+Future Dockerfile/build remediation is not part of this lane; it must be a separate PR or operator-reviewed change.

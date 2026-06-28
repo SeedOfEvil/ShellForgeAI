@@ -3001,3 +3001,16 @@ python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose
 The rehearsal reads the explicitly supplied original Dockerfile and PR251 preview artifacts, writes only copied rehearsal/report artifacts under an empty explicit `--out` directory, records original Dockerfile SHA256 before/after, and statically verifies the rehearsed Dockerfile no longer contains broad recursive ownership over `/data`, `/home/appuser/.codex`, or `/opt/shellforgeai`. It also checks for targeted runtime-directory ownership guidance and `COPY --chown` guidance.
 
 This is artifact-only rehearsal, not remediation. It does not edit the real Dockerfile, does not edit Compose, does not run Docker/Compose/build, does not run chown/chmod/chgrp, does not install packages, and does not clean up, prune, restart, remediate, roll back, or recover. Any actual Dockerfile/build remediation must be a separate PR or operator-reviewed change. No duplicate full pytest should be triggered just because Docker01 build-path investigation or patch-rehearsal reporting is ongoing.
+
+## Docker01 ownership candidate verifier
+
+`ops/docker/Dockerfile.docker01.ownership-candidate` is a repository-owned candidate artifact for reviewing Docker01 build-path ownership. It follows the diagnostic/proposal/preview/rehearsal sequence by making the safer ownership pattern concrete in source control without changing the active external Docker01 Dockerfile or Compose.
+
+Run the static verifier with:
+
+```bash
+python3 scripts/docker01_build_path_candidate_verify.py --candidate ops/docker/Dockerfile.docker01.ownership-candidate
+python3 scripts/docker01_build_path_candidate_verify.py --candidate ops/docker/Dockerfile.docker01.ownership-candidate --json
+```
+
+For report artifacts, provide an empty output directory with `--out`. Optional comparison against `/srv/compose/shellforgeai/Dockerfile` reads that source Dockerfile only when explicitly supplied. The helper does not edit `/srv/compose/shellforgeai/Dockerfile`, does not edit Compose, does not run Docker/Compose/build, does not run `chown`/`chmod`/`chgrp`, does not install packages, and does not remediate, roll back, recover, prune, clean up, or restart anything. Any real Dockerfile/build remediation must be a separate PR or operator-reviewed change.

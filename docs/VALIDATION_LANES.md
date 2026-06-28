@@ -1368,3 +1368,9 @@ python3 scripts/docker01_build_path_patch_rehearsal.py --dockerfile /srv/compose
 ```
 
 It follows the PR249 diagnostic, PR250 ownership proposal, and PR251 patch preview. The helper consumes the review-only preview Dockerfile/diff artifacts, writes copied rehearsal Dockerfile/diff/report artifacts only under an empty explicit output directory, proves the original Dockerfile SHA256 is unchanged, and statically verifies that the rehearsed artifact removes broad recursive ownership over `/data`, `/home/appuser/.codex`, and `/opt/shellforgeai`. This is patch rehearsal only: it does not edit Dockerfile, does not edit Compose, does not run Docker/Compose/build/chown/chmod/chgrp/package install, and does not remediate. Future Dockerfile/build remediation must be a separate PR or operator-reviewed change. This lane should not cause duplicate full pytest; full pytest should run once only if the change broadens into shared runtime, Dockerfile/Compose/deploy, or safety machinery.
+
+## Docker01 ownership candidate lane
+
+Repository-owned Docker01 ownership candidate changes (`ops/docker/Dockerfile.docker01.ownership-candidate`, its README, and `scripts/docker01_build_path_candidate_verify.py`) fit the targeted/default validation lane when they remain static and review-only. The verifier reads only the candidate and an optional explicitly supplied source Dockerfile, writes reports only under `--out`, and does not edit the external Docker01 Dockerfile, edit Compose, run Docker/Compose/build, run ownership commands, install packages, clean up, prune, restart, remediate, roll back, or recover.
+
+Use the PR-specific verifier tests plus the related PR250/PR251/PR252 build-path tests and command-surface/mutation-refusal guardrails. Docker01 build-path investigation alone should not trigger duplicate full pytest; reserve one full run only for broad runtime, deploy, command-surface policy, or shared safety machinery changes.

@@ -1,0 +1,28 @@
+# ShellForgeAI Docker01 ownership candidate artifact.
+# CANDIDATE ONLY: this is not the active Docker01 production Dockerfile.
+# Do not copy, apply, or deploy this file blindly.
+# Future review is required before any production Dockerfile change.
+
+FROM python:3.12-slim
+
+RUN useradd --create-home --shell /bin/bash appuser
+
+# Create only the runtime directories that need ownership. Avoid broad recursive
+# ownership over Docker/LXC build paths such as /data, /home/appuser/.codex, or
+# /opt/shellforgeai during image build.
+RUN install -d -o appuser -g appuser /data /home/appuser/.codex /opt/shellforgeai
+
+WORKDIR /opt/shellforgeai
+
+# Candidate guidance: prefer COPY --chown=appuser:appuser for application source
+# ownership where the reviewed Dockerfile copies ShellForgeAI source into the
+# image, instead of running recursive ownership over the full tree afterward.
+# Example for a future reviewed Dockerfile change only:
+# COPY --chown=appuser:appuser . /opt/shellforgeai
+
+USER appuser
+
+# This candidate intentionally avoids Docker/Compose runtime commands, cleanup,
+# prune, restart, remediation, rollback, recovery, and production host
+# assumptions. Any real Dockerfile/build remediation must be a separate,
+# operator-reviewed change.
