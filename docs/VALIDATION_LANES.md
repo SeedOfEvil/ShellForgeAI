@@ -1384,3 +1384,22 @@ Use the PR-specific handoff-packet tests plus PR253/PR252/PR251 build-path regre
 ## Docker01 external Dockerfile ownership update recipe
 
 A narrow validation lane now exists for the Docker01 external Dockerfile ownership update. The preflight lane is read-only and checks exact source/candidate SHA256 values, the known broad recursive ownership risk in the external source, and the repository-owned candidate marker. The future write lane requires `CONFIRM_SHELLFORGEAI_DOCKER01_OWNERSHIP_DOCKERFILE_UPDATE`, creates a backup first, writes only `/srv/compose/shellforgeai/Dockerfile`, and emits receipt artifacts. Codex/PR work must not run production write mode. The helper does not run Docker, Docker Compose, chown/chmod/chgrp, package installation, cleanup, restart, remediation, rollback, or recovery; build/recreate validation is separate.
+
+### Docker01 ownership update receipt validation lane
+
+Use the standalone read-only validator when the guarded external Dockerfile
+ownership update recipe needs before/after audit evidence:
+
+```bash
+python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --target /srv/compose/shellforgeai/Dockerfile --json
+python3 scripts/docker01_external_dockerfile_ownership_update_validate.py --receipt <ownership_update_receipt_dir> --target /srv/compose/shellforgeai/Dockerfile --out <validation_report_dir> --json
+```
+
+This lane validates current target state plus optional receipt manifest,
+checksums, backup metadata, allowed scope, and safety flags. It is read-only and
+not remediation. It must not execute the recipe, edit the external Dockerfile,
+edit Compose, run Docker build, run Docker Compose, run ownership commands,
+install packages, prune, restart, remediate, roll back, or recover. Docker
+build/recreate validation remains a separate operator action after an intentional
+recipe run and should not cause duplicate full pytest while Docker01 build-path
+investigation is ongoing.
