@@ -1,18 +1,81 @@
 # ShellForgeAI
 
-ShellForgeAI is a lightweight, portable Tier-3 triage and guarded remediation
-tool — a combat knife with a safety catch, receipts, and a flight recorder. It
-collects evidence with typed read-only collectors, builds operator runbooks,
-stages mutation proposals behind explicit approval/mission/apply gates,
-verifies outcomes, and writes auditable receipts. The default LLM (OpenAI
-Codex CLI) is used only for advisory synthesis; it never executes commands.
+ShellForgeAI is a **CLI-first Linux/Docker operator knife** for evidence-backed
+triage, guarded operational workflows, and auditable handoffs.
 
-ShellForgeAI is strongest at evidence-backed Docker/Linux triage, guarded operator workflows, audit-friendly receipts and manifests, and deterministic refusal of unsafe broad mutation. It is designed to help operators collect proof, compare validation evidence, and prepare reviewed decisions without turning advisory output into automatic infrastructure changes. The archive/source-action review chain is documented as an operator runbook in [`docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md`](docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md), where readiness means reviewable evidence rather than executable source action.
+It helps an operator inspect messy Docker/Linux state, rank likely suspects,
+produce structured reports, and decide what to check next without turning every
+prompt into a command executor. The product center is practical operator help:
+"it is 2AM, Docker feels broken, what should I check first?" ShellForgeAI
+answers with read-only evidence, likely suspects, validation context, and a safe
+next report or command surface the operator can review.
 
-> Status: alpha. Mutation is gated to two narrow lanes: ShellForgeAI-owned
-> metadata cleanup, and exact-container Docker restart (with a separate,
-> disposable-only Compose service restart lane that remains environment-gated
-> in most deployments). Everything else is read-only or proposal-only.
+ShellForgeAI is strongest at evidence-backed Docker/Linux triage, guarded operator workflows, audit-friendly receipts and manifests, and deterministic refusal of unsafe broad mutation. It is designed to help operators collect
+proof, compare validation evidence, stage governed handoffs, and prepare
+reviewed decisions without presenting itself as self-healing
+infrastructure. The archive/source-action review chain is documented as an
+operator runbook in [`docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md`](docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md),
+where readiness means reviewable evidence rather than executable source action.
+
+> Status: alpha. Read-only reporting is the default. Mutation is gated to named,
+> narrow, auditable recipes that require explicit confirmation and every prior
+> gate green. Broad cleanup, restart, remediation, rollback, recovery, or
+> "run whatever command is needed" prompts are refused and redirected to safe
+> read-only evidence or proposal surfaces.
+
+## What it helps with
+
+- Docker/container state review: status snapshots, Compose context, logs/errors,
+  network symptoms, and exact-container diagnostic evidence.
+- Linux host/operator evidence gathering for health, disk, performance,
+  packages, config, and change-review questions.
+- Suspect ranking and "likely first checks" for safe 2AM triage style asks.
+- Read-only status, triage, validation-lane, and ops reports that are suitable
+  for review before action.
+- Auditable receipts, manifests, checksums, exports, comparisons, and handoff
+  packets for change review and incident follow-up.
+- Governed artifact/archive/source-action runway: status reports, readiness
+  packets, validation evidence, and reviewable source-action decisions.
+- Docker01 build-path runway: diagnostic, proposal, preview, and validation
+  reports without broad production remediation.
+- Refusal and redirection for dangerous mutation requests, with safe read-only
+  next steps instead of unguarded cleanup or restart.
+
+## Operating model
+
+- Observe and report first: collect typed, read-only evidence before advice or
+  proposals.
+- Read-only by default: asks, previews, proposals, approvals, rollback previews,
+  reports, exports, status views, and validation surfaces do not execute fixes.
+- Refuse unsafe broad mutation deterministically: ShellForgeAI treats requests
+  such as "clean up Docker and restart Compose" as a safety signal, not an
+  instruction to improvise.
+- Allow mutation only through named, narrow, auditable recipes with explicit
+  confirmation, matching gates, and receipts.
+- Keep the SeedOfEvil/operator role central: ShellForgeAI prepares evidence and
+  reviewed decisions; the operator remains the final change and merge owner.
+- No broad autonomy, no command execution from natural-language prompts, no
+  unguarded cleanup/restart/remediation/rollback/recovery, and no secret or
+  auth-cache reading.
+
+## Good operator requests
+
+- "What should I check first if Docker feels broken?"
+- "Show me a read-only Docker status report."
+- "Generate an archive/source-action status report from this evidence chain."
+- "Validate this receipt or readiness packet."
+- "Show the Docker01 build-path diagnostic/proposal report."
+
+## Unsafe requests ShellForgeAI refuses or redirects
+
+ShellForgeAI refuses unsafe broad mutation as a product behavior and offers a
+safe read-only next command, status report, proposal, or validation packet the
+operator can review instead.
+
+- "Clean up Docker and restart Compose."
+- "Fix it automatically."
+- "Delete old artifacts."
+- "Run whatever command is needed."
 
 ## What it is
 
