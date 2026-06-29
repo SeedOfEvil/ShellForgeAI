@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
+import sys
 from dataclasses import dataclass
 from typing import Any, Literal
 
 PlatformSystem = Literal["linux", "windows", "darwin", "unknown"]
-SupportLane = Literal["linux_docker_v1", "windows_v1_planned", "unsupported"]
+SupportLane = Literal["linux_docker_v1", "windows_read_only_doctor_v1", "unsupported"]
 
 
 @dataclass(frozen=True)
@@ -71,15 +73,74 @@ def support_status(info: PlatformInfo | None = None) -> dict[str, Any]:
     if info.system == "windows":
         return {
             "supported": False,
-            "lane": "windows_v1_planned",
-            "windows_v1_available": False,
+            "lane": "windows_read_only_doctor_v1",
+            "windows_v1_available": True,
+            "windows_read_only_doctor_available": True,
             "linux_docker_available": False,
         }
     return {
         "supported": False,
         "lane": "unsupported",
         "windows_v1_available": False,
+        "windows_read_only_doctor_available": False,
         "linux_docker_available": False,
+    }
+
+
+def _limited_evidence(reason: str) -> dict[str, Any]:
+    return {"status": "limited", "value": None, "reason": reason}
+
+
+def _safe_text_evidence(label: str, collector) -> dict[str, Any]:
+    try:
+        value = collector()
+    except Exception as exc:  # defensive evidence capture; never crash doctor output
+        return _limited_evidence(f"{label}_unavailable: {type(exc).__name__}")
+    if value in (None, ""):
+        return _limited_evidence(f"{label}_unavailable")
+    return {"status": "ok", "value": str(value), "reason": None}
+
+
+def windows_doctor_evidence(info: PlatformInfo | None = None) -> dict[str, Any]:
+    """Return narrow local Windows evidence without shelling out or mutating state."""
+
+    info = info or detect_platform()
+    try:
+        version, build, _platform_type, service_pack = platform.win32_ver()
+    except Exception:
+        version, build, service_pack = "", "", ""
+    shell_availability = {
+        "powershell": {
+            "available": shutil.which("powershell") is not None,
+            "discovery": "shutil.which",
+            "version": _limited_evidence("not_collected_without_shelling_out"),
+        },
+        "pwsh": {
+            "available": shutil.which("pwsh") is not None,
+            "discovery": "shutil.which",
+            "version": _limited_evidence("not_collected_without_shelling_out"),
+        },
+    }
+    return {
+        "schema_version": 1,
+        "mode": "windows_read_only_doctor_evidence",
+        "status": "ok" if info.system == "windows" else "unsupported",
+        "platform_name": "Windows" if info.system == "windows" else info.system,
+        "os_family": "windows" if info.system == "windows" else info.system,
+        "windows_version": _safe_text_evidence("windows_version", lambda: version),
+        "windows_build": _safe_text_evidence("windows_build", lambda: build),
+        "windows_service_pack": _safe_text_evidence("windows_service_pack", lambda: service_pack),
+        "architecture": _safe_text_evidence("architecture", lambda: info.machine),
+        "python_version": _safe_text_evidence("python_version", lambda: sys.version.split()[0]),
+        "python_platform": _safe_text_evidence("python_platform", lambda: info.python_platform),
+        "shell_availability": shell_availability,
+        "unsupported_or_limited": [
+            "PowerShell versions are not collected because that would require executing a shell.",
+            "Registry, services, firewall, network, event logs, credentials, and broad "
+            "inventory are out of scope.",
+        ],
+        "read_only": True,
+        "mutation_performed": False,
     }
 
 
@@ -93,11 +154,8 @@ def platform_doctor_payload(info: PlatformInfo | None = None) -> dict[str, Any]:
         message = "Linux detected. ShellForgeAI Linux/Docker V1 operational lane is available."
         next_safe_command = "shellforgeai doctor"
     elif info.system == "windows":
-        status = "unsupported"
-        message = (
-            "Windows detected. Windows/PowerShell V1 is planned, but evidence collection "
-            "is not implemented in this release."
-        )
+        status = "limited"
+        message = "Windows detected. Limited Windows read-only doctor evidence is available."
         next_safe_command = "shellforgeai platform doctor --json"
     elif info.system == "darwin":
         status = "unsupported"
@@ -111,7 +169,7 @@ def platform_doctor_payload(info: PlatformInfo | None = None) -> dict[str, Any]:
         )
         next_safe_command = "shellforgeai platform doctor --json"
 
-    return {
+    payload = {
         "schema_version": 1,
         "mode": "platform_doctor",
         "status": status,
@@ -122,6 +180,9 @@ def platform_doctor_payload(info: PlatformInfo | None = None) -> dict[str, Any]:
         "message": message,
         "next_safe_command": next_safe_command,
     }
+    if info.system == "windows":
+        payload["windows_evidence"] = windows_doctor_evidence(info)
+    return payload
 
 
 def unsupported_platform_payload(
