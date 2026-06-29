@@ -12,6 +12,7 @@ from shellforgeai.platform_detection import (
     platform_doctor_payload,
     support_status,
     unsupported_platform_payload,
+    windows_doctor_evidence,
 )
 
 
@@ -55,24 +56,77 @@ def test_linux_support_status_reports_linux_docker_lane_available() -> None:
     }
 
 
-def test_windows_support_status_reports_recognized_but_evidence_unavailable() -> None:
+def test_windows_support_status_reports_limited_read_only_doctor_available(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "shellforgeai.platform_detection.platform.win32_ver",
+        lambda: ("2025", "26100", "", ""),
+    )
+    monkeypatch.setattr("shellforgeai.platform_detection.shutil.which", lambda name: None)
     payload = platform_doctor_payload(
         PlatformInfo("windows", "Windows-test", "nt", "2025", "AMD64")
     )
-    assert payload["status"] == "unsupported"
+    assert payload["status"] == "limited"
     assert payload["platform"]["system"] == "windows"
-    assert payload["support"]["lane"] == "windows_v1_planned"
-    assert payload["support"]["windows_v1_available"] is False
+    assert payload["support"]["lane"] == "windows_read_only_doctor_v1"
+    assert payload["support"]["windows_v1_available"] is True
+    assert payload["support"]["windows_read_only_doctor_available"] is True
     assert payload["support"]["linux_docker_available"] is False
-    assert "planned" in payload["message"].lower()
+    assert payload["windows_evidence"]["windows_build"]["value"] == "26100"
+    assert "read-only doctor evidence" in payload["message"].lower()
 
 
-def test_windows_output_is_read_only_and_no_mutation() -> None:
+def test_windows_output_is_read_only_and_no_mutation(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "shellforgeai.platform_detection.platform.win32_ver",
+        lambda: ("2025", "26100", "", ""),
+    )
+    monkeypatch.setattr("shellforgeai.platform_detection.shutil.which", lambda name: None)
     payload = platform_doctor_payload(
         PlatformInfo("windows", "Windows-test", "nt", "2025", "AMD64")
     )
     assert payload["read_only"] is True
     assert payload["mutation_performed"] is False
+    assert payload["windows_evidence"]["read_only"] is True
+    assert payload["windows_evidence"]["mutation_performed"] is False
+
+
+def test_windows_evidence_collects_narrow_deterministic_fields(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "shellforgeai.platform_detection.platform.win32_ver",
+        lambda: ("2025", "26100", "", ""),
+    )
+    monkeypatch.setattr(
+        "shellforgeai.platform_detection.shutil.which",
+        lambda name: f"C:/Program Files/{name}/{name}.exe" if name == "pwsh" else None,
+    )
+    evidence = windows_doctor_evidence(
+        PlatformInfo("windows", "Windows-2025-test", "nt", "2025", "AMD64")
+    )
+    assert evidence["mode"] == "windows_read_only_doctor_evidence"
+    assert evidence["platform_name"] == "Windows"
+    assert evidence["os_family"] == "windows"
+    assert evidence["windows_version"] == {"status": "ok", "value": "2025", "reason": None}
+    assert evidence["windows_build"] == {"status": "ok", "value": "26100", "reason": None}
+    assert evidence["architecture"] == {"status": "ok", "value": "AMD64", "reason": None}
+    assert evidence["python_version"]["status"] == "ok"
+    assert evidence["python_platform"]["value"] == "Windows-2025-test"
+    assert evidence["shell_availability"]["powershell"]["available"] is False
+    assert evidence["shell_availability"]["pwsh"]["available"] is True
+    assert evidence["shell_availability"]["pwsh"]["version"]["status"] == "limited"
+
+
+def test_windows_evidence_gracefully_reports_missing_data(monkeypatch) -> None:
+    def raise_win32_ver():
+        raise OSError("not available")
+
+    monkeypatch.setattr("shellforgeai.platform_detection.platform.win32_ver", raise_win32_ver)
+    monkeypatch.setattr("shellforgeai.platform_detection.shutil.which", lambda name: None)
+    evidence = windows_doctor_evidence(PlatformInfo("windows", "", "nt", "", ""))
+    assert evidence["windows_version"]["status"] == "limited"
+    assert evidence["windows_build"]["status"] == "limited"
+    assert evidence["architecture"]["status"] == "limited"
+    assert evidence["python_platform"]["status"] == "limited"
+    assert evidence["shell_availability"]["powershell"]["available"] is False
 
 
 def test_unsupported_output_is_structured_json_compatible_and_deterministic() -> None:
@@ -133,7 +187,7 @@ def test_platform_doctor_human_output_is_concise(monkeypatch) -> None:
     result = CliRunner().invoke(app, ["platform", "doctor"])
     assert result.exit_code == 0
     assert "ShellForgeAI platform doctor" in result.stdout
-    assert "Windows/PowerShell V1 is planned" in result.stdout
+    assert "Limited Windows read-only doctor evidence is available" in result.stdout
     assert len(result.stdout.splitlines()) <= 8
 
 
@@ -141,11 +195,10 @@ def test_platform_detector_forbidden_implementation_strings() -> None:
     source = Path("src/shellforgeai/platform_detection.py").read_text(encoding="utf-8").lower()
     assert "import subprocess" not in source
     assert "shell=true" not in source
-    assert "run(" not in source
+    assert "import subprocess" not in source
+    assert "shell=true" not in source
     assert "popen" not in source
     assert "check_output" not in source
-    assert "powershell.exe" not in source
-    assert "pwsh.exe" not in source
     assert "new-pssession" not in source
     assert "docker(" not in source
     assert "compose " not in source
