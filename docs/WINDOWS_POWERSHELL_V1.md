@@ -84,13 +84,13 @@ Unsupported Windows commands, unsupported Linux/Docker commands on Windows, and 
 
 ## Future command shape
 
-The platform doctor command is available now; Windows-specific commands remain future design sketches only:
+The platform doctor command is available now. The first Windows-specific prototype is also available as a local-only read-only doctor:
 
 ```bash
 shellforgeai platform doctor --json
 shellforgeai platform doctor
 shellforgeai windows doctor --json
-shellforgeai windows status --json
+shellforgeai windows doctor
 shellforgeai ask "It is 2AM and this Windows server feels broken. What should I check first?"
 ```
 
@@ -113,7 +113,9 @@ The Windows lane preserves ShellForgeAI's core safety model:
 ## Proposed implementation sequence
 
 1. Add a read-only platform detector and graceful unsupported message contract. (Complete.)
-2. Add a narrow Windows read-only doctor evidence foundation for local OS/Python metadata and shell availability signals without executing PowerShell. (Current foundation.)
-3. Prototype a broader Windows read-only doctor/status report for execution policy, services, processes, disks, network basics, event logs, and safe update/firewall/roles signals.
-4. Run a packaging/install spike after the evidence path is clear.
-5. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
+2. Add a narrow Windows read-only doctor evidence foundation for local OS/Python metadata and shell availability signals without executing PowerShell. (Current platform foundation.)
+3. Add the first `shellforgeai windows doctor` prototype for local, read-only Windows host basics using Python standard library only. It does not execute PowerShell, use WinRM/PSRemoting, mutate the Windows VM, or collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output for this command. Windows Server 2025 VM acceptance should verify `shellforgeai windows doctor --json` after merge/QA. (Current prototype.)
+4. Windows Server 2025 VM smoke for the local doctor.
+5. Expand Windows read-only status/evidence for execution policy, services, processes, disks, network basics, event logs, and safe update/firewall/roles signals.
+6. Packaging/install spike.
+7. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.

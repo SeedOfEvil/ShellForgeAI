@@ -39,6 +39,7 @@ KNOWN_EXTRACTED = {
     "v1",
     "model",
     "interactive",
+    "windows doctor",
 }
 
 
@@ -175,6 +176,7 @@ def test_unknown_unclassified_handlers_warn_instead_of_claiming_certainty(tmp_pa
         "triage.py",
         "v1.py",
         "verify.py",
+        "windows.py",
     ]:
         (commands_dir / module).write_text("\n", encoding="utf-8")
     (cli_dir / "cli.py").write_text(

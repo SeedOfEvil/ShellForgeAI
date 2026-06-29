@@ -20,6 +20,10 @@ The behavior-preserving extraction slices currently cover read-only domains:
   status/diagnostic command; standard-library platform metadata only, with no
   host probing, subprocess, PowerShell, WinRM, Docker/Compose execution,
   network/model calls, secret reads, or mutation.
+* :mod:`shellforgeai.commands.windows` — the local read-only ``windows doctor``
+  prototype; standard-library host basics only, with no command execution,
+  remoting, PowerShell execution, service/process/event-log inventory,
+  network/model calls, secret reads, or mutation.
 * :mod:`shellforgeai.commands.triage` — ``triage`` and compatibility
   ``triage docker`` handlers.
 * :mod:`shellforgeai.commands.verify` — the read-only top-level ``verify``
@@ -93,4 +97,5 @@ __all__ = [
     "triage",
     "v1",
     "verify",
+    "windows",
 ]
