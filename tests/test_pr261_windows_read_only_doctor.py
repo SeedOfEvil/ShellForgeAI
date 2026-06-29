@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -117,6 +120,77 @@ def test_text_output_is_concise() -> None:
     assert "Status: unsupported" in text
     assert "Next safe command: shellforgeai platform doctor --json" in text
     assert len(text.splitlines()) <= 8
+
+
+def test_windows_help_is_available() -> None:
+    result = CliRunner().invoke(app, ["windows", "--help"])
+    assert result.exit_code == 0
+    assert "doctor" in result.stdout
+
+
+def test_cli_import_windows_commands_without_unix_only_grp_or_pwd() -> None:
+    script = r"""
+import importlib.abc
+import json
+import platform
+import sys
+
+class BlockUnixOnly(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"grp", "pwd"}:
+            raise ModuleNotFoundError(f"No module named {fullname!r}")
+        return None
+
+sys.meta_path.insert(0, BlockUnixOnly())
+platform.system = lambda: "Windows"
+platform.release = lambda: "2025"
+platform.machine = lambda: "AMD64"
+platform.platform = lambda **_: "Windows-test"
+platform.version = lambda: "10.0.26100"
+import shellforgeai.cli as cli
+from typer.testing import CliRunner
+
+help_result = CliRunner().invoke(cli.app, ["windows", "--help"])
+doctor_result = CliRunner().invoke(cli.app, ["windows", "doctor", "--json"])
+payload = json.loads(doctor_result.stdout)
+print(json.dumps({
+    "help_exit": help_result.exit_code,
+    "doctor_exit": doctor_result.exit_code,
+    "status": payload["status"],
+    "system": payload["platform"]["system"],
+    "read_only": payload["read_only"],
+    "mutation_performed": payload["mutation_performed"],
+    "available": payload["windows_v1"]["available"],
+    "powershell_executed": payload["windows_v1"]["powershell_executed"],
+    "winrm_used": payload["windows_v1"]["winrm_used"],
+    "remote_execution": payload["windows_v1"]["remote_execution"],
+}, sort_keys=True))
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = "src"
+    env.setdefault("USERNAME", "shellforgeai-test")
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path.cwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "available": True,
+        "doctor_exit": 0,
+        "help_exit": 0,
+        "mutation_performed": False,
+        "powershell_executed": False,
+        "read_only": True,
+        "remote_execution": False,
+        "status": "ok",
+        "system": "windows",
+        "winrm_used": False,
+    }
 
 
 def test_cli_windows_doctor_json_invokes_unsupported_on_linux(monkeypatch) -> None:
