@@ -64,6 +64,7 @@ How matching works:
 | `src/shellforgeai/interactive/**` | targeted_runtime | `test_pr122_*`, `test_pr124_*`, `test_pr128_*`, `test_pr129_*`, `test_pr130_*`, `test_pr132_*`, `test_pr136_*` … `test_pr142_*` |
 | `src/shellforgeai/cli.py` | targeted_runtime | `test_cli`, `test_pr114_*`, `test_pr143_*`, `test_pr184_cli_command_surface_golden` (broad router rewrites → use `--profile full`) |
 | `src/shellforgeai/commands/**` | targeted_runtime | `test_pr182_*`, `test_pr183_*`, `test_pr184_cli_command_surface_golden` (command-module extraction; broad/core moves → use `--profile full`) |
+| `src/shellforgeai/platform_detection.py` | targeted_runtime | `test_pr259_platform_detection` + command-surface/mutation-refusal targeted checks |
 | `tests/golden/cli_command_surface_pr184.json` | targeted_runtime | `test_pr184_cli_command_surface_golden` |
 | `tests/helpers/cli_surface.py` | targeted_runtime | `test_pr184_cli_command_surface_golden` + `test_pr208_command_surface_performance_polish` (shared invocation cache + duration report) |
 | `tests/test_pr208_command_surface_performance_polish.py` | targeted_runtime | `test_pr208_command_surface_performance_polish` (cache correctness, coverage-preserved, deterministic duration report) |

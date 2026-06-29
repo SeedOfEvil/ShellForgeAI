@@ -16,6 +16,10 @@ The behavior-preserving extraction slices currently cover read-only domains:
   ``model test`` surface, both unchanged.
 * :mod:`shellforgeai.commands.ops` — ``ops status`` and the ``ops report``
   report lifecycle handlers.
+* :mod:`shellforgeai.commands.platform` — the read-only ``platform doctor``
+  status/diagnostic command; standard-library platform metadata only, with no
+  host probing, subprocess, PowerShell, WinRM, Docker/Compose execution,
+  network/model calls, secret reads, or mutation.
 * :mod:`shellforgeai.commands.triage` — ``triage`` and compatibility
   ``triage docker`` handlers.
 * :mod:`shellforgeai.commands.verify` — the read-only top-level ``verify``
@@ -77,6 +81,7 @@ __all__ = [
     "interactive",
     "model",
     "ops",
+    "platform",
     "propose",
     "receipt_audit",
     "receipt_recovery_execute",
