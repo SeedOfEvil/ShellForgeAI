@@ -308,6 +308,7 @@
       "tests/test_pr160_full_validation_runner_streaming.py",
       "tests/test_pr176_validation_heartbeat_incomplete.py"
     ]},
+    {"pattern": "scripts/windows_smoke_acceptance.py", "lane": "targeted_runtime", "reason": "local saved-JSON Windows smoke acceptance helper changed", "tests": ["tests/test_pr263_windows_smoke_acceptance.py", "tests/test_pr262_windows_read_only_status.py", "tests/test_pr261_windows_read_only_doctor.py", "tests/test_pr259_platform_detection.py"]},
     {"pattern": "scripts/**", "lane": "full", "reason": "operator/validation script changed", "tests": []},
 
     {"pattern": "tests/conftest.py", "lane": "full", "reason": "shared test harness changed (broad confidence)", "tests": []},

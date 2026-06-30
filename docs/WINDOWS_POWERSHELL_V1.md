@@ -118,7 +118,8 @@ The Windows lane preserves ShellForgeAI's core safety model:
 2. Add a narrow Windows read-only doctor evidence foundation for local OS/Python metadata and shell availability signals without executing PowerShell. (Current platform foundation.)
 3. Add the first `shellforgeai windows doctor` prototype for local, read-only Windows host basics using Python standard library only. It does not execute PowerShell, use WinRM/PSRemoting, mutate the Windows VM, or collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output for this command. (Complete.)
 4. PR262 adds the first `shellforgeai windows status` report for safe stdlib-only host basics: platform metadata, hostname/FQDN, current working directory, Python runtime, and disk-capacity summaries for the current directory and Windows root. It is local-only, does not execute PowerShell, does not use WinRM/PSRemoting, does not mutate the Windows VM, and does not collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output pointing to `shellforgeai platform doctor --json`. Windows Server 2025 VM acceptance should verify `shellforgeai windows status --json` and `shellforgeai windows status`. (Current prototype.)
-5. Windows Server 2025 VM smoke for the local status report.
-6. Add Windows read-only service, process, and event-log evidence in separate PRs.
-7. Packaging/install spike.
-8. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
+5. Windows Server 2025 VM smoke for the local status report. (Complete for the PR262 baseline.)
+6. Use `docs/runbooks/WINDOWS_SMOKE_HARNESS.md` and `scripts/windows_smoke_acceptance.py` to validate saved Windows `status`/`doctor` JSON before expanding Windows evidence collection. The validator is local-only and does not execute ShellForgeAI commands, PowerShell, WinRM/PSRemoting, QGA, subprocesses, network calls, or mutation.
+7. Add Windows read-only service, process, and event-log evidence in separate PRs.
+8. Packaging/install spike.
+9. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
