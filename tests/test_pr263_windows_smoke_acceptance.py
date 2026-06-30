@@ -115,6 +115,28 @@ def test_valid_pr262_like_status_json_passes(tmp_path: Path) -> None:
     assert result["summary"]["failed"] == 0
 
 
+def test_bom_prefixed_valid_status_json_passes(tmp_path: Path) -> None:
+    module = _module()
+    status = tmp_path / "status-bom.json"
+    status.write_text(json.dumps(_status_payload()), encoding="utf-8-sig")
+    result = module._result(module.parse_args(["--status-json", str(status)]))
+    assert result["status"] == "ok"
+    assert result["summary"]["failed"] == 0
+
+
+def test_bom_prefixed_valid_doctor_json_passes_with_status_json(tmp_path: Path) -> None:
+    module = _module()
+    status = _write_json(tmp_path, "status.json", _status_payload())
+    doctor = tmp_path / "doctor-bom.json"
+    doctor.write_text(json.dumps(_doctor_payload()), encoding="utf-8-sig")
+    result = module._result(
+        module.parse_args(["--status-json", str(status), "--doctor-json", str(doctor)])
+    )
+    assert result["status"] == "ok"
+    assert result["summary"]["failed"] == 0
+    assert any(check["name"] == "doctor.json_parse" for check in result["checks"])
+
+
 def test_valid_pr262_like_status_plus_doctor_json_passes(tmp_path: Path) -> None:
     module = _module()
     status = _write_json(tmp_path, "status.json", _status_payload())

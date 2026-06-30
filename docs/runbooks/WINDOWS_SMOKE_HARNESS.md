@@ -40,14 +40,17 @@ use QEMU Guest Agent, or run host-management tools.
    - `shellforgeai windows status --json`
    - `shellforgeai windows doctor --json`
 7. Capture text output where relevant for human-facing smoke evidence.
-8. Validate the saved JSON artifacts locally with:
+8. Archive the raw JSON artifacts exactly as captured. Deterministic capture
+   methods are preferred, but operators do not need to rewrite files that include
+   a UTF-8 BOM. The local validator accepts UTF-8 JSON with or without BOM.
+9. Validate the saved JSON artifacts locally with:
 
    ```bash
    python scripts/windows_smoke_acceptance.py --status-json path/to/status.json --doctor-json path/to/doctor.json
    python scripts/windows_smoke_acceptance.py --status-json path/to/status.json --doctor-json path/to/doctor.json --json
    ```
 
-9. Report whether ShellForgeAI itself executed PowerShell, used WinRM, performed
+10. Report whether ShellForgeAI itself executed PowerShell, used WinRM, performed
    remote execution, or mutated the host. Expected answer for the current lane
    is always no.
 
@@ -85,11 +88,11 @@ rollback, recovery, or other mutation.
 ## Local saved-JSON validator
 
 `scripts/windows_smoke_acceptance.py` is a QA helper, not a ShellForgeAI product
-command. It reads local JSON files only, never invokes ShellForgeAI commands,
-never contacts Windows hosts, never uses QGA, never uses PowerShell, never uses
-WinRM, never uses subprocess, and never mutates the host. It exits `0` only when
-required product and safety checks pass, otherwise it emits failed check names
-and exits nonzero.
+command. It reads local UTF-8 JSON files with or without BOM only, never
+invokes ShellForgeAI commands, never contacts Windows hosts, never uses QGA,
+never uses PowerShell, never uses WinRM, never uses subprocess, and never
+mutates the host. It exits `0` only when required product and safety checks
+pass, otherwise it emits failed check names and exits nonzero.
 
 Useful forms:
 

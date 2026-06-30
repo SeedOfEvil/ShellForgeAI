@@ -59,7 +59,9 @@ def _read_json_file(path: Path, label: str) -> tuple[Any | None, list[Check]]:
     if not path.is_file():
         return None, [_check(f"{label}.is_file", False, f"not a file: {path}")]
     try:
-        return json.loads(path.read_text(encoding="utf-8")), [_check(f"{label}.json_parse", True)]
+        return json.loads(path.read_text(encoding="utf-8-sig")), [
+            _check(f"{label}.json_parse", True)
+        ]
     except json.JSONDecodeError as exc:
         return None, [_check(f"{label}.json_parse", False, f"invalid JSON: {exc.msg}")]
     except OSError as exc:
