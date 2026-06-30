@@ -60,6 +60,7 @@ EXPECTED_COMMAND_MODULES = {
     "triage",
     "v1",
     "verify",
+    "windows",
 }
 
 

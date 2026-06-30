@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import fnmatch
-import grp
 import os
-import pwd
+
+try:
+    import grp
+except ModuleNotFoundError:  # Windows: POSIX group database is unavailable.
+    grp = None
+try:
+    import pwd
+except ModuleNotFoundError:  # Windows: POSIX password database is unavailable.
+    pwd = None
 from pathlib import Path
 
 from .base import ToolResult
@@ -137,11 +144,11 @@ def stat(path: str) -> ToolResult:
     mode = oct(st.st_mode & 0o777)
     is_exec = bool(st.st_mode & 0o111)
     try:
-        owner = pwd.getpwuid(st.st_uid).pw_name
+        owner = pwd.getpwuid(st.st_uid).pw_name if pwd is not None else str(st.st_uid)
     except KeyError:
         owner = str(st.st_uid)
     try:
-        group = grp.getgrgid(st.st_gid).gr_name
+        group = grp.getgrgid(st.st_gid).gr_name if grp is not None else str(st.st_gid)
     except KeyError:
         group = str(st.st_gid)
     payload = {

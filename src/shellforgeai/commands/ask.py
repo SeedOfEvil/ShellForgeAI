@@ -20,29 +20,6 @@ from typing import Any
 
 import typer
 
-from shellforgeai.core.ask_docker_grounding import (
-    build_docker_evidence_context,
-    is_docker_operator_ask,
-    render_docker_evidence_explainability,
-)
-from shellforgeai.core.ask_routing import (
-    EVIDENCE_BACKED,
-    PLAIN,
-    AskRoute,
-    evidence_brief,
-    extract_container_target,
-    is_brief_ops_report_ask,
-    is_ops_report_ask,
-    network_reachability_brief,
-    route_ask_intent,
-    target_container_status,
-)
-from shellforgeai.core.command_suggestions import filter_unsupported_command_suggestions
-from shellforgeai.core.diagnose import findings_summary_line
-from shellforgeai.core.runbook import build_runbook, render_runbook_md
-from shellforgeai.llm.prompts import build_contextual_prompt
-from shellforgeai.llm.schemas import ModelRequest
-
 
 def _cli() -> Any:
     return sys.modules["shellforgeai.cli"]
@@ -68,6 +45,30 @@ def register(app: typer.Typer) -> None:
         ),
         since: str = typer.Option("30m", "--since"),
     ) -> None:
+
+        from shellforgeai.core.ask_docker_grounding import (
+            build_docker_evidence_context,
+            is_docker_operator_ask,
+            render_docker_evidence_explainability,
+        )
+        from shellforgeai.core.ask_routing import (
+            EVIDENCE_BACKED,
+            PLAIN,
+            AskRoute,
+            evidence_brief,
+            extract_container_target,
+            is_brief_ops_report_ask,
+            is_ops_report_ask,
+            network_reachability_brief,
+            route_ask_intent,
+            target_container_status,
+        )
+        from shellforgeai.core.command_suggestions import filter_unsupported_command_suggestions
+        from shellforgeai.core.diagnose import findings_summary_line
+        from shellforgeai.core.runbook import build_runbook, render_runbook_md
+        from shellforgeai.llm.prompts import build_contextual_prompt
+        from shellforgeai.llm.schemas import ModelRequest
+
         cli = _cli()
         runtime = cli._ctx(ctx)
         if not no_evidence:

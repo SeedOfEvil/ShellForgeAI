@@ -146,6 +146,7 @@ Default, JSON, and Markdown modes are read-only. `--write-doc` writes only the e
 | `model` | `src/shellforgeai/commands/model.py` | `read_only` | PR196 |
 | `ops` | `src/shellforgeai/commands/ops.py` | `read_only` | PR183 |
 | `platform doctor` | `src/shellforgeai/commands/platform.py` | `read_only` | PR259 |
+| `windows doctor` | `src/shellforgeai/commands/windows.py` | `read_only` | PR261 |
 | `propose` | `src/shellforgeai/commands/propose.py` | `artifact_only` | PR187 |
 | `receipt audit` | `src/shellforgeai/commands/receipt_audit.py` | `artifact_only` | PR191 |
 | `receipt recovery execute` | `src/shellforgeai/commands/receipt_recovery_execute.py` | `confirm_gated_mutation` | PR194 |

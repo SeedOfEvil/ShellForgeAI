@@ -573,3 +573,7 @@ Compose, run build/recreate validation, run `chown`/`chmod`/`chgrp`, install
 packages, clean up, prune, restart, remediate, roll back, or recover. Docker
 build/recreate validation is a separate operator action/change window after an
 actual recipe run.
+
+## Windows read-only doctor prototype
+
+`shellforgeai windows doctor --json` is validated from source with mocked Windows metadata and native Linux/Docker unsupported behavior. The PR-specific test file is `tests/test_pr261_windows_read_only_doctor.py` so Docker01 helpers can discover it directly. Validation must confirm strict JSON, concise text output, read-only safety flags, no mutation, no PowerShell execution, no WinRM/PSRemoting, no services/processes/event-log collection, and the unsupported Linux/Docker response pointing to `shellforgeai platform doctor --json`. Windows Server 2025 VM smoke should run only after merge/QA and should verify the JSON contract without manually running PowerShell.

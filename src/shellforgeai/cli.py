@@ -40,6 +40,7 @@ from shellforgeai.commands import status as status_commands
 from shellforgeai.commands import triage as triage_commands
 from shellforgeai.commands import v1 as v1_commands
 from shellforgeai.commands import verify as verify_commands
+from shellforgeai.commands import windows as windows_commands
 from shellforgeai.core import incident_index as incident_index_mod
 from shellforgeai.core import lab_restart as lab_restart_mod
 from shellforgeai.core import rollback_preview as rollback_preview_mod
@@ -273,6 +274,7 @@ mission_app.add_typer(mission_compose_restart_app, name="compose-restart")
 compose_app = typer.Typer(help="Read-only Docker Compose ownership context.")
 ops_app = typer.Typer(help="Read-only operator status board.")
 platform_app = typer.Typer(help="Read-only platform detection and support status.")
+windows_app = typer.Typer(help="Local read-only Windows V1 doctor commands.")
 session_app = typer.Typer(help="Session handoff artifact utilities (read-only metadata).")
 session_summary_app = typer.Typer(help="Interactive session summary artifact workflow.")
 ops_report_app = typer.Typer(invoke_without_command=True, no_args_is_help=False)
@@ -331,6 +333,8 @@ app.add_typer(compose_app, name="compose")
 app.add_typer(ops_app, name="ops")
 app.add_typer(platform_app, name="platform")
 platform_commands.register(platform_app)
+app.add_typer(windows_app, name="windows")
+windows_commands.register(windows_app)
 app.add_typer(session_app, name="session")
 ops_app.add_typer(ops_report_app, name="report")
 session_app.add_typer(session_summary_app, name="summary")
