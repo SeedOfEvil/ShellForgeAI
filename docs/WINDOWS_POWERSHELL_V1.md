@@ -84,13 +84,15 @@ Unsupported Windows commands, unsupported Linux/Docker commands on Windows, and 
 
 ## Future command shape
 
-The platform doctor command is available now. The first Windows-specific prototype is also available as a local-only read-only doctor:
+The platform doctor command is available now. The first Windows-specific prototypes are available as local-only read-only doctor and status reports:
 
 ```bash
 shellforgeai platform doctor --json
 shellforgeai platform doctor
 shellforgeai windows doctor --json
 shellforgeai windows doctor
+shellforgeai windows status --json
+shellforgeai windows status
 shellforgeai ask "It is 2AM and this Windows server feels broken. What should I check first?"
 ```
 
@@ -114,8 +116,9 @@ The Windows lane preserves ShellForgeAI's core safety model:
 
 1. Add a read-only platform detector and graceful unsupported message contract. (Complete.)
 2. Add a narrow Windows read-only doctor evidence foundation for local OS/Python metadata and shell availability signals without executing PowerShell. (Current platform foundation.)
-3. Add the first `shellforgeai windows doctor` prototype for local, read-only Windows host basics using Python standard library only. It does not execute PowerShell, use WinRM/PSRemoting, mutate the Windows VM, or collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output for this command. Windows Server 2025 VM acceptance should verify `shellforgeai windows doctor --json` after merge/QA. (Current prototype.)
-4. Windows Server 2025 VM smoke for the local doctor.
-5. Expand Windows read-only status/evidence for execution policy, services, processes, disks, network basics, event logs, and safe update/firewall/roles signals.
-6. Packaging/install spike.
-7. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
+3. Add the first `shellforgeai windows doctor` prototype for local, read-only Windows host basics using Python standard library only. It does not execute PowerShell, use WinRM/PSRemoting, mutate the Windows VM, or collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output for this command. (Complete.)
+4. PR262 adds the first `shellforgeai windows status` report for safe stdlib-only host basics: platform metadata, hostname/FQDN, current working directory, Python runtime, and disk-capacity summaries for the current directory and Windows root. It is local-only, does not execute PowerShell, does not use WinRM/PSRemoting, does not mutate the Windows VM, and does not collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output pointing to `shellforgeai platform doctor --json`. Windows Server 2025 VM acceptance should verify `shellforgeai windows status --json` and `shellforgeai windows status`. (Current prototype.)
+5. Windows Server 2025 VM smoke for the local status report.
+6. Add Windows read-only service, process, and event-log evidence in separate PRs.
+7. Packaging/install spike.
+8. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
