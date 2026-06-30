@@ -65,6 +65,8 @@ How matching works:
 | `src/shellforgeai/cli.py` | targeted_runtime | `test_cli`, `test_pr114_*`, `test_pr143_*`, `test_pr184_cli_command_surface_golden` (broad router rewrites → use `--profile full`) |
 | `src/shellforgeai/commands/**` | targeted_runtime | `test_pr182_*`, `test_pr183_*`, `test_pr184_cli_command_surface_golden` (command-module extraction; broad/core moves → use `--profile full`) |
 | `src/shellforgeai/platform_detection.py` | targeted_runtime | `test_pr259_platform_detection` + command-surface/mutation-refusal targeted checks |
+| `src/shellforgeai/windows_doctor.py` | targeted_runtime | `test_pr261_windows_read_only_doctor` + command-surface/mutation-refusal targeted checks |
+| `src/shellforgeai/windows_status.py` | targeted_runtime | `test_pr262_windows_read_only_status`, `test_pr261_windows_read_only_doctor`, `test_pr259_platform_detection` + command-surface/mutation-refusal targeted checks |
 | `tests/golden/cli_command_surface_pr184.json` | targeted_runtime | `test_pr184_cli_command_surface_golden` |
 | `tests/helpers/cli_surface.py` | targeted_runtime | `test_pr184_cli_command_surface_golden` + `test_pr208_command_surface_performance_polish` (shared invocation cache + duration report) |
 | `tests/test_pr208_command_surface_performance_polish.py` | targeted_runtime | `test_pr208_command_surface_performance_polish` (cache correctness, coverage-preserved, deterministic duration report) |

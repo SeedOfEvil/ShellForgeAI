@@ -40,6 +40,7 @@ KNOWN_EXTRACTED = {
     "model",
     "interactive",
     "windows doctor",
+    "windows status",
 }
 
 
