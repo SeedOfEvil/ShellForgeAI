@@ -40,6 +40,9 @@ use QEMU Guest Agent, or run host-management tools.
    - `windows-evidence.json` from `shellforgeai windows evidence --json`
    - `windows-status.json` from `shellforgeai windows status --json`
    - `windows-doctor.json` from `shellforgeai windows doctor --json`
+   - optional `windows-services.json` from `shellforgeai windows services --json`
+     (PR267 standalone read-only services preview; not part of the evidence
+     bundle yet and not validated by the saved-JSON acceptance validator yet)
    - optional text outputs for human-facing smoke evidence.
 7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts.
 8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON.
