@@ -103,11 +103,16 @@ How matching works:
 | `scripts/run_full_pytest.py` | **full** | `test_pr160_*`, `test_pr176_*` + `python scripts/run_full_pytest.py` |
 | `scripts/docker01_operator_qa_bundle.py` | **full** | `test_pr206_docker01_operator_qa_bundle` + `test_pr207_qa_bundle_lifecycle` + `python scripts/run_full_pytest.py` |
 | `scripts/docker01_artifact_archive_plan.py` | targeted_runtime | `test_pr231_docker01_artifact_archive_plan` + storage/hygiene/QA/command-surface/mutation-refusal targeted checks |
+| `scripts/windows_smoke_acceptance.py` | targeted_runtime | `test_pr263_windows_smoke_acceptance`, `test_pr262_windows_read_only_status`, `test_pr261_windows_read_only_doctor`, `test_pr259_platform_detection` + command-surface/mutation-refusal targeted checks |
 | `scripts/**` (other) | **full** | + `python scripts/run_full_pytest.py` |
 | `tests/conftest.py` | **full** | shared harness → `python scripts/run_full_pytest.py` |
 | `tests/**` | fast | the changed test files are run directly |
 | `src/**/*.py` (unmatched) | targeted_runtime | PR-specific tests + **warning** if none resolve |
 | anything else (unmatched) | **full** | safe default |
+
+### Windows smoke saved-JSON acceptance
+
+`scripts/windows_smoke_acceptance.py` validates saved JSON artifacts from `shellforgeai windows status --json` and optionally `shellforgeai windows doctor --json`. It is a local QA helper rather than a ShellForgeAI product command: it reads local files only, uses the Python standard library, does not import ShellForgeAI runtime command modules, does not invoke subprocesses, does not contact Windows hosts, and does not use PowerShell, WinRM/PSRemoting, QGA, network calls, secrets, or mutation. The targeted/default lane is appropriate when only this helper, its PR-specific tests, and narrow Windows harness documentation change.
 
 ---
 
