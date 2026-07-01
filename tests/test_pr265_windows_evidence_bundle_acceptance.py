@@ -112,9 +112,20 @@ def _evidence_payload() -> dict[str, Any]:
     }
 
 
-def _write_json(tmp_path: Path, name: str, payload: Any, *, bom: bool = False) -> Path:
+def _write_json(
+    tmp_path: Path,
+    name: str,
+    payload: Any,
+    *,
+    bom: bool = False,
+    encoding: str = "utf-8",
+) -> Path:
     path = tmp_path / name
-    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8-sig" if bom else "utf-8")
+    text = json.dumps(payload, sort_keys=True)
+    if encoding == "utf-16":
+        path.write_text(text, encoding="utf-16")
+    else:
+        path.write_text(text, encoding="utf-8-sig" if bom else "utf-8")
     return path
 
 
@@ -188,6 +199,91 @@ def test_evidence_json_accepts_utf8_with_and_without_bom(tmp_path: Path, bom: bo
     evidence = _write_json(tmp_path, "evidence.json", _evidence_payload(), bom=bom)
     result = module._result(module.parse_args(["--evidence-json", str(evidence)]))
     assert result["status"] == "ok"
+
+
+def test_utf16le_with_bom_evidence_json_passes(tmp_path: Path) -> None:
+    module = _module()
+    evidence = _write_json(tmp_path, "evidence-utf16.json", _evidence_payload(), encoding="utf-16")
+    result = module._result(module.parse_args(["--evidence-json", str(evidence)]))
+    assert result["status"] == "ok"
+
+
+def test_utf16le_with_bom_status_json_passes(tmp_path: Path) -> None:
+    module = _module()
+    status = _write_json(
+        tmp_path, "status-utf16.json", _component("windows_status"), encoding="utf-16"
+    )
+    result = module._result(module.parse_args(["--status-json", str(status)]))
+    assert result["status"] == "ok"
+
+
+def test_utf16le_with_bom_doctor_json_passes(tmp_path: Path) -> None:
+    module = _module()
+    doctor = _write_json(
+        tmp_path, "doctor-utf16.json", _component("windows_doctor"), encoding="utf-16"
+    )
+    result = module._result(module.parse_args(["--doctor-json", str(doctor)]))
+    assert result["status"] == "ok"
+
+
+def test_evidence_status_doctor_all_utf16le_with_bom_pass(tmp_path: Path) -> None:
+    module = _module()
+    evidence = _write_json(tmp_path, "evidence.json", _evidence_payload(), encoding="utf-16")
+    status = _write_json(tmp_path, "status.json", _component("windows_status"), encoding="utf-16")
+    doctor = _write_json(tmp_path, "doctor.json", _component("windows_doctor"), encoding="utf-16")
+    result = module._result(
+        module.parse_args(
+            [
+                "--evidence-json",
+                str(evidence),
+                "--status-json",
+                str(status),
+                "--doctor-json",
+                str(doctor),
+            ]
+        )
+    )
+    assert result["status"] == "ok"
+
+
+def test_mixed_artifact_encodings_pass(tmp_path: Path) -> None:
+    module = _module()
+    evidence = _write_json(tmp_path, "evidence.json", _evidence_payload(), encoding="utf-16")
+    status = _write_json(tmp_path, "status.json", _component("windows_status"))
+    doctor = _write_json(tmp_path, "doctor.json", _component("windows_doctor"), bom=True)
+    result = module._result(
+        module.parse_args(
+            [
+                "--evidence-json",
+                str(evidence),
+                "--status-json",
+                str(status),
+                "--doctor-json",
+                str(doctor),
+            ]
+        )
+    )
+    assert result["status"] == "ok"
+
+
+def test_invalid_utf16_fails_cleanly_without_traceback(tmp_path: Path) -> None:
+    module = _module()
+    path = tmp_path / "bad-utf16.json"
+    path.write_bytes(b"\xff\xfe{")
+    result = module._result(module.parse_args(["--evidence-json", str(path)]))
+    assert result["status"] == "failed"
+    assert result["checks"][0]["name"] == "evidence.encoding_decode"
+    assert "invalid text encoding" in result["checks"][0]["reason"]
+
+
+def test_utf16_invalid_json_fails_cleanly_without_traceback(tmp_path: Path) -> None:
+    module = _module()
+    path = tmp_path / "invalid-json-utf16.json"
+    path.write_text("{bad", encoding="utf-16")
+    result = module._result(module.parse_args(["--evidence-json", str(path)]))
+    assert result["status"] == "failed"
+    assert result["checks"][0]["name"] == "evidence.json_parse"
+    assert "invalid JSON" in result["checks"][0]["reason"]
 
 
 def test_missing_all_inputs_fails_cleanly() -> None:

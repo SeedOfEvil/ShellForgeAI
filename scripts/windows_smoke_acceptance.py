@@ -64,19 +64,27 @@ def _check(name: str, passed: bool, reason: str | None = None) -> Check:
     return Check(name=name, passed=passed, reason=None if passed else reason or "check failed")
 
 
+def _decode_json_bytes(raw: bytes) -> str:
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8-sig")
+
+
 def _read_json_file(path: Path, label: str) -> tuple[Any | None, list[Check]]:
     if not path.exists():
         return None, [_check(f"{label}.file_exists", False, f"file not found: {path}")]
     if not path.is_file():
         return None, [_check(f"{label}.is_file", False, f"not a file: {path}")]
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig")), [
-            _check(f"{label}.json_parse", True)
-        ]
-    except json.JSONDecodeError as exc:
-        return None, [_check(f"{label}.json_parse", False, f"invalid JSON: {exc.msg}")]
+        text = _decode_json_bytes(path.read_bytes())
+    except UnicodeError as exc:
+        return None, [_check(f"{label}.encoding_decode", False, f"invalid text encoding: {exc}")]
     except OSError as exc:
         return None, [_check(f"{label}.json_read", False, str(exc))]
+    try:
+        return json.loads(text), [_check(f"{label}.json_parse", True)]
+    except json.JSONDecodeError as exc:
+        return None, [_check(f"{label}.json_parse", False, f"invalid JSON: {exc.msg}")]
 
 
 def _nested(payload: dict[str, Any], *keys: str) -> Any:
