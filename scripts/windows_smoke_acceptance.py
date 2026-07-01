@@ -37,6 +37,29 @@ SAFETY_FALSE_KEYS = (
     "model_called",
     "network_call",
 )
+SERVICES_SAFETY_FALSE_KEYS = (
+    "powershell_executed",
+    "winrm_used",
+    "remote_execution",
+    "service_restart_executed",
+    "service_control_executed",
+    "service_config_modified",
+    "process_termination_executed",
+    "registry_modified",
+    "execution_policy_modified",
+    "cleanup_executed",
+    "remediation_executed",
+    "rollback_executed",
+    "recovery_executed",
+    "natural_language_execution",
+    "shell_true",
+    "arbitrary_command_execution",
+    "secret_read",
+    "auth_cache_read",
+    "model_called",
+    "network_call",
+)
+SERVICES_STATE_COUNT_KEYS = ("running", "stopped", "unknown")
 WINDOWS_V1_FALSE_KEYS = ("powershell_executed", "winrm_used", "remote_execution")
 NOT_COLLECTED_PR264_KEYS = (
     "powershell_version",
@@ -323,6 +346,152 @@ def _validate_evidence(
     return checks
 
 
+def _non_negative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _validate_services(
+    payload: Any, expected_host: str | None, expected_python: str | None
+) -> list[Check]:
+    checks = [
+        _check("services.object", isinstance(payload, dict), "top-level JSON must be an object")
+    ]
+    if not isinstance(payload, dict):
+        return checks
+
+    checks.extend(
+        [
+            _check(
+                "services.schema_version",
+                payload.get("schema_version") == 1,
+                "expected schema_version 1",
+            ),
+            _check(
+                "services.mode",
+                payload.get("mode") == "windows_services",
+                "expected mode 'windows_services'",
+            ),
+            _check("services.status", payload.get("status") == "ok", "expected status 'ok'"),
+            _check(
+                "services.platform.system",
+                _nested(payload, "platform", "system") == "windows",
+                "expected platform.system 'windows'",
+            ),
+            _check(
+                "services.read_only", payload.get("read_only") is True, "expected read_only true"
+            ),
+            _check(
+                "services.mutation_performed",
+                payload.get("mutation_performed") is False,
+                "expected mutation_performed false",
+            ),
+            _check(
+                "services.windows_v1.available",
+                _nested(payload, "windows_v1", "available") is True,
+                "expected windows_v1.available true",
+            ),
+            _check(
+                "services.windows_v1.scope",
+                _nested(payload, "windows_v1", "scope") == "local_read_only_services",
+                "expected local_read_only_services scope",
+            ),
+        ]
+    )
+    for key in WINDOWS_V1_FALSE_KEYS:
+        checks.append(
+            _check(
+                f"services.windows_v1.{key}",
+                _nested(payload, "windows_v1", key) is False,
+                f"expected {key} false",
+            )
+        )
+    for key in SERVICES_SAFETY_FALSE_KEYS:
+        checks.append(
+            _check(
+                f"services.safety.{key}",
+                _nested(payload, "safety", key) is False,
+                f"expected {key} false",
+            )
+        )
+
+    summary = payload.get("services")
+    checks.append(
+        _check(
+            "services.services.object",
+            isinstance(summary, dict) and bool(summary),
+            "expected services summary object",
+        )
+    )
+    if isinstance(summary, dict):
+        total = summary.get("total_count")
+        checks.append(
+            _check(
+                "services.services.total_count",
+                _non_negative_int(total),
+                "expected non-negative integer total_count",
+            )
+        )
+        for key in SERVICES_STATE_COUNT_KEYS:
+            checks.append(
+                _check(
+                    f"services.services.state_counts.{key}",
+                    _non_negative_int(_nested(summary, "state_counts", key)),
+                    f"expected non-negative integer state_counts.{key}",
+                )
+            )
+        items = summary.get("items")
+        checks.append(
+            _check("services.services.items", isinstance(items, list), "expected services list")
+        )
+        limits = summary.get("collection_limits")
+        truncated = _nested(summary, "collection_limits", "truncated")
+        checks.append(
+            _check(
+                "services.services.collection_limits",
+                isinstance(limits, dict) and isinstance(truncated, bool),
+                "expected collection_limits with boolean truncated",
+            )
+        )
+        if truncated is True:
+            max_services = _nested(summary, "collection_limits", "max_services")
+            consistent = (
+                _non_negative_int(max_services)
+                and max_services >= 1
+                and _non_negative_int(total)
+                and total > max_services
+                and isinstance(items, list)
+                and len(items) <= max_services
+            )
+            checks.append(
+                _check(
+                    "services.services.truncation_consistent",
+                    consistent,
+                    "expected truncated=true limit metadata consistent with "
+                    "max_services, total_count, and items",
+                )
+            )
+
+    host = payload.get("host")
+    if expected_host is not None and isinstance(host, dict) and host.get("hostname") is not None:
+        checks.append(
+            _check(
+                "services.host.expected",
+                host.get("hostname") == expected_host,
+                f"expected host hostname {expected_host!r}",
+            )
+        )
+    runtime = payload.get("python_runtime")
+    if expected_python is not None and isinstance(runtime, dict) and runtime.get("version"):
+        checks.append(
+            _check(
+                "services.python_runtime.expected",
+                _python_matches(runtime.get("version"), expected_python),
+                f"expected Python version prefix or exact {expected_python!r}",
+            )
+        )
+    return checks
+
+
 def _artifact_summary(payload: Any, expected_mode: str, validated: bool) -> dict[str, Any]:
     artifact = {"mode": None, "status": None, "validated": validated}
     if isinstance(payload, dict):
@@ -374,7 +543,8 @@ def _cross_check(evidence: Any, status: Any, doctor: Any) -> list[Check]:
 
 def _result(args: argparse.Namespace) -> dict[str, Any]:
     checks: list[Check] = []
-    payloads: dict[str, Any] = {"evidence": None, "status": None, "doctor": None}
+    payloads: dict[str, Any] = {"evidence": None, "status": None, "doctor": None, "services": None}
+    services_json = getattr(args, "services_json", None)
 
     if args.evidence_json:
         payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
@@ -412,7 +582,31 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
                 )
             )
 
+    if services_json:
+        payloads["services"], read_checks = _read_json_file(Path(services_json), "services")
+        checks.extend(read_checks)
+        if payloads["services"] is not None:
+            checks.extend(
+                _validate_services(payloads["services"], args.expected_host, args.expected_python)
+            )
+
     checks.extend(_cross_check(payloads["evidence"], payloads["status"], payloads["doctor"]))
+
+    inputs = {
+        "evidence_json": str(Path(args.evidence_json)) if args.evidence_json else None,
+        "status_json": str(Path(args.status_json)) if args.status_json else None,
+        "doctor_json": str(Path(args.doctor_json)) if args.doctor_json else None,
+    }
+    artifacts = {
+        "evidence": _artifact_summary(
+            payloads["evidence"], "windows_evidence_bundle", bool(args.evidence_json)
+        ),
+        "status": _artifact_summary(payloads["status"], "windows_status", bool(args.status_json)),
+        "doctor": _artifact_summary(payloads["doctor"], "windows_doctor", bool(args.doctor_json)),
+    }
+    if services_json:
+        inputs["services_json"] = str(Path(services_json))
+        artifacts["services"] = _artifact_summary(payloads["services"], "windows_services", True)
 
     passed = sum(1 for check in checks if check.passed)
     failed = len(checks) - passed
@@ -422,22 +616,8 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         "status": "ok" if failed == 0 else "failed",
         "read_only": True,
         "mutation_performed": False,
-        "inputs": {
-            "evidence_json": str(Path(args.evidence_json)) if args.evidence_json else None,
-            "status_json": str(Path(args.status_json)) if args.status_json else None,
-            "doctor_json": str(Path(args.doctor_json)) if args.doctor_json else None,
-        },
-        "artifacts": {
-            "evidence": _artifact_summary(
-                payloads["evidence"], "windows_evidence_bundle", bool(args.evidence_json)
-            ),
-            "status": _artifact_summary(
-                payloads["status"], "windows_status", bool(args.status_json)
-            ),
-            "doctor": _artifact_summary(
-                payloads["doctor"], "windows_doctor", bool(args.doctor_json)
-            ),
-        },
+        "inputs": inputs,
+        "artifacts": artifacts,
         "checks": [check.to_dict() for check in checks],
         "summary": {"passed": passed, "failed": failed},
     }
@@ -475,6 +655,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--doctor-json", help="Optional path to saved 'shellforgeai windows doctor --json' output."
     )
     parser.add_argument(
+        "--services-json",
+        help="Optional path to saved 'shellforgeai windows services --json' output.",
+    )
+    parser.add_argument(
         "--expected-host", help="Optional expected Windows hostname, for example WIN2025-SFAI01."
     )
     parser.add_argument(
@@ -483,8 +667,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--json", action="store_true", help="Emit deterministic JSON output.")
     args = parser.parse_args(argv)
-    if not (args.evidence_json or args.status_json or args.doctor_json):
-        parser.error("at least one of --evidence-json, --status-json, or --doctor-json is required")
+    if not (args.evidence_json or args.status_json or args.doctor_json or args.services_json):
+        parser.error(
+            "at least one of --evidence-json, --status-json, --doctor-json, "
+            "or --services-json is required"
+        )
     return args
 
 
