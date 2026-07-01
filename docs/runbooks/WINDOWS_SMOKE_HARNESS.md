@@ -42,11 +42,12 @@ use QEMU Guest Agent, or run host-management tools.
    - `windows-doctor.json` from `shellforgeai windows doctor --json`
    - optional text outputs for human-facing smoke evidence.
 7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts.
-8. Archive the raw JSON artifacts exactly as captured. Deterministic capture
+8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON.
+9. Archive the raw JSON artifacts exactly as captured. Deterministic capture
    methods are preferred, but operators do not need to rewrite files that include
    a UTF-8 BOM or Windows PowerShell 5.1 default UTF-16LE BOM. The local
    validator accepts UTF-8, UTF-8 with BOM, and UTF-16 with BOM JSON artifacts.
-9. Validate the saved JSON artifacts locally with:
+10. Validate the saved JSON artifacts locally with:
 
    ```bash
    python scripts/windows_smoke_acceptance.py \
@@ -58,7 +59,22 @@ use QEMU Guest Agent, or run host-management tools.
      --json
    ```
 
-10. Report whether ShellForgeAI itself executed PowerShell, used WinRM, performed
+11. Build a paste-ready saved evidence packet when needed:
+
+   ```bash
+   python scripts/windows_smoke_packet.py \
+     --evidence-json windows-evidence.json \
+     --status-json windows-status.json \
+     --doctor-json windows-doctor.json \
+     --expected-host WIN2025-SFAI01 \
+     --expected-python 3.14.6 \
+     --commit <commit-sha> \
+     --pr 266 \
+     --json \
+     --markdown
+   ```
+
+12. Report whether ShellForgeAI itself executed PowerShell, used WinRM, performed
    remote execution, or mutated the host. Expected answer for the current lane
    is always no.
 
@@ -117,6 +133,48 @@ python scripts/windows_smoke_acceptance.py --status-json status.json --doctor-js
 python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
 ```
 
+## Saved evidence packet helper
+
+`scripts/windows_smoke_packet.py` turns saved Windows smoke artifacts into a
+deterministic QA evidence packet. It reads the saved `windows-evidence.json`,
+`windows-status.json`, and `windows-doctor.json` files only; validates them via
+the PR265 acceptance checks; computes SHA256 and byte size for each input; and
+emits deterministic JSON and/or concise Markdown for PR handoff. It accepts
+UTF-8, UTF-8 with BOM, UTF-16 with BOM, and Windows PowerShell 5.1 UTF-16LE/BOM
+artifacts through the shared saved-JSON validator.
+
+The packet helper is not a product collection command. It does not run
+ShellForgeAI commands, contact Windows hosts, use PowerShell, WinRM, QGA,
+Proxmox, subprocess, network calls, model calls, or mutation. By default it
+writes to stdout only; it writes files only when an operator explicitly passes
+`--out-json` and/or `--out-markdown`. At least one output mode is required.
+
+Useful packet forms:
+
+```bash
+python scripts/windows_smoke_packet.py \
+  --evidence-json windows-evidence.json \
+  --status-json windows-status.json \
+  --doctor-json windows-doctor.json \
+  --expected-host WIN2025-SFAI01 \
+  --expected-python 3.14.6 \
+  --commit <commit-sha> \
+  --pr 266 \
+  --json \
+  --markdown
+
+python scripts/windows_smoke_packet.py \
+  --evidence-json windows-evidence.json \
+  --status-json windows-status.json \
+  --doctor-json windows-doctor.json \
+  --expected-host WIN2025-SFAI01 \
+  --expected-python 3.14.6 \
+  --commit <commit-sha> \
+  --pr 266 \
+  --out-json packet.json \
+  --out-markdown PR266-QA-EVIDENCE.md
+```
+
 ## Future PR guidance
 
 Each Windows feature PR should include:
@@ -124,7 +182,7 @@ Each Windows feature PR should include:
 - Docker01 Linux unsupported smoke for Windows-specific commands.
 - Windows Server on-VM CLI smoke when the command is Windows-specific.
 - Saved JSON output from the relevant Windows command.
-- Validator result from `scripts/windows_smoke_acceptance.py`.
+- Validator result from `scripts/windows_smoke_acceptance.py` and, when a handoff packet is useful, `scripts/windows_smoke_packet.py`.
 - A clear statement that deeper Windows evidence collection, if any, is split
   into a separate PR.
 
