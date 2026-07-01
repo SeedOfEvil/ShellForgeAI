@@ -584,3 +584,8 @@ actual recipe run.
 ## Windows read-only doctor prototype
 
 `shellforgeai windows doctor --json` is validated from source with mocked Windows metadata and native Linux/Docker unsupported behavior. The PR-specific test file is `tests/test_pr261_windows_read_only_doctor.py` so Docker01 helpers can discover it directly. Validation must confirm strict JSON, concise text output, read-only safety flags, no mutation, no PowerShell execution, no WinRM/PSRemoting, no services/processes/event-log collection, and the unsupported Linux/Docker response pointing to `shellforgeai platform doctor --json`. Windows Server 2025 VM smoke should run only after merge/QA and should verify the JSON contract without manually running PowerShell.
+
+
+## Windows evidence bundle preview validation
+
+Validate `shellforgeai windows evidence [--json]` with targeted PR264 tests plus existing Windows doctor/status/smoke tests. The command is bundle-only and adds no new collection, PowerShell, WinRM/PSRemoting, or mutation.
