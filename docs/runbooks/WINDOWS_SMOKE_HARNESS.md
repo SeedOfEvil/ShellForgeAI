@@ -40,12 +40,13 @@ use QEMU Guest Agent, or run host-management tools.
    - `windows-evidence.json` from `shellforgeai windows evidence --json`
    - `windows-status.json` from `shellforgeai windows status --json`
    - `windows-doctor.json` from `shellforgeai windows doctor --json`
-   - optional `windows-services.json` from `shellforgeai windows services --json`
+   - `windows-services.json` from `shellforgeai windows services --json`
      (PR267 standalone read-only services preview; not part of the evidence
-     bundle yet and not validated by the saved-JSON acceptance validator yet)
+     bundle yet, but validated by the saved-JSON acceptance validator and
+     reported by the packet helper since PR268 via `--services-json`)
    - optional text outputs for human-facing smoke evidence.
-7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts.
-8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON.
+7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`.
+8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON, optionally including services JSON.
 9. Archive the raw JSON artifacts exactly as captured. Deterministic capture
    methods are preferred, but operators do not need to rewrite files that include
    a UTF-8 BOM or Windows PowerShell 5.1 default UTF-16LE BOM. The local
@@ -57,6 +58,7 @@ use QEMU Guest Agent, or run host-management tools.
      --evidence-json windows-evidence.json \
      --status-json windows-status.json \
      --doctor-json windows-doctor.json \
+     --services-json windows-services.json \
      --expected-host WIN2025-SFAI01 \
      --expected-python 3.14.6 \
      --json
@@ -69,10 +71,11 @@ use QEMU Guest Agent, or run host-management tools.
      --evidence-json windows-evidence.json \
      --status-json windows-status.json \
      --doctor-json windows-doctor.json \
+     --services-json windows-services.json \
      --expected-host WIN2025-SFAI01 \
      --expected-python 3.14.6 \
      --commit <commit-sha> \
-     --pr 266 \
+     --pr 268 \
      --json \
      --markdown
    ```
@@ -116,16 +119,27 @@ rollback, recovery, or other mutation.
 
 `scripts/windows_smoke_acceptance.py` is a QA helper, not a ShellForgeAI product
 command. It reads saved local JSON files only, including PR264
-`windows_evidence_bundle` artifacts from `windows evidence --json`, captured as
-UTF-8, UTF-8 with BOM, or Windows PowerShell 5.1 default UTF-16LE with BOM.
-Raw/UTF-8 capture is still preferred where practical, but UTF-16LE PowerShell
-5.1 artifacts are accepted. It never invokes ShellForgeAI commands, never
-contacts Windows hosts, never uses QGA or Proxmox APIs, never uses PowerShell,
-never uses WinRM, never uses subprocess, never uses network or model calls, and
-never mutates the Windows VM. Operator staging may use
-approved external tooling, but ShellForgeAI product commands and validator
-behavior remain read-only. It exits `0` only when required product and safety checks
-pass, otherwise it emits failed check names and exits nonzero.
+`windows_evidence_bundle` artifacts from `windows evidence --json` and, since
+PR268, PR267 `windows_services` artifacts from `windows services --json`,
+captured as UTF-8, UTF-8 with BOM, UTF-16 with BOM, or Windows PowerShell 5.1
+default UTF-16LE with BOM. Raw/UTF-8 capture is still preferred where practical,
+but UTF-16LE PowerShell 5.1 artifacts are accepted. It never invokes
+ShellForgeAI commands, never contacts Windows hosts, never uses QGA or Proxmox
+APIs, never uses PowerShell, never uses WinRM, never uses subprocess, never
+uses network or model calls, and never mutates the Windows VM. Operator staging
+may use approved external tooling, but ShellForgeAI product commands and
+validator behavior remain read-only. It exits `0` only when required product
+and safety checks pass, otherwise it emits failed check names and exits nonzero.
+
+The optional `--services-json` input validates the PR267 services artifact:
+`mode=windows_services`, `status=ok`, Windows platform, read-only/no-mutation
+flags, `windows_v1.available`, the services summary with non-negative
+total/running/stopped/unknown counts, the services list, truncation-limit
+consistency, and the full services safety-flag set (no service
+control/restart/config mutation, no PowerShell/WinRM/remote execution, no
+registry or execution-policy changes, no secret/auth-cache reads, no
+model/network calls). Omitting `--services-json` leaves existing validator
+behavior unchanged.
 
 Useful forms:
 
@@ -133,18 +147,24 @@ Useful forms:
 python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --json
 python scripts/windows_smoke_acceptance.py --status-json status.json
 python scripts/windows_smoke_acceptance.py --status-json status.json --doctor-json doctor.json
-python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
+python scripts/windows_smoke_acceptance.py --services-json windows-services.json --json
+python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --services-json windows-services.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
 ```
 
 ## Saved evidence packet helper
 
 `scripts/windows_smoke_packet.py` turns saved Windows smoke artifacts into a
 deterministic QA evidence packet. It reads the saved `windows-evidence.json`,
-`windows-status.json`, and `windows-doctor.json` files only; validates them via
-the PR265 acceptance checks; computes SHA256 and byte size for each input; and
-emits deterministic JSON and/or concise Markdown for PR handoff. It accepts
-UTF-8, UTF-8 with BOM, UTF-16 with BOM, and Windows PowerShell 5.1 UTF-16LE/BOM
-artifacts through the shared saved-JSON validator.
+`windows-status.json`, `windows-doctor.json`, and optional
+`windows-services.json` files only; validates them via the PR265/PR268
+acceptance checks; computes SHA256 and byte size for each input; and emits
+deterministic JSON and/or concise Markdown for PR handoff. When
+`--services-json` is provided, the packet includes the services artifact path,
+SHA256, size, mode, status, and total/running/stopped/unknown service counts in
+both the JSON artifact block and the Markdown artifact table plus a short
+services summary; omitting it leaves the PR266 packet behavior unchanged. It
+accepts UTF-8, UTF-8 with BOM, UTF-16 with BOM, and Windows PowerShell 5.1
+UTF-16LE/BOM artifacts through the shared saved-JSON validator.
 
 The packet helper is not a product collection command. It is safe to execute
 directly by absolute path with the durable Windows embedded Python runtime; no
@@ -161,10 +181,11 @@ python scripts/windows_smoke_packet.py \
   --evidence-json windows-evidence.json \
   --status-json windows-status.json \
   --doctor-json windows-doctor.json \
+  --services-json windows-services.json \
   --expected-host WIN2025-SFAI01 \
   --expected-python 3.14.6 \
   --commit <commit-sha> \
-  --pr 266 \
+  --pr 268 \
   --json \
   --markdown
 
@@ -172,12 +193,13 @@ python scripts/windows_smoke_packet.py \
   --evidence-json windows-evidence.json \
   --status-json windows-status.json \
   --doctor-json windows-doctor.json \
+  --services-json windows-services.json \
   --expected-host WIN2025-SFAI01 \
   --expected-python 3.14.6 \
   --commit <commit-sha> \
-  --pr 266 \
+  --pr 268 \
   --out-json packet.json \
-  --out-markdown PR266-QA-EVIDENCE.md
+  --out-markdown PR268-QA-EVIDENCE.md
 ```
 
 ## Future PR guidance

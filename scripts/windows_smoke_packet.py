@@ -53,6 +53,19 @@ def _artifact(path_value: str, validator_artifact: dict[str, Any]) -> dict[str, 
     return payload
 
 
+def _services_counts(path_value: str) -> dict[str, Any]:
+    counts: dict[str, Any] = {"total": None, "running": None, "stopped": None, "unknown": None}
+    payload, _ = acceptance._read_json_file(Path(path_value), "services")
+    summary = payload.get("services") if isinstance(payload, dict) else None
+    if isinstance(summary, dict):
+        counts["total"] = summary.get("total_count")
+        state_counts = summary.get("state_counts")
+        if isinstance(state_counts, dict):
+            for key in ("running", "stopped", "unknown"):
+                counts[key] = state_counts.get(key)
+    return counts
+
+
 def _windows_summary(args: argparse.Namespace, validator: dict[str, Any]) -> dict[str, Any]:
     evidence_path = validator.get("inputs", {}).get("evidence_json")
     host = args.expected_host
@@ -91,6 +104,11 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
         "windows": _windows_summary(args, validator),
         "safety": dict(SAFETY),
     }
+    services_json = getattr(args, "services_json", None)
+    if services_json:
+        services_artifact = _artifact(services_json, artifacts.get("services", {}))
+        services_artifact.update(_services_counts(services_json))
+        packet["artifacts"]["services_json"] = services_artifact
     failed = [check for check in validator.get("checks", []) if not check.get("passed")]
     if failed:
         packet["failed_checks"] = failed
@@ -138,6 +156,21 @@ def render_markdown(packet: dict[str, Any]) -> str:
             f"- Host: {windows.get('host') or 'not provided'}",
             f"- Python: {windows.get('python') or 'not provided'}",
             f"- Platform system: {windows.get('platform_system')}",
+        ]
+    )
+    services = packet["artifacts"].get("services_json")
+    if services is not None:
+        lines.extend(["", "## Services summary", ""])
+        for label, key in (
+            ("Total services", "total"),
+            ("Running", "running"),
+            ("Stopped", "stopped"),
+            ("Unknown", "unknown"),
+        ):
+            value = services.get(key)
+            lines.append(f"- {label}: {value if value is not None else 'not available'}")
+    lines.extend(
+        [
             "",
             "## Safety summary",
             "",
@@ -161,6 +194,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--evidence-json", required=True)
     parser.add_argument("--status-json", required=True)
     parser.add_argument("--doctor-json", required=True)
+    parser.add_argument(
+        "--services-json",
+        help="Optional path to saved 'shellforgeai windows services --json' output.",
+    )
     parser.add_argument("--expected-host")
     parser.add_argument("--expected-python")
     parser.add_argument("--commit")
