@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
+import runpy
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -22,6 +25,22 @@ def _module() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _run_direct_by_path(args: list[str], monkeypatch: pytest.MonkeyPatch) -> tuple[int, str]:
+    scripts_dir = str(Path("scripts").resolve())
+    monkeypatch.setattr(sys, "path", [entry for entry in sys.path if entry != scripts_dir])
+    sys.modules.pop("windows_smoke_acceptance", None)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), *args])
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        try:
+            runpy.run_path(str(SCRIPT), run_name="__main__")
+        except SystemExit as exc:
+            code = int(exc.code or 0)
+        else:
+            code = 0
+    return code, stdout.getvalue()
 
 
 def _safe_flags() -> dict[str, bool]:
@@ -299,6 +318,27 @@ def test_explicit_output_files_and_default_stdout_only(tmp_path: Path) -> None:
     before = {p.name for p in tmp_path.iterdir()}
     assert module.main(_args(evidence, status, doctor, "--json")) == 0
     assert {p.name for p in tmp_path.iterdir()} == before
+
+
+def test_direct_by_path_execution_emits_json_without_scripts_on_sys_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence, status, doctor = _paths(tmp_path)
+    code, stdout = _run_direct_by_path(_args(evidence, status, doctor, "--json"), monkeypatch)
+    packet = json.loads(stdout)
+    assert code == 0
+    assert packet["status"] == "ok"
+    assert packet["mode"] == "windows_smoke_packet"
+
+
+def test_direct_by_path_execution_emits_markdown_without_scripts_on_sys_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence, status, doctor = _paths(tmp_path)
+    code, stdout = _run_direct_by_path(_args(evidence, status, doctor, "--markdown"), monkeypatch)
+    assert code == 0
+    assert "# Windows Smoke Evidence Packet" in stdout
+    assert "| Artifact | Path | SHA256 | Size bytes | Mode | Status |" in stdout
 
 
 def test_source_safety() -> None:

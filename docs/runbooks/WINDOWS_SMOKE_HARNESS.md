@@ -143,7 +143,9 @@ emits deterministic JSON and/or concise Markdown for PR handoff. It accepts
 UTF-8, UTF-8 with BOM, UTF-16 with BOM, and Windows PowerShell 5.1 UTF-16LE/BOM
 artifacts through the shared saved-JSON validator.
 
-The packet helper is not a product collection command. It does not run
+The packet helper is not a product collection command. It is safe to execute
+directly by absolute path with the durable Windows embedded Python runtime; no
+`PYTHONPATH` setting or scripts-directory cwd trick is required. It does not run
 ShellForgeAI commands, contact Windows hosts, use PowerShell, WinRM, QGA,
 Proxmox, subprocess, network calls, model calls, or mutation. By default it
 writes to stdout only; it writes files only when an operator explicitly passes

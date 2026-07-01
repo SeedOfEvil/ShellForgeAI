@@ -15,7 +15,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import windows_smoke_acceptance as acceptance
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+import windows_smoke_acceptance as acceptance  # noqa: E402
 
 SAFETY = {
     "read_only": True,
