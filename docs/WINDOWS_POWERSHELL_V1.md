@@ -95,6 +95,8 @@ shellforgeai windows status --json
 shellforgeai windows status
 shellforgeai windows evidence --json
 shellforgeai windows evidence
+shellforgeai windows services --json
+shellforgeai windows services
 shellforgeai ask "It is 2AM and this Windows server feels broken. What should I check first?"
 ```
 
@@ -125,6 +127,7 @@ The Windows lane preserves ShellForgeAI's core safety model:
 7. Add `shellforgeai windows evidence` as a bundle/preview command over the existing read-only doctor/status payloads. It reuses those payload builders, adds no new Windows evidence collection, does not execute PowerShell, does not use WinRM/PSRemoting, does not mutate the Windows VM, and leaves services, processes, event logs, firewall, and Windows Update for later separate PRs. Windows Server 2025 acceptance should run `shellforgeai windows evidence --json`, `shellforgeai windows evidence`, `shellforgeai windows status --json`, and `shellforgeai windows doctor --json`. (Current bundle preview.)
 8. PR265 extends the saved-artifact acceptance validator to cover the PR264 evidence bundle as a QA gate before deeper Windows evidence slices; it adds no new collection.
 9. Add the saved evidence packet helper as the handoff/reporting step for saved Windows smoke artifacts. It validates existing artifacts, records hashes/sizes, and emits JSON/Markdown without new collection, PowerShell, WinRM, or mutation.
-10. Add Windows read-only service, process, and event-log evidence in separate PRs.
-11. Packaging/install spike.
-12. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
+10. PR267 adds `shellforgeai windows services` as the first narrow deeper Windows evidence slice: a standalone local read-only service state summary preview. On Windows it enumerates service names, display names, and current states through read-only `ctypes` Service Control Manager enumeration only (`OpenSCManagerW` with enumerate rights, `EnumServicesStatusExW`, `CloseServiceHandle`) and summarizes counts by state with a bounded collection limit. It does not execute PowerShell, does not use WinRM/PSRemoting, does not use subprocess, does not start/stop/restart/control/configure services, does not read service binary paths, service accounts, service configuration, or the registry, and does not mutate the Windows VM. Linux/Docker and unsupported platforms return structured unsupported output pointing to `shellforgeai platform doctor --json`. The services preview is not yet included in `shellforgeai windows evidence`; bundle integration may follow in a later PR only after the standalone services surface is proven safe. (Current services preview.)
+11. Add Windows read-only service deep detail (descriptions, dependencies, recovery options), process, and event-log evidence in separate PRs; firewall and Windows Update evidence also remain future separate PRs.
+12. Packaging/install spike.
+13. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.

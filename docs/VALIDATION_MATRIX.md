@@ -67,6 +67,7 @@ How matching works:
 | `src/shellforgeai/platform_detection.py` | targeted_runtime | `test_pr259_platform_detection` + command-surface/mutation-refusal targeted checks |
 | `src/shellforgeai/windows_doctor.py` | targeted_runtime | `test_pr261_windows_read_only_doctor` + command-surface/mutation-refusal targeted checks |
 | `src/shellforgeai/windows_status.py` | targeted_runtime | `test_pr262_windows_read_only_status`, `test_pr261_windows_read_only_doctor`, `test_pr259_platform_detection` + command-surface/mutation-refusal targeted checks |
+| `src/shellforgeai/windows_services.py` | targeted_runtime | `test_pr267_windows_read_only_services`, `test_pr264_windows_read_only_evidence`, `test_pr262_windows_read_only_status`, `test_pr261_windows_read_only_doctor`, `test_pr259_platform_detection` + command-surface/mutation-refusal targeted checks |
 | `tests/golden/cli_command_surface_pr184.json` | targeted_runtime | `test_pr184_cli_command_surface_golden` |
 | `tests/helpers/cli_surface.py` | targeted_runtime | `test_pr184_cli_command_surface_golden` + `test_pr208_command_surface_performance_polish` (shared invocation cache + duration report) |
 | `tests/test_pr208_command_surface_performance_polish.py` | targeted_runtime | `test_pr208_command_surface_performance_polish` (cache correctness, coverage-preserved, deterministic duration report) |
@@ -590,3 +591,8 @@ actual recipe run.
 ## Windows evidence bundle preview validation
 
 Validate `shellforgeai windows evidence [--json]` with targeted PR264 tests plus existing Windows doctor/status/smoke tests. The command is bundle-only and adds no new collection, PowerShell, WinRM/PSRemoting, or mutation.
+
+
+## Windows local services read-only preview validation
+
+PR267 adds `shellforgeai windows services [--json]`, a standalone local read-only Windows service state summary preview validated with `tests/test_pr267_windows_read_only_services.py` plus existing Windows doctor/status/evidence/smoke tests and command-surface/mutation-refusal guardrails. On Windows it collects service names, display names, and current states only, through read-only `ctypes` Service Control Manager enumeration (`OpenSCManagerW` enumerate rights, `EnumServicesStatusExW`, `CloseServiceHandle`) with a bounded collection limit. It does not execute PowerShell, does not use WinRM/PSRemoting, does not use subprocess, does not start/stop/restart/control/configure services, does not read service binary paths/accounts/config or the registry, and does not mutate the Windows VM. The services preview is not yet included in `shellforgeai windows evidence`; bundle integration is a later PR after the standalone surface is proven safe. Linux/Docker01 must return structured unsupported output pointing to `shellforgeai platform doctor --json`. Because PR267 adds a new Windows-specific product command, real Windows Server 2025 smoke (`shellforgeai windows services --json` and text mode, plus doctor/status/evidence regression) is required before merge.
