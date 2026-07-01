@@ -17,7 +17,7 @@ use QEMU Guest Agent, or run host-management tools.
 - VM: `WIN2025-SFAI01`
 - Proxmox VMID: `101`
 - Durable runtime root: `C:\Tools\ShellForgeAI`
-- Embedded CPython: `C:\Tools\ShellForgeAI\Python312`
+- Embedded CPython: `C:\Tools\ShellForgeAI\Python314`
 - Wrappers: `C:\Tools\ShellForgeAI\bin\shellforgeai.cmd` and
   `C:\Tools\ShellForgeAI\bin\sfai.cmd`
 - Source root pattern: `C:\Tools\ShellForgeAI\src\ShellForgeAI-pr<PR_NUMBER>`
@@ -36,18 +36,25 @@ use QEMU Guest Agent, or run host-management tools.
    root.
 5. Enforce native process exit codes; do not treat captured text as success
    when the process failed.
-6. Capture JSON output for:
-   - `shellforgeai windows status --json`
-   - `shellforgeai windows doctor --json`
-7. Capture text output where relevant for human-facing smoke evidence.
+6. Capture the normal Windows smoke artifact set:
+   - `windows-evidence.json` from `shellforgeai windows evidence --json`
+   - `windows-status.json` from `shellforgeai windows status --json`
+   - `windows-doctor.json` from `shellforgeai windows doctor --json`
+   - optional text outputs for human-facing smoke evidence.
+7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts.
 8. Archive the raw JSON artifacts exactly as captured. Deterministic capture
    methods are preferred, but operators do not need to rewrite files that include
    a UTF-8 BOM. The local validator accepts UTF-8 JSON with or without BOM.
 9. Validate the saved JSON artifacts locally with:
 
    ```bash
-   python scripts/windows_smoke_acceptance.py --status-json path/to/status.json --doctor-json path/to/doctor.json
-   python scripts/windows_smoke_acceptance.py --status-json path/to/status.json --doctor-json path/to/doctor.json --json
+   python scripts/windows_smoke_acceptance.py \
+     --evidence-json windows-evidence.json \
+     --status-json windows-status.json \
+     --doctor-json windows-doctor.json \
+     --expected-host WIN2025-SFAI01 \
+     --expected-python 3.14.6 \
+     --json
    ```
 
 10. Report whether ShellForgeAI itself executed PowerShell, used WinRM, performed
@@ -88,18 +95,22 @@ rollback, recovery, or other mutation.
 ## Local saved-JSON validator
 
 `scripts/windows_smoke_acceptance.py` is a QA helper, not a ShellForgeAI product
-command. It reads local UTF-8 JSON files with or without BOM only, never
-invokes ShellForgeAI commands, never contacts Windows hosts, never uses QGA,
-never uses PowerShell, never uses WinRM, never uses subprocess, and never
-mutates the host. It exits `0` only when required product and safety checks
+command. It reads local UTF-8 JSON files with or without BOM only, including
+PR264 `windows_evidence_bundle` artifacts from `windows evidence --json`. It
+never invokes ShellForgeAI commands, never contacts Windows hosts, never uses
+QGA, never uses PowerShell, never uses WinRM, never uses subprocess, never uses
+network or model calls, and never mutates the host. Operator staging may use
+approved external tooling, but ShellForgeAI product commands and validator
+behavior remain read-only. It exits `0` only when required product and safety checks
 pass, otherwise it emits failed check names and exits nonzero.
 
 Useful forms:
 
 ```bash
+python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --json
 python scripts/windows_smoke_acceptance.py --status-json status.json
 python scripts/windows_smoke_acceptance.py --status-json status.json --doctor-json doctor.json
-python scripts/windows_smoke_acceptance.py --status-json status.json --doctor-json doctor.json --expected-host WIN2025-SFAI01 --expected-python 3.12.10 --json
+python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
 ```
 
 ## Future PR guidance
