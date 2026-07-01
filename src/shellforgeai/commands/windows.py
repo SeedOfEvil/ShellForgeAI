@@ -9,7 +9,12 @@ import typer
 from rich.console import Console
 
 from shellforgeai.windows_doctor import render_windows_doctor_text, windows_doctor_payload
-from shellforgeai.windows_evidence import render_windows_evidence_text, windows_evidence_payload
+from shellforgeai.windows_evidence import (
+    EVIDENCE_SERVICES_DEFAULT_LIMIT,
+    render_windows_evidence_text,
+    validate_evidence_services_limit,
+    windows_evidence_payload,
+)
 from shellforgeai.windows_services import (
     DEFAULT_MAX_SERVICES,
     render_windows_services_text,
@@ -26,8 +31,36 @@ def register(windows_app: typer.Typer) -> None:
     @windows_app.command("evidence")
     def windows_evidence(
         json_output: Annotated[bool, typer.Option("--json")] = False,
+        include_services: Annotated[
+            bool,
+            typer.Option(
+                "--include-services",
+                help="Opt in to a bounded read-only services component in the bundle.",
+            ),
+        ] = False,
+        services_limit: Annotated[
+            int | None,
+            typer.Option(
+                "--services-limit",
+                help="Bounded max services in the opt-in services component (1-500).",
+            ),
+        ] = None,
     ) -> None:
-        payload = windows_evidence_payload()
+        if include_services:
+            try:
+                limit = validate_evidence_services_limit(
+                    EVIDENCE_SERVICES_DEFAULT_LIMIT if services_limit is None else services_limit
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--services-limit") from exc
+            payload = windows_evidence_payload(include_services=True, services_limit=limit)
+        else:
+            if services_limit is not None:
+                raise typer.BadParameter(
+                    "--services-limit requires --include-services",
+                    param_hint="--services-limit",
+                )
+            payload = windows_evidence_payload()
         if json_output:
             typer.echo(json.dumps(payload, sort_keys=True))
             return

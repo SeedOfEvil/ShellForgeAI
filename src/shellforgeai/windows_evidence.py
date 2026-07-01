@@ -1,8 +1,10 @@
 """Consolidated local read-only Windows evidence bundle preview.
 
 The PR264 bundle reuses the existing Windows doctor and status payload builders.
-It does not add probes, execute commands, use remoting, open network
-connections, read credential caches, write files, or mutate host state.
+PR269 adds an explicit, bounded, opt-in services component that reuses the
+existing PR267 read-only services payload builder. The bundle does not add
+probes, execute commands, use remoting, control or configure services, open
+network connections, read credential caches, write files, or mutate host state.
 """
 
 from __future__ import annotations
@@ -13,10 +15,14 @@ from typing import Any
 
 from shellforgeai.platform_detection import PlatformInfo, detect_platform
 from shellforgeai.windows_doctor import windows_doctor_payload
+from shellforgeai.windows_services import DEFAULT_MAX_SERVICES, windows_services_payload
 from shellforgeai.windows_status import windows_status_payload
 
 WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND = "shellforgeai windows status --json"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
+
+EVIDENCE_SERVICES_DEFAULT_LIMIT = 25
+EVIDENCE_SERVICES_MAX_LIMIT = DEFAULT_MAX_SERVICES
 
 _NOT_COLLECTED_PR264 = {
     "powershell_version": "not collected because PR264 does not execute PowerShell",
@@ -35,6 +41,8 @@ _WINDOWS_EVIDENCE_SAFETY = {
     "winrm_used": False,
     "remote_execution": False,
     "service_restart_executed": False,
+    "service_control_executed": False,
+    "service_config_modified": False,
     "process_termination_executed": False,
     "registry_modified": False,
     "execution_policy_modified": False,
@@ -68,6 +76,41 @@ _UNSUPPORTED_SAFETY_KEYS = (
 )
 
 PayloadBuilder = Callable[[PlatformInfo], dict[str, Any]]
+ServicesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
+
+
+def validate_evidence_services_limit(value: Any) -> int:
+    """Validate the opt-in bundled services limit as a bounded positive integer."""
+
+    message = (
+        f"services limit must be a positive integer between 1 and {EVIDENCE_SERVICES_MAX_LIMIT}"
+    )
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(message)
+    if value < 1 or value > EVIDENCE_SERVICES_MAX_LIMIT:
+        raise ValueError(message)
+    return value
+
+
+def _default_services_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
+    return windows_services_payload(info, max_services=limit)
+
+
+def _embedded_services_component(payload: dict[str, Any], limit: int) -> dict[str, Any]:
+    """Wrap the reused services payload with explicit bounded-output fields."""
+
+    component = dict(payload)
+    component["limit"] = limit
+    services = payload.get("services")
+    if isinstance(services, dict):
+        items = services.get("items")
+        limits = services.get("collection_limits")
+        component["total_count"] = services.get("total_count")
+        component["returned_count"] = len(items) if isinstance(items, list) else 0
+        component["truncated"] = bool(
+            limits.get("truncated") if isinstance(limits, dict) else False
+        )
+    return component
 
 
 def _component_summary(components: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -87,8 +130,16 @@ def windows_evidence_payload(
     *,
     doctor_builder: PayloadBuilder = windows_doctor_payload,
     status_builder: PayloadBuilder = windows_status_payload,
+    include_services: bool = False,
+    services_limit: int | None = None,
+    services_builder: ServicesBuilder = _default_services_builder,
 ) -> dict[str, Any]:
-    """Build the PR264 Windows evidence bundle payload."""
+    """Build the Windows evidence bundle payload.
+
+    The bundle stays doctor/status-only by default. Services are included only
+    when ``include_services`` is explicitly requested, bounded by a validated
+    limit, and built by reusing the existing PR267 read-only services payload.
+    """
 
     info = info or detect_platform()
     if info.system != "windows":
@@ -98,6 +149,17 @@ def windows_evidence_payload(
         "doctor": doctor_builder(info),
         "status": status_builder(info),
     }
+    not_collected = dict(_NOT_COLLECTED_PR264)
+    next_safe_command = WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND
+    if include_services:
+        limit = validate_evidence_services_limit(
+            EVIDENCE_SERVICES_DEFAULT_LIMIT if services_limit is None else services_limit
+        )
+        components["services"] = _embedded_services_component(services_builder(info, limit), limit)
+        not_collected["services"] = (
+            "included as an explicit opt-in bounded component via --include-services"
+        )
+        next_safe_command = f"shellforgeai windows services --json --limit {limit}"
     summary = _component_summary(components)
     return {
         "schema_version": 1,
@@ -116,8 +178,8 @@ def windows_evidence_payload(
         "components": components,
         "summary": summary,
         "safety": dict(_WINDOWS_EVIDENCE_SAFETY),
-        "not_collected_in_pr264": dict(_NOT_COLLECTED_PR264),
-        "next_safe_command": WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND,
+        "not_collected_in_pr264": not_collected,
+        "next_safe_command": next_safe_command,
     }
 
 
@@ -167,12 +229,33 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
             f"ok={','.join(summary.get('ok_components', [])) or 'none'}; "
             f"failed={','.join(summary.get('failed_components', [])) or 'none'}"
         )
+    services_component = components.get("services") if isinstance(components, dict) else None
+    if isinstance(services_component, dict):
+        parts = [
+            f"status={services_component.get('status', 'unknown')}",
+            f"returned={services_component.get('returned_count', 0)}",
+            f"total={services_component.get('total_count', 0)}",
+            f"truncated={str(services_component.get('truncated', False)).lower()}",
+        ]
+        state_counts = (services_component.get("services") or {}).get("state_counts") or {}
+        if state_counts:
+            parts.append(f"running={state_counts.get('running', 0)}")
+            parts.append(f"stopped={state_counts.get('stopped', 0)}")
+        lines.append("Services component: " + "; ".join(parts))
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows evidence bundle is unavailable.")))
-    lines.append(
-        "Not collected yet: PowerShell version, execution policy, services, "
-        "processes, event logs, firewall, Windows Update."
-    )
+    pending = [
+        "PowerShell version",
+        "execution policy",
+        "services",
+        "processes",
+        "event logs",
+        "firewall",
+        "Windows Update",
+    ]
+    if isinstance(services_component, dict):
+        pending.remove("services")
+    lines.append("Not collected yet: " + ", ".join(pending) + ".")
     lines.append(
         f"Next safe command: {payload.get('next_safe_command', UNSUPPORTED_NEXT_SAFE_COMMAND)}"
     )
