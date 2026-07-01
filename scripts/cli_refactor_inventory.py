@@ -150,6 +150,7 @@ EXTRACTED_MODULES: dict[str, dict[str, Any]] = {
     "platform doctor": {"module": "platform.py", "category": "read_only", "known_pr": 259},
     "windows doctor": {"module": "windows.py", "category": "read_only", "known_pr": 261},
     "windows status": {"module": "windows.py", "category": "read_only", "known_pr": 262},
+    "windows evidence": {"module": "windows.py", "category": "read_only", "known_pr": 264},
     "propose": {"module": "propose.py", "category": "artifact_only", "known_pr": 187},
     "receipt audit": {"module": "receipt_audit.py", "category": "artifact_only", "known_pr": 191},
     "receipt recovery execute": {
