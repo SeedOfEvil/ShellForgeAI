@@ -1104,6 +1104,11 @@ Docker01 PR QA bundles now also connect the Model Doctor receipt evidence trail 
 
 The QA bundle never performs a live probe and never calls the model: its `model_receipts.safety` always reports `model_called=false`/`live_probe_performed=false`, while a historical receipt's `model_called=true` is read as evidence of an earlier explicit probe. Empty/unavailable receipt history is non-blocking; a secret marker or historical safety drift is surfaced as a blocking safety failure. The integration adds no cleanup, Docker prune/image removal, file deletion, Docker/Compose mutation, restart, remediation/rollback/recovery, natural-language execution, network/Codex call, or package install, and preserves the PR196 model-module static guard.
 
+
+### Windows evidence bundle acceptance validator
+
+PR265 extends the local saved-JSON Windows smoke validator to accept PR264 `windows_evidence_bundle` artifacts and optionally cross-check standalone status/doctor JSON. This is a QA gate only: it reads saved files, adds no Windows collection, and keeps services, processes, event logs, firewall, and Windows Update as future separate PRs.
+
 ## Validation evidence discoverability
 
 Docker01 PR-lane validation now writes a small PR/commit-scoped evidence packet that downstream QA can discover. The packet documents validation commands, status, checksums, and safety boundaries without adding cleanup or Docker mutation behavior.

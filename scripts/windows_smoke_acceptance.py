@@ -17,23 +17,34 @@ from pathlib import Path
 from typing import Any
 
 SAFETY_FALSE_KEYS = (
-    "shell_true",
-    "arbitrary_command_execution",
-    "network_call",
-    "model_called",
-    "secret_read",
-    "auth_cache_read",
+    "powershell_executed",
+    "winrm_used",
+    "remote_execution",
     "service_restart_executed",
     "process_termination_executed",
     "registry_modified",
     "execution_policy_modified",
+    "software_install_executed",
+    "cleanup_executed",
     "remediation_executed",
     "rollback_executed",
     "recovery_executed",
+    "natural_language_execution",
+    "shell_true",
+    "arbitrary_command_execution",
+    "secret_read",
+    "auth_cache_read",
+    "model_called",
+    "network_call",
 )
-
-TOP_LEVEL_FALSE_KEYS = ("mutation_performed",)
 WINDOWS_V1_FALSE_KEYS = ("powershell_executed", "winrm_used", "remote_execution")
+NOT_COLLECTED_PR264_KEYS = (
+    "powershell_version",
+    "execution_policy",
+    "services",
+    "processes",
+    "event_logs",
+)
 
 
 @dataclass(frozen=True)
@@ -53,19 +64,27 @@ def _check(name: str, passed: bool, reason: str | None = None) -> Check:
     return Check(name=name, passed=passed, reason=None if passed else reason or "check failed")
 
 
+def _decode_json_bytes(raw: bytes) -> str:
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8-sig")
+
+
 def _read_json_file(path: Path, label: str) -> tuple[Any | None, list[Check]]:
     if not path.exists():
         return None, [_check(f"{label}.file_exists", False, f"file not found: {path}")]
     if not path.is_file():
         return None, [_check(f"{label}.is_file", False, f"not a file: {path}")]
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig")), [
-            _check(f"{label}.json_parse", True)
-        ]
-    except json.JSONDecodeError as exc:
-        return None, [_check(f"{label}.json_parse", False, f"invalid JSON: {exc.msg}")]
+        text = _decode_json_bytes(path.read_bytes())
+    except UnicodeError as exc:
+        return None, [_check(f"{label}.encoding_decode", False, f"invalid text encoding: {exc}")]
     except OSError as exc:
         return None, [_check(f"{label}.json_read", False, str(exc))]
+    try:
+        return json.loads(text), [_check(f"{label}.json_parse", True)]
+    except json.JSONDecodeError as exc:
+        return None, [_check(f"{label}.json_parse", False, f"invalid JSON: {exc.msg}")]
 
 
 def _nested(payload: dict[str, Any], *keys: str) -> Any:
@@ -77,6 +96,10 @@ def _nested(payload: dict[str, Any], *keys: str) -> Any:
     return current
 
 
+def _python_matches(version: str | None, expected: str) -> bool:
+    return isinstance(version, str) and (version == expected or version.startswith(expected))
+
+
 def _validate_common(
     payload: Any,
     *,
@@ -84,6 +107,7 @@ def _validate_common(
     expected_mode: str,
     expected_host: str | None,
     expected_python: str | None,
+    require_details: bool = True,
 ) -> list[Check]:
     checks: list[Check] = []
     checks.append(
@@ -120,14 +144,18 @@ def _validate_common(
             ),
         ]
     )
-    if expected_mode == "windows_status":
-        checks.append(
-            _check(
-                f"{label}.windows_v1.scope",
-                _nested(payload, "windows_v1", "scope") == "local_read_only_status",
-                "expected local_read_only_status scope",
-            )
+    scopes = {
+        "windows_status": "local_read_only_status",
+        "windows_doctor": "local_read_only_doctor",
+        "windows_evidence_bundle": "local_read_only_evidence_bundle",
+    }
+    checks.append(
+        _check(
+            f"{label}.windows_v1.scope",
+            _nested(payload, "windows_v1", "scope") == scopes[expected_mode],
+            f"expected {scopes[expected_mode]} scope",
         )
+    )
 
     for key in WINDOWS_V1_FALSE_KEYS:
         checks.append(
@@ -147,80 +175,244 @@ def _validate_common(
         )
 
     host = payload.get("host")
-    checks.append(
-        _check(
-            f"{label}.host.present", isinstance(host, dict) and bool(host), "expected host basics"
+    if require_details:
+        checks.append(
+            _check(
+                f"{label}.host.present",
+                isinstance(host, dict) and bool(host),
+                "expected host basics",
+            )
         )
-    )
-    if expected_host is not None:
+    if expected_host is not None and isinstance(host, dict) and host:
         checks.append(
             _check(
                 f"{label}.host.expected",
-                isinstance(host, dict) and host.get("hostname") == expected_host,
+                host.get("hostname") == expected_host,
                 f"expected host hostname {expected_host!r}",
             )
         )
 
     runtime = payload.get("python_runtime")
-    checks.append(
-        _check(
-            f"{label}.python_runtime.present",
-            isinstance(runtime, dict)
-            and bool(runtime.get("version"))
-            and bool(runtime.get("executable")),
-            "expected Python runtime basics",
+    if require_details:
+        checks.append(
+            _check(
+                f"{label}.python_runtime.present",
+                isinstance(runtime, dict)
+                and bool(runtime.get("version"))
+                and bool(runtime.get("executable")),
+                "expected Python runtime basics",
+            )
         )
-    )
-    if expected_python is not None:
+    if expected_python is not None and isinstance(runtime, dict) and runtime.get("version"):
         checks.append(
             _check(
                 f"{label}.python_runtime.expected",
-                isinstance(runtime, dict) and runtime.get("version") == expected_python,
-                f"expected Python version {expected_python!r}",
+                _python_matches(runtime.get("version"), expected_python),
+                f"expected Python version prefix or exact {expected_python!r}",
             )
         )
 
     filesystem = payload.get("filesystem")
-    checks.append(
-        _check(
-            f"{label}.filesystem.present",
-            isinstance(filesystem, dict) and bool(filesystem),
-            "expected filesystem basics",
+    if require_details:
+        checks.append(
+            _check(
+                f"{label}.filesystem.present",
+                isinstance(filesystem, dict) and bool(filesystem),
+                "expected filesystem basics",
+            )
         )
+    return checks
+
+
+def _validate_evidence(
+    payload: Any, expected_host: str | None, expected_python: str | None
+) -> list[Check]:
+    checks = _validate_common(
+        payload,
+        label="evidence",
+        expected_mode="windows_evidence_bundle",
+        expected_host=expected_host,
+        expected_python=expected_python,
+        require_details=False,
     )
+    if not isinstance(payload, dict):
+        return checks
+    checks.insert(
+        1,
+        _check(
+            "evidence.schema_version",
+            payload.get("schema_version") == 1,
+            "expected schema_version 1",
+        ),
+    )
+
+    components = payload.get("components")
+    doctor = _nested(payload, "components", "doctor")
+    status = _nested(payload, "components", "status")
+    checks.extend(
+        [
+            _check(
+                "evidence.components.object",
+                isinstance(components, dict),
+                "expected components object",
+            ),
+            _check(
+                "evidence.components.doctor.exists",
+                isinstance(doctor, dict),
+                "expected doctor component",
+            ),
+            _check(
+                "evidence.components.status.exists",
+                isinstance(status, dict),
+                "expected status component",
+            ),
+        ]
+    )
+    if isinstance(doctor, dict):
+        checks.extend(
+            _validate_common(
+                doctor,
+                label="evidence.components.doctor",
+                expected_mode="windows_doctor",
+                expected_host=expected_host,
+                expected_python=expected_python,
+            )
+        )
+    if isinstance(status, dict):
+        checks.extend(
+            _validate_common(
+                status,
+                label="evidence.components.status",
+                expected_mode="windows_status",
+                expected_host=expected_host,
+                expected_python=expected_python,
+            )
+        )
+
+    ok_components = _nested(payload, "summary", "ok_components")
+    failed_components = _nested(payload, "summary", "failed_components")
+    checks.extend(
+        [
+            _check(
+                "evidence.summary.component_count",
+                _nested(payload, "summary", "component_count") == 2,
+                "expected component_count 2",
+            ),
+            _check(
+                "evidence.summary.failed_components",
+                failed_components == [],
+                "expected no failed components",
+            ),
+            _check(
+                "evidence.summary.ok_components",
+                isinstance(ok_components, list)
+                and {"doctor", "status"}.issubset(set(ok_components)),
+                "expected doctor and status ok components",
+            ),
+        ]
+    )
+    not_collected = payload.get("not_collected_in_pr264")
+    for key in NOT_COLLECTED_PR264_KEYS:
+        checks.append(
+            _check(
+                f"evidence.not_collected_in_pr264.{key}",
+                isinstance(not_collected, dict) and key in not_collected,
+                f"expected not_collected_in_pr264.{key}",
+            )
+        )
+    return checks
+
+
+def _artifact_summary(payload: Any, expected_mode: str, validated: bool) -> dict[str, Any]:
+    artifact = {"mode": None, "status": None, "validated": validated}
+    if isinstance(payload, dict):
+        artifact["mode"] = payload.get("mode")
+        artifact["status"] = payload.get("status")
+    elif validated:
+        artifact["mode"] = expected_mode
+    return artifact
+
+
+def _cross_check(evidence: Any, status: Any, doctor: Any) -> list[Check]:
+    checks: list[Check] = []
+    if not isinstance(evidence, dict):
+        return checks
+    if isinstance(status, dict) and isinstance(_nested(evidence, "components", "status"), dict):
+        component = _nested(evidence, "components", "status")
+        checks.extend(
+            [
+                _check(
+                    "cross_check.status.mode",
+                    component.get("mode") == status.get("mode"),
+                    "evidence status mode differs from standalone status mode",
+                ),
+                _check(
+                    "cross_check.status.status",
+                    component.get("status") == status.get("status"),
+                    "evidence status differs from standalone status",
+                ),
+            ]
+        )
+    if isinstance(doctor, dict) and isinstance(_nested(evidence, "components", "doctor"), dict):
+        component = _nested(evidence, "components", "doctor")
+        checks.extend(
+            [
+                _check(
+                    "cross_check.doctor.mode",
+                    component.get("mode") == doctor.get("mode"),
+                    "evidence doctor mode differs from standalone doctor mode",
+                ),
+                _check(
+                    "cross_check.doctor.status",
+                    component.get("status") == doctor.get("status"),
+                    "evidence doctor status differs from standalone doctor status",
+                ),
+            ]
+        )
     return checks
 
 
 def _result(args: argparse.Namespace) -> dict[str, Any]:
     checks: list[Check] = []
-    status_payload, status_checks = _read_json_file(Path(args.status_json), "status")
-    checks.extend(status_checks)
-    if status_payload is not None:
-        checks.extend(
-            _validate_common(
-                status_payload,
-                label="status",
-                expected_mode="windows_status",
-                expected_host=args.expected_host,
-                expected_python=args.expected_python,
-            )
-        )
+    payloads: dict[str, Any] = {"evidence": None, "status": None, "doctor": None}
 
-    doctor_input = None
-    if args.doctor_json:
-        doctor_input = str(Path(args.doctor_json))
-        doctor_payload, doctor_checks = _read_json_file(Path(args.doctor_json), "doctor")
-        checks.extend(doctor_checks)
-        if doctor_payload is not None:
+    if args.evidence_json:
+        payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
+        checks.extend(read_checks)
+        if payloads["evidence"] is not None:
+            checks.extend(
+                _validate_evidence(payloads["evidence"], args.expected_host, args.expected_python)
+            )
+
+    if args.status_json:
+        payloads["status"], read_checks = _read_json_file(Path(args.status_json), "status")
+        checks.extend(read_checks)
+        if payloads["status"] is not None:
             checks.extend(
                 _validate_common(
-                    doctor_payload,
+                    payloads["status"],
+                    label="status",
+                    expected_mode="windows_status",
+                    expected_host=args.expected_host,
+                    expected_python=args.expected_python,
+                )
+            )
+
+    if args.doctor_json:
+        payloads["doctor"], read_checks = _read_json_file(Path(args.doctor_json), "doctor")
+        checks.extend(read_checks)
+        if payloads["doctor"] is not None:
+            checks.extend(
+                _validate_common(
+                    payloads["doctor"],
                     label="doctor",
                     expected_mode="windows_doctor",
                     expected_host=args.expected_host,
                     expected_python=args.expected_python,
                 )
             )
+
+    checks.extend(_cross_check(payloads["evidence"], payloads["status"], payloads["doctor"]))
 
     passed = sum(1 for check in checks if check.passed)
     failed = len(checks) - passed
@@ -230,7 +422,22 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         "status": "ok" if failed == 0 else "failed",
         "read_only": True,
         "mutation_performed": False,
-        "inputs": {"status_json": str(Path(args.status_json)), "doctor_json": doctor_input},
+        "inputs": {
+            "evidence_json": str(Path(args.evidence_json)) if args.evidence_json else None,
+            "status_json": str(Path(args.status_json)) if args.status_json else None,
+            "doctor_json": str(Path(args.doctor_json)) if args.doctor_json else None,
+        },
+        "artifacts": {
+            "evidence": _artifact_summary(
+                payloads["evidence"], "windows_evidence_bundle", bool(args.evidence_json)
+            ),
+            "status": _artifact_summary(
+                payloads["status"], "windows_status", bool(args.status_json)
+            ),
+            "doctor": _artifact_summary(
+                payloads["doctor"], "windows_doctor", bool(args.doctor_json)
+            ),
+        },
         "checks": [check.to_dict() for check in checks],
         "summary": {"passed": passed, "failed": failed},
     }
@@ -258,9 +465,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Validate saved ShellForgeAI Windows smoke JSON artifacts."
     )
     parser.add_argument(
-        "--status-json",
-        required=True,
-        help="Path to saved 'shellforgeai windows status --json' output.",
+        "--evidence-json",
+        help="Optional path to saved 'shellforgeai windows evidence --json' output.",
+    )
+    parser.add_argument(
+        "--status-json", help="Optional path to saved 'shellforgeai windows status --json' output."
     )
     parser.add_argument(
         "--doctor-json", help="Optional path to saved 'shellforgeai windows doctor --json' output."
@@ -269,10 +478,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--expected-host", help="Optional expected Windows hostname, for example WIN2025-SFAI01."
     )
     parser.add_argument(
-        "--expected-python", help="Optional expected Python version, for example 3.12.10."
+        "--expected-python",
+        help="Optional expected Python version prefix or exact value, for example 3.14.6.",
     )
     parser.add_argument("--json", action="store_true", help="Emit deterministic JSON output.")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not (args.evidence_json or args.status_json or args.doctor_json):
+        parser.error("at least one of --evidence-json, --status-json, or --doctor-json is required")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

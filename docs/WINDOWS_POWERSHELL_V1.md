@@ -123,6 +123,7 @@ The Windows lane preserves ShellForgeAI's core safety model:
 5. Windows Server 2025 VM smoke for the local status report. (Complete for the PR262 baseline.)
 6. Use `docs/runbooks/WINDOWS_SMOKE_HARNESS.md` and `scripts/windows_smoke_acceptance.py` to validate saved Windows `status`/`doctor` JSON before expanding Windows evidence collection. The validator is local-only and does not execute ShellForgeAI commands, PowerShell, WinRM/PSRemoting, QGA, subprocesses, network calls, or mutation.
 7. Add `shellforgeai windows evidence` as a bundle/preview command over the existing read-only doctor/status payloads. It reuses those payload builders, adds no new Windows evidence collection, does not execute PowerShell, does not use WinRM/PSRemoting, does not mutate the Windows VM, and leaves services, processes, event logs, firewall, and Windows Update for later separate PRs. Windows Server 2025 acceptance should run `shellforgeai windows evidence --json`, `shellforgeai windows evidence`, `shellforgeai windows status --json`, and `shellforgeai windows doctor --json`. (Current bundle preview.)
-8. Add Windows read-only service, process, and event-log evidence in separate PRs.
-9. Packaging/install spike.
-10. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
+8. PR265 extends the saved-artifact acceptance validator to cover the PR264 evidence bundle as a QA gate before deeper Windows evidence slices; it adds no new collection.
+9. Add Windows read-only service, process, and event-log evidence in separate PRs.
+10. Packaging/install spike.
+11. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
