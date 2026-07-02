@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,44 @@ SERVICES_SAFETY_FALSE_KEYS = (
     "network_call",
 )
 SERVICES_STATE_COUNT_KEYS = ("running", "stopped", "unknown")
+DISKS_SAFETY_FALSE_KEYS = (
+    "powershell_executed",
+    "winrm_used",
+    "remote_execution",
+    "directory_scan_performed",
+    "file_scan_performed",
+    "service_restart_executed",
+    "process_termination_executed",
+    "registry_modified",
+    "execution_policy_modified",
+    "software_install_executed",
+    "cleanup_executed",
+    "remediation_executed",
+    "rollback_executed",
+    "recovery_executed",
+    "natural_language_execution",
+    "shell_true",
+    "arbitrary_command_execution",
+    "secret_read",
+    "auth_cache_read",
+    "model_called",
+    "network_call",
+)
+DISKS_OPTIONAL_SAFETY_FALSE_KEYS = (
+    "disk_mutation_executed",
+    "mount_modified",
+    "format_executed",
+)
+DISKS_SUMMARY_COUNT_KEYS = (
+    "total_roots",
+    "returned_roots",
+    "available_roots",
+    "unavailable_roots",
+)
+DISKS_MIN_LIMIT = 1
+DISKS_MAX_LIMIT = 64
+_SANITIZED_DISK_ERROR_RE = re.compile(r"[a-z0-9_]{1,64}")
+_UNAVAILABLE_DISK_ITEM_KEYS = frozenset({"root", "status", "error"})
 WINDOWS_V1_FALSE_KEYS = ("powershell_executed", "winrm_used", "remote_execution")
 NOT_COLLECTED_PR264_KEYS = (
     "powershell_version",
@@ -562,6 +601,270 @@ def _validate_embedded_services_bounds(payload: dict[str, Any], label: str) -> l
     return checks
 
 
+def _disk_item_checks(item: Any, label: str) -> list[Check]:
+    if not isinstance(item, dict):
+        return [_check(f"{label}.object", False, "expected disk item object")]
+    checks = [
+        _check(
+            f"{label}.root",
+            isinstance(item.get("root"), str) and bool(item.get("root")),
+            "expected non-empty root string",
+        ),
+        _check(
+            f"{label}.status",
+            item.get("status") in ("ok", "unavailable"),
+            "expected status 'ok' or 'unavailable'",
+        ),
+    ]
+    if item.get("status") == "ok":
+        for key in ("total_bytes", "used_bytes", "free_bytes"):
+            checks.append(
+                _check(
+                    f"{label}.{key}",
+                    _non_negative_int(item.get(key)),
+                    f"expected non-negative integer {key}",
+                )
+            )
+    elif item.get("status") == "unavailable":
+        extra_keys = set(item) - _UNAVAILABLE_DISK_ITEM_KEYS
+        error = item.get("error")
+        checks.extend(
+            [
+                _check(
+                    f"{label}.sanitized_fields",
+                    not extra_keys,
+                    "unavailable root must carry only root/status/error, no raw "
+                    f"exception detail fields: {', '.join(sorted(extra_keys))}",
+                ),
+                _check(
+                    f"{label}.sanitized_error",
+                    isinstance(error, str)
+                    and _SANITIZED_DISK_ERROR_RE.fullmatch(error) is not None,
+                    "expected sanitized failure token such as 'disk_usage_failed', "
+                    "never tracebacks",
+                ),
+            ]
+        )
+    return checks
+
+
+def _validate_disks(
+    payload: Any,
+    expected_host: str | None,
+    expected_python: str | None,
+    *,
+    label: str = "disks",
+) -> list[Check]:
+    checks = [
+        _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
+    ]
+    if not isinstance(payload, dict):
+        return checks
+
+    checks.extend(
+        [
+            _check(
+                f"{label}.schema_version",
+                payload.get("schema_version") == 1,
+                "expected schema_version 1",
+            ),
+            _check(
+                f"{label}.mode",
+                payload.get("mode") == "windows_disks",
+                "expected mode 'windows_disks'",
+            ),
+            _check(f"{label}.status", payload.get("status") == "ok", "expected status 'ok'"),
+            _check(
+                f"{label}.platform.system",
+                _nested(payload, "platform", "system") == "windows",
+                "expected platform.system 'windows'",
+            ),
+            _check(
+                f"{label}.read_only", payload.get("read_only") is True, "expected read_only true"
+            ),
+            _check(
+                f"{label}.mutation_performed",
+                payload.get("mutation_performed") is False,
+                "expected mutation_performed false",
+            ),
+            _check(
+                f"{label}.windows_v1.available",
+                _nested(payload, "windows_v1", "available") is True,
+                "expected windows_v1.available true",
+            ),
+            _check(
+                f"{label}.windows_v1.scope",
+                _nested(payload, "windows_v1", "scope") == "local_read_only_disks",
+                "expected local_read_only_disks scope",
+            ),
+        ]
+    )
+    for key in WINDOWS_V1_FALSE_KEYS:
+        checks.append(
+            _check(
+                f"{label}.windows_v1.{key}",
+                _nested(payload, "windows_v1", key) is False,
+                f"expected {key} false",
+            )
+        )
+    safety = payload.get("safety")
+    for key in DISKS_SAFETY_FALSE_KEYS:
+        checks.append(
+            _check(
+                f"{label}.safety.{key}",
+                _nested(payload, "safety", key) is False,
+                f"expected {key} false",
+            )
+        )
+    for key in DISKS_OPTIONAL_SAFETY_FALSE_KEYS:
+        if isinstance(safety, dict) and key in safety:
+            checks.append(
+                _check(
+                    f"{label}.safety.{key}",
+                    safety.get(key) is False,
+                    f"expected {key} false",
+                )
+            )
+
+    collection = payload.get("collection")
+    limit = _nested(payload, "collection", "limit")
+    truncated = _nested(payload, "collection", "truncated")
+    checks.extend(
+        [
+            _check(
+                f"{label}.collection.object",
+                isinstance(collection, dict) and bool(collection),
+                "expected collection object",
+            ),
+            _check(
+                f"{label}.collection.method",
+                _nested(payload, "collection", "method") == "stdlib_only",
+                "expected collection method 'stdlib_only'",
+            ),
+            _check(
+                f"{label}.collection.directory_scan_performed",
+                _nested(payload, "collection", "directory_scan_performed") is False,
+                "expected directory_scan_performed false",
+            ),
+            _check(
+                f"{label}.collection.file_scan_performed",
+                _nested(payload, "collection", "file_scan_performed") is False,
+                "expected file_scan_performed false",
+            ),
+            _check(
+                f"{label}.collection.limit",
+                _non_negative_int(limit) and DISKS_MIN_LIMIT <= limit <= DISKS_MAX_LIMIT,
+                f"expected integer limit between {DISKS_MIN_LIMIT} and {DISKS_MAX_LIMIT}",
+            ),
+            _check(
+                f"{label}.collection.truncated",
+                isinstance(truncated, bool),
+                "expected boolean truncated",
+            ),
+        ]
+    )
+
+    summary = payload.get("summary")
+    checks.append(
+        _check(
+            f"{label}.summary.object",
+            isinstance(summary, dict) and bool(summary),
+            "expected root/disk summary object",
+        )
+    )
+    total = _nested(payload, "summary", "total_roots")
+    returned = _nested(payload, "summary", "returned_roots")
+    available = _nested(payload, "summary", "available_roots")
+    unavailable = _nested(payload, "summary", "unavailable_roots")
+    for key in DISKS_SUMMARY_COUNT_KEYS:
+        checks.append(
+            _check(
+                f"{label}.summary.{key}",
+                _non_negative_int(_nested(payload, "summary", key)),
+                f"expected non-negative integer {key}",
+            )
+        )
+    if _non_negative_int(total) and _non_negative_int(returned):
+        checks.append(
+            _check(
+                f"{label}.summary.returned_le_total",
+                returned <= total,
+                "expected returned_roots <= total_roots",
+            )
+        )
+        if isinstance(truncated, bool):
+            checks.append(
+                _check(
+                    f"{label}.summary.truncation_consistent",
+                    truncated == (total > returned),
+                    "expected truncated consistent with total_roots and returned_roots",
+                )
+            )
+    if (
+        _non_negative_int(returned)
+        and _non_negative_int(available)
+        and _non_negative_int(unavailable)
+    ):
+        checks.append(
+            _check(
+                f"{label}.summary.availability_consistent",
+                available + unavailable == returned,
+                "expected available_roots + unavailable_roots == returned_roots",
+            )
+        )
+
+    disks = payload.get("disks")
+    checks.append(_check(f"{label}.disks.list", isinstance(disks, list), "expected disks list"))
+    if isinstance(disks, list):
+        for index, item in enumerate(disks):
+            checks.extend(_disk_item_checks(item, f"{label}.disks[{index}]"))
+        ok_items = sum(1 for item in disks if isinstance(item, dict) and item.get("status") == "ok")
+        if _non_negative_int(returned):
+            checks.append(
+                _check(
+                    f"{label}.disks.returned_count_consistent",
+                    len(disks) == returned,
+                    "expected disks list length to match returned_roots",
+                )
+            )
+        if _non_negative_int(available):
+            checks.append(
+                _check(
+                    f"{label}.disks.available_count_consistent",
+                    ok_items == available,
+                    "expected ok disk items to match available_roots",
+                )
+            )
+        if _non_negative_int(limit) and DISKS_MIN_LIMIT <= limit <= DISKS_MAX_LIMIT:
+            checks.append(
+                _check(
+                    f"{label}.disks.bounded_by_limit",
+                    len(disks) <= limit,
+                    "expected disks list length <= limit",
+                )
+            )
+
+    host = payload.get("host")
+    if expected_host is not None and isinstance(host, dict) and host.get("hostname") is not None:
+        checks.append(
+            _check(
+                f"{label}.host.expected",
+                host.get("hostname") == expected_host,
+                f"expected host hostname {expected_host!r}",
+            )
+        )
+    runtime = payload.get("python_runtime")
+    if expected_python is not None and isinstance(runtime, dict) and runtime.get("version"):
+        checks.append(
+            _check(
+                f"{label}.python_runtime.expected",
+                _python_matches(runtime.get("version"), expected_python),
+                f"expected Python version prefix or exact {expected_python!r}",
+            )
+        )
+    return checks
+
+
 def _artifact_summary(payload: Any, expected_mode: str, validated: bool) -> dict[str, Any]:
     artifact = {"mode": None, "status": None, "validated": validated}
     if isinstance(payload, dict):
@@ -639,8 +942,15 @@ def _cross_check(evidence: Any, status: Any, doctor: Any, services: Any = None) 
 
 def _result(args: argparse.Namespace) -> dict[str, Any]:
     checks: list[Check] = []
-    payloads: dict[str, Any] = {"evidence": None, "status": None, "doctor": None, "services": None}
+    payloads: dict[str, Any] = {
+        "evidence": None,
+        "status": None,
+        "doctor": None,
+        "services": None,
+        "disks": None,
+    }
     services_json = getattr(args, "services_json", None)
+    disks_json = getattr(args, "disks_json", None)
 
     if args.evidence_json:
         payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
@@ -686,6 +996,14 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
                 _validate_services(payloads["services"], args.expected_host, args.expected_python)
             )
 
+    if disks_json:
+        payloads["disks"], read_checks = _read_json_file(Path(disks_json), "disks")
+        checks.extend(read_checks)
+        if payloads["disks"] is not None:
+            checks.extend(
+                _validate_disks(payloads["disks"], args.expected_host, args.expected_python)
+            )
+
     checks.extend(
         _cross_check(
             payloads["evidence"], payloads["status"], payloads["doctor"], payloads["services"]
@@ -707,6 +1025,9 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
     if services_json:
         inputs["services_json"] = str(Path(services_json))
         artifacts["services"] = _artifact_summary(payloads["services"], "windows_services", True)
+    if disks_json:
+        inputs["disks_json"] = str(Path(disks_json))
+        artifacts["disks"] = _artifact_summary(payloads["disks"], "windows_disks", True)
 
     passed = sum(1 for check in checks if check.passed)
     failed = len(checks) - passed
@@ -759,6 +1080,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to saved 'shellforgeai windows services --json' output.",
     )
     parser.add_argument(
+        "--disks-json",
+        help="Optional path to saved 'shellforgeai windows disks --json' output.",
+    )
+    parser.add_argument(
         "--expected-host", help="Optional expected Windows hostname, for example WIN2025-SFAI01."
     )
     parser.add_argument(
@@ -767,10 +1092,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--json", action="store_true", help="Emit deterministic JSON output.")
     args = parser.parse_args(argv)
-    if not (args.evidence_json or args.status_json or args.doctor_json or args.services_json):
+    if not (
+        args.evidence_json
+        or args.status_json
+        or args.doctor_json
+        or args.services_json
+        or args.disks_json
+    ):
         parser.error(
             "at least one of --evidence-json, --status-json, --doctor-json, "
-            "or --services-json is required"
+            "--services-json, or --disks-json is required"
         )
     return args
 
