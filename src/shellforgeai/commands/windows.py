@@ -1,4 +1,4 @@
-"""Read-only Windows V1 doctor, status, evidence, services, and disks commands."""
+"""Read-only Windows V1 doctor, status, evidence, services, disks, and processes commands."""
 
 from __future__ import annotations
 
@@ -22,6 +22,12 @@ from shellforgeai.windows_evidence import (
     validate_evidence_disks_limit,
     validate_evidence_services_limit,
     windows_evidence_payload,
+)
+from shellforgeai.windows_processes import (
+    DEFAULT_PROCESSES_LIMIT,
+    render_windows_processes_text,
+    validate_processes_limit,
+    windows_processes_payload,
 )
 from shellforgeai.windows_services import (
     DEFAULT_MAX_SERVICES,
@@ -142,6 +148,25 @@ def register(windows_app: typer.Typer) -> None:
             return
 
         console.print(render_windows_disks_text(payload))
+
+    @windows_app.command("processes")
+    def windows_processes(
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="Bounded max processes to list (1-200)."),
+        ] = DEFAULT_PROCESSES_LIMIT,
+    ) -> None:
+        try:
+            validated_limit = validate_processes_limit(limit)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--limit") from exc
+        payload = windows_processes_payload(limit=validated_limit)
+        if json_output:
+            typer.echo(json.dumps(payload, sort_keys=True))
+            return
+
+        console.print(render_windows_processes_text(payload))
 
     @windows_app.command("services")
     def windows_services(

@@ -72,6 +72,9 @@ use QEMU Guest Agent, or run host-management tools.
    shellforgeai windows evidence --json --include-services --services-limit 25
    shellforgeai windows evidence --json --include-disks
    shellforgeai windows evidence --json --include-disks --disks-limit 5
+   shellforgeai windows processes --json
+   shellforgeai windows processes --json --limit 10
+   shellforgeai windows processes
    shellforgeai windows services --json --limit 25
    shellforgeai windows disks --json
    ```
@@ -158,6 +161,9 @@ Saved Windows smoke JSON must show:
 - for disks artifacts (standalone and embedded, PR273+): explicit
   `directory_scan_performed=false`, `file_scan_performed=false`, and
   `disk_mutation_performed=false`
+- for processes preview artifacts: only PID, parent PID, image basename/name,
+  and thread count are collected; command lines, environments, memory, handles,
+  modules, owners/tokens, and network connections are not collected
 - no service restart
 - no process termination
 - no registry modification
