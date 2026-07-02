@@ -4,6 +4,28 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Windows disks safety-flag normalization (PR273)
+
+- Normalized the Windows disks safety schema so the standalone
+  `shellforgeai windows disks --json` payload, the embedded disks component in
+  `shellforgeai windows evidence --json --include-disks`, the saved-artifact
+  validator, and the packet helper all agree on the explicit disk safety flags:
+  `directory_scan_performed=false`, `file_scan_performed=false`, and
+  `disk_mutation_performed=false`. The standalone/embedded disks safety block
+  now carries `disk_mutation_performed=false` explicitly (the top-level PR272
+  evidence safety block already did).
+- `scripts/windows_smoke_acceptance.py` now requires the explicit
+  `disk_mutation_performed=false` flag for PR273+ disks artifacts (standalone
+  and embedded); legacy artifacts missing the key fail strict validation with a
+  clear check name. `scripts/windows_smoke_packet.py` reports the three disk
+  safety flags in the disks artifact summary (JSON `disk_safety` block plus
+  Markdown lines).
+- This is **safety-schema consistency only**: no new disk collection, no
+  directory/file scans, no disk mutation, no PowerShell/WinRM/remote execution,
+  and no change to default evidence, `--include-disks` opt-in, disks limit, or
+  services behavior. New coverage in
+  `tests/test_pr273_windows_disks_safety_flags.py`.
+
 ### Docker01 QA bundle validate/history/compare lifecycle (PR207)
 
 - Extended `scripts/docker01_operator_qa_bundle.py` with four **artifact-only**

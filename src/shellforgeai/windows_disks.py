@@ -6,7 +6,11 @@ drive root only) and reads per-root capacity via ``shutil.disk_usage``. It
 never executes shells, enumerates directories or files, reads user files,
 reads secrets or credential caches, queries device or volume APIs, reads the
 registry, uses remoting, opens network connections, writes files, or mutates
-host state.
+host state. Since PR273 the safety block explicitly reports the disk-specific
+flags ``directory_scan_performed``, ``file_scan_performed``, and
+``disk_mutation_performed`` as false in both the standalone payload and the
+embedded evidence-bundle component; this is schema normalization only, with no
+collection change.
 """
 
 from __future__ import annotations
@@ -46,6 +50,7 @@ _WINDOWS_DISKS_SAFETY = {
     "remote_execution": False,
     "directory_scan_performed": False,
     "file_scan_performed": False,
+    "disk_mutation_performed": False,
     "service_restart_executed": False,
     "process_termination_executed": False,
     "registry_modified": False,

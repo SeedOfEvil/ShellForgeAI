@@ -531,6 +531,7 @@ def _disks_safe_flags() -> dict[str, bool]:
     flags = _safe_flags()
     flags["directory_scan_performed"] = False
     flags["file_scan_performed"] = False
+    flags["disk_mutation_performed"] = False
     return flags
 
 
