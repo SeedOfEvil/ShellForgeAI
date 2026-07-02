@@ -24,8 +24,8 @@ WINDOWS_DISKS_NEXT_SAFE_COMMAND = "shellforgeai windows status --json"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
 
 DEFAULT_DISKS_LIMIT = 32
-_MIN_DISKS_LIMIT = 1
-_MAX_DISKS_LIMIT = 64
+MIN_DISKS_LIMIT = 1
+MAX_DISKS_LIMIT = 64
 
 COLLECTION_METHOD = "stdlib_only"
 ROOT_DISCOVERY_LABEL = "os.listdrives_or_current_root_fallback"
@@ -92,9 +92,9 @@ def validate_disks_limit(value: int) -> int:
         numeric = int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"--limit must be an integer, got {value!r}") from exc
-    if isinstance(value, bool) or numeric < _MIN_DISKS_LIMIT or numeric > _MAX_DISKS_LIMIT:
+    if isinstance(value, bool) or numeric < MIN_DISKS_LIMIT or numeric > MAX_DISKS_LIMIT:
         raise ValueError(
-            f"--limit must be between {_MIN_DISKS_LIMIT} and {_MAX_DISKS_LIMIT}, got {value!r}"
+            f"--limit must be between {MIN_DISKS_LIMIT} and {MAX_DISKS_LIMIT}, got {value!r}"
         )
     return numeric
 

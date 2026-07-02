@@ -2,9 +2,12 @@
 
 The PR264 bundle reuses the existing Windows doctor and status payload builders.
 PR269 adds an explicit, bounded, opt-in services component that reuses the
-existing PR267 read-only services payload builder. The bundle does not add
-probes, execute commands, use remoting, control or configure services, open
-network connections, read credential caches, write files, or mutate host state.
+existing PR267 read-only services payload builder. PR272 adds an explicit,
+bounded, opt-in disks component that reuses the existing PR270 read-only disks
+payload builder. The bundle does not add probes, execute commands, use
+remoting, control or configure services, scan directories or files, mutate
+disks, open network connections, read credential caches, write files, or
+mutate host state.
 """
 
 from __future__ import annotations
@@ -14,15 +17,23 @@ from collections.abc import Callable
 from typing import Any
 
 from shellforgeai.platform_detection import PlatformInfo, detect_platform
+from shellforgeai.windows_disks import (
+    DEFAULT_DISKS_LIMIT,
+    MAX_DISKS_LIMIT,
+    windows_disks_payload,
+)
 from shellforgeai.windows_doctor import windows_doctor_payload
 from shellforgeai.windows_services import DEFAULT_MAX_SERVICES, windows_services_payload
 from shellforgeai.windows_status import windows_status_payload
 
 WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND = "shellforgeai windows status --json"
+WINDOWS_EVIDENCE_DISKS_NEXT_SAFE_COMMAND = "shellforgeai windows disks --json"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
 
 EVIDENCE_SERVICES_DEFAULT_LIMIT = 25
 EVIDENCE_SERVICES_MAX_LIMIT = DEFAULT_MAX_SERVICES
+EVIDENCE_DISKS_DEFAULT_LIMIT = DEFAULT_DISKS_LIMIT
+EVIDENCE_DISKS_MAX_LIMIT = MAX_DISKS_LIMIT
 
 _NOT_COLLECTED_PR264 = {
     "powershell_version": "not collected because PR264 does not execute PowerShell",
@@ -60,6 +71,18 @@ _WINDOWS_EVIDENCE_SAFETY = {
     "network_call": False,
 }
 
+_EVIDENCE_DISKS_SAFETY = {
+    "directory_scan_performed": False,
+    "file_scan_performed": False,
+    "disk_mutation_performed": False,
+}
+
+_NOT_COLLECTED_PR272 = {
+    "directory_scan": "not collected because PR272 only uses root-level stdlib disk usage",
+    "file_scan": "not collected because PR272 does not scan files",
+    "disk_repair": "not available because PR272 is read-only",
+}
+
 _UNSUPPORTED_SAFETY_KEYS = (
     "read_only",
     "mutation_performed",
@@ -77,6 +100,7 @@ _UNSUPPORTED_SAFETY_KEYS = (
 
 PayloadBuilder = Callable[[PlatformInfo], dict[str, Any]]
 ServicesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
+DisksBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 
 
 def validate_evidence_services_limit(value: Any) -> int:
@@ -92,8 +116,23 @@ def validate_evidence_services_limit(value: Any) -> int:
     return value
 
 
+def validate_evidence_disks_limit(value: Any) -> int:
+    """Validate the opt-in bundled disks limit as a bounded positive integer."""
+
+    message = f"disks limit must be a positive integer between 1 and {EVIDENCE_DISKS_MAX_LIMIT}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(message)
+    if value < 1 or value > EVIDENCE_DISKS_MAX_LIMIT:
+        raise ValueError(message)
+    return value
+
+
 def _default_services_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
     return windows_services_payload(info, max_services=limit)
+
+
+def _default_disks_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
+    return windows_disks_payload(info, limit=limit)
 
 
 def _embedded_services_component(payload: dict[str, Any], limit: int) -> dict[str, Any]:
@@ -110,6 +149,23 @@ def _embedded_services_component(payload: dict[str, Any], limit: int) -> dict[st
         component["truncated"] = bool(
             limits.get("truncated") if isinstance(limits, dict) else False
         )
+    return component
+
+
+def _embedded_disks_component(payload: dict[str, Any], limit: int) -> dict[str, Any]:
+    """Wrap the reused disks payload with explicit bounded-output fields."""
+
+    component = dict(payload)
+    component["limit"] = limit
+    summary = payload.get("summary")
+    collection = payload.get("collection")
+    component["total_roots"] = summary.get("total_roots", 0) if isinstance(summary, dict) else 0
+    component["returned_roots"] = (
+        summary.get("returned_roots", 0) if isinstance(summary, dict) else 0
+    )
+    component["truncated"] = bool(
+        collection.get("truncated") if isinstance(collection, dict) else False
+    )
     return component
 
 
@@ -133,12 +189,18 @@ def windows_evidence_payload(
     include_services: bool = False,
     services_limit: int | None = None,
     services_builder: ServicesBuilder = _default_services_builder,
+    include_disks: bool = False,
+    disks_limit: int | None = None,
+    disks_builder: DisksBuilder = _default_disks_builder,
 ) -> dict[str, Any]:
     """Build the Windows evidence bundle payload.
 
     The bundle stays doctor/status-only by default. Services are included only
     when ``include_services`` is explicitly requested, bounded by a validated
     limit, and built by reusing the existing PR267 read-only services payload.
+    Disks are included only when ``include_disks`` is explicitly requested,
+    bounded by a validated limit, and built by reusing the existing PR270
+    read-only disks payload.
     """
 
     info = info or detect_platform()
@@ -151,6 +213,7 @@ def windows_evidence_payload(
     }
     not_collected = dict(_NOT_COLLECTED_PR264)
     next_safe_command = WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND
+    safety = dict(_WINDOWS_EVIDENCE_SAFETY)
     if include_services:
         limit = validate_evidence_services_limit(
             EVIDENCE_SERVICES_DEFAULT_LIMIT if services_limit is None else services_limit
@@ -160,8 +223,26 @@ def windows_evidence_payload(
             "included as an explicit opt-in bounded component via --include-services"
         )
         next_safe_command = f"shellforgeai windows services --json --limit {limit}"
+    embedded_disks: dict[str, Any] | None = None
+    if include_disks:
+        bounded_disks_limit = validate_evidence_disks_limit(
+            EVIDENCE_DISKS_DEFAULT_LIMIT if disks_limit is None else disks_limit
+        )
+        disks_component = _embedded_disks_component(
+            disks_builder(info, bounded_disks_limit), bounded_disks_limit
+        )
+        components["disks"] = disks_component
+        embedded_disks = {
+            "included": True,
+            "limit": bounded_disks_limit,
+            "returned_roots": disks_component["returned_roots"],
+            "total_roots": disks_component["total_roots"],
+            "truncated": disks_component["truncated"],
+        }
+        safety.update(_EVIDENCE_DISKS_SAFETY)
+        next_safe_command = WINDOWS_EVIDENCE_DISKS_NEXT_SAFE_COMMAND
     summary = _component_summary(components)
-    return {
+    payload: dict[str, Any] = {
         "schema_version": 1,
         "mode": "windows_evidence_bundle",
         "status": "ok" if not summary["failed_components"] else "component_failure",
@@ -177,10 +258,14 @@ def windows_evidence_payload(
         },
         "components": components,
         "summary": summary,
-        "safety": dict(_WINDOWS_EVIDENCE_SAFETY),
+        "safety": safety,
         "not_collected_in_pr264": not_collected,
         "next_safe_command": next_safe_command,
     }
+    if embedded_disks is not None:
+        payload["embedded_disks"] = embedded_disks
+        payload["not_collected_in_pr272"] = dict(_NOT_COLLECTED_PR272)
+    return payload
 
 
 def windows_evidence_unsupported_payload(info: PlatformInfo | None = None) -> dict[str, Any]:
@@ -242,6 +327,16 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
             parts.append(f"running={state_counts.get('running', 0)}")
             parts.append(f"stopped={state_counts.get('stopped', 0)}")
         lines.append("Services component: " + "; ".join(parts))
+    disks_component = components.get("disks") if isinstance(components, dict) else None
+    if isinstance(disks_component, dict):
+        lines.append(
+            "Disks component: "
+            f"status={disks_component.get('status', 'unknown')}; "
+            f"returned={disks_component.get('returned_roots', 0)}; "
+            f"total={disks_component.get('total_roots', 0)}; "
+            f"limit={disks_component.get('limit', 0)}; "
+            f"truncated={str(disks_component.get('truncated', False)).lower()}"
+        )
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows evidence bundle is unavailable.")))
     pending = [

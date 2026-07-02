@@ -364,8 +364,26 @@ def _validate_evidence(
             )
         )
 
-    expected_component_count = 3 if has_services else 2
-    expected_ok = {"doctor", "status", "services"} if has_services else {"doctor", "status"}
+    disks = _nested(payload, "components", "disks")
+    has_disks = isinstance(components, dict) and "disks" in components
+    if has_disks:
+        checks.extend(
+            _validate_disks(
+                disks,
+                expected_host,
+                expected_python,
+                label="evidence.components.disks",
+                embedded=True,
+            )
+        )
+        checks.extend(_validate_embedded_disks_block(payload, disks))
+
+    expected_component_count = 2 + int(has_services) + int(has_disks)
+    expected_ok = {"doctor", "status"}
+    if has_services:
+        expected_ok.add("services")
+    if has_disks:
+        expected_ok.add("disks")
     ok_components = _nested(payload, "summary", "ok_components")
     failed_components = _nested(payload, "summary", "failed_components")
     checks.extend(
@@ -601,6 +619,92 @@ def _validate_embedded_services_bounds(payload: dict[str, Any], label: str) -> l
     return checks
 
 
+def _validate_embedded_disks_bounds(payload: dict[str, Any], label: str) -> list[Check]:
+    """Check the PR272 embedded disks component bounded-output fields."""
+
+    limit = payload.get("limit")
+    returned = payload.get("returned_roots")
+    total = payload.get("total_roots")
+    truncated = payload.get("truncated")
+    checks = [
+        _check(
+            f"{label}.limit",
+            _non_negative_int(limit) and DISKS_MIN_LIMIT <= limit <= DISKS_MAX_LIMIT,
+            f"expected integer limit between {DISKS_MIN_LIMIT} and {DISKS_MAX_LIMIT}",
+        ),
+        _check(
+            f"{label}.returned_roots",
+            _non_negative_int(returned),
+            "expected non-negative integer returned_roots",
+        ),
+        _check(
+            f"{label}.total_roots",
+            _non_negative_int(total),
+            "expected non-negative integer total_roots",
+        ),
+        _check(
+            f"{label}.truncated",
+            isinstance(truncated, bool),
+            "expected boolean truncated",
+        ),
+    ]
+    if (
+        _non_negative_int(limit)
+        and DISKS_MIN_LIMIT <= limit <= DISKS_MAX_LIMIT
+        and _non_negative_int(returned)
+        and _non_negative_int(total)
+        and isinstance(truncated, bool)
+    ):
+        consistent = returned <= limit and total >= returned and truncated == (total > returned)
+        checks.append(
+            _check(
+                f"{label}.bounded_consistent",
+                consistent,
+                "expected returned_roots <= limit, total_roots >= returned_roots, "
+                "and truncated consistent with total/returned root counts",
+            )
+        )
+    return checks
+
+
+def _validate_embedded_disks_block(payload: dict[str, Any], component: Any) -> list[Check]:
+    """Check the optional top-level PR272 embedded_disks summary block."""
+
+    block = payload.get("embedded_disks")
+    if block is None:
+        return []
+    checks = [
+        _check(
+            "evidence.embedded_disks.object",
+            isinstance(block, dict),
+            "expected embedded_disks object",
+        )
+    ]
+    if not isinstance(block, dict):
+        return checks
+    checks.append(
+        _check(
+            "evidence.embedded_disks.included",
+            block.get("included") is True,
+            "expected embedded_disks.included true",
+        )
+    )
+    if isinstance(component, dict):
+        consistent = all(
+            block.get(key) == component.get(key)
+            for key in ("limit", "returned_roots", "total_roots", "truncated")
+        )
+        checks.append(
+            _check(
+                "evidence.embedded_disks.consistent",
+                consistent,
+                "expected embedded_disks limit/returned_roots/total_roots/truncated "
+                "to match the embedded disks component",
+            )
+        )
+    return checks
+
+
 def _disk_item_checks(item: Any, label: str) -> list[Check]:
     if not isinstance(item, dict):
         return [_check(f"{label}.object", False, "expected disk item object")]
@@ -654,6 +758,7 @@ def _validate_disks(
     expected_python: str | None,
     *,
     label: str = "disks",
+    embedded: bool = False,
 ) -> list[Check]:
     checks = [
         _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
@@ -725,6 +830,9 @@ def _validate_disks(
                     f"expected {key} false",
                 )
             )
+
+    if embedded:
+        checks.extend(_validate_embedded_disks_bounds(payload, label))
 
     collection = payload.get("collection")
     limit = _nested(payload, "collection", "limit")
@@ -875,7 +983,9 @@ def _artifact_summary(payload: Any, expected_mode: str, validated: bool) -> dict
     return artifact
 
 
-def _cross_check(evidence: Any, status: Any, doctor: Any, services: Any = None) -> list[Check]:
+def _cross_check(
+    evidence: Any, status: Any, doctor: Any, services: Any = None, disks: Any = None
+) -> list[Check]:
     checks: list[Check] = []
     if not isinstance(evidence, dict):
         return checks
@@ -935,6 +1045,32 @@ def _cross_check(evidence: Any, status: Any, doctor: Any, services: Any = None) 
                     "cross_check.services.total_count",
                     embedded_total == standalone_total,
                     "evidence services total_count differs from standalone services total_count",
+                )
+            )
+    if isinstance(disks, dict) and isinstance(_nested(evidence, "components", "disks"), dict):
+        component = _nested(evidence, "components", "disks")
+        checks.extend(
+            [
+                _check(
+                    "cross_check.disks.mode",
+                    component.get("mode") == disks.get("mode"),
+                    "evidence disks mode differs from standalone disks mode",
+                ),
+                _check(
+                    "cross_check.disks.status",
+                    component.get("status") == disks.get("status"),
+                    "evidence disks status differs from standalone disks status",
+                ),
+            ]
+        )
+        embedded_total = _nested(component, "summary", "total_roots")
+        standalone_total = _nested(disks, "summary", "total_roots")
+        if _non_negative_int(embedded_total) and _non_negative_int(standalone_total):
+            checks.append(
+                _check(
+                    "cross_check.disks.total_roots",
+                    embedded_total == standalone_total,
+                    "evidence disks total_roots differs from standalone disks total_roots",
                 )
             )
     return checks
@@ -1006,7 +1142,11 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
 
     checks.extend(
         _cross_check(
-            payloads["evidence"], payloads["status"], payloads["doctor"], payloads["services"]
+            payloads["evidence"],
+            payloads["status"],
+            payloads["doctor"],
+            payloads["services"],
+            payloads["disks"],
         )
     )
 

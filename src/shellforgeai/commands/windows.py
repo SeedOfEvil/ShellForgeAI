@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -16,8 +16,10 @@ from shellforgeai.windows_disks import (
 )
 from shellforgeai.windows_doctor import render_windows_doctor_text, windows_doctor_payload
 from shellforgeai.windows_evidence import (
+    EVIDENCE_DISKS_DEFAULT_LIMIT,
     EVIDENCE_SERVICES_DEFAULT_LIMIT,
     render_windows_evidence_text,
+    validate_evidence_disks_limit,
     validate_evidence_services_limit,
     windows_evidence_payload,
 )
@@ -51,22 +53,49 @@ def register(windows_app: typer.Typer) -> None:
                 help="Bounded max services in the opt-in services component (1-500).",
             ),
         ] = None,
+        include_disks: Annotated[
+            bool,
+            typer.Option(
+                "--include-disks",
+                help="Opt in to a bounded read-only disks component in the bundle.",
+            ),
+        ] = False,
+        disks_limit: Annotated[
+            int | None,
+            typer.Option(
+                "--disks-limit",
+                help="Bounded max disk roots in the opt-in disks component (1-64).",
+            ),
+        ] = None,
     ) -> None:
+        kwargs: dict[str, Any] = {}
         if include_services:
             try:
-                limit = validate_evidence_services_limit(
+                kwargs["services_limit"] = validate_evidence_services_limit(
                     EVIDENCE_SERVICES_DEFAULT_LIMIT if services_limit is None else services_limit
                 )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc), param_hint="--services-limit") from exc
-            payload = windows_evidence_payload(include_services=True, services_limit=limit)
-        else:
-            if services_limit is not None:
-                raise typer.BadParameter(
-                    "--services-limit requires --include-services",
-                    param_hint="--services-limit",
+            kwargs["include_services"] = True
+        elif services_limit is not None:
+            raise typer.BadParameter(
+                "--services-limit requires --include-services",
+                param_hint="--services-limit",
+            )
+        if include_disks:
+            try:
+                kwargs["disks_limit"] = validate_evidence_disks_limit(
+                    EVIDENCE_DISKS_DEFAULT_LIMIT if disks_limit is None else disks_limit
                 )
-            payload = windows_evidence_payload()
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--disks-limit") from exc
+            kwargs["include_disks"] = True
+        elif disks_limit is not None:
+            raise typer.BadParameter(
+                "--disks-limit requires --include-disks",
+                param_hint="--disks-limit",
+            )
+        payload = windows_evidence_payload(**kwargs)
         if json_output:
             typer.echo(json.dumps(payload, sort_keys=True))
             return
