@@ -48,11 +48,16 @@ use QEMU Guest Agent, or run host-management tools.
      (PR267 standalone read-only services preview; validated by the saved-JSON
      acceptance validator and reported by the packet helper since PR268 via
      `--services-json`)
-   - optional `windows-disks.json` from `shellforgeai windows disks --json`
+   - `windows-disks.json` from `shellforgeai windows disks --json`
      (PR270 standalone local read-only disk/root usage preview; not part of
-     the evidence bundle yet and not validated by the saved-JSON acceptance
-     validator or packet helper yet)
+     the evidence bundle yet, but validated by the saved-JSON acceptance
+     validator and reported by the packet helper since PR271 via
+     `--disks-json`)
    - optional text outputs for human-facing smoke evidence.
+
+   The normal Windows smoke artifact set may now include
+   `windows-evidence.json`, `windows-status.json`, `windows-doctor.json`,
+   `windows-services.json`, and `windows-disks.json`.
 
    Windows smoke commands for the current lane:
 
@@ -62,7 +67,7 @@ use QEMU Guest Agent, or run host-management tools.
    shellforgeai windows services --json --limit 25
    shellforgeai windows disks --json
    ```
-7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`. PR269 validates evidence bundles that embed the opt-in services component with the same key safety expectations as the standalone services artifact; a standalone `--services-json` artifact is not required when the bundle embeds services.
+7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`. PR269 validates evidence bundles that embed the opt-in services component with the same key safety expectations as the standalone services artifact; a standalone `--services-json` artifact is not required when the bundle embeds services. PR271 extends the saved-artifact validator and packet helper support to `windows-disks.json`; the disks artifact validator accepts unavailable roots only when they are sanitized as safe disk usage failures (for example `disk_usage_failed`), never tracebacks or raw exception detail.
 8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON, optionally including services JSON.
 9. Archive the raw JSON artifacts exactly as captured. Deterministic capture
    methods are preferred, but operators do not need to rewrite files that include
@@ -76,6 +81,7 @@ use QEMU Guest Agent, or run host-management tools.
      --status-json windows-status.json \
      --doctor-json windows-doctor.json \
      --services-json windows-services.json \
+     --disks-json windows-disks.json \
      --expected-host WIN2025-SFAI01 \
      --expected-python 3.14.6 \
      --json
@@ -99,10 +105,11 @@ use QEMU Guest Agent, or run host-management tools.
      --status-json windows-status.json \
      --doctor-json windows-doctor.json \
      --services-json windows-services.json \
+     --disks-json windows-disks.json \
      --expected-host WIN2025-SFAI01 \
      --expected-python 3.14.6 \
      --commit <commit-sha> \
-     --pr 268 \
+     --pr 271 \
      --json \
      --markdown
    ```
@@ -146,8 +153,9 @@ rollback, recovery, or other mutation.
 
 `scripts/windows_smoke_acceptance.py` is a QA helper, not a ShellForgeAI product
 command. It reads saved local JSON files only, including PR264
-`windows_evidence_bundle` artifacts from `windows evidence --json` and, since
-PR268, PR267 `windows_services` artifacts from `windows services --json`,
+`windows_evidence_bundle` artifacts from `windows evidence --json`, since
+PR268 the PR267 `windows_services` artifacts from `windows services --json`,
+and since PR271 the PR270 `windows_disks` artifacts from `windows disks --json`,
 captured as UTF-8, UTF-8 with BOM, UTF-16 with BOM, or Windows PowerShell 5.1
 default UTF-16LE with BOM. Raw/UTF-8 capture is still preferred where practical,
 but UTF-16LE PowerShell 5.1 artifacts are accepted. It never invokes
@@ -178,6 +186,23 @@ and a standalone `--services-json` artifact is not required when the bundle
 embeds services. When both are provided, the validator cross-checks the
 embedded and standalone services mode/status and total counts.
 
+Since PR271, the optional `--disks-json` input validates the PR270 disks
+artifact: `mode=windows_disks`, `schema_version` 1, `status=ok`, Windows
+platform, read-only/no-mutation flags, `windows_v1.available` with the
+`local_read_only_disks` scope, the `stdlib_only` collection method, bounded
+output fields (integer `limit` within the accepted 1-64 command range, boolean
+`truncated`, non-negative total/returned/available/unavailable root counts,
+returned <= total, truncation consistency, and a disks list bounded by the
+limit), and the full disks safety-flag set (no PowerShell/WinRM/remote
+execution, no directory or file scanning, no disk mutation/mount/format flags
+when present, no registry or execution-policy changes, no secret/auth-cache
+reads, no model/network calls). Unavailable roots are accepted only when they
+are sanitized as safe disk usage failures (for example
+`{"status": "unavailable", "error": "disk_usage_failed"}`); tracebacks or raw
+exception detail fields fail validation, while sanitized unavailable roots do
+not fail an artifact whose top-level status is ok. Omitting `--disks-json`
+leaves existing validator behavior unchanged.
+
 Useful forms:
 
 ```bash
@@ -185,7 +210,9 @@ python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json
 python scripts/windows_smoke_acceptance.py --status-json status.json
 python scripts/windows_smoke_acceptance.py --status-json status.json --doctor-json doctor.json
 python scripts/windows_smoke_acceptance.py --services-json windows-services.json --json
-python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --services-json windows-services.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
+python scripts/windows_smoke_acceptance.py --disks-json windows-disks.json --json
+python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --disks-json windows-disks.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
+python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --services-json windows-services.json --disks-json windows-disks.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
 ```
 
 ## Saved evidence packet helper
@@ -193,13 +220,19 @@ python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json
 `scripts/windows_smoke_packet.py` turns saved Windows smoke artifacts into a
 deterministic QA evidence packet. It reads the saved `windows-evidence.json`,
 `windows-status.json`, `windows-doctor.json`, and optional
-`windows-services.json` files only; validates them via the PR265/PR268
-acceptance checks; computes SHA256 and byte size for each input; and emits
-deterministic JSON and/or concise Markdown for PR handoff. When
-`--services-json` is provided, the packet includes the services artifact path,
-SHA256, size, mode, status, and total/running/stopped/unknown service counts in
-both the JSON artifact block and the Markdown artifact table plus a short
-services summary; omitting it leaves the PR266 packet behavior unchanged. Since
+`windows-services.json` and `windows-disks.json` files only; validates them via
+the PR265/PR268/PR271 acceptance checks; computes SHA256 and byte size for each
+input; and emits deterministic JSON and/or concise Markdown for PR handoff.
+When `--services-json` is provided, the packet includes the services artifact
+path, SHA256, size, mode, status, and total/running/stopped/unknown service
+counts in both the JSON artifact block and the Markdown artifact table plus a
+short services summary; omitting it leaves the PR266 packet behavior unchanged.
+When `--disks-json` is provided (PR271), the packet includes the disks artifact
+path, SHA256, byte size, mode, status, and the safe disk summary fields
+(total/returned/available/unavailable root counts, limit, truncated) in both
+the JSON artifact block and the Markdown artifact table plus a short disks
+summary noting that unavailable roots are accepted only when sanitized as safe
+disk usage failures; omitting it leaves existing packet behavior unchanged. Since
 PR269, when the evidence bundle itself embeds the opt-in services component the
 packet also emits an `embedded_services` summary (mode, status, limit,
 returned/total counts, truncated flag, and running/stopped/unknown counts) in
@@ -225,10 +258,11 @@ python scripts/windows_smoke_packet.py \
   --status-json windows-status.json \
   --doctor-json windows-doctor.json \
   --services-json windows-services.json \
+  --disks-json windows-disks.json \
   --expected-host WIN2025-SFAI01 \
   --expected-python 3.14.6 \
   --commit <commit-sha> \
-  --pr 268 \
+  --pr 271 \
   --json \
   --markdown
 
@@ -237,12 +271,13 @@ python scripts/windows_smoke_packet.py \
   --status-json windows-status.json \
   --doctor-json windows-doctor.json \
   --services-json windows-services.json \
+  --disks-json windows-disks.json \
   --expected-host WIN2025-SFAI01 \
   --expected-python 3.14.6 \
   --commit <commit-sha> \
-  --pr 268 \
+  --pr 271 \
   --out-json packet.json \
-  --out-markdown PR268-QA-EVIDENCE.md
+  --out-markdown PR271-QA-EVIDENCE.md
 ```
 
 ## Future PR guidance

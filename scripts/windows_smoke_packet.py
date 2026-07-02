@@ -66,6 +66,27 @@ def _services_counts(path_value: str) -> dict[str, Any]:
     return counts
 
 
+def _disks_counts(path_value: str) -> dict[str, Any]:
+    counts: dict[str, Any] = {
+        "total_roots": None,
+        "returned_roots": None,
+        "available_roots": None,
+        "unavailable_roots": None,
+        "limit": None,
+        "truncated": None,
+    }
+    payload, _ = acceptance._read_json_file(Path(path_value), "disks")
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    if isinstance(summary, dict):
+        for key in ("total_roots", "returned_roots", "available_roots", "unavailable_roots"):
+            counts[key] = summary.get(key)
+    collection = payload.get("collection") if isinstance(payload, dict) else None
+    if isinstance(collection, dict):
+        counts["limit"] = collection.get("limit")
+        counts["truncated"] = collection.get("truncated")
+    return counts
+
+
 def _embedded_services_summary(evidence_path: str) -> dict[str, Any] | None:
     """Summarize the opt-in PR269 services component embedded in the evidence bundle."""
 
@@ -142,6 +163,11 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
         services_artifact = _artifact(services_json, artifacts.get("services", {}))
         services_artifact.update(_services_counts(services_json))
         packet["artifacts"]["services_json"] = services_artifact
+    disks_json = getattr(args, "disks_json", None)
+    if disks_json:
+        disks_artifact = _artifact(disks_json, artifacts.get("disks", {}))
+        disks_artifact.update(_disks_counts(disks_json))
+        packet["artifacts"]["disks_json"] = disks_artifact
     failed = [check for check in validator.get("checks", []) if not check.get("passed")]
     if failed:
         packet["failed_checks"] = failed
@@ -220,6 +246,25 @@ def render_markdown(packet: dict[str, Any]) -> str:
         ):
             value = services.get(key)
             lines.append(f"- {label}: {value if value is not None else 'not available'}")
+    disks = packet["artifacts"].get("disks_json")
+    if disks is not None:
+        lines.extend(["", "## Disks summary", ""])
+        for label, key in (
+            ("Total roots", "total_roots"),
+            ("Returned roots", "returned_roots"),
+            ("Available roots", "available_roots"),
+            ("Unavailable roots", "unavailable_roots"),
+            ("Limit", "limit"),
+            ("Truncated", "truncated"),
+        ):
+            value = disks.get(key)
+            if isinstance(value, bool):
+                value = str(value).lower()
+            lines.append(f"- {label}: {value if value is not None else 'not available'}")
+        lines.append(
+            "- Unavailable roots are accepted only when sanitized as safe disk usage "
+            "failures (for example `disk_usage_failed`), never tracebacks."
+        )
     lines.extend(
         [
             "",
@@ -248,6 +293,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--services-json",
         help="Optional path to saved 'shellforgeai windows services --json' output.",
+    )
+    parser.add_argument(
+        "--disks-json",
+        help="Optional path to saved 'shellforgeai windows disks --json' output.",
     )
     parser.add_argument("--expected-host")
     parser.add_argument("--expected-python")
