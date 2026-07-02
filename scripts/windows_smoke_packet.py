@@ -117,6 +117,34 @@ def _embedded_services_summary(evidence_path: str) -> dict[str, Any] | None:
     return summary
 
 
+def _embedded_disks_summary(evidence_path: str) -> dict[str, Any] | None:
+    """Summarize the opt-in PR272 disks component embedded in the evidence bundle."""
+
+    payload, _ = acceptance._read_json_file(Path(evidence_path), "evidence")
+    component = None
+    if isinstance(payload, dict):
+        components = payload.get("components")
+        if isinstance(components, dict):
+            component = components.get("disks")
+    if not isinstance(component, dict):
+        return None
+    summary: dict[str, Any] = {
+        "mode": component.get("mode"),
+        "status": component.get("status"),
+        "limit": component.get("limit"),
+        "returned_roots": component.get("returned_roots"),
+        "total_roots": component.get("total_roots"),
+        "truncated": component.get("truncated"),
+        "available_roots": None,
+        "unavailable_roots": None,
+    }
+    root_summary = component.get("summary")
+    if isinstance(root_summary, dict):
+        summary["available_roots"] = root_summary.get("available_roots")
+        summary["unavailable_roots"] = root_summary.get("unavailable_roots")
+    return summary
+
+
 def _windows_summary(args: argparse.Namespace, validator: dict[str, Any]) -> dict[str, Any]:
     evidence_path = validator.get("inputs", {}).get("evidence_json")
     host = args.expected_host
@@ -158,6 +186,9 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
     embedded_services = _embedded_services_summary(args.evidence_json)
     if embedded_services is not None:
         packet["embedded_services"] = embedded_services
+    embedded_disks = _embedded_disks_summary(args.evidence_json)
+    if embedded_disks is not None:
+        packet["embedded_disks"] = embedded_disks
     services_json = getattr(args, "services_json", None)
     if services_json:
         services_artifact = _artifact(services_json, artifacts.get("services", {}))
@@ -232,6 +263,23 @@ def render_markdown(packet: dict[str, Any]) -> str:
             ("Unknown", "unknown"),
         ):
             value = embedded.get(key)
+            if isinstance(value, bool):
+                value = str(value).lower()
+            lines.append(f"- {label}: {value if value is not None else 'not available'}")
+    embedded_disks = packet.get("embedded_disks")
+    if embedded_disks is not None:
+        lines.extend(["", "## Embedded disks component", ""])
+        for label, key in (
+            ("Mode", "mode"),
+            ("Status", "status"),
+            ("Limit", "limit"),
+            ("Returned roots", "returned_roots"),
+            ("Total roots", "total_roots"),
+            ("Available roots", "available_roots"),
+            ("Unavailable roots", "unavailable_roots"),
+            ("Truncated", "truncated"),
+        ):
+            value = embedded_disks.get(key)
             if isinstance(value, bool):
                 value = str(value).lower()
             lines.append(f"- {label}: {value if value is not None else 'not available'}")
