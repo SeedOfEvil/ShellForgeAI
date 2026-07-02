@@ -152,6 +152,7 @@ EXTRACTED_MODULES: dict[str, dict[str, Any]] = {
     "windows status": {"module": "windows.py", "category": "read_only", "known_pr": 262},
     "windows evidence": {"module": "windows.py", "category": "read_only", "known_pr": 264},
     "windows services": {"module": "windows.py", "category": "read_only", "known_pr": 267},
+    "windows disks": {"module": "windows.py", "category": "read_only", "known_pr": 270},
     "propose": {"module": "propose.py", "category": "artifact_only", "known_pr": 187},
     "receipt audit": {"module": "receipt_audit.py", "category": "artifact_only", "known_pr": 191},
     "receipt recovery execute": {
