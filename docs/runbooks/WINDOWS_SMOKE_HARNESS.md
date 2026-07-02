@@ -155,6 +155,9 @@ Saved Windows smoke JSON must show:
 - `model_called=false`
 - `secret_read=false`
 - `auth_cache_read=false`
+- for disks artifacts (standalone and embedded, PR273+): explicit
+  `directory_scan_performed=false`, `file_scan_performed=false`, and
+  `disk_mutation_performed=false`
 - no service restart
 - no process termination
 - no registry modification
