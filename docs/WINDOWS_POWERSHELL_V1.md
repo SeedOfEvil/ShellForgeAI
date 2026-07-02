@@ -95,6 +95,8 @@ shellforgeai windows status --json
 shellforgeai windows status
 shellforgeai windows evidence --json
 shellforgeai windows evidence
+shellforgeai windows evidence --json --include-services
+shellforgeai windows evidence --json --include-services --services-limit 25
 shellforgeai windows services --json
 shellforgeai windows services
 shellforgeai ask "It is 2AM and this Windows server feels broken. What should I check first?"
@@ -129,6 +131,7 @@ The Windows lane preserves ShellForgeAI's core safety model:
 9. Add the saved evidence packet helper as the handoff/reporting step for saved Windows smoke artifacts. It validates existing artifacts, records hashes/sizes, and emits JSON/Markdown without new collection, PowerShell, WinRM, or mutation.
 10. PR267 adds `shellforgeai windows services` as the first narrow deeper Windows evidence slice: a standalone local read-only service state summary preview. On Windows it enumerates service names, display names, and current states through read-only `ctypes` Service Control Manager enumeration only (`OpenSCManagerW` with enumerate rights, `EnumServicesStatusExW`, `CloseServiceHandle`) and summarizes counts by state with a bounded collection limit. It does not execute PowerShell, does not use WinRM/PSRemoting, does not use subprocess, does not start/stop/restart/control/configure services, does not read service binary paths, service accounts, service configuration, or the registry, and does not mutate the Windows VM. Linux/Docker and unsupported platforms return structured unsupported output pointing to `shellforgeai platform doctor --json`. The services preview is not yet included in `shellforgeai windows evidence`; bundle integration may follow in a later PR only after the standalone services surface is proven safe. (Current services preview.)
 11. PR268 extends the saved-artifact acceptance validator and packet helper with optional `--services-json` support for PR267 `windows_services` artifacts. Services saved-artifact validation is the QA gate before deeper Windows evidence slices; it reads saved local files only and adds no new collection, PowerShell, WinRM, or mutation.
-12. Add Windows read-only service deep detail (descriptions, dependencies, recovery options), process, and event-log evidence in separate PRs; firewall and Windows Update evidence also remain future separate PRs.
-13. Packaging/install spike.
-14. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
+12. PR269 adds an explicit, bounded, opt-in services component to `shellforgeai windows evidence` via `--include-services` and `--services-limit N`. Services in the evidence bundle are opt-in and bounded: the default bundle stays doctor/status-only, and when `--include-services` is passed the bundle embeds the existing PR267 read-only services collector output with a conservative default limit of 25 (validated range 1-500). This reuses the existing read-only services collector and adds no new Windows collection surface. No PowerShell is executed, no WinRM/PSRemoting is used, no service control/restart/configuration mutation is performed, and no registry or execution-policy change occurs. (Current opt-in bundle component.)
+13. Add Windows read-only service deep detail (descriptions, dependencies, recovery options), process, and event-log evidence in separate PRs; firewall and Windows Update evidence also remain future separate PRs.
+14. Packaging/install spike.
+15. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.

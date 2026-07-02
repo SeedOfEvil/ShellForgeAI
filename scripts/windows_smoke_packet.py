@@ -66,6 +66,36 @@ def _services_counts(path_value: str) -> dict[str, Any]:
     return counts
 
 
+def _embedded_services_summary(evidence_path: str) -> dict[str, Any] | None:
+    """Summarize the opt-in PR269 services component embedded in the evidence bundle."""
+
+    payload, _ = acceptance._read_json_file(Path(evidence_path), "evidence")
+    component = None
+    if isinstance(payload, dict):
+        components = payload.get("components")
+        if isinstance(components, dict):
+            component = components.get("services")
+    if not isinstance(component, dict):
+        return None
+    summary: dict[str, Any] = {
+        "mode": component.get("mode"),
+        "status": component.get("status"),
+        "limit": component.get("limit"),
+        "returned_count": component.get("returned_count"),
+        "total_count": component.get("total_count"),
+        "truncated": component.get("truncated"),
+        "running": None,
+        "stopped": None,
+        "unknown": None,
+    }
+    state_counts = component.get("services")
+    state_counts = state_counts.get("state_counts") if isinstance(state_counts, dict) else None
+    if isinstance(state_counts, dict):
+        for key in ("running", "stopped", "unknown"):
+            summary[key] = state_counts.get(key)
+    return summary
+
+
 def _windows_summary(args: argparse.Namespace, validator: dict[str, Any]) -> dict[str, Any]:
     evidence_path = validator.get("inputs", {}).get("evidence_json")
     host = args.expected_host
@@ -104,6 +134,9 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
         "windows": _windows_summary(args, validator),
         "safety": dict(SAFETY),
     }
+    embedded_services = _embedded_services_summary(args.evidence_json)
+    if embedded_services is not None:
+        packet["embedded_services"] = embedded_services
     services_json = getattr(args, "services_json", None)
     if services_json:
         services_artifact = _artifact(services_json, artifacts.get("services", {}))
@@ -158,6 +191,24 @@ def render_markdown(packet: dict[str, Any]) -> str:
             f"- Platform system: {windows.get('platform_system')}",
         ]
     )
+    embedded = packet.get("embedded_services")
+    if embedded is not None:
+        lines.extend(["", "## Embedded services component", ""])
+        for label, key in (
+            ("Mode", "mode"),
+            ("Status", "status"),
+            ("Limit", "limit"),
+            ("Returned services", "returned_count"),
+            ("Total services", "total_count"),
+            ("Truncated", "truncated"),
+            ("Running", "running"),
+            ("Stopped", "stopped"),
+            ("Unknown", "unknown"),
+        ):
+            value = embedded.get(key)
+            if isinstance(value, bool):
+                value = str(value).lower()
+            lines.append(f"- {label}: {value if value is not None else 'not available'}")
     services = packet["artifacts"].get("services_json")
     if services is not None:
         lines.extend(["", "## Services summary", ""])

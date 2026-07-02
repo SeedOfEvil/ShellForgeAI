@@ -312,14 +312,29 @@ def _validate_evidence(
             )
         )
 
+    services = _nested(payload, "components", "services")
+    has_services = isinstance(components, dict) and "services" in components
+    if has_services:
+        checks.extend(
+            _validate_services(
+                services,
+                expected_host,
+                expected_python,
+                label="evidence.components.services",
+                embedded=True,
+            )
+        )
+
+    expected_component_count = 3 if has_services else 2
+    expected_ok = {"doctor", "status", "services"} if has_services else {"doctor", "status"}
     ok_components = _nested(payload, "summary", "ok_components")
     failed_components = _nested(payload, "summary", "failed_components")
     checks.extend(
         [
             _check(
                 "evidence.summary.component_count",
-                _nested(payload, "summary", "component_count") == 2,
-                "expected component_count 2",
+                _nested(payload, "summary", "component_count") == expected_component_count,
+                f"expected component_count {expected_component_count}",
             ),
             _check(
                 "evidence.summary.failed_components",
@@ -328,9 +343,8 @@ def _validate_evidence(
             ),
             _check(
                 "evidence.summary.ok_components",
-                isinstance(ok_components, list)
-                and {"doctor", "status"}.issubset(set(ok_components)),
-                "expected doctor and status ok components",
+                isinstance(ok_components, list) and expected_ok.issubset(set(ok_components)),
+                f"expected {', '.join(sorted(expected_ok))} ok components",
             ),
         ]
     )
@@ -351,10 +365,15 @@ def _non_negative_int(value: Any) -> bool:
 
 
 def _validate_services(
-    payload: Any, expected_host: str | None, expected_python: str | None
+    payload: Any,
+    expected_host: str | None,
+    expected_python: str | None,
+    *,
+    label: str = "services",
+    embedded: bool = False,
 ) -> list[Check]:
     checks = [
-        _check("services.object", isinstance(payload, dict), "top-level JSON must be an object")
+        _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
     ]
     if not isinstance(payload, dict):
         return checks
@@ -362,36 +381,36 @@ def _validate_services(
     checks.extend(
         [
             _check(
-                "services.schema_version",
+                f"{label}.schema_version",
                 payload.get("schema_version") == 1,
                 "expected schema_version 1",
             ),
             _check(
-                "services.mode",
+                f"{label}.mode",
                 payload.get("mode") == "windows_services",
                 "expected mode 'windows_services'",
             ),
-            _check("services.status", payload.get("status") == "ok", "expected status 'ok'"),
+            _check(f"{label}.status", payload.get("status") == "ok", "expected status 'ok'"),
             _check(
-                "services.platform.system",
+                f"{label}.platform.system",
                 _nested(payload, "platform", "system") == "windows",
                 "expected platform.system 'windows'",
             ),
             _check(
-                "services.read_only", payload.get("read_only") is True, "expected read_only true"
+                f"{label}.read_only", payload.get("read_only") is True, "expected read_only true"
             ),
             _check(
-                "services.mutation_performed",
+                f"{label}.mutation_performed",
                 payload.get("mutation_performed") is False,
                 "expected mutation_performed false",
             ),
             _check(
-                "services.windows_v1.available",
+                f"{label}.windows_v1.available",
                 _nested(payload, "windows_v1", "available") is True,
                 "expected windows_v1.available true",
             ),
             _check(
-                "services.windows_v1.scope",
+                f"{label}.windows_v1.scope",
                 _nested(payload, "windows_v1", "scope") == "local_read_only_services",
                 "expected local_read_only_services scope",
             ),
@@ -400,7 +419,7 @@ def _validate_services(
     for key in WINDOWS_V1_FALSE_KEYS:
         checks.append(
             _check(
-                f"services.windows_v1.{key}",
+                f"{label}.windows_v1.{key}",
                 _nested(payload, "windows_v1", key) is False,
                 f"expected {key} false",
             )
@@ -408,16 +427,19 @@ def _validate_services(
     for key in SERVICES_SAFETY_FALSE_KEYS:
         checks.append(
             _check(
-                f"services.safety.{key}",
+                f"{label}.safety.{key}",
                 _nested(payload, "safety", key) is False,
                 f"expected {key} false",
             )
         )
 
+    if embedded:
+        checks.extend(_validate_embedded_services_bounds(payload, label))
+
     summary = payload.get("services")
     checks.append(
         _check(
-            "services.services.object",
+            f"{label}.services.object",
             isinstance(summary, dict) and bool(summary),
             "expected services summary object",
         )
@@ -426,7 +448,7 @@ def _validate_services(
         total = summary.get("total_count")
         checks.append(
             _check(
-                "services.services.total_count",
+                f"{label}.services.total_count",
                 _non_negative_int(total),
                 "expected non-negative integer total_count",
             )
@@ -434,20 +456,20 @@ def _validate_services(
         for key in SERVICES_STATE_COUNT_KEYS:
             checks.append(
                 _check(
-                    f"services.services.state_counts.{key}",
+                    f"{label}.services.state_counts.{key}",
                     _non_negative_int(_nested(summary, "state_counts", key)),
                     f"expected non-negative integer state_counts.{key}",
                 )
             )
         items = summary.get("items")
         checks.append(
-            _check("services.services.items", isinstance(items, list), "expected services list")
+            _check(f"{label}.services.items", isinstance(items, list), "expected services list")
         )
         limits = summary.get("collection_limits")
         truncated = _nested(summary, "collection_limits", "truncated")
         checks.append(
             _check(
-                "services.services.collection_limits",
+                f"{label}.services.collection_limits",
                 isinstance(limits, dict) and isinstance(truncated, bool),
                 "expected collection_limits with boolean truncated",
             )
@@ -464,7 +486,7 @@ def _validate_services(
             )
             checks.append(
                 _check(
-                    "services.services.truncation_consistent",
+                    f"{label}.services.truncation_consistent",
                     consistent,
                     "expected truncated=true limit metadata consistent with "
                     "max_services, total_count, and items",
@@ -475,7 +497,7 @@ def _validate_services(
     if expected_host is not None and isinstance(host, dict) and host.get("hostname") is not None:
         checks.append(
             _check(
-                "services.host.expected",
+                f"{label}.host.expected",
                 host.get("hostname") == expected_host,
                 f"expected host hostname {expected_host!r}",
             )
@@ -484,9 +506,57 @@ def _validate_services(
     if expected_python is not None and isinstance(runtime, dict) and runtime.get("version"):
         checks.append(
             _check(
-                "services.python_runtime.expected",
+                f"{label}.python_runtime.expected",
                 _python_matches(runtime.get("version"), expected_python),
                 f"expected Python version prefix or exact {expected_python!r}",
+            )
+        )
+    return checks
+
+
+def _validate_embedded_services_bounds(payload: dict[str, Any], label: str) -> list[Check]:
+    """Check the PR269 embedded services component bounded-output fields."""
+
+    limit = payload.get("limit")
+    returned = payload.get("returned_count")
+    total = payload.get("total_count")
+    truncated = payload.get("truncated")
+    checks = [
+        _check(
+            f"{label}.limit",
+            _non_negative_int(limit) and limit >= 1,
+            "expected positive integer limit",
+        ),
+        _check(
+            f"{label}.returned_count",
+            _non_negative_int(returned),
+            "expected non-negative integer returned_count",
+        ),
+        _check(
+            f"{label}.total_count",
+            _non_negative_int(total),
+            "expected non-negative integer total_count",
+        ),
+        _check(
+            f"{label}.truncated",
+            isinstance(truncated, bool),
+            "expected boolean truncated",
+        ),
+    ]
+    if (
+        _non_negative_int(limit)
+        and limit >= 1
+        and _non_negative_int(returned)
+        and _non_negative_int(total)
+        and isinstance(truncated, bool)
+    ):
+        consistent = returned <= limit and total >= returned and truncated == (total > returned)
+        checks.append(
+            _check(
+                f"{label}.bounded_consistent",
+                consistent,
+                "expected returned_count <= limit, total_count >= returned_count, "
+                "and truncated consistent with total/returned counts",
             )
         )
     return checks
@@ -502,7 +572,7 @@ def _artifact_summary(payload: Any, expected_mode: str, validated: bool) -> dict
     return artifact
 
 
-def _cross_check(evidence: Any, status: Any, doctor: Any) -> list[Check]:
+def _cross_check(evidence: Any, status: Any, doctor: Any, services: Any = None) -> list[Check]:
     checks: list[Check] = []
     if not isinstance(evidence, dict):
         return checks
@@ -538,6 +608,32 @@ def _cross_check(evidence: Any, status: Any, doctor: Any) -> list[Check]:
                 ),
             ]
         )
+    if isinstance(services, dict) and isinstance(_nested(evidence, "components", "services"), dict):
+        component = _nested(evidence, "components", "services")
+        checks.extend(
+            [
+                _check(
+                    "cross_check.services.mode",
+                    component.get("mode") == services.get("mode"),
+                    "evidence services mode differs from standalone services mode",
+                ),
+                _check(
+                    "cross_check.services.status",
+                    component.get("status") == services.get("status"),
+                    "evidence services status differs from standalone services status",
+                ),
+            ]
+        )
+        embedded_total = _nested(component, "services", "total_count")
+        standalone_total = _nested(services, "services", "total_count")
+        if _non_negative_int(embedded_total) and _non_negative_int(standalone_total):
+            checks.append(
+                _check(
+                    "cross_check.services.total_count",
+                    embedded_total == standalone_total,
+                    "evidence services total_count differs from standalone services total_count",
+                )
+            )
     return checks
 
 
@@ -590,7 +686,11 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
                 _validate_services(payloads["services"], args.expected_host, args.expected_python)
             )
 
-    checks.extend(_cross_check(payloads["evidence"], payloads["status"], payloads["doctor"]))
+    checks.extend(
+        _cross_check(
+            payloads["evidence"], payloads["status"], payloads["doctor"], payloads["services"]
+        )
+    )
 
     inputs = {
         "evidence_json": str(Path(args.evidence_json)) if args.evidence_json else None,

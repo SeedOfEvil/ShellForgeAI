@@ -38,14 +38,26 @@ use QEMU Guest Agent, or run host-management tools.
    when the process failed.
 6. Capture the normal Windows smoke artifact set:
    - `windows-evidence.json` from `shellforgeai windows evidence --json`
+   - `windows-evidence-services.json` from
+     `shellforgeai windows evidence --json --include-services --services-limit 25`
+     (PR269 opt-in bounded services component; the default bundle stays
+     doctor/status-only)
    - `windows-status.json` from `shellforgeai windows status --json`
    - `windows-doctor.json` from `shellforgeai windows doctor --json`
-   - `windows-services.json` from `shellforgeai windows services --json`
-     (PR267 standalone read-only services preview; not part of the evidence
-     bundle yet, but validated by the saved-JSON acceptance validator and
-     reported by the packet helper since PR268 via `--services-json`)
+   - `windows-services.json` from `shellforgeai windows services --json --limit 25`
+     (PR267 standalone read-only services preview; validated by the saved-JSON
+     acceptance validator and reported by the packet helper since PR268 via
+     `--services-json`)
    - optional text outputs for human-facing smoke evidence.
-7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`.
+
+   Windows smoke commands for the current lane:
+
+   ```text
+   shellforgeai windows evidence --json
+   shellforgeai windows evidence --json --include-services --services-limit 25
+   shellforgeai windows services --json --limit 25
+   ```
+7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`. PR269 validates evidence bundles that embed the opt-in services component with the same key safety expectations as the standalone services artifact; a standalone `--services-json` artifact is not required when the bundle embeds services.
 8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON, optionally including services JSON.
 9. Archive the raw JSON artifacts exactly as captured. Deterministic capture
    methods are preferred, but operators do not need to rewrite files that include
@@ -59,6 +71,16 @@ use QEMU Guest Agent, or run host-management tools.
      --status-json windows-status.json \
      --doctor-json windows-doctor.json \
      --services-json windows-services.json \
+     --expected-host WIN2025-SFAI01 \
+     --expected-python 3.14.6 \
+     --json
+   ```
+
+   Validate the include-services evidence bundle (embedded services) with:
+
+   ```bash
+   python scripts/windows_smoke_acceptance.py \
+     --evidence-json windows-evidence-services.json \
      --expected-host WIN2025-SFAI01 \
      --expected-python 3.14.6 \
      --json
@@ -141,6 +163,16 @@ registry or execution-policy changes, no secret/auth-cache reads, no
 model/network calls). Omitting `--services-json` leaves existing validator
 behavior unchanged.
 
+Since PR269, an evidence bundle that embeds the opt-in services component
+(`shellforgeai windows evidence --json --include-services`) is validated with
+the same key safety expectations as the standalone services artifact, plus the
+bounded-output fields (`limit`, `returned_count`, `total_count`, `truncated`)
+and a summary `component_count` of 3 with `services` among the ok components.
+A default doctor/status-only bundle continues to validate exactly as before,
+and a standalone `--services-json` artifact is not required when the bundle
+embeds services. When both are provided, the validator cross-checks the
+embedded and standalone services mode/status and total counts.
+
 Useful forms:
 
 ```bash
@@ -162,7 +194,13 @@ deterministic JSON and/or concise Markdown for PR handoff. When
 `--services-json` is provided, the packet includes the services artifact path,
 SHA256, size, mode, status, and total/running/stopped/unknown service counts in
 both the JSON artifact block and the Markdown artifact table plus a short
-services summary; omitting it leaves the PR266 packet behavior unchanged. It
+services summary; omitting it leaves the PR266 packet behavior unchanged. Since
+PR269, when the evidence bundle itself embeds the opt-in services component the
+packet also emits an `embedded_services` summary (mode, status, limit,
+returned/total counts, truncated flag, and running/stopped/unknown counts) in
+JSON and a short Markdown section; a standalone `--services-json` artifact is
+not required when the bundle embeds services, and when both are present the
+shared validator cross-checks their mode/status/count fields. It
 accepts UTF-8, UTF-8 with BOM, UTF-16 with BOM, and Windows PowerShell 5.1
 UTF-16LE/BOM artifacts through the shared saved-JSON validator.
 
