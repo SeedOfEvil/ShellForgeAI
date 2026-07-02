@@ -48,6 +48,10 @@ use QEMU Guest Agent, or run host-management tools.
      (PR267 standalone read-only services preview; validated by the saved-JSON
      acceptance validator and reported by the packet helper since PR268 via
      `--services-json`)
+   - optional `windows-disks.json` from `shellforgeai windows disks --json`
+     (PR270 standalone local read-only disk/root usage preview; not part of
+     the evidence bundle yet and not validated by the saved-JSON acceptance
+     validator or packet helper yet)
    - optional text outputs for human-facing smoke evidence.
 
    Windows smoke commands for the current lane:
@@ -56,6 +60,7 @@ use QEMU Guest Agent, or run host-management tools.
    shellforgeai windows evidence --json
    shellforgeai windows evidence --json --include-services --services-limit 25
    shellforgeai windows services --json --limit 25
+   shellforgeai windows disks --json
    ```
 7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`. PR269 validates evidence bundles that embed the opt-in services component with the same key safety expectations as the standalone services artifact; a standalone `--services-json` artifact is not required when the bundle embeds services.
 8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON, optionally including services JSON.

@@ -1,4 +1,4 @@
-"""Read-only Windows V1 doctor, status, evidence, and services commands."""
+"""Read-only Windows V1 doctor, status, evidence, services, and disks commands."""
 
 from __future__ import annotations
 
@@ -8,6 +8,12 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+from shellforgeai.windows_disks import (
+    DEFAULT_DISKS_LIMIT,
+    render_windows_disks_text,
+    validate_disks_limit,
+    windows_disks_payload,
+)
 from shellforgeai.windows_doctor import render_windows_doctor_text, windows_doctor_payload
 from shellforgeai.windows_evidence import (
     EVIDENCE_SERVICES_DEFAULT_LIMIT,
@@ -88,6 +94,25 @@ def register(windows_app: typer.Typer) -> None:
             return
 
         console.print(render_windows_status_text(payload))
+
+    @windows_app.command("disks")
+    def windows_disks(
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="Bounded max disk roots to report (1-64)."),
+        ] = DEFAULT_DISKS_LIMIT,
+    ) -> None:
+        try:
+            validated_limit = validate_disks_limit(limit)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--limit") from exc
+        payload = windows_disks_payload(limit=validated_limit)
+        if json_output:
+            typer.echo(json.dumps(payload, sort_keys=True))
+            return
+
+        console.print(render_windows_disks_text(payload))
 
     @windows_app.command("services")
     def windows_services(
