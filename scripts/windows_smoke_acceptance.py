@@ -67,6 +67,7 @@ DISKS_SAFETY_FALSE_KEYS = (
     "remote_execution",
     "directory_scan_performed",
     "file_scan_performed",
+    "disk_mutation_performed",
     "service_restart_executed",
     "process_termination_executed",
     "registry_modified",

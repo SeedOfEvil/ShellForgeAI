@@ -66,6 +66,13 @@ def _services_counts(path_value: str) -> dict[str, Any]:
     return counts
 
 
+DISK_SAFETY_KEYS = (
+    "directory_scan_performed",
+    "file_scan_performed",
+    "disk_mutation_performed",
+)
+
+
 def _disks_counts(path_value: str) -> dict[str, Any]:
     counts: dict[str, Any] = {
         "total_roots": None,
@@ -74,6 +81,7 @@ def _disks_counts(path_value: str) -> dict[str, Any]:
         "unavailable_roots": None,
         "limit": None,
         "truncated": None,
+        "disk_safety": {key: None for key in DISK_SAFETY_KEYS},
     }
     payload, _ = acceptance._read_json_file(Path(path_value), "disks")
     summary = payload.get("summary") if isinstance(payload, dict) else None
@@ -84,6 +92,10 @@ def _disks_counts(path_value: str) -> dict[str, Any]:
     if isinstance(collection, dict):
         counts["limit"] = collection.get("limit")
         counts["truncated"] = collection.get("truncated")
+    safety = payload.get("safety") if isinstance(payload, dict) else None
+    if isinstance(safety, dict):
+        for key in DISK_SAFETY_KEYS:
+            counts["disk_safety"][key] = safety.get(key)
     return counts
 
 
@@ -309,6 +321,17 @@ def render_markdown(packet: dict[str, Any]) -> str:
             if isinstance(value, bool):
                 value = str(value).lower()
             lines.append(f"- {label}: {value if value is not None else 'not available'}")
+        disk_safety = disks.get("disk_safety")
+        if isinstance(disk_safety, dict):
+            for label, key in (
+                ("Directory scan performed", "directory_scan_performed"),
+                ("File scan performed", "file_scan_performed"),
+                ("Disk mutation performed", "disk_mutation_performed"),
+            ):
+                value = disk_safety.get(key)
+                if isinstance(value, bool):
+                    value = str(value).lower()
+                lines.append(f"- {label}: {value if value is not None else 'not available'}")
         lines.append(
             "- Unavailable roots are accepted only when sanitized as safe disk usage "
             "failures (for example `disk_usage_failed`), never tracebacks."

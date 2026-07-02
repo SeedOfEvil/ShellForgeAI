@@ -218,7 +218,13 @@ returned <= total, truncation consistency, and a disks list bounded by the
 limit), and the full disks safety-flag set (no PowerShell/WinRM/remote
 execution, no directory or file scanning, no disk mutation/mount/format flags
 when present, no registry or execution-policy changes, no secret/auth-cache
-reads, no model/network calls). Unavailable roots are accepted only when they
+reads, no model/network calls). Since PR273, disks artifacts (standalone and
+embedded) must also carry the explicit `disk_mutation_performed=false` safety
+flag alongside `directory_scan_performed=false` and `file_scan_performed=false`;
+legacy artifacts missing the key fail strict validation with a clear per-key
+check name. PR273 is safety-schema normalization only: no new disk collection,
+no directory/file scan, no disk mutation, and no PowerShell/WinRM/remoting.
+Unavailable roots are accepted only when they
 are sanitized as safe disk usage failures (for example
 `{"status": "unavailable", "error": "disk_usage_failed"}`); tracebacks or raw
 exception detail fields fail validation, while sanitized unavailable roots do
@@ -270,7 +276,11 @@ path, SHA256, byte size, mode, status, and the safe disk summary fields
 (total/returned/available/unavailable root counts, limit, truncated) in both
 the JSON artifact block and the Markdown artifact table plus a short disks
 summary noting that unavailable roots are accepted only when sanitized as safe
-disk usage failures; omitting it leaves existing packet behavior unchanged. Since
+disk usage failures; since PR273 the disks summary also reports the explicit
+disk safety flags (`directory_scan_performed`, `file_scan_performed`,
+`disk_mutation_performed`) from the saved artifact, and validation fails when
+a PR273+ disks artifact carries unsafe or missing disk safety flags. Omitting
+`--disks-json` leaves existing packet behavior unchanged. Since
 PR269, when the evidence bundle itself embeds the opt-in services component the
 packet also emits an `embedded_services` summary (mode, status, limit,
 returned/total counts, truncated flag, and running/stopped/unknown counts) in
