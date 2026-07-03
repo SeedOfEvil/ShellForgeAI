@@ -4,7 +4,7 @@ import contextlib
 import subprocess
 from pathlib import Path
 
-from shellforgeai.llm.codex import CodexProvider
+from shellforgeai.llm.codex import CodexProvider, _format_human_value
 from shellforgeai.llm.schemas import ModelRequest
 
 
@@ -38,6 +38,16 @@ def _fake_popen(captured: dict, returncode: int = 0, stdout: str = "", stderr: s
             pass
 
     return FakePopen
+
+
+def test_human_value_formatting_does_not_repr_escape_windows_paths():
+    resolved = r"C:\Tools\ShellForgeAI\bin\codex.cmd"
+
+    formatted = _format_human_value(resolved)
+
+    assert formatted == f"'{resolved}'"
+    assert "\\\\" not in formatted
+    assert _format_human_value(None) == "'<unresolved>'"
 
 
 def test_plain_codex_resolves_mixed_case_cmd_for_doctor_and_complete(monkeypatch, tmp_path):

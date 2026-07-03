@@ -27,10 +27,11 @@ def _redact(text: str) -> str:
     return "\n".join(out)
 
 
-def _human_quoted(value: str | None) -> str:
+def _format_human_value(value: str | None) -> str:
+    """Quote a human-facing provider value without repr-style path escaping."""
     if value is None:
         return "'<unresolved>'"
-    return f"'{value}'"
+    return f"'{str(value)}'"
 
 
 class CodexProvider:
@@ -82,8 +83,8 @@ class CodexProvider:
     def _provider_unavailable_error(self, reason: str, resolved: str | None = None) -> str:
         return (
             "codex provider unavailable: "
-            f"configured_binary={_human_quoted(self.binary)}; "
-            f"resolved_binary={_human_quoted(resolved)}; "
+            f"configured_binary={_format_human_value(self.binary)}; "
+            f"resolved_binary={_format_human_value(resolved)}; "
             f"reason={reason}; run: shellforgeai model doctor --json"
         )
 
