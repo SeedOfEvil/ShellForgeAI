@@ -421,12 +421,27 @@ def _validate_evidence(
         )
         checks.extend(_validate_embedded_disks_block(payload, disks))
 
-    expected_component_count = 2 + int(has_services) + int(has_disks)
+    processes = _nested(payload, "components", "processes")
+    has_processes = isinstance(components, dict) and "processes" in components
+    if has_processes:
+        checks.extend(
+            _validate_processes(
+                processes,
+                expected_host,
+                expected_python,
+                label="evidence.components.processes",
+            )
+        )
+        checks.extend(_validate_embedded_processes_block(payload, processes))
+
+    expected_component_count = 2 + int(has_services) + int(has_disks) + int(has_processes)
     expected_ok = {"doctor", "status"}
     if has_services:
         expected_ok.add("services")
     if has_disks:
         expected_ok.add("disks")
+    if has_processes:
+        expected_ok.add("processes")
     ok_components = _nested(payload, "summary", "ok_components")
     failed_components = _nested(payload, "summary", "failed_components")
     checks.extend(
@@ -743,6 +758,44 @@ def _validate_embedded_disks_block(payload: dict[str, Any], component: Any) -> l
                 consistent,
                 "expected embedded_disks limit/returned_roots/total_roots/truncated "
                 "to match the embedded disks component",
+            )
+        )
+    return checks
+
+
+def _validate_embedded_processes_block(payload: dict[str, Any], component: Any) -> list[Check]:
+    """Check the optional top-level PR276 embedded_processes summary block."""
+
+    block = payload.get("embedded_processes")
+    if block is None:
+        return []
+    checks = [
+        _check(
+            "evidence.embedded_processes.object",
+            isinstance(block, dict),
+            "expected embedded_processes object",
+        )
+    ]
+    if not isinstance(block, dict):
+        return checks
+    checks.append(
+        _check(
+            "evidence.embedded_processes.included",
+            block.get("included") is True,
+            "expected embedded_processes.included true",
+        )
+    )
+    if isinstance(component, dict):
+        consistent = all(
+            block.get(key) == component.get(key)
+            for key in ("limit", "returned_count", "total_count", "truncated")
+        )
+        checks.append(
+            _check(
+                "evidence.embedded_processes.consistent",
+                consistent,
+                "expected embedded_processes limit/returned_count/total_count/truncated "
+                "to match the embedded processes component",
             )
         )
     return checks
@@ -1240,7 +1293,12 @@ def _artifact_summary(payload: Any, expected_mode: str, validated: bool) -> dict
 
 
 def _cross_check(
-    evidence: Any, status: Any, doctor: Any, services: Any = None, disks: Any = None
+    evidence: Any,
+    status: Any,
+    doctor: Any,
+    services: Any = None,
+    disks: Any = None,
+    processes: Any = None,
 ) -> list[Check]:
     checks: list[Check] = []
     if not isinstance(evidence, dict):
@@ -1329,6 +1387,29 @@ def _cross_check(
                     "evidence disks total_roots differs from standalone disks total_roots",
                 )
             )
+    if isinstance(processes, dict) and isinstance(
+        _nested(evidence, "components", "processes"), dict
+    ):
+        component = _nested(evidence, "components", "processes")
+        checks.extend(
+            [
+                _check(
+                    "cross_check.processes.mode",
+                    component.get("mode") == processes.get("mode"),
+                    "evidence processes mode differs from standalone processes mode",
+                ),
+                _check(
+                    "cross_check.processes.status",
+                    component.get("status") == processes.get("status"),
+                    "evidence processes status differs from standalone processes status",
+                ),
+                _check(
+                    "cross_check.processes.method",
+                    component.get("method") == processes.get("method"),
+                    "evidence processes method differs from standalone processes method",
+                ),
+            ]
+        )
     return checks
 
 
@@ -1413,6 +1494,7 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
             payloads["doctor"],
             payloads["services"],
             payloads["disks"],
+            payloads["processes"],
         )
     )
 
