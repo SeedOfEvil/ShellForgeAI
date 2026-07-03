@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -52,29 +53,57 @@ class CodexProvider:
         self.skip_git_repo_check = skip_git_repo_check
         self.allow_fallback = allow_fallback
         self.approval = approval
+        self._resolved_binary: str | None = None
+
+    def _resolve_binary(self) -> str | None:
+        """Resolve the configured Codex executable once for subprocess launches."""
+        if self._resolved_binary is not None:
+            return self._resolved_binary
+        resolved = shutil.which(self.binary)
+        if resolved is not None:
+            self._resolved_binary = resolved
+            return resolved
+        if os.path.isabs(self.binary) or any(
+            sep and sep in self.binary for sep in (os.sep, os.altsep)
+        ):
+            path = Path(self.binary)
+            if path.is_file():
+                self._resolved_binary = str(path)
+                return self._resolved_binary
+        return None
+
+    def _provider_unavailable_error(self, reason: str, resolved: str | None = None) -> str:
+        resolved_part = resolved if resolved is not None else "unresolved"
+        return (
+            "codex provider unavailable: "
+            f"configured_binary={self.binary!r}; resolved_binary={resolved_part!r}; "
+            f"reason={reason}; run: shellforgeai model doctor --json"
+        )
 
     def available(self) -> tuple[bool, str]:
-        if shutil.which(self.binary) is None:
-            return False, "codex CLI not found on PATH"
+        if self._resolve_binary() is None:
+            return False, self._provider_unavailable_error("codex executable not found")
         auth_cache = Path.home() / ".codex" / "auth.json"
         if not auth_cache.exists():
             return False, "codex auth cache missing"
         return True, "ok"
 
     def doctor(self) -> dict[str, str | bool]:
-        found = shutil.which(self.binary)
+        found = self._resolve_binary()
         auth_cache = Path.home() / ".codex" / "auth.json"
         version = "unknown"
         if found:
             try:
                 r = subprocess.run(
-                    [self.binary, "--version"],
+                    [found, "--version"],
                     capture_output=True,
                     text=True,
                     timeout=10,
                     stdin=subprocess.DEVNULL,
                 )
                 version = (r.stdout or r.stderr).strip() or "unknown"
+            except (FileNotFoundError, OSError):
+                version = "unknown"
             except Exception:
                 version = "unknown"
         auth_cache_present = auth_cache.exists()
@@ -91,7 +120,8 @@ class CodexProvider:
             "provider": self.name,
             "model": self.default_model,
             "fallback_model": self.fallback_model,
-            "codex_binary": found or self.binary,
+            "codex_binary": self.binary,
+            "codex_resolved_binary": found or "",
             "codex_found": bool(found),
             "codex_version": version,
             "auth_cache_present": auth_cache_present,
@@ -134,7 +164,10 @@ class CodexProvider:
         Global options must precede ``exec``; ``--ask-for-approval`` and
         ``--sandbox`` are global.
         """
-        cmd = [self.binary, "--sandbox", self.sandbox, "--ask-for-approval", self.approval]
+        resolved = self._resolve_binary()
+        if resolved is None:
+            raise FileNotFoundError(self._provider_unavailable_error("codex executable not found"))
+        cmd = [resolved, "--sandbox", self.sandbox, "--ask-for-approval", self.approval]
         if model:
             cmd.extend(["-m", model])
         cmd.append("exec")
@@ -223,19 +256,30 @@ class CodexProvider:
     def complete(self, request: ModelRequest) -> ModelResponse:
         started = time.monotonic()
         warnings: list[str] = []
-        if shutil.which(self.binary) is None:
+        resolved = self._resolve_binary()
+        if resolved is None:
             return ModelResponse(
                 provider=self.name,
                 model=request.model,
                 text="",
                 ok=False,
-                error="codex CLI not found on PATH; install Codex CLI",
+                error=self._provider_unavailable_error("codex executable not found", resolved),
                 duration_ms=int((time.monotonic() - started) * 1000),
                 raw={"stderr": ""},
             )
         try:
             rc, out, err, last_message, cmd = self._run(
                 request.prompt, request.model or self.default_model, request.timeout_seconds
+            )
+        except (FileNotFoundError, OSError) as exc:
+            return ModelResponse(
+                provider=self.name,
+                model=request.model,
+                text="",
+                ok=False,
+                error=self._provider_unavailable_error(exc.__class__.__name__, resolved),
+                duration_ms=int((time.monotonic() - started) * 1000),
+                raw={"stderr": ""},
             )
         except subprocess.TimeoutExpired as exc:
             return ModelResponse(
@@ -259,9 +303,20 @@ class CodexProvider:
             and model_used != self.fallback_model
             and "model" in (err + out).lower()
         ):
-            rc, out, err, last_message, cmd = self._run(
-                request.prompt, self.fallback_model, request.timeout_seconds
-            )
+            try:
+                rc, out, err, last_message, cmd = self._run(
+                    request.prompt, self.fallback_model, request.timeout_seconds
+                )
+            except (FileNotFoundError, OSError) as exc:
+                return ModelResponse(
+                    provider=self.name,
+                    model=request.model,
+                    text="",
+                    ok=False,
+                    error=self._provider_unavailable_error(exc.__class__.__name__, resolved),
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    raw={"stderr": ""},
+                )
             model_used = self.fallback_model
             warnings.append(
                 f"{request.model or self.default_model} was unavailable through Codex; "
