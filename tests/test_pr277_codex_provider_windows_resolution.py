@@ -74,7 +74,11 @@ def test_configured_codex_cmd_and_absolute_path_work(monkeypatch, tmp_path):
     abs_cmd = tmp_path / "bin" / "codex.cmd"
     abs_cmd.parent.mkdir()
     abs_cmd.write_text("fake")
-    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda binary: None)
+
+    def fail_which(binary):
+        raise AssertionError("absolute usable paths should not need PATH lookup")
+
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", fail_which)
     provider = CodexProvider(binary=str(abs_cmd))
     assert provider._build_cmd("hi", "gpt-5.5", None)[0] == str(abs_cmd)
 
@@ -141,3 +145,51 @@ def test_linux_style_resolution_still_uses_shutil_which_path(monkeypatch, tmp_pa
     assert response.ok
     assert captured["cmds"][0][0] == resolved
     assert all(kwargs.get("shell") is not True for kwargs in captured["kwargs"])
+
+
+def test_resolution_is_cached_between_doctor_and_complete(monkeypatch, tmp_path):
+    first = str(tmp_path / "codex.CMD")
+    second = str(tmp_path / "other.cmd")
+    calls = {"which": 0, "run_cmds": []}
+    captured: dict = {}
+
+    def fake_which(binary):
+        calls["which"] += 1
+        return first if calls["which"] == 1 else second
+
+    def fake_run(cmd, **kwargs):
+        calls["run_cmds"].append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="codex 0.130.0\n", stderr="")
+
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", fake_which)
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.Popen", _fake_popen(captured))
+
+    provider = CodexProvider(binary="codex")
+    info = provider.doctor()
+    response = provider.complete(_request())
+
+    assert info["codex_resolved_binary"] == first
+    assert calls["run_cmds"][0][0] == first
+    assert captured["cmds"][0][0] == first
+    assert calls["which"] == 1
+    assert response.ok
+
+
+def test_missing_binary_doctor_does_not_launch_or_read_auth_cache_contents(monkeypatch):
+    monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda binary: None)
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("doctor should not launch subprocess when binary is missing")
+
+    def fail_read_text(self, *args, **kwargs):
+        raise AssertionError("provider must not read auth-cache contents")
+
+    monkeypatch.setattr("subprocess.run", fail_run)
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    info = CodexProvider(binary="codex").doctor()
+
+    assert info["codex_found"] is False
+    assert info["auth_readiness"] == "missing_binary"
+    assert info["codex_resolved_binary"] == ""

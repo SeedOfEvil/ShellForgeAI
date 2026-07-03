@@ -55,21 +55,22 @@ class CodexProvider:
         self.approval = approval
         self._resolved_binary: str | None = None
 
+    def _has_path_separator(self) -> bool:
+        return any(sep in self.binary for sep in {"/", "\\", os.sep, os.altsep} if sep)
+
     def _resolve_binary(self) -> str | None:
         """Resolve the configured Codex executable once for subprocess launches."""
         if self._resolved_binary is not None:
             return self._resolved_binary
-        resolved = shutil.which(self.binary)
-        if resolved is not None:
-            self._resolved_binary = resolved
-            return resolved
-        if os.path.isabs(self.binary) or any(
-            sep and sep in self.binary for sep in (os.sep, os.altsep)
-        ):
+        if os.path.isabs(self.binary) or self._has_path_separator():
             path = Path(self.binary)
             if path.is_file():
                 self._resolved_binary = str(path)
                 return self._resolved_binary
+        resolved = shutil.which(self.binary)
+        if resolved is not None:
+            self._resolved_binary = resolved
+            return resolved
         return None
 
     def _provider_unavailable_error(self, reason: str, resolved: str | None = None) -> str:
