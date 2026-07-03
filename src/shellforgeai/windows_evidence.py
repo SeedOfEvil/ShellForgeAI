@@ -4,9 +4,12 @@ The PR264 bundle reuses the existing Windows doctor and status payload builders.
 PR269 adds an explicit, bounded, opt-in services component that reuses the
 existing PR267 read-only services payload builder. PR272 adds an explicit,
 bounded, opt-in disks component that reuses the existing PR270 read-only disks
-payload builder. The bundle does not add probes, execute commands, use
-remoting, control or configure services, scan directories or files, mutate
-disks, open network connections, read credential caches, write files, or
+payload builder. PR276 adds an explicit, bounded, opt-in processes component
+that reuses the existing PR274 read-only processes payload builder. The bundle
+does not add probes, execute commands, use remoting, control or configure
+services, scan directories or files, mutate disks, terminate/control
+processes, read process command lines, environments, memory, handles, modules,
+or owners, map network connections, read credential caches, write files, or
 mutate host state.
 """
 
@@ -23,17 +26,21 @@ from shellforgeai.windows_disks import (
     windows_disks_payload,
 )
 from shellforgeai.windows_doctor import windows_doctor_payload
+from shellforgeai.windows_processes import MAX_PROCESSES_LIMIT, windows_processes_payload
 from shellforgeai.windows_services import DEFAULT_MAX_SERVICES, windows_services_payload
 from shellforgeai.windows_status import windows_status_payload
 
 WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND = "shellforgeai windows status --json"
 WINDOWS_EVIDENCE_DISKS_NEXT_SAFE_COMMAND = "shellforgeai windows disks --json"
+WINDOWS_EVIDENCE_PROCESSES_NEXT_SAFE_COMMAND = "shellforgeai windows processes --json --limit 10"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
 
 EVIDENCE_SERVICES_DEFAULT_LIMIT = 25
 EVIDENCE_SERVICES_MAX_LIMIT = DEFAULT_MAX_SERVICES
 EVIDENCE_DISKS_DEFAULT_LIMIT = DEFAULT_DISKS_LIMIT
 EVIDENCE_DISKS_MAX_LIMIT = MAX_DISKS_LIMIT
+EVIDENCE_PROCESSES_DEFAULT_LIMIT = 25
+EVIDENCE_PROCESSES_MAX_LIMIT = MAX_PROCESSES_LIMIT
 
 _NOT_COLLECTED_PR264 = {
     "powershell_version": "not collected because PR264 does not execute PowerShell",
@@ -83,6 +90,30 @@ _NOT_COLLECTED_PR272 = {
     "disk_repair": "not available because PR272 is read-only",
 }
 
+_EVIDENCE_PROCESSES_SAFETY = {
+    "process_control_executed": False,
+    "process_config_modified": False,
+    "process_memory_read": False,
+    "process_command_line_read": False,
+    "process_environment_read": False,
+    "process_handles_read": False,
+    "process_modules_read": False,
+    "process_owner_read": False,
+}
+
+_NOT_COLLECTED_PR276 = {
+    "command_line": (
+        "not collected because PR276 reuses the bounded PR274 preview and does not "
+        "inspect process command lines"
+    ),
+    "environment": "not collected because PR276 does not inspect process environments",
+    "memory": "not collected because PR276 does not inspect process memory",
+    "handles": "not collected because PR276 does not inspect process handles",
+    "modules": "not collected because PR276 does not enumerate modules",
+    "owner_user": "not collected because PR276 does not inspect process owners/users/tokens",
+    "network_connections": "not collected because PR276 does not map network connections",
+}
+
 _UNSUPPORTED_SAFETY_KEYS = (
     "read_only",
     "mutation_performed",
@@ -101,6 +132,7 @@ _UNSUPPORTED_SAFETY_KEYS = (
 PayloadBuilder = Callable[[PlatformInfo], dict[str, Any]]
 ServicesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 DisksBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
+ProcessesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 
 
 def validate_evidence_services_limit(value: Any) -> int:
@@ -127,12 +159,29 @@ def validate_evidence_disks_limit(value: Any) -> int:
     return value
 
 
+def validate_evidence_processes_limit(value: Any) -> int:
+    """Validate the opt-in bundled processes limit as a bounded positive integer."""
+
+    message = (
+        f"processes limit must be a positive integer between 1 and {EVIDENCE_PROCESSES_MAX_LIMIT}"
+    )
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(message)
+    if value < 1 or value > EVIDENCE_PROCESSES_MAX_LIMIT:
+        raise ValueError(message)
+    return value
+
+
 def _default_services_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
     return windows_services_payload(info, max_services=limit)
 
 
 def _default_disks_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
     return windows_disks_payload(info, limit=limit)
+
+
+def _default_processes_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
+    return windows_processes_payload(info, limit=limit)
 
 
 def _embedded_services_component(payload: dict[str, Any], limit: int) -> dict[str, Any]:
@@ -169,6 +218,22 @@ def _embedded_disks_component(payload: dict[str, Any], limit: int) -> dict[str, 
     return component
 
 
+def _embedded_processes_component(payload: dict[str, Any], limit: int) -> dict[str, Any]:
+    """Wrap the reused PR274 processes payload with explicit bounded-output fields.
+
+    A swallowed enumeration failure in the reused payload keeps status "ok" in
+    the standalone command; the bundle reports it honestly as a failed component.
+    """
+
+    component = dict(payload)
+    component["limit"] = limit
+    state = payload.get("state")
+    if isinstance(state, dict) and state.get("enumeration_failed"):
+        component["status"] = "error"
+        component["reason"] = "process_enumeration_failed"
+    return component
+
+
 def _component_summary(components: dict[str, dict[str, Any]]) -> dict[str, Any]:
     ok_components = [name for name, payload in components.items() if payload.get("status") == "ok"]
     failed_components = [
@@ -192,6 +257,9 @@ def windows_evidence_payload(
     include_disks: bool = False,
     disks_limit: int | None = None,
     disks_builder: DisksBuilder = _default_disks_builder,
+    include_processes: bool = False,
+    processes_limit: int | None = None,
+    processes_builder: ProcessesBuilder = _default_processes_builder,
 ) -> dict[str, Any]:
     """Build the Windows evidence bundle payload.
 
@@ -200,7 +268,9 @@ def windows_evidence_payload(
     limit, and built by reusing the existing PR267 read-only services payload.
     Disks are included only when ``include_disks`` is explicitly requested,
     bounded by a validated limit, and built by reusing the existing PR270
-    read-only disks payload.
+    read-only disks payload. Processes are included only when
+    ``include_processes`` is explicitly requested, bounded by a validated
+    limit, and built by reusing the existing PR274 read-only processes payload.
     """
 
     info = info or detect_platform()
@@ -241,6 +311,27 @@ def windows_evidence_payload(
         }
         safety.update(_EVIDENCE_DISKS_SAFETY)
         next_safe_command = WINDOWS_EVIDENCE_DISKS_NEXT_SAFE_COMMAND
+    embedded_processes: dict[str, Any] | None = None
+    if include_processes:
+        bounded_processes_limit = validate_evidence_processes_limit(
+            EVIDENCE_PROCESSES_DEFAULT_LIMIT if processes_limit is None else processes_limit
+        )
+        processes_component = _embedded_processes_component(
+            processes_builder(info, bounded_processes_limit), bounded_processes_limit
+        )
+        components["processes"] = processes_component
+        embedded_processes = {
+            "included": True,
+            "limit": bounded_processes_limit,
+            "returned_count": processes_component.get("returned_count", 0),
+            "total_count": processes_component.get("total_count", 0),
+            "truncated": bool(processes_component.get("truncated", False)),
+        }
+        not_collected["processes"] = (
+            "included as an explicit opt-in bounded component via --include-processes"
+        )
+        safety.update(_EVIDENCE_PROCESSES_SAFETY)
+        next_safe_command = WINDOWS_EVIDENCE_PROCESSES_NEXT_SAFE_COMMAND
     summary = _component_summary(components)
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -265,6 +356,9 @@ def windows_evidence_payload(
     if embedded_disks is not None:
         payload["embedded_disks"] = embedded_disks
         payload["not_collected_in_pr272"] = dict(_NOT_COLLECTED_PR272)
+    if embedded_processes is not None:
+        payload["embedded_processes"] = embedded_processes
+        payload["not_collected_in_pr276"] = dict(_NOT_COLLECTED_PR276)
     return payload
 
 
@@ -337,6 +431,16 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
             f"limit={disks_component.get('limit', 0)}; "
             f"truncated={str(disks_component.get('truncated', False)).lower()}"
         )
+    processes_component = components.get("processes") if isinstance(components, dict) else None
+    if isinstance(processes_component, dict):
+        lines.append(
+            "Processes component: "
+            f"status={processes_component.get('status', 'unknown')}; "
+            f"returned={processes_component.get('returned_count', 0)}; "
+            f"total={processes_component.get('total_count', 0)}; "
+            f"limit={processes_component.get('limit', 0)}; "
+            f"truncated={str(processes_component.get('truncated', False)).lower()}"
+        )
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows evidence bundle is unavailable.")))
     pending = [
@@ -350,6 +454,8 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
     ]
     if isinstance(services_component, dict):
         pending.remove("services")
+    if isinstance(processes_component, dict):
+        pending.remove("processes")
     lines.append("Not collected yet: " + ", ".join(pending) + ".")
     lines.append(
         f"Next safe command: {payload.get('next_safe_command', UNSUPPORTED_NEXT_SAFE_COMMAND)}"

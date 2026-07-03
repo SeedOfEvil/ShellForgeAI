@@ -17,9 +17,11 @@ from shellforgeai.windows_disks import (
 from shellforgeai.windows_doctor import render_windows_doctor_text, windows_doctor_payload
 from shellforgeai.windows_evidence import (
     EVIDENCE_DISKS_DEFAULT_LIMIT,
+    EVIDENCE_PROCESSES_DEFAULT_LIMIT,
     EVIDENCE_SERVICES_DEFAULT_LIMIT,
     render_windows_evidence_text,
     validate_evidence_disks_limit,
+    validate_evidence_processes_limit,
     validate_evidence_services_limit,
     windows_evidence_payload,
 )
@@ -73,6 +75,20 @@ def register(windows_app: typer.Typer) -> None:
                 help="Bounded max disk roots in the opt-in disks component (1-64).",
             ),
         ] = None,
+        include_processes: Annotated[
+            bool,
+            typer.Option(
+                "--include-processes",
+                help="Opt in to a bounded read-only processes component in the bundle.",
+            ),
+        ] = False,
+        processes_limit: Annotated[
+            int | None,
+            typer.Option(
+                "--processes-limit",
+                help="Bounded max processes in the opt-in processes component (1-200).",
+            ),
+        ] = None,
     ) -> None:
         kwargs: dict[str, Any] = {}
         if include_services:
@@ -100,6 +116,19 @@ def register(windows_app: typer.Typer) -> None:
             raise typer.BadParameter(
                 "--disks-limit requires --include-disks",
                 param_hint="--disks-limit",
+            )
+        if include_processes:
+            try:
+                kwargs["processes_limit"] = validate_evidence_processes_limit(
+                    EVIDENCE_PROCESSES_DEFAULT_LIMIT if processes_limit is None else processes_limit
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--processes-limit") from exc
+            kwargs["include_processes"] = True
+        elif processes_limit is not None:
+            raise typer.BadParameter(
+                "--processes-limit requires --include-processes",
+                param_hint="--processes-limit",
             )
         payload = windows_evidence_payload(**kwargs)
         if json_output:

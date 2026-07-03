@@ -171,6 +171,28 @@ def _embedded_disks_summary(evidence_path: str) -> dict[str, Any] | None:
     return summary
 
 
+def _embedded_processes_summary(evidence_path: str) -> dict[str, Any] | None:
+    """Summarize the opt-in PR276 processes component embedded in the evidence bundle."""
+
+    payload, _ = acceptance._read_json_file(Path(evidence_path), "evidence")
+    component = None
+    if isinstance(payload, dict):
+        components = payload.get("components")
+        if isinstance(components, dict):
+            component = components.get("processes")
+    if not isinstance(component, dict):
+        return None
+    return {
+        "mode": component.get("mode"),
+        "status": component.get("status"),
+        "method": component.get("method"),
+        "limit": component.get("limit"),
+        "returned_count": component.get("returned_count"),
+        "total_count": component.get("total_count"),
+        "truncated": component.get("truncated"),
+    }
+
+
 def _windows_summary(args: argparse.Namespace, validator: dict[str, Any]) -> dict[str, Any]:
     evidence_path = validator.get("inputs", {}).get("evidence_json")
     host = args.expected_host
@@ -215,6 +237,9 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
     embedded_disks = _embedded_disks_summary(args.evidence_json)
     if embedded_disks is not None:
         packet["embedded_disks"] = embedded_disks
+    embedded_processes = _embedded_processes_summary(args.evidence_json)
+    if embedded_processes is not None:
+        packet["embedded_processes"] = embedded_processes
     services_json = getattr(args, "services_json", None)
     if services_json:
         services_artifact = _artifact(services_json, artifacts.get("services", {}))
@@ -315,6 +340,26 @@ def render_markdown(packet: dict[str, Any]) -> str:
             if isinstance(value, bool):
                 value = str(value).lower()
             lines.append(f"- {label}: {value if value is not None else 'not available'}")
+    embedded_processes = packet.get("embedded_processes")
+    if embedded_processes is not None:
+        lines.extend(["", "## Embedded processes component", ""])
+        for label, key in (
+            ("Mode", "mode"),
+            ("Status", "status"),
+            ("Method", "method"),
+            ("Limit", "limit"),
+            ("Returned processes", "returned_count"),
+            ("Total processes", "total_count"),
+            ("Truncated", "truncated"),
+        ):
+            value = embedded_processes.get(key)
+            if isinstance(value, bool):
+                value = str(value).lower()
+            lines.append(f"- {label}: {value if value is not None else 'not available'}")
+        lines.append(
+            "- Command lines, environments, memory, handles, modules, owners/users, "
+            "and network connections were not collected."
+        )
     services = packet["artifacts"].get("services_json")
     if services is not None:
         lines.extend(["", "## Services summary", ""])

@@ -4,6 +4,35 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Windows evidence bundle opt-in processes component (PR276)
+
+- `shellforgeai windows evidence` now supports an explicit, bounded, opt-in
+  processes component via `--include-processes [--processes-limit N]`. The
+  default bundle remains doctor/status-only (`component_count=2`); with
+  `--include-processes` the bundle embeds the existing PR274 read-only
+  processes payload (`mode=windows_processes`, `status=ok`) with a
+  conservative default limit of 25 (validated range 1-200, matching the
+  standalone processes bounds). `--processes-limit` is valid only with
+  `--include-processes`; invalid limits fail cleanly with nonzero exit.
+  Services (PR269) and disks (PR272) opt-in behavior is unchanged, and
+  services, disks, and processes can be combined (`component_count=5`).
+- The bundle reports an explicit top-level `embedded_processes` summary block,
+  `not_collected_in_pr276` notes, and processes-specific safety flags, and it
+  surfaces embedded process-enumeration failures honestly in
+  `summary.failed_components`. The embedded component reuses the PR274 payload
+  only: no new process collection, no command lines, no environments, no
+  memory reads, no handles/modules/owners/users/tokens, no network connection
+  mapping, no process termination/control, no PowerShell, no WinRM/remoting,
+  and no cleanup/remediation/rollback/recovery. Linux/Docker hosts return
+  structured unsupported output without probing processes.
+- `scripts/windows_smoke_acceptance.py` validates evidence bundles with the
+  embedded processes component (same key safety expectations and per-item
+  field allowlist as standalone `windows-processes.json`, bounded fields,
+  `embedded_processes` block consistency, and embedded-vs-standalone
+  cross-checks), and `scripts/windows_smoke_packet.py` summarizes the embedded
+  processes component in JSON and Markdown. Standalone `--processes-json`
+  support from PR275 remains valid.
+
 ### Windows disks safety-flag normalization (PR273)
 
 - Normalized the Windows disks safety schema so the standalone
