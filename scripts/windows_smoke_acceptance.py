@@ -100,6 +100,48 @@ DISKS_MIN_LIMIT = 1
 DISKS_MAX_LIMIT = 64
 _SANITIZED_DISK_ERROR_RE = re.compile(r"[a-z0-9_]{1,64}")
 _UNAVAILABLE_DISK_ITEM_KEYS = frozenset({"root", "status", "error"})
+PROCESSES_SAFETY_FALSE_KEYS = (
+    "powershell_executed",
+    "winrm_used",
+    "remote_execution",
+    "process_termination_executed",
+    "process_control_executed",
+    "process_config_modified",
+    "process_memory_read",
+    "process_command_line_read",
+    "process_environment_read",
+    "process_handles_read",
+    "process_modules_read",
+    "process_owner_read",
+    "service_restart_executed",
+    "registry_modified",
+    "execution_policy_modified",
+    "software_install_executed",
+    "cleanup_executed",
+    "remediation_executed",
+    "rollback_executed",
+    "recovery_executed",
+    "natural_language_execution",
+    "shell_true",
+    "arbitrary_command_execution",
+    "secret_read",
+    "auth_cache_read",
+    "model_called",
+    "network_call",
+)
+PROCESSES_MIN_LIMIT = 1
+PROCESSES_MAX_LIMIT = 200
+PROCESSES_METHOD = "ctypes_toolhelp32_snapshot"
+_ALLOWED_PROCESS_ITEM_KEYS = frozenset({"pid", "parent_pid", "name", "thread_count"})
+PROCESSES_NOT_COLLECTED_PR274_KEYS = (
+    "command_line",
+    "environment",
+    "memory",
+    "handles",
+    "modules",
+    "owner_user",
+    "network_connections",
+)
 WINDOWS_V1_FALSE_KEYS = ("powershell_executed", "winrm_used", "remote_execution")
 NOT_COLLECTED_PR264_KEYS = (
     "powershell_version",
@@ -974,6 +1016,219 @@ def _validate_disks(
     return checks
 
 
+def _process_item_checks(item: Any, label: str) -> list[Check]:
+    if not isinstance(item, dict):
+        return [_check(f"{label}.object", False, "expected process item object")]
+    extra_keys = set(item) - _ALLOWED_PROCESS_ITEM_KEYS
+    checks = [
+        _check(
+            f"{label}.allowed_fields_only",
+            not extra_keys,
+            "process item must carry only pid/parent_pid/name/thread_count, never "
+            "command lines, environments, memory, handles, modules, owners/users, "
+            "network connections, or executable paths: "
+            f"{', '.join(sorted(extra_keys))}",
+        )
+    ]
+    for key in ("pid", "parent_pid", "thread_count"):
+        checks.append(
+            _check(
+                f"{label}.{key}",
+                _non_negative_int(item.get(key)),
+                f"expected non-negative integer {key}",
+            )
+        )
+    checks.append(
+        _check(
+            f"{label}.name",
+            isinstance(item.get("name"), str),
+            "expected string process image basename",
+        )
+    )
+    return checks
+
+
+def _validate_processes(
+    payload: Any,
+    expected_host: str | None,
+    expected_python: str | None,
+    *,
+    label: str = "processes",
+) -> list[Check]:
+    checks = [
+        _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
+    ]
+    if not isinstance(payload, dict):
+        return checks
+
+    checks.extend(
+        [
+            _check(
+                f"{label}.schema_version",
+                payload.get("schema_version") == 1,
+                "expected schema_version 1",
+            ),
+            _check(
+                f"{label}.mode",
+                payload.get("mode") == "windows_processes",
+                "expected mode 'windows_processes'",
+            ),
+            _check(f"{label}.status", payload.get("status") == "ok", "expected status 'ok'"),
+            _check(
+                f"{label}.platform.system",
+                _nested(payload, "platform", "system") == "windows",
+                "expected platform.system 'windows'",
+            ),
+            _check(
+                f"{label}.read_only", payload.get("read_only") is True, "expected read_only true"
+            ),
+            _check(
+                f"{label}.mutation_performed",
+                payload.get("mutation_performed") is False,
+                "expected mutation_performed false",
+            ),
+            _check(
+                f"{label}.windows_v1.available",
+                _nested(payload, "windows_v1", "available") is True,
+                "expected windows_v1.available true",
+            ),
+            _check(
+                f"{label}.windows_v1.scope",
+                _nested(payload, "windows_v1", "scope") == "local_read_only_processes_preview",
+                "expected local_read_only_processes_preview scope",
+            ),
+        ]
+    )
+    for key in WINDOWS_V1_FALSE_KEYS:
+        checks.append(
+            _check(
+                f"{label}.windows_v1.{key}",
+                _nested(payload, "windows_v1", key) is False,
+                f"expected {key} false",
+            )
+        )
+    for key in PROCESSES_SAFETY_FALSE_KEYS:
+        checks.append(
+            _check(
+                f"{label}.safety.{key}",
+                _nested(payload, "safety", key) is False,
+                f"expected {key} false",
+            )
+        )
+
+    limit = payload.get("limit")
+    total = payload.get("total_count")
+    returned = payload.get("returned_count")
+    truncated = payload.get("truncated")
+    checks.extend(
+        [
+            _check(
+                f"{label}.method",
+                payload.get("method") == PROCESSES_METHOD,
+                f"expected method {PROCESSES_METHOD!r}",
+            ),
+            _check(
+                f"{label}.limit",
+                _non_negative_int(limit) and PROCESSES_MIN_LIMIT <= limit <= PROCESSES_MAX_LIMIT,
+                f"expected integer limit between {PROCESSES_MIN_LIMIT} and {PROCESSES_MAX_LIMIT}",
+            ),
+            _check(
+                f"{label}.total_count",
+                _non_negative_int(total),
+                "expected non-negative integer total_count",
+            ),
+            _check(
+                f"{label}.returned_count",
+                _non_negative_int(returned),
+                "expected non-negative integer returned_count",
+            ),
+            _check(
+                f"{label}.truncated",
+                isinstance(truncated, bool),
+                "expected boolean truncated",
+            ),
+        ]
+    )
+    if _non_negative_int(returned) and _non_negative_int(limit) and limit >= PROCESSES_MIN_LIMIT:
+        checks.append(
+            _check(
+                f"{label}.returned_le_limit",
+                returned <= limit,
+                "expected returned_count <= limit",
+            )
+        )
+    if _non_negative_int(returned) and _non_negative_int(total):
+        checks.append(
+            _check(
+                f"{label}.returned_le_total",
+                returned <= total,
+                "expected returned_count <= total_count",
+            )
+        )
+        if isinstance(truncated, bool):
+            checks.append(
+                _check(
+                    f"{label}.truncation_consistent",
+                    truncated == (total > returned),
+                    "expected truncated consistent with total_count and returned_count",
+                )
+            )
+
+    processes = payload.get("processes")
+    checks.append(
+        _check(f"{label}.processes.list", isinstance(processes, list), "expected processes list")
+    )
+    if isinstance(processes, list):
+        for index, item in enumerate(processes):
+            checks.extend(_process_item_checks(item, f"{label}.processes[{index}]"))
+        if _non_negative_int(returned):
+            checks.append(
+                _check(
+                    f"{label}.processes.returned_count_consistent",
+                    len(processes) == returned,
+                    "expected processes list length to match returned_count",
+                )
+            )
+        if _non_negative_int(limit) and PROCESSES_MIN_LIMIT <= limit <= PROCESSES_MAX_LIMIT:
+            checks.append(
+                _check(
+                    f"{label}.processes.bounded_by_limit",
+                    len(processes) <= limit,
+                    "expected processes list length <= limit",
+                )
+            )
+
+    not_collected = payload.get("not_collected_in_pr274")
+    for key in PROCESSES_NOT_COLLECTED_PR274_KEYS:
+        checks.append(
+            _check(
+                f"{label}.not_collected_in_pr274.{key}",
+                isinstance(not_collected, dict) and key in not_collected,
+                f"expected not_collected_in_pr274.{key}",
+            )
+        )
+
+    host = payload.get("host")
+    if expected_host is not None and isinstance(host, dict) and host.get("hostname") is not None:
+        checks.append(
+            _check(
+                f"{label}.host.expected",
+                host.get("hostname") == expected_host,
+                f"expected host hostname {expected_host!r}",
+            )
+        )
+    runtime = payload.get("python_runtime")
+    if expected_python is not None and isinstance(runtime, dict) and runtime.get("version"):
+        checks.append(
+            _check(
+                f"{label}.python_runtime.expected",
+                _python_matches(runtime.get("version"), expected_python),
+                f"expected Python version prefix or exact {expected_python!r}",
+            )
+        )
+    return checks
+
+
 def _artifact_summary(payload: Any, expected_mode: str, validated: bool) -> dict[str, Any]:
     artifact = {"mode": None, "status": None, "validated": validated}
     if isinstance(payload, dict):
@@ -1085,9 +1340,11 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         "doctor": None,
         "services": None,
         "disks": None,
+        "processes": None,
     }
     services_json = getattr(args, "services_json", None)
     disks_json = getattr(args, "disks_json", None)
+    processes_json = getattr(args, "processes_json", None)
 
     if args.evidence_json:
         payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
@@ -1141,6 +1398,14 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
                 _validate_disks(payloads["disks"], args.expected_host, args.expected_python)
             )
 
+    if processes_json:
+        payloads["processes"], read_checks = _read_json_file(Path(processes_json), "processes")
+        checks.extend(read_checks)
+        if payloads["processes"] is not None:
+            checks.extend(
+                _validate_processes(payloads["processes"], args.expected_host, args.expected_python)
+            )
+
     checks.extend(
         _cross_check(
             payloads["evidence"],
@@ -1169,6 +1434,9 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
     if disks_json:
         inputs["disks_json"] = str(Path(disks_json))
         artifacts["disks"] = _artifact_summary(payloads["disks"], "windows_disks", True)
+    if processes_json:
+        inputs["processes_json"] = str(Path(processes_json))
+        artifacts["processes"] = _artifact_summary(payloads["processes"], "windows_processes", True)
 
     passed = sum(1 for check in checks if check.passed)
     failed = len(checks) - passed
@@ -1225,6 +1493,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to saved 'shellforgeai windows disks --json' output.",
     )
     parser.add_argument(
+        "--processes-json",
+        help="Optional path to saved 'shellforgeai windows processes --json' output.",
+    )
+    parser.add_argument(
         "--expected-host", help="Optional expected Windows hostname, for example WIN2025-SFAI01."
     )
     parser.add_argument(
@@ -1239,10 +1511,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         or args.doctor_json
         or args.services_json
         or args.disks_json
+        or args.processes_json
     ):
         parser.error(
             "at least one of --evidence-json, --status-json, --doctor-json, "
-            "--services-json, or --disks-json is required"
+            "--services-json, --disks-json, or --processes-json is required"
         )
     return args
 

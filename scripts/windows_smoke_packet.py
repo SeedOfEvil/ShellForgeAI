@@ -99,6 +99,20 @@ def _disks_counts(path_value: str) -> dict[str, Any]:
     return counts
 
 
+PROCESSES_SUMMARY_KEYS = ("total_count", "returned_count", "limit", "truncated")
+
+
+def _processes_summary(path_value: str) -> dict[str, Any]:
+    summary: dict[str, Any] = {"method": None}
+    summary.update({key: None for key in PROCESSES_SUMMARY_KEYS})
+    payload, _ = acceptance._read_json_file(Path(path_value), "processes")
+    if isinstance(payload, dict):
+        summary["method"] = payload.get("method")
+        for key in PROCESSES_SUMMARY_KEYS:
+            summary[key] = payload.get(key)
+    return summary
+
+
 def _embedded_services_summary(evidence_path: str) -> dict[str, Any] | None:
     """Summarize the opt-in PR269 services component embedded in the evidence bundle."""
 
@@ -211,6 +225,12 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
         disks_artifact = _artifact(disks_json, artifacts.get("disks", {}))
         disks_artifact.update(_disks_counts(disks_json))
         packet["artifacts"]["disks_json"] = disks_artifact
+    processes_json = getattr(args, "processes_json", None)
+    if processes_json:
+        packet["artifacts"]["processes_json"] = _artifact(
+            processes_json, artifacts.get("processes", {})
+        )
+        packet["windows"]["processes"] = _processes_summary(processes_json)
     failed = [check for check in validator.get("checks", []) if not check.get("passed")]
     if failed:
         packet["failed_checks"] = failed
@@ -336,6 +356,24 @@ def render_markdown(packet: dict[str, Any]) -> str:
             "- Unavailable roots are accepted only when sanitized as safe disk usage "
             "failures (for example `disk_usage_failed`), never tracebacks."
         )
+    processes = packet["windows"].get("processes")
+    if processes is not None:
+        lines.extend(["", "## Processes summary", ""])
+        for label, key in (
+            ("Method", "method"),
+            ("Total processes", "total_count"),
+            ("Returned processes", "returned_count"),
+            ("Limit", "limit"),
+            ("Truncated", "truncated"),
+        ):
+            value = processes.get(key)
+            if isinstance(value, bool):
+                value = str(value).lower()
+            lines.append(f"- {label}: {value if value is not None else 'not available'}")
+        lines.append(
+            "- Command lines, environments, memory, handles, modules, owners/users, "
+            "and network connections were not collected."
+        )
     lines.extend(
         [
             "",
@@ -368,6 +406,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--disks-json",
         help="Optional path to saved 'shellforgeai windows disks --json' output.",
+    )
+    parser.add_argument(
+        "--processes-json",
+        help="Optional path to saved 'shellforgeai windows processes --json' output.",
     )
     parser.add_argument("--expected-host")
     parser.add_argument("--expected-python")
