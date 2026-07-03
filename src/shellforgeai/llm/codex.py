@@ -27,6 +27,12 @@ def _redact(text: str) -> str:
     return "\n".join(out)
 
 
+def _human_quoted(value: str | None) -> str:
+    if value is None:
+        return "'<unresolved>'"
+    return f"'{value}'"
+
+
 class CodexProvider:
     name = "openai-codex"
     _active_procs: set[subprocess.Popen[str]] = set()
@@ -74,10 +80,10 @@ class CodexProvider:
         return None
 
     def _provider_unavailable_error(self, reason: str, resolved: str | None = None) -> str:
-        resolved_part = resolved if resolved is not None else "unresolved"
         return (
             "codex provider unavailable: "
-            f"configured_binary={self.binary!r}; resolved_binary={resolved_part!r}; "
+            f"configured_binary={_human_quoted(self.binary)}; "
+            f"resolved_binary={_human_quoted(resolved)}; "
             f"reason={reason}; run: shellforgeai model doctor --json"
         )
 

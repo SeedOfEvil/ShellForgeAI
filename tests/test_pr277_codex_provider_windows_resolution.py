@@ -96,14 +96,17 @@ def test_missing_binary_is_clean_and_does_not_attempt_subprocess(monkeypatch):
 
     assert not response.ok
     assert "configured_binary='codex'" in (response.error or "")
-    assert "resolved_binary='unresolved'" in (response.error or "")
+    assert "resolved_binary='<unresolved>'" in (response.error or "")
     assert "shellforgeai model doctor --json" in (response.error or "")
     assert "Traceback" not in (response.error or "")
     assert calls["popen"] == 0
 
 
-def test_filenotfound_and_oserror_from_launch_are_bounded(monkeypatch, tmp_path):
-    resolved = str(tmp_path / "codex.CMD")
+def test_filenotfound_and_oserror_from_launch_are_bounded(monkeypatch):
+    resolved = (
+        r"C:\Windows\Temp\pytest-of-WIN2025-SFAI01$"
+        r"\pytest-0\test_filenotfound_and_oserror_0\codex.CMD"
+    )
     monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda binary: resolved)
 
     for exc_type in (FileNotFoundError, OSError):
@@ -116,8 +119,11 @@ def test_filenotfound_and_oserror_from_launch_are_bounded(monkeypatch, tmp_path)
         assert not response.ok
         assert f"reason={exc_type.__name__}" in (response.error or "")
         assert f"resolved_binary='{resolved}'" in (response.error or "")
+        assert "configured_binary='codex'" in (response.error or "")
+        assert "shellforgeai model doctor --json" in (response.error or "")
         assert "Traceback" not in (response.error or "")
         assert "WinError 2" not in (response.error or "")
+        assert "\\\\" not in (response.error or "").replace("\\n", "")
 
 
 def test_doctor_version_oserror_is_bounded(monkeypatch, tmp_path):
