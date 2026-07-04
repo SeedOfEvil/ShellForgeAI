@@ -126,14 +126,18 @@ def test_filenotfound_and_oserror_from_launch_are_bounded(monkeypatch):
 
         monkeypatch.setattr("subprocess.Popen", raising_popen)
         response = CodexProvider(binary="codex").complete(_request())
+        error = response.error or ""
+        expected_resolved = f"resolved_binary='{resolved}'"
+        repr_style_resolved = expected_resolved.replace("\\", "\\\\")
+
         assert not response.ok
-        assert f"reason={exc_type.__name__}" in (response.error or "")
-        assert f"resolved_binary='{resolved}'" in (response.error or "")
-        assert "configured_binary='codex'" in (response.error or "")
-        assert "shellforgeai model doctor --json" in (response.error or "")
-        assert "Traceback" not in (response.error or "")
-        assert "WinError 2" not in (response.error or "")
-        assert "\\\\" not in (response.error or "").replace("\\n", "")
+        assert f"reason={exc_type.__name__}" in error
+        assert expected_resolved in error
+        assert repr_style_resolved not in error
+        assert "configured_binary='codex'" in error
+        assert "shellforgeai model doctor --json" in error
+        assert "Traceback" not in error
+        assert "WinError 2" not in error
 
 
 def test_doctor_version_oserror_is_bounded(monkeypatch, tmp_path):
