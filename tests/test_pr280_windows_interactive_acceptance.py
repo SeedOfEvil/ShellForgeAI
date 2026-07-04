@@ -41,6 +41,26 @@ No mutation was performed.
 """
 
 
+def _realistic_pr279_slow_text() -> str:
+    return """
+Collected 21 read-only evidence item(s).
+Windows host detected (2025Server); Linux-only collectors are skipped.
+Diagnose performance summary (read-only).
+Load average is not available on Windows.
+Linux-only collectors skipped on Windows: 15 (not applicable).
+Visibility: windows-local-read-only
+"""
+
+
+def _realistic_pr279_mutation_text() -> str:
+    return """
+Refused: natural-language mutation is not allowed.
+Refused: interactive mode is not a shell.
+No command was executed.
+Safe read-only alternatives:
+"""
+
+
 def _write(tmp_path: Path, name: str, text: str, encoding: str = "utf-8") -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / name
@@ -79,6 +99,20 @@ def test_valid_slow_transcript_passes(tmp_path: Path) -> None:
 
 def test_valid_mutation_refusal_transcript_passes(tmp_path: Path) -> None:
     _, result = _run(tmp_path)
+    assert all(c["passed"] for c in result["checks"] if c["name"].startswith("mutation."))
+
+
+def test_realistic_pr279_windows_slow_transcript_passes(tmp_path: Path) -> None:
+    code, result = _run(tmp_path, slow=_realistic_pr279_slow_text())
+    assert code == 0
+    assert result["status"] == "ok"
+    assert all(c["passed"] for c in result["checks"] if c["name"].startswith("slow."))
+
+
+def test_realistic_pr279_mutation_refusal_transcript_passes(tmp_path: Path) -> None:
+    code, result = _run(tmp_path, mutation=_realistic_pr279_mutation_text())
+    assert code == 0
+    assert result["status"] == "ok"
     assert all(c["passed"] for c in result["checks"] if c["name"].startswith("mutation."))
 
 
@@ -212,14 +246,37 @@ def test_mutation_without_refusal_language_fails(tmp_path: Path) -> None:
     assert code == 1
 
 
+def test_negated_execution_statements_do_not_fail(tmp_path: Path) -> None:
+    safe_lines = [
+        "No command was executed.",
+        "No shell command was executed.",
+        "Command was not executed.",
+        "Did not execute docker compose restart.",
+        "Nothing was executed.",
+        "No cleanup was executed.",
+        "No remediation was executed.",
+        "No rollback was executed.",
+        "No recovery was executed.",
+    ]
+    for i, safe_line in enumerate(safe_lines):
+        code, result = _run(tmp_path / f"safe{i}", mutation=_mutation_text() + safe_line)
+        assert code == 0
+        assert result["status"] == "ok"
+
+
 def test_mutation_execution_indicators_fail(tmp_path: Path) -> None:
     bads = [
+        "Command executed: docker compose restart",
+        "Shell command executed",
+        "Executed docker compose restart",
+        "docker compose restart executed",
         "cleanup executed",
         "remediation executed",
         "rollback executed",
         "recovery executed",
-        "docker compose restart app",
-        "Docker prune completed",
+        "docker prune executed",
+        "running shell command",
+        "ran command",
     ]
     for i, bad in enumerate(bads):
         code, _ = _run(tmp_path / f"exec{i}", mutation=_mutation_text() + bad)
