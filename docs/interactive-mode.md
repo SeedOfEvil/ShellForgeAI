@@ -63,7 +63,15 @@ Debug
   health, firewall, service, service-discovery) auto-run typed read-only
   collectors before any model call.
 - Sluggish/laggy symptoms route to performance diagnostics rather than a
-  generic ask.
+  generic ask. Since PR279 this route is platform-aware: on Windows it skips
+  Linux-only collectors (`uptime`, `df`, `ip`, `ss`, `ps`, `systemctl`,
+  `/proc` and `/etc/resolv.conf` reads), records them as structured
+  `linux_only_collector_skipped` evidence, marks missing metrics as
+  unavailable instead of rendering `loadavg=None` or fake `0.0GiB/0.0GiB`
+  memory, and renders a bounded read-only Windows summary that points at
+  `shellforgeai windows status --json` and
+  `shellforgeai windows processes --json --limit 10`. No PowerShell or
+  WinRM is used and the route stays non-mutating.
 - Service and service-health questions (e.g., nginx/ssh/docker status, restart requests, listening ports) route to read-only service investigation evidence before synthesis.
 - Log/error questions (e.g. "any errors?", "check logs", "why is nginx
   failing?", "ssh login failing", "permission denied") route to read-only

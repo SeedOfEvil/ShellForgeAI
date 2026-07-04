@@ -15,8 +15,13 @@ from rich.console import Console
 from rich.table import Table
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.core.collectors import (
+    LINUX_ONLY_COLLECTOR_SKIP_STATUS,
+    WINDOWS_METRIC_UNAVAILABLE_STATUS,
+    WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS,
+    parse_collector_payload,
+)
 from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
-from shellforgeai.core.collectors import parse_collector_payload
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, classify_target
@@ -338,7 +343,30 @@ def _evidence_table(console: Console, checks: list[dict[str, str]]) -> None:
     console.print(t)
 
 
+def _is_windows_platform_checks(checks: list[dict[str, str]]) -> bool:
+    return any(
+        c.get("tool") == "platform.detect" and "windows" in c.get("summary", "").lower()
+        for c in checks
+    )
+
+
+def _windows_evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
+    out = []
+    unavailable = [c for c in checks if c.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS]
+    for c in checks:
+        if c.get("tool", "").startswith(("platform.", "windows.")) and c not in unavailable:
+            out.append(f"- {c.get('summary', 'unavailable')}.")
+    for c in unavailable[:3]:
+        out.append(f"- {c.get('summary', 'metric unavailable on Windows')}.")
+    skipped = sum(1 for c in checks if c.get("status") == LINUX_ONLY_COLLECTOR_SKIP_STATUS)
+    if skipped:
+        out.append(f"- Linux-only collectors skipped on Windows: {skipped} (not applicable).")
+    return out[:7]
+
+
 def _evidence_highlights(checks: list[dict[str, str]]) -> list[str]:
+    if _is_windows_platform_checks(checks):
+        return _windows_evidence_highlights(checks)
     by_tool = {c["tool"]: c for c in checks}
     out = []
     if "system.cpu_memory" in by_tool:
@@ -593,7 +621,10 @@ def _summary_for_check(c) -> str:
             f"arch={payload.get('arch') or 'unknown'}"
         )
     if c.tool == "host.resources":
-        return f"loadavg={_human_load(c.stdout or c.stderr or first).replace(' / ', ',')}"
+        human = _human_load(c.stdout or c.stderr or first)
+        if "unavailable" in human:
+            return "load average unavailable from this collector"
+        return f"loadavg={human.replace(' / ', ',')}"
     if c.tool == "host.uptime":
         return first or "uptime unavailable"
     if c.tool in {"disk.usage", "disk.inodes"}:
@@ -774,9 +805,50 @@ def _storage_io_deep_dive_synthesis(
     )
 
 
+def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
+    """Bounded Windows-aware read-only summary for slow-system/performance asks."""
+    facts = []
+    unavailable = [c for c in checks if c.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS]
+    skipped = [c for c in checks if c.get("status") == LINUX_ONLY_COLLECTOR_SKIP_STATUS]
+    for c in checks:
+        if c in unavailable:
+            continue
+        if c.get("tool", "").startswith(("platform.", "windows.")) or c.get("tool") == "host.info":
+            facts.append(f"- {c.get('summary', 'unavailable')}.")
+    limitations = [f"- {c.get('summary', 'metric unavailable on Windows')}." for c in unavailable]
+    if skipped:
+        skipped_names = ", ".join(c.get("tool", "collector") for c in skipped[:8])
+        more = "" if len(skipped) <= 8 else f" (+{len(skipped) - 8} more)"
+        limitations.append(
+            f"- Linux-only collectors skipped on Windows (not applicable): {skipped_names}{more}."
+        )
+    next_commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS)
+    return (
+        "## Assessment\n"
+        "Windows host: bounded read-only diagnostics completed. Linux-only collectors "
+        "were skipped instead of executed, so their absence is expected and not a failure.\n\n"
+        "## Facts found\n"
+        + ("\n".join(facts) if facts else "- Windows platform evidence collected.")
+        + "\n\n## Platform limitations\n"
+        + (
+            "\n".join(limitations)
+            if limitations
+            else "- No additional platform limitations recorded."
+        )
+        + "\n\n## Next safe read-only commands\n"
+        + next_commands
+        + "\n\n## Safety\n"
+        "Read-only checks only. No shell or remoting execution, no service restart, "
+        "no process termination, no cleanup, and no file changes were performed.\n"
+    )
+
+
 def _deterministic_operator_summary(
     intent: str, checks: list[dict[str, str]], target: str | None = None
 ) -> str:
+    if _is_windows_platform_checks(checks):
+        return _windows_operator_summary(checks)
+
     def _find(tool: str) -> dict[str, str] | None:
         return next((c for c in checks if c["tool"] == tool), None)
 
@@ -1246,6 +1318,10 @@ def _extract_service_target(question: str) -> str:
 def select_followup_investigation(
     intent: str, checks: list[dict[str, str]], question: str
 ) -> dict[str, Any] | None:
+    if _is_windows_platform_checks(checks):
+        # Windows route stays bounded: deeper follow-up bundles are
+        # Linux-oriented, so no pending investigation is queued.
+        return None
     q = question.lower()
     if intent == "docker" or any(
         p in q
@@ -2748,6 +2824,7 @@ No command was executed.""")
                     )
                     pending_followup["first_pass_checks"] = list(checks)
                 provider_error = None
+                mresp_text = ""
                 try:
                     provider = build_provider(runtime.settings)
                     prompt = build_contextual_prompt(

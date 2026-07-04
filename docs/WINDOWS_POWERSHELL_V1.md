@@ -111,6 +111,10 @@ shellforgeai ask "It is 2AM and this Windows server feels broken. What should I 
 
 The `ask` example should remain evidence-first: collect typed local Windows evidence first when a Windows lane exists, then synthesize a safe inspection summary. It must not run natural-language commands.
 
+## Interactive performance diagnostics on Windows
+
+Since PR279, interactive slow-system/performance diagnostics (for example "Hey this system feels a bit slow" inside `shellforgeai interactive`) are Windows-aware. On Windows the route skips Linux-only collectors (`uptime`, `df`, `ip`, `ss`, `ps`, `systemctl`, `/proc` reads, `/etc/resolv.conf` reads) and records them as structured `linux_only_collector_skipped` evidence instead of running them or rendering their failures. Missing metrics (load average, `/proc`-based memory totals) render explicit unavailable markers instead of `loadavg=None` or fake `0.0GiB/0.0GiB` values. The bounded read-only summary reuses only the existing stdlib-only `windows status` and `windows disks` payloads and points at safe next commands such as `shellforgeai windows status --json` and `shellforgeai windows processes --json --limit 10`. No PowerShell is executed and no WinRM/PSRemoting is used; the route stays read-only and non-mutating, and it degrades to a deterministic summary when model synthesis is unavailable.
+
 ## Safety model
 
 The Windows lane preserves ShellForgeAI's core safety model:
