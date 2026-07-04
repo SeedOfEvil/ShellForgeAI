@@ -158,3 +158,7 @@ The Windows lane preserves ShellForgeAI's core safety model:
 ## Saved interactive transcript acceptance
 
 Windows interactive performance diagnostics have a QA/harness-only saved-transcript acceptance helper: `python scripts/windows_interactive_acceptance.py --slow-transcript interactive-slow.txt --mutation-transcript interactive-mutation-refusal.txt --json --markdown`. The helper validates saved text only and does not execute PowerShell, use WinRM/PSRemoting, launch interactive mode, contact a Windows host, or mutate the VM. ShellForgeAI itself also uses no PowerShell or WinRM for this Windows interactive performance path.
+
+## Saved interactive transcript packet support
+
+For QA handoff only, `scripts/windows_smoke_packet.py` can include saved Windows interactive slow/performance and mutation-refusal transcripts alongside saved JSON artifacts by passing both `--slow-transcript` and `--mutation-transcript`. The helper reuses the saved-transcript acceptance checks, reports transcript path, SHA256, byte size, accepted/failed state, and an interactive summary in deterministic JSON/Markdown. It reads saved local files only and does not launch ShellForgeAI interactive mode, execute PowerShell, use WinRM/PSRemoting, contact QGA/Proxmox, call the network or a model, or mutate the Windows host.
