@@ -6,6 +6,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from shellforgeai.core.collectors import (
+    WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS,
     collect_config_evidence,
     collect_disk_evidence,
     collect_docker_evidence,
@@ -24,6 +25,7 @@ from shellforgeai.core.collectors import (
     collect_performance_evidence,
     collect_service_evidence,
     collect_ssh_evidence,
+    collect_windows_performance_evidence,
 )
 from shellforgeai.core.command_suggestions import (
     remediation_eligibility_explain_command,
@@ -32,6 +34,7 @@ from shellforgeai.core.command_suggestions import (
 from shellforgeai.core.evidence import EvidenceBundle, TargetType, classify_target
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.triage_ranking import collect_scene, rank_scene
+from shellforgeai.platform_detection import detect_platform
 from shellforgeai.util.text import extract_lines_matching
 
 
@@ -460,11 +463,137 @@ def _dedupe(items):
     return out
 
 
+_PERFORMANCE_FAMILY_KEYWORDS = (
+    "slow",
+    "sluggish",
+    "laggy",
+    "performance",
+    "high cpu",
+    "high memory",
+    "high load",
+)
+
+
+def _is_performance_family_target(canonical_target: str, target: str) -> bool:
+    if canonical_target in {"host", "health", "storage-performance", "disk_storage_deep_dive"}:
+        return True
+    low = target.lower()
+    return any(k in low for k in _PERFORMANCE_FAMILY_KEYWORDS)
+
+
+def _windows_performance_diagnosis(
+    context, target: str, ttype: TargetType, warnings: list[str], platform_info
+) -> DiagnosisResult:
+    """Bounded read-only Windows diagnosis for slow-system/performance asks.
+
+    Runs no Linux-only collectors, no shell execution, no remoting, and no
+    mutation; missing metrics are marked unavailable instead of rendered as
+    fake zero values.
+    """
+    items = collect_windows_performance_evidence(context, platform_info)
+    findings = [
+        Finding(
+            severity="info",
+            title="Windows host: Linux-only collectors were skipped",
+            detail=(
+                "This host runs Windows, so Linux-oriented collectors (uptime, df, ip, "
+                "ss, ps, systemctl, /proc, /etc/resolv.conf) were skipped instead of "
+                "executed or reported as failures."
+            ),
+            evidence_refs=["platform.detect"],
+            confidence="high",
+        ),
+        Finding(
+            severity="limitation",
+            title="Load average is not available on Windows",
+            detail="Windows does not expose a Linux-style load average from this collector.",
+            evidence_refs=["host.resources"],
+            confidence="high",
+        ),
+        Finding(
+            severity="limitation",
+            title="Memory summary unavailable from this collector",
+            detail=(
+                "/proc-based memory totals are not collected on Windows; missing values "
+                "are marked unavailable rather than rendered as 0.0GiB/0.0GiB."
+            ),
+            evidence_refs=["system.cpu_memory"],
+            confidence="high",
+        ),
+    ]
+    plan = Plan(
+        plan_id=f"plan_{uuid4().hex[:8]}",
+        goal=f"Diagnose {target}",
+        session_id=context.session.session_id,
+        steps=[
+            PlanStep(
+                step_id="1",
+                title="Review Windows platform evidence",
+                description=(
+                    "Review the read-only Windows status and disk capacity evidence "
+                    "collected without shelling out."
+                ),
+            ),
+            PlanStep(
+                step_id="2",
+                title="Run bounded Windows read-only commands",
+                description=(
+                    "Use shellforgeai windows status --json and "
+                    "shellforgeai windows processes --json --limit 10 for local evidence."
+                ),
+            ),
+            PlanStep(
+                step_id="3",
+                title="Decide operator follow-up",
+                description=(
+                    "Deeper Windows performance metrics remain future work; any "
+                    "remediation stays operator-run."
+                ),
+            ),
+        ],
+        notes=[
+            "Read-only Windows diagnostics only; no shell execution, no remoting, and no mutation.",
+        ],
+    )
+    bundle = EvidenceBundle(target=target, target_type=ttype, items=items, warnings=warnings)
+    return DiagnosisResult(
+        session_id=context.session.session_id,
+        target=target,
+        target_type=ttype,
+        evidence=bundle,
+        findings=findings,
+        proposed_plan=plan,
+        warnings=warnings,
+        runtime_context={
+            "inside_container": False,
+            "visibility": "windows_local_read_only",
+            "view": "windows read-only diagnostics",
+            "limitations": [
+                "Linux-only collectors are skipped on Windows",
+                "load average and /proc-based memory metrics are unavailable",
+            ],
+        },
+        safe_next_commands=list(WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS),
+        safety={
+            "read_only": True,
+            "mutation_performed": False,
+            "plan_created": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "cleanup_executed": False,
+            "docker_compose_executed": False,
+            "container_restarted": False,
+            "natural_language_execution": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+        },
+    )
+
+
 def diagnose_target(
     context, target: str, online: bool = False, since: str = "30m"
 ) -> DiagnosisResult:
     ttype = classify_target(target)
-    items = collect_host_evidence(context)
     findings: list[Finding] = []
     warnings: list[str] = []
     if online and not context.session.online_enabled:
@@ -484,6 +613,14 @@ def diagnose_target(
         target = "storage-performance"
     if canonical_target in {"performance", "slow", "slowness", "host", "performance_deep_dive"}:
         canonical_target = "host"
+    platform_info = detect_platform()
+    if platform_info.system == "windows" and _is_performance_family_target(
+        canonical_target, target
+    ):
+        # Windows slow-system/performance route: never execute Linux-only
+        # collectors; return bounded read-only Windows evidence instead.
+        return _windows_performance_diagnosis(context, target, ttype, warnings, platform_info)
+    items = collect_host_evidence(context)
     log_targets = {
         "logs",
         "errors",

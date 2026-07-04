@@ -7,6 +7,7 @@ from typing import Any
 from shellforgeai.core.evidence import EvidenceCategory, EvidenceItem
 from shellforgeai.knowledge.audits import search_recent_audits
 from shellforgeai.knowledge.search import search_local
+from shellforgeai.platform_detection import PlatformInfo, detect_platform
 from shellforgeai.tools import (
     audit_recent,
     configs,
@@ -26,6 +27,8 @@ from shellforgeai.tools import (
 )
 from shellforgeai.tools.services import docker_detect, nginx_detect, ssh_detect
 from shellforgeai.util.text import truncate_text
+from shellforgeai.windows_disks import windows_disks_payload
+from shellforgeai.windows_status import windows_status_payload
 
 PARSE_FAILED: Any = object()
 """Sentinel returned by :func:`parse_collector_payload` when parsing fails.
@@ -102,6 +105,11 @@ def _summarize(result) -> str:
             return "cpu/memory summary unavailable"
         mem_used = _payload_float(data.get("mem_used_mb")) / 1024
         mem_total = _payload_float(data.get("mem_total_mb")) / 1024
+        cpus = data.get("cpus")
+        cpus_text = cpus if cpus is not None else "?"
+        if mem_total <= 0:
+            # Never render fake "0.0GiB/0.0GiB" as if it were valid evidence.
+            return f"cpus={cpus_text} memory summary unavailable from this collector"
         swap_used = _payload_float(data.get("swap_used_mb"))
         swap_total = _payload_float(data.get("swap_total_mb")) / 1024
         swap_text = "swap=0B/0B"
@@ -111,8 +119,6 @@ def _summarize(result) -> str:
                 if swap_used <= 0.01
                 else f"swap={swap_used / 1024:.1f}GiB/{swap_total:.1f}GiB"
             )
-        cpus = data.get("cpus")
-        cpus_text = cpus if cpus is not None else "?"
         return f"cpus={cpus_text} mem={mem_used:.1f}GiB/{mem_total:.1f}GiB {swap_text}"
     if result.tool == "system.container_detect":
         val = (result.stdout or "").strip().replace("\n", " ")
@@ -135,7 +141,12 @@ def _summarize(result) -> str:
     if result.tool == "host.resources":
         if "loadavg" in first:
             val = first.split("loadavg", 1)[-1]
-            return val.replace(":", "=").replace("(", "").replace(")", "").replace(" ", "")
+            val = val.replace(":", "=").replace("(", "").replace(")", "").replace(" ", "")
+            if "None" in val:
+                # os.getloadavg is unavailable (e.g. Windows); do not render
+                # "loadavg=None" as if it were a valid metric.
+                return "load average unavailable from this collector"
+            return val
         return first
     if result.tool == "network.listeners":
         lines = (result.stdout or "").splitlines()
@@ -452,6 +463,189 @@ def collect_performance_evidence(context) -> list[EvidenceItem]:
                 metadata={"status": "ok"},
             )
         )
+    return _dedupe_items(items)
+
+
+LINUX_ONLY_COLLECTOR_SKIP_STATUS = "linux_only_collector_skipped"
+WINDOWS_METRIC_UNAVAILABLE_STATUS = "windows_metric_unavailable"
+NOT_COLLECTED_ON_WINDOWS_REASON = "not_collected_on_windows"
+
+WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS: tuple[str, ...] = (
+    "shellforgeai windows status --json",
+    "shellforgeai windows disks --json",
+    "shellforgeai windows processes --json --limit 10",
+)
+
+# Linux-oriented performance collectors that must never execute on Windows.
+# Each entry is (source, title, mechanism) where mechanism names the Linux
+# command or path the collector would otherwise touch.
+LINUX_ONLY_PERFORMANCE_COLLECTOR_SKIPS: tuple[tuple[str, str, str], ...] = (
+    ("host.uptime", "Host uptime", "uptime"),
+    ("disk.usage", "Disk usage", "df"),
+    ("disk.inodes", "Inode usage", "df -i"),
+    ("network.interfaces", "Interfaces", "ip addr"),
+    ("network.default_route", "Default route", "ip route"),
+    ("network.dns", "DNS config", "/etc/resolv.conf"),
+    ("network.listeners", "Listeners", "ss"),
+    ("process.top", "Top processes", "ps"),
+    ("process.io", "Process I/O", "/proc I/O counters"),
+    ("system.os_release", "OS release", "/etc/os-release"),
+    ("system.container_detect", "Container detection", "/proc/1/cgroup"),
+    ("system.pressure", "Pressure", "/proc/pressure"),
+    ("system.cgroup_limits", "Cgroup limits", "/sys/fs/cgroup"),
+    ("storage.mounts", "Storage mounts", "/proc/mounts"),
+    ("systemd.list_failed", "Failed systemd units", "systemctl"),
+)
+
+
+def _linux_only_skip_item(source: str, title: str, mechanism: str) -> EvidenceItem:
+    """Structured, non-scary skip record for a Linux-only collector on Windows."""
+    return EvidenceItem(
+        source=source,
+        category=EvidenceCategory.host,
+        ok=True,
+        title=title,
+        summary=f"Linux-only collector skipped on Windows: {title} ({mechanism})",
+        content=json.dumps(
+            {
+                "status": LINUX_ONLY_COLLECTOR_SKIP_STATUS,
+                "reason": NOT_COLLECTED_ON_WINDOWS_REASON,
+                "collector": source,
+                "mechanism": mechanism,
+            }
+        ),
+        metadata={"status": LINUX_ONLY_COLLECTOR_SKIP_STATUS, "platform": "windows"},
+    )
+
+
+def _windows_metric_unavailable_item(source: str, title: str, summary: str) -> EvidenceItem:
+    """Explicit unavailable marker instead of fake zero/None metric values."""
+    return EvidenceItem(
+        source=source,
+        category=EvidenceCategory.host,
+        ok=True,
+        title=title,
+        summary=summary,
+        content=json.dumps(
+            {
+                "status": WINDOWS_METRIC_UNAVAILABLE_STATUS,
+                "reason": NOT_COLLECTED_ON_WINDOWS_REASON,
+            }
+        ),
+        metadata={"status": WINDOWS_METRIC_UNAVAILABLE_STATUS, "platform": "windows"},
+    )
+
+
+def _bytes_gib(value: Any) -> str:
+    try:
+        return f"{float(value) / (1024**3):.1f}GiB"
+    except (TypeError, ValueError):
+        return "unknown"
+
+
+def _windows_status_summary(payload: dict) -> str:
+    host_block = payload.get("host") or {}
+    fs = payload.get("filesystem") or {}
+    root = fs.get("root_usage") or {}
+    free = root.get("free_bytes")
+    total = root.get("total_bytes")
+    hostname = host_block.get("hostname") or "unknown"
+    if isinstance(free, int) and isinstance(total, int) and total > 0:
+        return f"hostname={hostname} root_free={_bytes_gib(free)}/{_bytes_gib(total)}"
+    return f"hostname={hostname} (read-only Windows status collected)"
+
+
+def _windows_disks_summary(payload: dict) -> str:
+    summary = payload.get("summary") or {}
+    returned = summary.get("returned_roots")
+    available = summary.get("available_roots")
+    if isinstance(returned, int) and isinstance(available, int):
+        return f"drive_roots={returned} available={available} (stdlib read-only)"
+    return "windows disks preview collected (read-only)"
+
+
+def _windows_payload_item(source: str, title: str, builder, summarizer) -> EvidenceItem:
+    """Reuse an existing safe Windows payload as evidence; degrade without tracebacks."""
+    try:
+        payload = builder()
+    except Exception as exc:  # payload reuse must never crash the diagnosis route
+        return _windows_metric_unavailable_item(
+            source,
+            title,
+            f"{title} unavailable from this collector "
+            f"({WINDOWS_METRIC_UNAVAILABLE_STATUS}: {type(exc).__name__})",
+        )
+    if not isinstance(payload, dict) or payload.get("status") not in {"ok", "limited"}:
+        return _windows_metric_unavailable_item(
+            source, title, f"{title} unavailable from this collector"
+        )
+    content, truncated = truncate_text(json.dumps(payload))
+    return EvidenceItem(
+        source=source,
+        category=EvidenceCategory.host,
+        ok=True,
+        title=title,
+        summary=summarizer(payload),
+        content=content,
+        truncated=truncated,
+        metadata={"status": "ok", "platform": "windows"},
+    )
+
+
+def collect_windows_performance_evidence(
+    context, info: PlatformInfo | None = None
+) -> list[EvidenceItem]:
+    """Windows-aware slow-system evidence: bounded, read-only, no new collection.
+
+    Linux-only collectors are recorded as structured skips instead of running.
+    Missing metrics (load average, /proc-based memory) are rendered as explicit
+    unavailable markers rather than ``loadavg=None`` or ``0.0GiB/0.0GiB``. The
+    only payloads reused are the existing stdlib-only ``windows status`` and
+    ``windows disks`` read-only payloads; no shell execution, no remoting, and
+    no mutation is involved.
+    """
+    info = info or detect_platform()
+    items: list[EvidenceItem] = [
+        EvidenceItem(
+            source="platform.detect",
+            category=EvidenceCategory.host,
+            ok=True,
+            title="Platform detection",
+            summary=(
+                f"Windows host detected ({info.release or 'unknown release'}); "
+                "Linux-only collectors are skipped"
+            ),
+            content=json.dumps(info.to_dict()),
+            metadata={"status": "ok", "platform": "windows"},
+        ),
+        _to_item(host.host_info(), EvidenceCategory.host, "Host information"),
+        _windows_payload_item(
+            "windows.status",
+            "Windows status (read-only)",
+            lambda: windows_status_payload(info),
+            _windows_status_summary,
+        ),
+        _windows_payload_item(
+            "windows.disks",
+            "Windows disks preview (read-only)",
+            lambda: windows_disks_payload(info),
+            _windows_disks_summary,
+        ),
+        _windows_metric_unavailable_item(
+            "host.resources",
+            "Host resources",
+            "Load average is not available on Windows",
+        ),
+        _windows_metric_unavailable_item(
+            "system.cpu_memory",
+            "CPU/memory",
+            "Memory summary unavailable from this collector on Windows",
+        ),
+    ]
+    items.extend(
+        _linux_only_skip_item(source, title, mechanism)
+        for source, title, mechanism in LINUX_ONLY_PERFORMANCE_COLLECTOR_SKIPS
+    )
     return _dedupe_items(items)
 
 

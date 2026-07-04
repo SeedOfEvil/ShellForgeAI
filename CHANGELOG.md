@@ -4,6 +4,36 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Windows interactive performance platform-awareness (PR279)
+
+- The interactive slow-system/performance diagnosis route (for example
+  "Hey this system feels a bit slow") is now platform-aware. `diagnose_target`
+  detects the platform through the existing read-only platform detection
+  helpers before any collector runs; on Windows the performance/health family
+  returns bounded read-only Windows evidence instead of executing Linux-only
+  collectors (`uptime`, `df`, `df -i`, `ip`, `ss`, `ps`, `systemctl`, `/proc`
+  reads, `/etc/resolv.conf` reads).
+- Skipped Linux collectors are recorded as structured
+  `linux_only_collector_skipped` evidence (reason `not_collected_on_windows`)
+  instead of scary failures. Missing metrics render explicit
+  `windows_metric_unavailable` markers ("Load average is not available on
+  Windows", "Memory summary unavailable from this collector") instead of
+  `loadavg=None` or fake `0.0GiB/0.0GiB` memory. The generic collector
+  summaries also stop rendering `loadavg=None` and zero-total memory as valid
+  metrics on any platform.
+- The Windows summary reuses only the existing stdlib-only `windows status`
+  and `windows disks` read-only payloads (no new Windows collection surface)
+  and points at safe next commands: `shellforgeai windows status --json`,
+  `shellforgeai windows disks --json`, and
+  `shellforgeai windows processes --json --limit 10`. No PowerShell, no
+  WinRM/remoting, no mutation, and no model synthesis requirement — the
+  deterministic Windows summary renders even when the model is unavailable.
+  PR278 JSON-null collector parsing behavior is preserved and Linux/Docker
+  performance diagnostics are unchanged.
+- Coverage: `tests/test_pr279_windows_interactive_platform_aware_performance.py`
+  plus the existing PR278, collector, interactive, performance, and
+  command-surface/mutation-refusal suites.
+
 ### Windows evidence bundle opt-in processes component (PR276)
 
 - `shellforgeai windows evidence` now supports an explicit, bounded, opt-in

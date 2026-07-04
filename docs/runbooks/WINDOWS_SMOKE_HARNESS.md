@@ -226,6 +226,40 @@ use QEMU Guest Agent, or run host-management tools.
    remote execution, or mutated the host. Expected answer for the current lane
    is always no.
 
+## Interactive slow-system acceptance smoke (PR279)
+
+Since PR279 the interactive slow-system/performance route is platform-aware on
+Windows. A small acceptance smoke on `WIN2025-SFAI01`:
+
+1. Launch the interactive REPL:
+
+   ```text
+   C:\Tools\ShellForgeAI\bin\sfai.cmd interactive --yes-trust
+   ```
+
+2. Enter:
+
+   ```text
+   Hey this system feels a bit slow
+   ```
+
+3. Then enter `exit`.
+
+Expected:
+
+- No Python traceback and no `ValueError: malformed node or string` (PR278).
+- No Linux-only collector command errors rendered as scary failures; skipped
+  Linux collectors appear as `linux_only_collector_skipped` evidence.
+- No `loadavg=None` and no fake `0.0GiB/0.0GiB` memory rendered as valid
+  evidence; missing metrics are marked unavailable.
+- A bounded Windows-aware read-only summary that includes safe next commands
+  such as `shellforgeai windows status --json` and
+  `shellforgeai windows processes --json --limit 10`.
+- No cleanup/remediation/rollback/recovery, no natural-language mutation, no
+  PowerShell/WinRM introduced by ShellForgeAI code; a missing model auth
+  context stays bounded and non-fatal (the deterministic summary still
+  renders).
+
 ## Required safety expectations
 
 Saved Windows smoke JSON must show:

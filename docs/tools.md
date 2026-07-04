@@ -49,6 +49,12 @@ For ops intents the runtime composes collectors that call several tools:
 `diagnose` aliases include `performance|slow|slowness|host`,
 `storage|disk-performance|io|iowait`, `services|service-discovery|ports`.
 
+Performance/health collection is platform-aware (PR279): on Windows the
+Linux-only collectors above are skipped as structured
+`linux_only_collector_skipped` evidence instead of executed, missing metrics
+are marked `windows_metric_unavailable`, and the bundle reuses only the
+existing stdlib-only `windows status`/`windows disks` read-only payloads.
+
 ## Adaptive follow-ups
 
 Natural-language diagnostics may queue an evidence-driven deeper read-only
