@@ -153,3 +153,8 @@ The Windows lane preserves ShellForgeAI's core safety model:
 20. Add Windows read-only service deep detail (descriptions, dependencies, recovery options) and event-log evidence in separate PRs; firewall and Windows Update evidence also remain future separate PRs.
 21. Packaging/install spike.
 22. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
+
+
+## Saved interactive transcript acceptance
+
+Windows interactive performance diagnostics have a QA/harness-only saved-transcript acceptance helper: `python scripts/windows_interactive_acceptance.py --slow-transcript interactive-slow.txt --mutation-transcript interactive-mutation-refusal.txt --json --markdown`. The helper validates saved text only and does not execute PowerShell, use WinRM/PSRemoting, launch interactive mode, contact a Windows host, or mutate the VM. ShellForgeAI itself also uses no PowerShell or WinRM for this Windows interactive performance path.

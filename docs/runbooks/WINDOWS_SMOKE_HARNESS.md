@@ -260,6 +260,20 @@ Expected:
   context stays bounded and non-fatal (the deterministic summary still
   renders).
 
+## Interactive transcript acceptance helper
+
+After running the PR279-style interactive slow-system smoke and the paired unsafe cleanup/restart refusal smoke, operators can validate the saved text transcripts locally:
+
+```bash
+python scripts/windows_interactive_acceptance.py \
+  --slow-transcript interactive-slow.txt \
+  --mutation-transcript interactive-mutation-refusal.txt \
+  --json \
+  --markdown
+```
+
+The helper reads saved transcript files only. It does not launch interactive mode, run ShellForgeAI commands, execute PowerShell, use WinRM, contact QGA/Proxmox, call models, or perform mutation. It accepts UTF-8, UTF-8 with BOM, UTF-16 with BOM, and Windows PowerShell 5.1 UTF-16LE/BOM transcript files. The checks require no traceback, no PR278 JSON-null crash (`ValueError: malformed node or string` / `Name(id='null')`), no Linux fake metrics (`loadavg=None` or `0.0GiB/0.0GiB`), Windows-aware skipped/unavailable metric wording, safe follow-up guidance, and refusal of unsafe cleanup/restart requests. Optional `--out-json` and `--out-markdown` write deterministic local output files only when explicitly requested; otherwise output is stdout-only.
+
 ## Required safety expectations
 
 Saved Windows smoke JSON must show:
