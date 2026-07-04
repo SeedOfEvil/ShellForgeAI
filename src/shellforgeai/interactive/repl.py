@@ -5,7 +5,6 @@ import os
 import platform
 import re
 import time
-from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
@@ -17,6 +16,7 @@ from rich.table import Table
 
 from shellforgeai.audit.storage import AuditStorage
 from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
+from shellforgeai.core.collectors import parse_collector_payload
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, classify_target
@@ -584,11 +584,13 @@ def _confirm_workspace(
 def _summary_for_check(c) -> str:
     first = (c.stderr or c.stdout or "").splitlines()[0] if (c.stderr or c.stdout) else ""
     if c.tool == "host.info" and "hostname" in c.stdout:
-        payload = literal_eval(c.stdout)
+        payload = parse_collector_payload(c.stdout, default=None)
+        if not isinstance(payload, dict):
+            payload = {}
         return (
-            f"hostname={payload.get('hostname', 'unknown')} "
-            f"kernel={payload.get('kernel', 'unknown')} "
-            f"arch={payload.get('arch', 'unknown')}"
+            f"hostname={payload.get('hostname') or 'unknown'} "
+            f"kernel={payload.get('kernel') or 'unknown'} "
+            f"arch={payload.get('arch') or 'unknown'}"
         )
     if c.tool == "host.resources":
         return f"loadavg={_human_load(c.stdout or c.stderr or first).replace(' / ', ',')}"

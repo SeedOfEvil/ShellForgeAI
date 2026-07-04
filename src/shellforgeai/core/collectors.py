@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from ast import literal_eval
+from typing import Any
 
 from shellforgeai.core.evidence import EvidenceCategory, EvidenceItem
 from shellforgeai.knowledge.audits import search_recent_audits
@@ -26,6 +27,53 @@ from shellforgeai.tools import (
 from shellforgeai.tools.services import docker_detect, nginx_detect, ssh_detect
 from shellforgeai.util.text import truncate_text
 
+PARSE_FAILED: Any = object()
+"""Sentinel returned by :func:`parse_collector_payload` when parsing fails.
+
+Distinct from ``None`` because JSON ``null`` legitimately parses to ``None``.
+"""
+
+
+def parse_collector_payload(text: str | None, default: Any = PARSE_FAILED) -> Any:
+    """Parse collector stdout that may be JSON or a legacy Python literal.
+
+    Most collector tools emit JSON, which allows ``null``/``true``/``false`` —
+    values ``ast.literal_eval`` rejects with ``ValueError: malformed node or
+    string``. ``json.loads`` is tried first; ``ast.literal_eval`` remains as a
+    fallback for legacy ``str(dict)`` payloads such as ``host.info``. When
+    neither parser accepts the payload, ``default`` is returned so callers can
+    degrade to a safe summary instead of crashing.
+    """
+    if not isinstance(text, str):
+        return default
+    candidate = text.strip()
+    if not candidate:
+        return default
+    try:
+        return json.loads(candidate)
+    except ValueError:
+        pass
+    try:
+        return literal_eval(candidate)
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return default
+
+
+def _payload_mapping(text: str | None) -> dict:
+    """Parse a collector payload expected to be a mapping; ``{}`` on failure."""
+    data = parse_collector_payload(text, default=None)
+    return data if isinstance(data, dict) else {}
+
+
+def _payload_float(value: Any, default: float = 0.0) -> float:
+    """Coerce a payload field to float, treating null/non-numeric as default."""
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 
 def _summarize(result) -> str:
     first = (
@@ -41,19 +89,21 @@ def _summarize(result) -> str:
             else f"{cmd}: not found"
         )
     if result.tool == "system.os_release" and result.stdout.strip().startswith("{"):
-        data = literal_eval(result.stdout)
-        name = data.get("name", "Unknown")
-        ver = data.get("version", "").strip()
+        data = _payload_mapping(result.stdout)
+        name = data.get("name") or "Unknown"
+        ver = str(data.get("version") or "").strip()
         pretty = f"{name} {ver}".strip()
         return pretty if pretty else "os release unavailable"
     if result.tool == "host.info" and "hostname" in result.stdout:
         return result.stdout.replace("'", "").replace("{", "").replace("}", "")[:120]
     if result.tool == "system.cpu_memory" and result.stdout.strip().startswith("{"):
-        data = literal_eval(result.stdout)
-        mem_used = float(data.get("mem_used_mb", 0)) / 1024
-        mem_total = float(data.get("mem_total_mb", 0)) / 1024
-        swap_used = float(data.get("swap_used_mb", 0))
-        swap_total = float(data.get("swap_total_mb", 0)) / 1024
+        data = _payload_mapping(result.stdout)
+        if not data:
+            return "cpu/memory summary unavailable"
+        mem_used = _payload_float(data.get("mem_used_mb")) / 1024
+        mem_total = _payload_float(data.get("mem_total_mb")) / 1024
+        swap_used = _payload_float(data.get("swap_used_mb"))
+        swap_total = _payload_float(data.get("swap_total_mb")) / 1024
         swap_text = "swap=0B/0B"
         if swap_total > 0:
             swap_text = (
@@ -61,7 +111,9 @@ def _summarize(result) -> str:
                 if swap_used <= 0.01
                 else f"swap={swap_used / 1024:.1f}GiB/{swap_total:.1f}GiB"
             )
-        return f"cpus={data.get('cpus', '?')} mem={mem_used:.1f}GiB/{mem_total:.1f}GiB {swap_text}"
+        cpus = data.get("cpus")
+        cpus_text = cpus if cpus is not None else "?"
+        return f"cpus={cpus_text} mem={mem_used:.1f}GiB/{mem_total:.1f}GiB {swap_text}"
     if result.tool == "system.container_detect":
         val = (result.stdout or "").strip().replace("\n", " ")
         return f"container={val}" if val else "container=unknown"
@@ -113,10 +165,7 @@ def _summarize(result) -> str:
         path = result.command[-1] if result.command else "path"
         return f"{path}: {'exists' if result.ok else 'missing'}"
     if result.tool == "files.stat" and (result.stdout or "").startswith("{"):
-        try:
-            data = literal_eval(result.stdout)
-        except (ValueError, SyntaxError):
-            data = {}
+        data = _payload_mapping(result.stdout)
         if not data.get("exists"):
             return f"{data.get('path', 'path')}: missing"
         return (
