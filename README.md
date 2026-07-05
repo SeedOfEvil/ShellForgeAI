@@ -666,6 +666,20 @@ The report emits deterministic JSON/Markdown with root, Docker-root, and workspa
 
 The helper is diagnostic-only. It does not repair, cleanup, prune, kill, restart, rebuild, run a PR lane, run `pip install`, run tests, mutate Docker/Compose, mutate filesystems, mutate snapshots, or perform remediation/rollback/recovery. Cleanup, snapshot retirement, and BuildKit repair remain approval-gated operator work outside this helper.
 
+
+### Docker01 ownership-fix readiness packet
+
+PR284 adds a read-only Docker01 ownership-fix readiness packet helper for the future operator-reviewed fix path for the broad recursive Dockerfile ownership layer. It prepares evidence only; it does not apply the fix, execute any recipe, modify `/srv/compose/shellforgeai/Dockerfile`, run Docker build, run Docker Compose, run Docker prune, cleanup, remediation, rollback, process kill, or service restart. Recipe execution remains a separate explicit operator action after SeedOfEvil approval.
+
+```bash
+python scripts/docker01_ownership_fix_readiness.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python scripts/docker01_ownership_fix_readiness.py --dockerfile /srv/compose/shellforgeai/Dockerfile --markdown
+python scripts/docker01_build_health_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out-json docker01-build-health.json
+python scripts/docker01_ownership_fix_readiness.py --dockerfile /srv/compose/shellforgeai/Dockerfile --health-json docker01-build-health.json --out-json docker01-ownership-readiness.json --out-markdown DOCKER01-OWNERSHIP-READINESS.md
+```
+
+The helper reads local files only and statically checks for the known broad chown risk, recipe existence, confirmation/apply gate markers, backup or receipt indicators, and absence of obvious unsafe commands such as Docker build/Compose mutation/prune/remove, service restart, process kill, `shell=True`, and broad subprocess shell construction. JSON and Markdown output are deterministic readiness signals, not a formal security proof.
+
 ### Docker01 PR-lane validation evidence
 
 Docker01 PR-lane validation writes discoverable PR/commit-scoped evidence under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, including `validation-status.json`, `validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and `logs/`. Use `python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection` to find current evidence; stale PR/commit packets are ignored.
