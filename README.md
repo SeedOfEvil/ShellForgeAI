@@ -655,10 +655,14 @@ PR282 adds a read-only Docker01 build-lane health report for operators to run be
 ```bash
 python scripts/docker01_build_health_report.py --json
 python scripts/docker01_build_health_report.py --markdown
+python scripts/docker01_build_health_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
+python scripts/docker01_build_health_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --markdown
 python scripts/docker01_build_health_report.py --out-json docker01-build-health.json --out-markdown DOCKER01-BUILD-HEALTH.md
 ```
 
-The report emits deterministic JSON/Markdown with root, Docker-root, and workspace disk usage; build-related process summaries; possible Linux `D`-state/uninterruptible I/O indicators; Docker CLI read-only availability checks (`docker info`, `docker system df`, `docker ps`, and `docker buildx ls` when the CLI is present); and detection of the known broad recursive ownership layer pattern `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` in the local Dockerfile. Readiness is reported as `ok`, `attention`, `blocked`, or `unknown`; report generation exits 0 when collection succeeds even if readiness needs attention.
+PR283 improves Dockerfile discovery for this helper. The active Docker01 compose Dockerfile is expected at `/srv/compose/shellforgeai/Dockerfile`; operators can pass that path explicitly with `--dockerfile /srv/compose/shellforgeai/Dockerfile`. Without an explicit path, the helper checks a small deterministic allowlist only: the current working directory `Dockerfile`, `/srv/compose/shellforgeai/Dockerfile`, the repository-root `Dockerfile`, `/srv/data/shellforgeai/src/Dockerfile`, and the legacy default `Dockerfile` path when distinct. JSON and Markdown report the selected path, selection source, every candidate checked, discovery status (`found`, `not_found`, `unreadable`, or `ambiguous`), and whether the known broad recursive ownership/chown pattern was detected read-only.
+
+The report emits deterministic JSON/Markdown with root, Docker-root, and workspace disk usage; build-related process summaries; possible Linux `D`-state/uninterruptible I/O indicators; Docker CLI read-only availability checks (`docker info`, `docker system df`, `docker ps`, and `docker buildx ls` when the CLI is present); and detection of the known broad recursive ownership layer pattern `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` in the selected Dockerfile. Readiness is reported as `ok`, `attention`, `blocked`, or `unknown`; report generation exits 0 when collection succeeds even if readiness needs attention.
 
 The helper is diagnostic-only. It does not repair, cleanup, prune, kill, restart, rebuild, run a PR lane, run `pip install`, run tests, mutate Docker/Compose, mutate filesystems, mutate snapshots, or perform remediation/rollback/recovery. Cleanup, snapshot retirement, and BuildKit repair remain approval-gated operator work outside this helper.
 
