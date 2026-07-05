@@ -19,6 +19,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+import windows_interactive_acceptance as interactive_acceptance  # noqa: E402
 import windows_smoke_acceptance as acceptance  # noqa: E402
 
 SAFETY = {
@@ -51,6 +52,27 @@ def _artifact(path_value: str, validator_artifact: dict[str, Any]) -> dict[str, 
     payload["mode"] = validator_artifact.get("mode")
     payload["status"] = validator_artifact.get("status")
     return payload
+
+
+def _transcript_artifact(path_value: str, accepted: bool) -> dict[str, Any]:
+    path = Path(path_value)
+    payload: dict[str, Any] = {"path": str(path)}
+    if path.exists() and path.is_file():
+        payload.update(_hash_file(path))
+    else:
+        payload.update({"sha256": None, "size_bytes": None})
+    payload["accepted"] = accepted
+    return payload
+
+
+def _interactive_result(args: argparse.Namespace) -> dict[str, Any] | None:
+    if not (args.slow_transcript and args.mutation_transcript):
+        return None
+    transcript_args = argparse.Namespace(
+        slow_transcript=Path(args.slow_transcript),
+        mutation_transcript=Path(args.mutation_transcript),
+    )
+    return interactive_acceptance.build_result(transcript_args)
 
 
 def _services_counts(path_value: str) -> dict[str, Any]:
@@ -209,11 +231,14 @@ def _windows_summary(args: argparse.Namespace, validator: dict[str, Any]) -> dic
 
 def build_packet(args: argparse.Namespace) -> dict[str, Any]:
     validator = acceptance._result(args)
+    interactive = _interactive_result(args)
     artifacts = validator.get("artifacts", {})
     packet = {
         "schema_version": 1,
         "mode": "windows_smoke_packet",
-        "status": "ok" if validator["status"] == "ok" else "failed",
+        "status": "ok"
+        if validator["status"] == "ok" and (interactive is None or interactive["status"] == "ok")
+        else "failed",
         "pr": int(args.pr) if args.pr is not None else None,
         "commit": args.commit,
         "read_only": True,
@@ -256,7 +281,31 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
             processes_json, artifacts.get("processes", {})
         )
         packet["windows"]["processes"] = _processes_summary(processes_json)
+    if interactive is not None:
+        interactive_failed = [
+            check for check in interactive.get("checks", []) if not check.get("passed")
+        ]
+        packet["artifacts"]["slow_transcript"] = _transcript_artifact(
+            args.slow_transcript, not any(c["name"].startswith("slow.") for c in interactive_failed)
+        )
+        packet["artifacts"]["mutation_transcript"] = _transcript_artifact(
+            args.mutation_transcript,
+            not any(c["name"].startswith("mutation.") for c in interactive_failed),
+        )
+        packet["interactive"] = {
+            "mode": interactive["mode"],
+            "status": interactive["status"],
+            "summary": interactive["summary"],
+            "slow_transcript": {
+                "validated": not any(c["name"].startswith("slow.") for c in interactive_failed)
+            },
+            "mutation_transcript": {
+                "validated": not any(c["name"].startswith("mutation.") for c in interactive_failed)
+            },
+        }
     failed = [check for check in validator.get("checks", []) if not check.get("passed")]
+    if interactive is not None:
+        failed.extend(check for check in interactive.get("checks", []) if not check.get("passed"))
     if failed:
         packet["failed_checks"] = failed
     return packet
@@ -401,6 +450,23 @@ def render_markdown(packet: dict[str, Any]) -> str:
             "- Unavailable roots are accepted only when sanitized as safe disk usage "
             "failures (for example `disk_usage_failed`), never tracebacks."
         )
+    interactive = packet.get("interactive")
+    if interactive is not None:
+        lines.extend(["", "## Interactive transcript summary", ""])
+        for label, key in (
+            ("Slow transcript", "slow_transcript"),
+            ("Mutation transcript", "mutation_transcript"),
+        ):
+            artifact = packet["artifacts"][key]
+            outcome = "accepted" if artifact.get("accepted") else "failed"
+            lines.append(f"- {label}: `{artifact['path']}`")
+            lines.append(f"  - SHA256: `{artifact.get('sha256')}`")
+            lines.append(f"  - Size bytes: {artifact.get('size_bytes')}")
+            lines.append(f"  - Result: {outcome}")
+        lines.append(
+            f"- Acceptance summary: {interactive['summary']['passed']} passed, "
+            f"{interactive['summary']['failed']} failed"
+        )
     processes = packet["windows"].get("processes")
     if processes is not None:
         lines.extend(["", "## Processes summary", ""])
@@ -425,8 +491,9 @@ def render_markdown(packet: dict[str, Any]) -> str:
             "## Safety summary",
             "",
             (
-                "This helper validated saved artifacts only and did not run "
-                "ShellForgeAI commands or contact Windows hosts."
+                "This helper validated saved artifacts only, plus optional saved transcripts only "
+                "when supplied, and did not run ShellForgeAI commands, launch interactive mode, "
+                "execute PowerShell/WinRM, or perform cleanup/remediation/rollback/recovery."
             ),
         ]
     )
@@ -456,6 +523,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--processes-json",
         help="Optional path to saved 'shellforgeai windows processes --json' output.",
     )
+    parser.add_argument(
+        "--slow-transcript",
+        help="Optional path to a saved Windows interactive slow/performance transcript.",
+    )
+    parser.add_argument(
+        "--mutation-transcript",
+        help="Optional path to a saved Windows interactive mutation-refusal transcript.",
+    )
     parser.add_argument("--expected-host")
     parser.add_argument("--expected-python")
     parser.add_argument("--commit")
@@ -465,6 +540,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--out-json", help="Optional explicit JSON output path.")
     parser.add_argument("--out-markdown", help="Optional explicit Markdown output path.")
     args = parser.parse_args(argv)
+    if bool(args.slow_transcript) != bool(args.mutation_transcript):
+        parser.error("--slow-transcript and --mutation-transcript must be provided together")
     if not (args.json or args.markdown or args.out_json or args.out_markdown):
         parser.error(
             "select at least one output mode: --json, --markdown, --out-json, or --out-markdown"

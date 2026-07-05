@@ -97,7 +97,7 @@ use QEMU Guest Agent, or run host-management tools.
    shellforgeai windows disks --json
    ```
 7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`. PR269 validates evidence bundles that embed the opt-in services component with the same key safety expectations as the standalone services artifact; a standalone `--services-json` artifact is not required when the bundle embeds services. PR271 extends the saved-artifact validator and packet helper support to `windows-disks.json`; the disks artifact validator accepts unavailable roots only when they are sanitized as safe disk usage failures (for example `disk_usage_failed`), never tracebacks or raw exception detail. PR272 validates evidence bundles that embed the opt-in disks component with the same key safety expectations as the standalone disks artifact; a standalone `--disks-json` artifact is not required when the bundle embeds disks, and standalone `windows-disks.json` support from PR271 remains valid. PR275 adds saved-artifact validator and packet support for `windows-processes.json` via `--processes-json`: it validates saved PR274 process artifacts only, runs no ShellForgeAI product commands, collects no new process data, does not add processes to the evidence bundle, and validates that process artifacts carry only PID, parent PID, image basename/name, and thread count — never command lines, environments, memory, handles, modules, owners/users, or network connections. PR276 validates evidence bundles that embed the opt-in processes component with the same key safety expectations as the standalone processes artifact (including the per-item field allowlist); a standalone `--processes-json` artifact is not required when the bundle embeds processes, and standalone `windows-processes.json` support from PR275 remains valid.
-8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON, optionally including services JSON.
+8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON, optionally including services/disks/processes JSON and, since PR281, optional saved Windows interactive slow/mutation-refusal transcripts.
 9. Archive the raw JSON artifacts exactly as captured. Deterministic capture
    methods are preferred, but operators do not need to rewrite files that include
    a UTF-8 BOM or Windows PowerShell 5.1 default UTF-16LE BOM. The local
@@ -221,6 +221,32 @@ use QEMU Guest Agent, or run host-management tools.
      --json \
      --markdown
    ```
+
+   For a PR281 packet that also includes saved interactive transcript
+   acceptance results and transcript hashes:
+
+   ```bash
+   python scripts/windows_smoke_packet.py \
+     --evidence-json windows-evidence.json \
+     --status-json windows-status.json \
+     --doctor-json windows-doctor.json \
+     --processes-json windows-processes.json \
+     --slow-transcript interactive-slow.txt \
+     --mutation-transcript interactive-mutation-refusal.txt \
+     --expected-host WIN2025-SFAI01 \
+     --expected-python 3.14.6 \
+     --pr 281 \
+     --commit <sha> \
+     --json \
+     --markdown
+   ```
+
+   Transcript arguments are optional, but if transcript validation is requested
+   both `--slow-transcript` and `--mutation-transcript` are required. The
+   packet helper reads saved files only, does not launch interactive mode, does
+   not execute PowerShell/WinRM/QGA/Proxmox/network/model calls, and does not
+   mutate the Windows host. Saved transcripts can be UTF-8, UTF-8 with BOM,
+   UTF-16 with BOM, or Windows PowerShell 5.1 UTF-16LE/BOM.
 
 12. Report whether ShellForgeAI itself executed PowerShell, used WinRM, performed
    remote execution, or mutated the host. Expected answer for the current lane
@@ -452,8 +478,10 @@ python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence-with
 deterministic QA evidence packet. It reads the saved `windows-evidence.json`,
 `windows-status.json`, `windows-doctor.json`, and optional
 `windows-services.json`, `windows-disks.json`, and `windows-processes.json`
-files only; validates them via the PR265/PR268/PR271/PR275/PR276 acceptance
-checks;
+files only, plus optional saved interactive slow/mutation-refusal transcripts
+when both transcript paths are supplied; validates JSON artifacts via the
+PR265/PR268/PR271/PR275/PR276 acceptance checks and transcripts via the PR280
+acceptance checks;
 computes SHA256 and byte size for each input; and emits deterministic JSON
 and/or concise Markdown for PR handoff.
 When `--services-json` is provided, the packet includes the services artifact
@@ -500,14 +528,27 @@ owners/users, and network connections were not collected; a standalone
 `--processes-json` artifact is not required when the bundle embeds processes,
 standalone `processes_json` support from PR275 remains valid, and when both
 are present the shared validator cross-checks their mode/status/method fields.
+Since PR281, when both `--slow-transcript` and `--mutation-transcript` are
+provided, the packet includes `slow_transcript` and `mutation_transcript`
+artifact entries with path, SHA256, byte size, and accepted/failed status; an
+`interactive` JSON block with mode `windows_interactive_acceptance`, status,
+summary, and per-transcript validation flags; and an "Interactive transcript
+summary" Markdown section. If either transcript fails PR280 acceptance, packet
+status is `failed`, failed transcript checks are included in JSON/Markdown, and
+the helper exits nonzero. If only one transcript argument is supplied, argument
+parsing fails cleanly instead of silently skipping transcript validation.
+Transcript support is optional and omitting both arguments leaves existing
+JSON-only packet behavior unchanged.
+
 It accepts UTF-8, UTF-8 with BOM, UTF-16 with BOM, and Windows PowerShell 5.1
-UTF-16LE/BOM artifacts through the shared saved-JSON validator.
+UTF-16LE/BOM artifacts and transcripts through the shared saved-file validators.
 
 The packet helper is not a product collection command. It is safe to execute
 directly by absolute path with the durable Windows embedded Python runtime; no
 `PYTHONPATH` setting or scripts-directory cwd trick is required. It does not run
-ShellForgeAI commands, contact Windows hosts, use PowerShell, WinRM, QGA,
-Proxmox, subprocess, network calls, model calls, or mutation. By default it
+ShellForgeAI commands, launch interactive mode, contact Windows hosts, use
+PowerShell, WinRM, QGA, Proxmox, subprocess, network calls, model calls, or
+mutation. By default it
 writes to stdout only; it writes files only when an operator explicitly passes
 `--out-json` and/or `--out-markdown`. At least one output mode is required.
 
@@ -561,6 +602,20 @@ python scripts/windows_smoke_packet.py \
   --expected-python 3.14.6 \
   --commit <commit-sha> \
   --pr 276 \
+  --json \
+  --markdown
+
+python scripts/windows_smoke_packet.py \
+  --evidence-json windows-evidence.json \
+  --status-json windows-status.json \
+  --doctor-json windows-doctor.json \
+  --processes-json windows-processes.json \
+  --slow-transcript interactive-slow.txt \
+  --mutation-transcript interactive-mutation-refusal.txt \
+  --expected-host WIN2025-SFAI01 \
+  --expected-python 3.14.6 \
+  --commit <commit-sha> \
+  --pr 281 \
   --json \
   --markdown
 ```
