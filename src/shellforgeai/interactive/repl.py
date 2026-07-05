@@ -929,7 +929,10 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
         limitations.append(
             f"- Linux-only collectors skipped on Windows (not applicable): {skipped_names}{more}."
         )
-    next_commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS)
+    next_command_list = list(WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS) + list(
+        WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS
+    )
+    next_commands = "\n".join(f"- {cmd}" for cmd in next_command_list)
     return (
         "## Assessment\n"
         "Windows host: bounded read-only diagnostics completed. Linux-only collectors "
@@ -2255,6 +2258,64 @@ def _contains_internal_collector_language(text: str) -> bool:
     return any(b in low for b in blocked)
 
 
+def _normalize_assessment_guard_text(text: str) -> str:
+    return (
+        text.lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("`", "")
+        .replace("â€™", "'")
+        .replace("â€˜", "'")
+        .replace("\u2019", "'")
+    )
+
+
+def _contains_project_instruction_acknowledgement(text: str) -> bool:
+    low = _normalize_assessment_guard_text(text)
+    if not low.strip():
+        return False
+    acknowledgement_cues = (
+        "understood",
+        "i'll treat",
+        "i will treat",
+        "i'm in",
+        "i am in",
+        "will follow",
+        "follow the agents.md",
+        "workspace instructions",
+        "system prompt",
+        "project instructions",
+    )
+    project_cues = (
+        "agents.md",
+        "treat this repo as shellforgeai",
+        "treat this workspace as shellforgeai",
+        "documentation invariants",
+        "evidence-first routing",
+        "preserve the safety, cli surface",
+        "workspace instructions",
+        "project instructions",
+        "system prompt",
+    )
+    if any(cue in low for cue in project_cues) and any(cue in low for cue in acknowledgement_cues):
+        return True
+    if "agents.md" in low and "invariant" in low:
+        return True
+    if "preserve the safety, cli surface" in low:
+        return True
+    if "documentation invariants" in low:
+        return True
+    if "evidence-first routing" in low and "diagnos" not in low:
+        return True
+    return all(part in low for part in ("c:", "tools", "shellforgeai")) and "will follow" in low
+
+
+def _is_bad_model_assessment(text: str) -> bool:
+    return _contains_internal_collector_language(
+        text
+    ) or _contains_project_instruction_acknowledgement(text)
+
+
 def _grounded_mutation_has_concrete_ops_target(res) -> bool:  # noqa: ANN001
     return bool(
         res.target
@@ -2983,9 +3044,9 @@ No command was executed.""")
                         artifact_dir=runtime.session.artifact_dir,
                     )
                     console.print("\n## Assessment")
-                    if (
-                        not _has_substantive_response(mresp_text)
-                    ) or _contains_internal_collector_language(mresp_text):
+                    if (not _has_substantive_response(mresp_text)) or _is_bad_model_assessment(
+                        mresp_text
+                    ):
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)

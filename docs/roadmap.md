@@ -1387,3 +1387,7 @@ PR276 is the next small Windows evidence integration after the standalone proces
 ## Windows interactive safe command hints/routing
 
 Windows interactive safe command hints are improved for explicit read-only status requests. Phrases such as `show me the windows status`, `windows doctor`, `windows evidence`, and `windows processes limit 10` now route deterministically to allowlisted Windows-local read-only command guidance and update `/pending` with `windows-local-read-only` safe next commands. This is not broad natural-language execution: no shell, subprocess, PowerShell, WinRM, remote probing, Docker/Compose mutation, cleanup, remediation, rollback, recovery, or service/process/disk mutation is added.
+
+## Windows interactive assessment leakage guard
+
+Windows interactive performance diagnosis now rejects project/system-prompt acknowledgement text in provider assessments. If a model response restates AGENTS.md, workspace instructions, documentation invariants, or evidence-first routing instead of diagnosing the evidence, the REPL falls back to deterministic Windows local read-only guidance. No broad natural-language execution, new collector, model/provider change, PowerShell/WinRM, shell/subprocess execution, Docker/Compose mutation, cleanup, remediation, rollback, recovery, or host mutation is added.
