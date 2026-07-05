@@ -647,6 +647,21 @@ It reports root filesystem capacity, mounted filesystems and device mapping, dis
 
 It is evidence-only. It does not repair filesystems, run `fsck`/`e2fsck`/`xfs_repair`, mount/remount, prune Docker, remove images, delete files, restart containers, or mutate Docker/Compose. It uses a fixed read-only command allowlist with `shell=False`. If `dmesg`/`journalctl` access is denied the report returns `partial` with a warning rather than crashing; if optional tools such as `findmnt` are missing it falls back to `/proc/mounts`. With `--out` it writes `storage-health-report.json`, `storage-health-summary.md`, `commands-run.json`, `manifest.json`, and `checksums.json` (SHA256 + sizes). Persistent host storage warnings should be investigated outside ShellForgeAI mutation lanes.
 
+
+### Docker01 build lane health report
+
+PR282 adds a read-only Docker01 build-lane health report for operators to run before PR lanes when Docker01 disk, I/O, or BuildKit health is uncertain. It was added after PR281 deploy validation reached Docker01 host I/O/BuildKit stalls before product validation could complete, so the report helps separate infrastructure/build-lane blockers from ShellForgeAI product or test failures.
+
+```bash
+python scripts/docker01_build_health_report.py --json
+python scripts/docker01_build_health_report.py --markdown
+python scripts/docker01_build_health_report.py --out-json docker01-build-health.json --out-markdown DOCKER01-BUILD-HEALTH.md
+```
+
+The report emits deterministic JSON/Markdown with root, Docker-root, and workspace disk usage; build-related process summaries; possible Linux `D`-state/uninterruptible I/O indicators; Docker CLI read-only availability checks (`docker info`, `docker system df`, `docker ps`, and `docker buildx ls` when the CLI is present); and detection of the known broad recursive ownership layer pattern `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` in the local Dockerfile. Readiness is reported as `ok`, `attention`, `blocked`, or `unknown`; report generation exits 0 when collection succeeds even if readiness needs attention.
+
+The helper is diagnostic-only. It does not repair, cleanup, prune, kill, restart, rebuild, run a PR lane, run `pip install`, run tests, mutate Docker/Compose, mutate filesystems, mutate snapshots, or perform remediation/rollback/recovery. Cleanup, snapshot retirement, and BuildKit repair remain approval-gated operator work outside this helper.
+
 ### Docker01 PR-lane validation evidence
 
 Docker01 PR-lane validation writes discoverable PR/commit-scoped evidence under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, including `validation-status.json`, `validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and `logs/`. Use `python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection` to find current evidence; stale PR/commit packets are ignored.
