@@ -28,6 +28,8 @@ BROAD_CHOWN_PATTERN = "chown -R appuser:appuser /data /home/appuser/.codex /opt/
 DEFAULT_DOCKER_ROOT = Path("/var/lib/docker")
 DEFAULT_WORKSPACE = Path("/srv/data/shellforgeai/src")
 DEFAULT_DOCKERFILE = Path("Dockerfile")
+COMPOSE_PROJECT_DOCKERFILE = Path("/srv/compose/shellforgeai/Dockerfile")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 DISK_ATTENTION_PERCENT = 85.0
 DISK_BLOCKED_PERCENT = 95.0
 COMMAND_TIMEOUT_SECONDS = 5
@@ -115,19 +117,114 @@ def root_disk_entry(usage_fn: Callable[[Path], shutil._ntuple_diskusage]) -> dic
     return item
 
 
-def scan_dockerfile(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {
-            "available": False,
-            "detected": False,
-            "path": str(path),
-            "reason": "dockerfile_not_found",
-        }
+@dataclass(frozen=True)
+class DockerfileCandidate:
+    path: Path
+    source: str
+    explicit: bool = False
+
+
+def _candidate_entry(candidate: DockerfileCandidate) -> dict[str, Any]:
+    path = candidate.path.expanduser()
+    exists = path.exists()
+    entry: dict[str, Any] = {
+        "path": str(path),
+        "exists": exists,
+        "source": candidate.source,
+    }
+    if not exists:
+        entry["readable"] = False
+        return entry
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        with path.open("r", encoding="utf-8", errors="replace"):
+            pass
     except OSError as exc:
-        return {"available": False, "detected": False, "path": str(path), "reason": str(exc)}
-    return {"available": True, "detected": BROAD_CHOWN_PATTERN in text, "path": str(path)}
+        entry["readable"] = False
+        entry["reason"] = str(exc)
+    else:
+        entry["readable"] = True
+    return entry
+
+
+def dockerfile_candidates(explicit_dockerfile: Path | None = None) -> list[DockerfileCandidate]:
+    raw: list[DockerfileCandidate] = []
+    if explicit_dockerfile is not None:
+        raw.append(DockerfileCandidate(explicit_dockerfile, "explicit", explicit=True))
+    raw.extend(
+        [
+            DockerfileCandidate(Path.cwd() / DEFAULT_DOCKERFILE, "cwd"),
+            DockerfileCandidate(COMPOSE_PROJECT_DOCKERFILE, "compose_project"),
+            DockerfileCandidate(REPO_ROOT / DEFAULT_DOCKERFILE, "repo_root"),
+            DockerfileCandidate(DEFAULT_WORKSPACE / DEFAULT_DOCKERFILE, "workspace"),
+            DockerfileCandidate(DEFAULT_DOCKERFILE, "legacy_default"),
+        ]
+    )
+    candidates: list[DockerfileCandidate] = []
+    seen: set[str] = set()
+    for candidate in raw:
+        key = str(candidate.path.expanduser().resolve(strict=False))
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+    return candidates
+
+
+def discover_dockerfile(explicit_dockerfile: Path | None = None) -> dict[str, Any]:
+    candidates = dockerfile_candidates(explicit_dockerfile)
+    checked = [_candidate_entry(candidate) for candidate in candidates]
+    explicit_problem = explicit_dockerfile is not None and checked
+    if explicit_problem and not checked[0]["exists"]:
+        selected = None
+        status = "not_found"
+    elif explicit_problem and not checked[0].get("readable", False):
+        selected = None
+        status = "unreadable"
+    else:
+        selected = next(
+            (entry for entry in checked if entry["exists"] and entry.get("readable")), None
+        )
+        found_count = sum(1 for entry in checked if entry["exists"] and entry.get("readable"))
+        status = "not_found" if selected is None else "ambiguous" if found_count > 1 else "found"
+    selected_path = selected["path"] if selected else None
+    selected_source = selected["source"] if selected else None
+    risk_detected = False
+    if selected_path:
+        try:
+            text = Path(selected_path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            for entry in checked:
+                if entry["path"] == selected_path:
+                    entry["readable"] = False
+                    entry["reason"] = str(exc)
+                    break
+            selected_path = None
+            selected_source = None
+            status = "unreadable"
+        else:
+            risk_detected = BROAD_CHOWN_PATTERN in text
+    return {
+        "status": status,
+        "selected_path": selected_path,
+        "source": selected_source,
+        "candidates_checked": checked,
+        "risk": {
+            "broad_recursive_ownership_layer": {
+                "detected": risk_detected,
+                "pattern": BROAD_CHOWN_PATTERN,
+            }
+        },
+    }
+
+
+def scan_dockerfile(path: Path) -> dict[str, Any]:
+    discovery = discover_dockerfile(path)
+    return {
+        "available": discovery["selected_path"] is not None,
+        "detected": discovery["risk"]["broad_recursive_ownership_layer"]["detected"],
+        "path": discovery["selected_path"] or str(path),
+        "reason": discovery["status"],
+    }
 
 
 def _read_text(path: Path) -> str:
@@ -259,12 +356,18 @@ def determine_readiness(report: dict[str, Any]) -> dict[str, Any]:
 def build_report(
     docker_root: Path = DEFAULT_DOCKER_ROOT,
     workspace: Path = DEFAULT_WORKSPACE,
-    dockerfile: Path = DEFAULT_DOCKERFILE,
+    dockerfile: Path | None = None,
     proc_root: Path = Path("/proc"),
     usage_fn: Callable[[Path], shutil._ntuple_diskusage] = shutil.disk_usage,
     include_docker_cli: bool = True,
 ) -> dict[str, Any]:
-    dockerfile_scan = scan_dockerfile(dockerfile)
+    dockerfile_discovery = discover_dockerfile(dockerfile)
+    dockerfile_scan = {
+        "available": dockerfile_discovery["selected_path"] is not None,
+        "detected": dockerfile_discovery["risk"]["broad_recursive_ownership_layer"]["detected"],
+        "path": dockerfile_discovery["selected_path"] or (str(dockerfile) if dockerfile else None),
+        "reason": dockerfile_discovery["status"],
+    }
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "mode": MODE,
@@ -291,9 +394,11 @@ def build_report(
             "buildkit_indicators": ["docker_cli_checks_disabled"],
             "read_only_commands": [],
         },
+        "dockerfile": dockerfile_discovery,
         "known_risks": {
             "broad_recursive_ownership_layer": {
                 "detected": bool(dockerfile_scan["detected"]),
+                "path": dockerfile_discovery["selected_path"],
                 "pattern": BROAD_CHOWN_PATTERN,
             },
             "docker01_io_pressure": {"detected": False},
@@ -334,6 +439,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         free = entry["free_bytes"]
         lines.append(f"- {name}: path `{entry['path']}`, used {used}%, free {free} bytes")
     stuck_count = len(report["processes"]["possible_stuck_io"])
+    dockerfile = report["dockerfile"]
     broad_chown = str(report["known_risks"]["broad_recursive_ownership_layer"]["detected"]).lower()
     io_pressure = str(report["known_risks"]["docker01_io_pressure"]["detected"]).lower()
     docker_df = str(report["docker"]["system_df_available"]).lower()
@@ -343,6 +449,24 @@ def render_markdown(report: dict[str, Any]) -> str:
             "## Processes",
             f"- Build-related process count: {report['processes']['count']}",
             f"- Possible D-state/uninterruptible I/O count: {stuck_count}",
+            "",
+            "## Dockerfile discovery",
+            f"- Status: `{dockerfile['status']}`",
+            f"- Selected Dockerfile path: `{dockerfile['selected_path'] or 'none'}`",
+            f"- Selected source: `{dockerfile['source'] or 'none'}`",
+            "- Candidates checked:",
+        ]
+    )
+    for candidate in dockerfile["candidates_checked"]:
+        lines.append(
+            f"  - `{candidate['path']}` (source `{candidate['source']}`, "
+            f"exists `{str(candidate['exists']).lower()}`, "
+            f"readable `{str(candidate.get('readable', False)).lower()}`)"
+        )
+    lines.extend(
+        [
+            f"- Broad recursive chown risk detected: `{broad_chown}`",
+            "- Dockerfile inspection is read-only; the helper reads candidate files only.",
             "",
             "## Known risks",
             f"- Broad recursive ownership layer detected: `{broad_chown}`",
@@ -371,10 +495,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out-json", type=Path, help="write deterministic JSON report")
     parser.add_argument("--out-markdown", type=Path, help="write deterministic Markdown report")
+    parser.add_argument(
+        "--dockerfile", type=Path, help="explicit Dockerfile path to inspect read-only"
+    )
     args = parser.parse_args(argv)
     if not (args.json or args.markdown or args.out_json or args.out_markdown):
         parser.error("choose --json, --markdown, --out-json, or --out-markdown")
-    report = build_report()
+    report = build_report(dockerfile=args.dockerfile) if args.dockerfile else build_report()
     json_text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     markdown_text = render_markdown(report)
     if args.out_json:
