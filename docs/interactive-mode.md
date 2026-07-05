@@ -610,3 +610,7 @@ routing is unchanged, broad/freeform mutation phrases stay refused, and natural
 language never executes governed fixes. The root callback's no-subcommand
 interactive fallback intentionally stays in `cli.py`. Future CLI refactors
 should keep running the PR184 command-surface golden guardrail.
+
+## Windows read-only phrases
+
+Interactive mode deterministically recognizes explicit Windows read-only phrases such as `show me the windows status`, `windows doctor`, `windows evidence`, and `windows processes limit 10`. These phrases only render allowlisted safe command guidance and set `/pending` to a `windows-local-read-only` context with Windows safe-next commands. They do not execute shell commands, PowerShell, WinRM/PSRemoting, subprocesses, Docker/Compose, cleanup, remediation, rollback, recovery, or mutation, and broad natural-language execution remains out of scope.

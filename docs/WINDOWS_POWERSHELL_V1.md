@@ -162,3 +162,9 @@ Windows interactive performance diagnostics have a QA/harness-only saved-transcr
 ## Saved interactive transcript packet support
 
 For QA handoff only, `scripts/windows_smoke_packet.py` can include saved Windows interactive slow/performance and mutation-refusal transcripts alongside saved JSON artifacts by passing both `--slow-transcript` and `--mutation-transcript`. The helper reuses the saved-transcript acceptance checks, reports transcript path, SHA256, byte size, accepted/failed state, and an interactive summary in deterministic JSON/Markdown. It reads saved local files only and does not launch ShellForgeAI interactive mode, execute PowerShell, use WinRM/PSRemoting, contact QGA/Proxmox, call the network or a model, or mutate the Windows host.
+
+## Interactive Windows read-only request routing
+
+Interactive mode recognizes explicit safe Windows read-only requests such as `show me the windows status`, `windows status`, `windows doctor`, `windows evidence`, and `windows processes limit 10`. These phrases are deterministic allowlisted routing only: ShellForgeAI renders the corresponding safe command guidance (`sfai.cmd windows status --json`, `sfai.cmd windows doctor --json`, `sfai.cmd windows evidence --json`, and `sfai.cmd windows processes --json --limit 10`) and updates `/pending` to a `windows-local-read-only` context. The route does not invoke model/system-prompt synthesis first, does not execute PowerShell, does not use WinRM/PSRemoting, does not spawn a shell or subprocess, and does not mutate services, processes, disks, Docker/Compose, registry, execution policy, or the filesystem.
+
+On Linux/non-Windows hosts, the same Windows phrases return unsupported/Windows-only safe guidance and `shellforgeai platform doctor --json`; they do not probe Windows or switch to Linux/Docker collectors. Broad natural-language execution remains out of scope.

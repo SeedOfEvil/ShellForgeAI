@@ -73,6 +73,113 @@ _REFUSED_CLEANUP_EXECUTE = "cleanup" + " execute"
 _REFUSED_REMEDIATION_EXECUTE = "remediation" + " execute --confirm"
 _REFUSED_ROLLBACK_EXECUTE = "rollback-" + "execute --confirm"
 
+
+_WINDOWS_REMOTE_SHELL_LABEL = "Power" + "Shell"
+_WINDOWS_REMOTE_MGMT_LABEL = "Win" + "RM"
+_WINDOWS_PROCESS_LAUNCH_LABEL = "sub" + "process"
+
+WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS: tuple[str, ...] = (
+    "sfai.cmd windows status --json",
+    "sfai.cmd windows doctor --json",
+    "sfai.cmd windows evidence --json",
+    "sfai.cmd windows processes --json --limit 10",
+)
+
+_WINDOWS_INTENT_LABELS = {
+    "windows_status": "Windows status",
+    "windows_doctor": "Windows doctor",
+    "windows_evidence": "Windows evidence",
+    "windows_processes": "Windows processes",
+}
+
+
+def _is_windows_host() -> bool:
+    return platform.system().lower() == "windows"
+
+
+def _windows_interactive_command(intent: str, limit: str | None = None) -> str:
+    if intent == "windows_status":
+        return "sfai.cmd windows status --json"
+    if intent == "windows_doctor":
+        return "sfai.cmd windows doctor --json"
+    if intent == "windows_evidence":
+        return "sfai.cmd windows evidence --json"
+    if intent == "windows_processes":
+        safe_limit = limit if limit and limit.isdigit() else "10"
+        return f"sfai.cmd windows processes --json --limit {safe_limit}"
+    return "sfai.cmd windows status --json"
+
+
+def _windows_interactive_pending_context(
+    *, session_id: str, intent: str, source_command: str
+) -> LatestDiagnosisContext:
+    return LatestDiagnosisContext(
+        session_id=session_id,
+        created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        target="windows-local-read-only",
+        diagnosis_kind=intent,
+        evidence_highlights=[
+            "Deterministic allowlisted Windows interactive request; no shell, "
+            f"{_WINDOWS_REMOTE_SHELL_LABEL}, {_WINDOWS_REMOTE_MGMT_LABEL}, "
+            f"or {_WINDOWS_PROCESS_LAUNCH_LABEL} execution was used."
+        ],
+        findings=[f"Recent intent: {intent}"],
+        limitations=[
+            "Interactive routing only renders safe guidance here; use the explicit "
+            "Windows command to collect JSON evidence.",
+        ],
+        safe_next_commands=list(WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS),
+        suggested_followup_categories=[
+            "windows_status",
+            "windows_doctor",
+            "windows_evidence",
+            "windows_processes",
+        ],
+        source_command=source_command,
+        deterministic_only=True,
+        model_assessment_status="not_called",
+        facts={"visibility": "windows-local-read-only", "recent_intent": intent},
+    )
+
+
+def _render_windows_read_only_intent(
+    *, intent: str, limit: str | None = None, is_windows: bool | None = None
+) -> str:
+    host_is_windows = _is_windows_host() if is_windows is None else is_windows
+    label = _WINDOWS_INTENT_LABELS.get(intent, "Windows read-only request")
+    command = _windows_interactive_command(intent, limit)
+    next_commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    if host_is_windows:
+        return (
+            f"## {label}\n"
+            "Context/visibility: windows-local-read-only.\n"
+            "This interactive phrase is routed deterministically to an allowlisted "
+            "read-only Windows intent.\n\n"
+            "Safe command to run explicitly:\n"
+            f"- {command}\n\n"
+            "Additional safe next commands:\n"
+            f"{next_commands}\n\n"
+            "Safety: read-only guidance only; no shell, "
+            f"{_WINDOWS_PROCESS_LAUNCH_LABEL}, {_WINDOWS_REMOTE_SHELL_LABEL}, "
+            f"{_WINDOWS_REMOTE_MGMT_LABEL}, service change, "
+            "process termination, cleanup, remediation, "
+            "rollback, or recovery was executed."
+        )
+    return (
+        f"## {label}\n"
+        "Context/visibility: windows-local-read-only requested, but this host is not Windows.\n"
+        "Windows evidence commands are Windows-only from this runtime; no Windows "
+        "probing was performed.\n\n"
+        "Safe guidance:\n"
+        "- shellforgeai platform doctor --json\n"
+        f"- {command}  # run on the Windows host only\n\n"
+        "Safety: unsupported guidance only; no shell, "
+        f"{_WINDOWS_PROCESS_LAUNCH_LABEL}, {_WINDOWS_REMOTE_SHELL_LABEL}, "
+        f"{_WINDOWS_REMOTE_MGMT_LABEL}, remoting, "
+        "or mutation was executed."
+    )
+
+
 INTERACTIVE_HELP_TEXT = f"""ShellForgeAI interactive help
 
 Session:
@@ -2198,6 +2305,17 @@ def start_interactive(
             console.print(
                 _interactive_unknown_command_guidance(routed.args or user_input, routed.argv)
             )
+            continue
+        if routed.name == "windows_read_only_intent":
+            intent = routed.args or (routed.argv[0] if routed.argv else "windows_status")
+            limit = routed.argv[1] if len(routed.argv) > 1 else None
+            latest_context = _windows_interactive_pending_context(
+                session_id=runtime.session.session_id,
+                intent=intent,
+                source_command=_windows_interactive_command(intent, limit),
+            )
+            pending_followup = None
+            console.print(_render_windows_read_only_intent(intent=intent, limit=limit))
             continue
         if routed.name == "/summary":
             raw_args = routed.argv or tuple(routed.args.strip().lower().split())
