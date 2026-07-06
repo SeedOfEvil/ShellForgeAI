@@ -53,6 +53,12 @@ _BAD_ASSESSMENT_TAIL = (
 BAD_ASSESSMENT = f"Understood. Iâ€™ll {_BAD_ASSESSMENT_TAIL}"
 BAD_ASSESSMENT_UNICODE = f"Understood. I’ll {_BAD_ASSESSMENT_TAIL}"
 BAD_ASSESSMENT_ASCII = f"Understood. I'll {_BAD_ASSESSMENT_TAIL}"
+BAD_PROJECT_INVARIANTS = (
+    "Understood. I'll follow the ShellForgeAI project invariants and AGENTS.md "
+    "guidance for any work in this repo."
+)
+BAD_PROJECT_INVARIANTS_UNICODE = BAD_PROJECT_INVARIANTS.replace("I'll", "I’ll")
+BAD_PROJECT_INVARIANTS_MOJIBAKE = BAD_PROJECT_INVARIANTS.replace("I'll", "Iâ€™ll")
 
 
 def _fake_windows_status_payload(info: Any = None, **_: Any) -> dict[str, Any]:
@@ -127,6 +133,9 @@ class _UnavailableProvider:
         BAD_ASSESSMENT_ASCII,
         BAD_ASSESSMENT_UNICODE,
         BAD_ASSESSMENT,
+        BAD_PROJECT_INVARIANTS,
+        BAD_PROJECT_INVARIANTS_UNICODE,
+        BAD_PROJECT_INVARIANTS_MOJIBAKE,
         "Understood. I'll treat this repo as ShellForgeAI and preserve the safety, CLI surface.",
         "I will treat this workspace as ShellForgeAI and follow the AGENTS.md invariants.",
         "Understood; documentation invariants are preserved.",
@@ -326,8 +335,40 @@ def test_windows_latency_exact_prompt_is_operator_facing_fallback(
     assert "sfai.cmd windows status --json" in out
     assert "sfai.cmd windows processes --json --limit 10" in out
     assert "AGENTS.md" not in out
+    assert "AGENTS.md guidance" not in out
     assert "ShellForgeAI repo conventions" not in out
+    assert "ShellForgeAI project invariants" not in out
+    assert "work in this repo" not in out
     assert "project constraints" not in out
+    assert "existing CLI surface" not in out
+
+
+def test_windows_latency_exact_prompt_routes_before_model_synthesis(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("exact Windows latency route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
+    res = runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input=(
+            "I am seeing weird latency in the app. "
+            "Give me a practical first-pass diagnosis.\n/exit\n"
+        ),
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Windows latency first-pass diagnosis" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "AGENTS.md guidance" not in out
+    assert "ShellForgeAI project invariants" not in out
+    assert "work in this repo" not in out
 
 
 def test_windows_strongest_signal_prompt_compares_categories_once(

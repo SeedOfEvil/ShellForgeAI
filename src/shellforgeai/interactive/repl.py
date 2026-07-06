@@ -143,9 +143,22 @@ def _is_current_host_handoff_phrase(text: str) -> bool:
 
 def _is_latency_diagnosis_phrase(text: str) -> bool:
     normalized = _normalized_interactive_phrase(text)
-    return ("latency" in normalized or "lag" in normalized) and (
-        "diagnosis" in normalized or "diagnose" in normalized or "first pass" in normalized
+    has_latency = any(
+        phrase in normalized
+        for phrase in ("latency", "weird latency", "latency in the app", "lag", "laggy")
     )
+    has_diagnosis = any(
+        phrase in normalized
+        for phrase in (
+            "diagnosis",
+            "diagnose",
+            "first pass",
+            "first pass diagnosis",
+            "practical first pass",
+            "practical first pass diagnosis",
+        )
+    )
+    return has_latency and has_diagnosis
 
 
 def _is_windows_service_mutation_phrase(text: str) -> bool:
@@ -1182,6 +1195,45 @@ def _windows_latency_fallback_summary(checks: list[dict[str, str]]) -> str:
         "## Windows latency first-pass diagnosis\n"
         "This is a Windows-local read-only first pass for app latency.\n\n" + base + "\n\n" + signal
     )
+
+
+def _collect_windows_performance_checks(
+    runtime: RuntimeContext,
+) -> tuple[str, list[dict[str, str]]]:
+    res = diagnose_target(runtime, "performance", False, "30m")
+    checks = [
+        {
+            "tool": i.source,
+            "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+            "summary": i.summary,
+        }
+        for i in res.evidence.items
+    ]
+    return res.session_id, checks
+
+
+def _render_windows_parity_prompt(
+    runtime: RuntimeContext, user_input: str
+) -> tuple[str, LatestDiagnosisContext]:
+    session_id, checks = _collect_windows_performance_checks(runtime)
+    latest_context = _apply_windows_latest_context_safe_next(
+        build_latest_diagnosis_context(
+            session_id=session_id,
+            target="windows-local-read-only",
+            diagnosis_kind="windows_performance",
+            checks=checks,
+            facts=_summarize_facts(checks),
+            evidence_highlights=_windows_evidence_highlights(checks),
+            source_command="sfai.cmd windows evidence --json",
+            deterministic_only=True,
+            model_assessment_status="not_called",
+        )
+    )
+    if _is_current_host_handoff_phrase(user_input):
+        return _windows_host_handoff_summary(checks), latest_context
+    if _is_windows_strongest_signal_phrase(user_input):
+        return _windows_strongest_signal_summary(checks), latest_context
+    return _windows_latency_fallback_summary(checks), latest_context
 
 
 def _deterministic_operator_summary(
@@ -2518,10 +2570,14 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         "i'm",
         "i am",
         "will follow",
+        "i'll follow",
+        "i will follow",
         "will preserve",
         "operate within",
         "preserve the stated",
         "follow the agents.md",
+        "agents.md guidance",
+        "work in this repo",
         "workspace instructions",
         "system prompt",
         "project instructions",
@@ -2539,6 +2595,9 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         "documentation invariants",
         "operator invariants",
         "project invariants",
+        "shellforgeai project invariants",
+        "agents.md guidance",
+        "work in this repo",
         "ux invariants",
         "cli, routing, and ux invariants",
         "safety, cli, routing",
@@ -2637,6 +2696,12 @@ def start_interactive(
             CodexProvider.cleanup_active_processes()
             console.print("\nInterrupted safely. REPL is still healthy.")
             continue
+        if _is_windows_host() and _is_latency_diagnosis_phrase(user_input):
+            with console.status("Collecting Windows read-only evidence..."):
+                rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
+            pending_followup = None
+            console.print(rendered)
+            continue
         routed = route_input(user_input)
         if routed.name == "noop":
             continue
@@ -2684,35 +2749,9 @@ def start_interactive(
             or _is_latency_diagnosis_phrase(user_input)
         ):
             with console.status("Collecting Windows read-only evidence..."):
-                res = diagnose_target(runtime, "performance", False, "30m")
-            checks = [
-                {
-                    "tool": i.source,
-                    "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
-                    "summary": i.summary,
-                }
-                for i in res.evidence.items
-            ]
-            latest_context = _apply_windows_latest_context_safe_next(
-                build_latest_diagnosis_context(
-                    session_id=res.session_id,
-                    target="windows-local-read-only",
-                    diagnosis_kind="windows_performance",
-                    checks=checks,
-                    facts=_summarize_facts(checks),
-                    evidence_highlights=_windows_evidence_highlights(checks),
-                    source_command="sfai.cmd windows evidence --json",
-                    deterministic_only=True,
-                    model_assessment_status="not_called",
-                )
-            )
+                rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
             pending_followup = None
-            if _is_current_host_handoff_phrase(user_input):
-                console.print(_windows_host_handoff_summary(checks))
-            elif _is_windows_strongest_signal_phrase(user_input):
-                console.print(_windows_strongest_signal_summary(checks))
-            else:
-                console.print(_windows_latency_fallback_summary(checks))
+            console.print(rendered)
             continue
         if (
             routed.name == "mutation_refused" or _is_windows_service_mutation_phrase(user_input)

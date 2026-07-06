@@ -60,11 +60,20 @@ SLOW_FORBIDDEN = (
 NEGATED_EXECUTION_PATTERNS = (
     re.compile(r"\bno\s+(shell\s+)?command\s+was\s+executed\b", re.I),
     re.compile(r"\b(shell\s+)?command\s+was\s+not\s+executed\b", re.I),
+    re.compile(r"\bno\s+action\s+was\s+taken\b", re.I),
     re.compile(r"\bdid\s+not\s+execute\b", re.I),
     re.compile(r"\bnothing\s+was\s+executed\b", re.I),
     re.compile(
-        r"\bno\s+(cleanup|clean[- ]?up|remediation|rollback|recovery)\s+was\s+executed\b", re.I
+        r"\bno\s+(cleanup|clean[- ]?up|remediation|rollback|recovery)\s+was\s+"
+        r"(executed|performed)\b",
+        re.I,
     ),
+    re.compile(
+        r"\bno\s+shell\s+or\s+remoting\s+execution\b.*\bno\s+cleanup\b.*"
+        r"\b(no\s+file\s+changes|file\s+changes\s+were\s+not)\b",
+        re.I,
+    ),
+    re.compile(r"\bno\s+cleanup\b.*\bno\s+file\s+changes\b.*\bperformed\b", re.I),
 )
 EXECUTION_PATTERNS = (
     (

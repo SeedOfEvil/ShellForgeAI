@@ -631,3 +631,5 @@ sfai.cmd windows services --json --limit 25
 ```
 
 Interactive mode is not a shell. Natural-language cleanup, restart, service-control, process-control, rollback, recovery, or remediation requests are refused; the refusal states that no command/action was executed and offers read-only alternatives. These routes do not execute PowerShell, WinRM/PSRemoting, subprocesses, shell commands, Docker/Compose mutation, cleanup, remediation, rollback, recovery, service restart, or process termination.
+
+Transcript acceptance for Windows interactive smoke logs is negation-aware: statements such as `No cleanup was performed.`, `No cleanup was executed.`, and `No command was executed.` are treated as safe refusal evidence, while true execution statements such as `cleanup executed` or `service restart executed` still fail validation.

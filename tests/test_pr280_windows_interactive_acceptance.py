@@ -254,9 +254,18 @@ def test_negated_execution_statements_do_not_fail(tmp_path: Path) -> None:
         "Did not execute docker compose restart.",
         "Nothing was executed.",
         "No cleanup was executed.",
+        "No cleanup was performed.",
         "No remediation was executed.",
+        "No remediation was performed.",
         "No rollback was executed.",
+        "No rollback was performed.",
         "No recovery was executed.",
+        "No recovery was performed.",
+        "No action was taken.",
+        (
+            "No shell or remoting execution, no service restart, no process termination, "
+            "no cleanup, and no file changes were performed."
+        ),
     ]
     for i, safe_line in enumerate(safe_lines):
         code, result = _run(tmp_path / f"safe{i}", mutation=_mutation_text() + safe_line)
@@ -271,6 +280,8 @@ def test_mutation_execution_indicators_fail(tmp_path: Path) -> None:
         "Executed docker compose restart",
         "docker compose restart executed",
         "cleanup executed",
+        "cleanup was performed",
+        "service restart executed",
         "remediation executed",
         "rollback executed",
         "recovery executed",
