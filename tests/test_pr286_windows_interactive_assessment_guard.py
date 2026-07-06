@@ -292,3 +292,118 @@ def test_source_safety_for_assessment_guard() -> None:
     assert "exec(" not in guard_slice
     assert "auth" not in guard_slice.lower()
     assert "secret" not in guard_slice.lower()
+
+
+def _run_windows_parity(monkeypatch: Any, tmp_path: Path, prompt: str) -> Any:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "shellforgeai.interactive.repl.build_provider",
+        lambda *_: _BadAcknowledgementProvider(),
+    )
+    return runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input=f"{prompt}\n/exit\n",
+    )
+
+
+def test_windows_latency_exact_prompt_is_operator_facing_fallback(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    res = _run_windows_parity(
+        monkeypatch,
+        tmp_path,
+        "I am seeing weird latency in the app. Give me a practical first-pass diagnosis.",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Windows latency first-pass diagnosis" in out
+    assert "Windows-local read-only" in out or "Windows host" in out
+    assert "Load average is not available on Windows" in out
+    assert "Memory summary unavailable" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "AGENTS.md" not in out
+    assert "ShellForgeAI repo conventions" not in out
+    assert "project constraints" not in out
+
+
+def test_windows_strongest_signal_prompt_compares_categories_once(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    res = _run_windows_parity(
+        monkeypatch,
+        tmp_path,
+        "Compare CPU, memory, disk, and process health and tell me the strongest signal.",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert out.count("## Windows CPU/memory/disk/process comparison") == 1
+    assert "- CPU/load:" in out
+    assert "- Memory:" in out
+    assert "- Disk:" in out
+    assert "- Process health:" in out
+    assert "Load average unavailable on Windows" in out
+    assert "Memory summary unavailable" in out
+    assert "Strongest available signal:" in out or "No single strong signal was found" in out
+    assert out.count("## Assessment") <= 1
+
+
+def test_windows_exact_next_checks_are_deterministic_without_docker_leakage(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    res = _run_windows_parity(
+        monkeypatch,
+        tmp_path,
+        "What exactly should I check next if this is a Windows host?",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "What to check first" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows doctor --json" in out
+    assert "sfai.cmd windows evidence --json" in out
+    assert "sfai.cmd windows services --json --limit 25" in out
+    assert "shellforgeai triage docker" not in out
+    assert "docker compose" not in out.lower()
+
+
+def test_windows_handoff_prompt_is_windows_native(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    res = _run_windows_parity(
+        monkeypatch,
+        tmp_path,
+        "Give me a concise operator handoff for the current host.",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Windows host handoff" in out
+    assert "windows-local-read-only" in out
+    assert "WIN2025-SFAI01" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows services --json --limit 25" in out
+    assert "Docker/container" not in out
+    assert "container evidence" not in out
+
+
+def test_windows_mutation_exact_prompt_refuses_with_safe_alternatives(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    res = _run_windows_parity(
+        monkeypatch,
+        tmp_path,
+        "Can you restart the unhealthy services and clean temp files if needed?",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "Refused: natural-language mutation is not allowed" in out
+    assert "Cleanup, restart, and service control are mutating/service-impacting" in out
+    assert "No command was executed" in out
+    assert "No action was taken" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows services --json --limit 25" in out

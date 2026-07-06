@@ -84,6 +84,7 @@ WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS: tuple[str, ...] = (
     "sfai.cmd windows evidence --json",
     "sfai.cmd windows processes --json --limit 10",
     "sfai.cmd windows disks --json",
+    "sfai.cmd windows services --json --limit 25",
 )
 
 _WINDOWS_INTENT_LABELS = {
@@ -119,12 +120,32 @@ def _is_next_check_phrase(text: str) -> bool:
         "what should we check first",
         "what should i check next",
         "what should we check next",
+        "what exactly should i check next if this is a windows host",
         "what do i check first",
         "what do we check first",
         "next check",
         "next checks",
         "what next",
     }
+
+
+def _is_windows_strongest_signal_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    return all(term in normalized for term in ("cpu", "memory", "disk", "process")) and (
+        "strongest signal" in normalized or "strongest" in normalized
+    )
+
+
+def _is_current_host_handoff_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    return "handoff" in normalized and ("current host" in normalized or "host" in normalized)
+
+
+def _is_latency_diagnosis_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    return ("latency" in normalized or "lag" in normalized) and (
+        "diagnosis" in normalized or "diagnose" in normalized or "first pass" in normalized
+    )
 
 
 def _is_windows_service_mutation_phrase(text: str) -> bool:
@@ -1060,6 +1081,106 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
         + "\n\n## Safety\n"
         "Read-only checks only. No shell or remoting execution, no service restart, "
         "no process termination, no cleanup, and no file changes were performed.\n"
+    )
+
+
+def _windows_strongest_signal_summary(checks: list[dict[str, str]]) -> str:
+    by_tool = {c.get("tool", ""): c for c in checks}
+
+    def summary(tool: str, default: str) -> str:
+        return by_tool.get(tool, {}).get("summary") or default
+
+    unavailable = [
+        c.get("summary", "metric unavailable on Windows")
+        for c in checks
+        if c.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS
+    ]
+    disk_signal = summary("windows.disks", "Windows disk-root summary unavailable")
+    status_signal = summary("windows.status", "Windows status/root-free summary unavailable")
+    process_signal = summary("process.top", "Process health unavailable from this Windows route")
+    cpu_signal = summary(
+        "system.cpu_memory", "CPU detail unavailable from this collector on Windows"
+    )
+    load_signal = summary("host.resources", "Load average unavailable on Windows")
+    memory_signal = summary(
+        "system.cpu_memory", "Memory summary unavailable from this collector on Windows"
+    )
+    candidates = [status_signal, disk_signal, process_signal]
+    useful = [c for c in candidates if "unavailable" not in c.lower()]
+    strongest = (
+        f"Strongest available signal: {useful[0]}."
+        if useful
+        else "No single strong signal was found from the bounded read-only evidence."
+    )
+    limitations = [
+        "Load average unavailable on Windows.",
+        "Memory summary unavailable if the Windows collector cannot provide it.",
+    ]
+    limitations.extend(unavailable)
+    deduped_limitations = list(dict.fromkeys(limitations))
+    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    return (
+        "## Windows CPU/memory/disk/process comparison\n"
+        "Context/visibility: Windows local read-only.\n\n"
+        "Evidence comparison:\n"
+        f"- CPU/load: {load_signal}; {cpu_signal}.\n"
+        f"- Memory: {memory_signal}.\n"
+        f"- Disk: {status_signal}; {disk_signal}.\n"
+        f"- Process health: {process_signal}.\n\n"
+        "Limitations:\n"
+        + "\n".join(
+            f"- {item}." if not item.endswith(".") else f"- {item}" for item in deduped_limitations
+        )
+        + "\n\n"
+        f"{strongest}\n\n"
+        "Safe next commands:\n"
+        f"{commands}\n\n"
+        "No command was executed from this prompt beyond ShellForgeAI read-only "
+        "evidence collection; no mutation was performed."
+    )
+
+
+def _windows_host_handoff_summary(checks: list[dict[str, str]]) -> str:
+    facts = _windows_evidence_highlights(checks)
+    host_line = next(
+        (line for line in facts if "hostname=" in line.lower()),
+        "- Windows host visible from local read-only context.",
+    )
+    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    limitations = [
+        c.get("summary", "metric unavailable")
+        for c in checks
+        if c.get("status") in {WINDOWS_METRIC_UNAVAILABLE_STATUS, LINUX_ONLY_COLLECTOR_SKIP_STATUS}
+    ][:5]
+    return (
+        "## Windows host handoff\n"
+        "- Current host/visibility: Windows host; windows-local-read-only. "
+        f"{host_line.lstrip('- ')}\n"
+        "- Evidence summary:\n"
+        + ("\n".join(facts[:6]) if facts else "- Windows read-only evidence is limited but active.")
+        + "\n"
+        "- Limitations:\n"
+        + (
+            "\n".join(
+                f"- {item}." if not item.endswith(".") else f"- {item}" for item in limitations
+            )
+            if limitations
+            else "- No additional limitations recorded."
+        )
+        + "\n"
+        "- Safe next checks:\n"
+        f"{commands}\n"
+        "- Safety: no restart, cleanup, service control, process termination, "
+        "remediation, rollback, or recovery was performed."
+    )
+
+
+def _windows_latency_fallback_summary(checks: list[dict[str, str]]) -> str:
+    base = _windows_operator_summary(checks).rstrip()
+    signal = _windows_strongest_signal_summary(checks).split("Safe next commands:", 1)[0].strip()
+    return (
+        "## Windows latency first-pass diagnosis\n"
+        "This is a Windows-local read-only first pass for app latency.\n\n" + base + "\n\n" + signal
     )
 
 
@@ -2546,8 +2667,52 @@ def start_interactive(
             pending_followup = None
             console.print(_render_windows_read_only_intent(intent="windows_status"))
             continue
-        if _is_next_check_phrase(user_input) and _latest_context_is_windows_local(latest_context):
+        if _is_next_check_phrase(user_input) and _should_use_windows_local_guidance(latest_context):
+            latest_context = _apply_windows_latest_context_safe_next(
+                latest_context
+                or _windows_interactive_pending_context(
+                    session_id=runtime.session.session_id,
+                    intent="windows_status",
+                    source_command=_windows_interactive_command("windows_status"),
+                )
+            )
             console.print(_render_windows_next_check_guidance())
+            continue
+        if _should_use_windows_local_guidance(latest_context) and (
+            _is_windows_strongest_signal_phrase(user_input)
+            or _is_current_host_handoff_phrase(user_input)
+            or _is_latency_diagnosis_phrase(user_input)
+        ):
+            with console.status("Collecting Windows read-only evidence..."):
+                res = diagnose_target(runtime, "performance", False, "30m")
+            checks = [
+                {
+                    "tool": i.source,
+                    "status": str(i.metadata.get("status", "ok" if i.ok else "unavailable")),
+                    "summary": i.summary,
+                }
+                for i in res.evidence.items
+            ]
+            latest_context = _apply_windows_latest_context_safe_next(
+                build_latest_diagnosis_context(
+                    session_id=res.session_id,
+                    target="windows-local-read-only",
+                    diagnosis_kind="windows_performance",
+                    checks=checks,
+                    facts=_summarize_facts(checks),
+                    evidence_highlights=_windows_evidence_highlights(checks),
+                    source_command="sfai.cmd windows evidence --json",
+                    deterministic_only=True,
+                    model_assessment_status="not_called",
+                )
+            )
+            pending_followup = None
+            if _is_current_host_handoff_phrase(user_input):
+                console.print(_windows_host_handoff_summary(checks))
+            elif _is_windows_strongest_signal_phrase(user_input):
+                console.print(_windows_strongest_signal_summary(checks))
+            else:
+                console.print(_windows_latency_fallback_summary(checks))
             continue
         if (
             routed.name == "mutation_refused" or _is_windows_service_mutation_phrase(user_input)

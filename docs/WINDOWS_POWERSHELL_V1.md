@@ -180,3 +180,9 @@ In a Windows local read-only interactive context, generic prompts such as `Show 
 ### Human SSH assessment acknowledgement fallback
 
 The Windows interactive performance path rejects provider assessments that merely acknowledge ShellForgeAI repo/workspace conventions or safety/CLI/routing/UX invariants. Smart-apostrophe and mojibake variants are normalized, and Windows evidence collection falls back to the deterministic read-only summary when provider text is non-diagnostic or lacks Windows evidence-bearing terms. The raw provider text may still be written to `model-response.md` for audit, but stdout stays operator-facing. No PowerShell, WinRM/PSRemoting, shell/subprocess execution, new collectors, or mutation are added.
+
+### Windows interactive operator parity
+
+Windows interactive mode rejects provider output that is only a project/repo/system-instruction acknowledgement (for example AGENTS.md invariants, ShellForgeAI repo conventions, project constraints, or system-prompt/workspace-instruction acknowledgements). The raw model response may remain in `model-response.md` for audit, but operator stdout falls back to deterministic Windows read-only summaries.
+
+Windows generic latency, status/next-check, CPU/memory/disk/process comparison, and current-host handoff prompts use Windows-local read-only guidance and safe next commands such as `sfai.cmd windows status --json`, `sfai.cmd windows doctor --json`, `sfai.cmd windows evidence --json`, `sfai.cmd windows processes --json --limit 10`, `sfai.cmd windows disks --json`, and `sfai.cmd windows services --json --limit 25`. The summaries state limitations honestly when load average, memory, or process detail is unavailable. No PowerShell, WinRM/PSRemoting, shell, subprocess, cleanup, remediation, rollback, recovery, service control, or mutation is used by these deterministic interactive routes.

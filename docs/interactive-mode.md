@@ -614,3 +614,20 @@ should keep running the PR184 command-surface golden guardrail.
 ## Windows read-only phrases
 
 Interactive mode deterministically recognizes explicit Windows read-only phrases such as `show me the windows status`, `windows doctor`, `windows evidence`, and `windows processes limit 10`. These phrases only render allowlisted safe command guidance and set `/pending` to a `windows-local-read-only` context with Windows safe-next commands. They do not execute shell commands, PowerShell, WinRM/PSRemoting, subprocesses, Docker/Compose, cleanup, remediation, rollback, recovery, or mutation, and broad natural-language execution remains out of scope.
+
+### Windows operator-parity prompts
+
+When the active context is Windows local read-only, interactive mode answers common operator prompts with Windows-native guidance instead of repo/project acknowledgements or Docker/container framing. Generic latency prompts get a first-pass Windows diagnosis from bounded read-only evidence; CPU/memory/disk/process comparison prompts explicitly compare the available categories, state when load average or memory summaries are unavailable, and identify the strongest available signal or say that no single strong signal was found. Current-host handoff prompts render a Windows host handoff with local visibility, evidence summary, limitations, and safe next checks.
+
+Safe Windows next checks are:
+
+```text
+sfai.cmd windows status --json
+sfai.cmd windows doctor --json
+sfai.cmd windows evidence --json
+sfai.cmd windows processes --json --limit 10
+sfai.cmd windows disks --json
+sfai.cmd windows services --json --limit 25
+```
+
+Interactive mode is not a shell. Natural-language cleanup, restart, service-control, process-control, rollback, recovery, or remediation requests are refused; the refusal states that no command/action was executed and offers read-only alternatives. These routes do not execute PowerShell, WinRM/PSRemoting, subprocesses, shell commands, Docker/Compose mutation, cleanup, remediation, rollback, recovery, service restart, or process termination.
