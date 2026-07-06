@@ -83,6 +83,7 @@ WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS: tuple[str, ...] = (
     "sfai.cmd windows doctor --json",
     "sfai.cmd windows evidence --json",
     "sfai.cmd windows processes --json --limit 10",
+    "sfai.cmd windows disks --json",
 )
 
 _WINDOWS_INTENT_LABELS = {
@@ -95,6 +96,115 @@ _WINDOWS_INTENT_LABELS = {
 
 def _is_windows_host() -> bool:
     return platform.system().lower() == "windows"
+
+
+def _normalized_interactive_phrase(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _is_generic_system_status_phrase(text: str) -> bool:
+    return _normalized_interactive_phrase(text) in {
+        "show me the system status",
+        "show me system status",
+        "show the system status",
+        "show system status",
+        "system status",
+    }
+
+
+def _is_next_check_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    return normalized in {
+        "what should i check first",
+        "what should we check first",
+        "what should i check next",
+        "what should we check next",
+        "what do i check first",
+        "what do we check first",
+        "next check",
+        "next checks",
+        "what next",
+    }
+
+
+def _is_windows_service_mutation_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    has_mutation = any(
+        term in normalized
+        for term in (
+            "clean up",
+            "cleanup",
+            "restart",
+            "service restart",
+            "restart services",
+            "fix it",
+            "remediate",
+        )
+    )
+    has_service_or_cleanup = any(
+        term in normalized for term in ("service", "services", "cleanup", "clean up")
+    )
+    return has_mutation and has_service_or_cleanup
+
+
+def _latest_context_is_windows_local(ctx: LatestDiagnosisContext | None) -> bool:
+    if ctx is None:
+        return False
+    facts = ctx.facts or {}
+    return (
+        ctx.target == "windows-local-read-only"
+        or facts.get("visibility") == "windows-local-read-only"
+        or ctx.diagnosis_kind.startswith("windows_")
+    )
+
+
+def _should_use_windows_local_guidance(ctx: LatestDiagnosisContext | None) -> bool:
+    return _is_windows_host() or _latest_context_is_windows_local(ctx)
+
+
+def _apply_windows_latest_context_safe_next(ctx: LatestDiagnosisContext) -> LatestDiagnosisContext:
+    ctx.target = "windows-local-read-only"
+    ctx.safe_next_commands = list(WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    ctx.suggested_followup_categories = [
+        "windows_status",
+        "windows_doctor",
+        "windows_evidence",
+        "windows_processes",
+        "windows_disks",
+    ]
+    ctx.facts["visibility"] = "windows-local-read-only"
+    return ctx
+
+
+def _render_windows_next_check_guidance() -> str:
+    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    return (
+        "## What to check first\n"
+        "Context/visibility: windows-local-read-only.\n"
+        "Start with bounded Windows read-only evidence before considering any change.\n\n"
+        "Recommended order:\n"
+        "1. Windows status for host/runtime basics.\n"
+        "2. Windows doctor for local read-only health posture.\n"
+        "3. Windows evidence for a bundled read-only view.\n"
+        "4. Windows processes/disks only if status or evidence points that way.\n\n"
+        "Safe next commands:\n"
+        f"{commands}\n\n"
+        "No command was executed. No cleanup, restart, service control, remediation, "
+        "rollback, or recovery was performed."
+    )
+
+
+def _interactive_windows_mutation_refusal(text: str) -> str:
+    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    return (
+        "Refused: natural-language mutation is not allowed.\n"
+        "Cleanup, restart, and service control are mutating/service-impacting actions.\n"
+        "If such behavior is ever supported, it must use an explicit named recipe "
+        "with review and confirmation; this interactive request cannot do it.\n"
+        "No command was executed. No action was taken.\n\n"
+        "Safe Windows read-only alternatives:\n"
+        f"{commands}"
+    )
 
 
 def _windows_interactive_command(intent: str, limit: str | None = None) -> str:
@@ -2378,6 +2488,26 @@ def start_interactive(
             pending_followup = None
             console.print(_render_windows_read_only_intent(intent=intent, limit=limit))
             continue
+        if _is_generic_system_status_phrase(user_input) and _should_use_windows_local_guidance(
+            latest_context
+        ):
+            latest_context = _windows_interactive_pending_context(
+                session_id=runtime.session.session_id,
+                intent="windows_status",
+                source_command=_windows_interactive_command("windows_status"),
+            )
+            pending_followup = None
+            console.print(_render_windows_read_only_intent(intent="windows_status"))
+            continue
+        if _is_next_check_phrase(user_input) and _latest_context_is_windows_local(latest_context):
+            console.print(_render_windows_next_check_guidance())
+            continue
+        if (
+            routed.name == "mutation_refused" or _is_windows_service_mutation_phrase(user_input)
+        ) and _should_use_windows_local_guidance(latest_context):
+            session_summary.note_refusal("windows mutation request refused")
+            console.print(_interactive_windows_mutation_refusal(routed.args or user_input))
+            continue
         if routed.name == "/summary":
             raw_args = routed.argv or tuple(routed.args.strip().lower().split())
             args = set(raw_args)
@@ -2719,7 +2849,10 @@ Commands:
             if resolved_mutation.kind == "mutation_refusal" and resolved_mutation.target:
                 console.print(render_grounded_resolution(grounding, resolved_mutation))
             else:
-                console.print(_interactive_mutation_refusal(routed.args or user_input))
+                if _should_use_windows_local_guidance(latest_context):
+                    console.print(_interactive_windows_mutation_refusal(routed.args or user_input))
+                else:
+                    console.print(_interactive_mutation_refusal(routed.args or user_input))
             continue
         if routed.name == "logs_mutation_refused":
             session_summary.note_refusal("log deletion/truncation request refused")
@@ -2966,6 +3099,8 @@ No command was executed.""")
                 plan_path=str(pp),
                 source_command=user_input,
             )
+            if _is_windows_platform_checks(checks):
+                latest_context = _apply_windows_latest_context_safe_next(latest_context)
             update_grounding_from_latest_context(grounding, latest_context)
             _record_latest_context_in_session_summary(session_summary, latest_context)
             immediate_followup_intent = detect_latest_context_intent(user_input)

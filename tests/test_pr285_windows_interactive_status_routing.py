@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+from typer.testing import CliRunner
+
+from shellforgeai.cli import app
 from shellforgeai.core.latest_context import render_latest_context_pending
 from shellforgeai.interactive.commands import route_input
 from shellforgeai.interactive.repl import (
@@ -121,3 +125,106 @@ def test_source_safety_no_routing_shell_powershell_winrm_subprocess_or_exec_lane
     assert "recovery" not in pr285_slice.lower()
     assert "auth" not in pr285_slice.lower()
     assert "build_provider" not in pr285_slice
+
+
+# ---------------------------------------------------------------------------
+# PR285 parity follow-up prompts from Windows interactive smoke
+# ---------------------------------------------------------------------------
+
+runner = CliRunner()
+
+
+def _run_windows_interactive(monkeypatch: Any, tmp_path: Any, transcript: str) -> Any:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("deterministic Windows parity route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
+    return runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input=transcript,
+    )
+
+
+def test_windows_generic_system_status_prompt_is_deterministic(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    res = _run_windows_interactive(
+        monkeypatch,
+        tmp_path,
+        "Show me the system status\n/exit\n",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "windows-local-read-only" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows doctor --json" in out
+    assert "sfai.cmd windows evidence --json" in out
+    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "AGENTS.md" not in out
+    assert "treat this repo as ShellForgeAI" not in out
+    assert "operate within the ShellForgeAI constraints" not in out
+    assert "CLI-first, evidence-first" not in out
+    assert "documentation invariants" not in out
+
+
+def test_windows_next_check_uses_active_windows_context_without_model_or_docker_commands(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    res = _run_windows_interactive(
+        monkeypatch,
+        tmp_path,
+        "Show me the system status\nWhat should I check first?\n/pending\n/exit\n",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "What to check first" in out
+    assert "windows-local-read-only" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows doctor --json" in out
+    assert "sfai.cmd windows evidence --json" in out
+    assert "sfai.cmd windows processes --json --limit 10" in out
+    forbidden = (
+        "shellforgeai triage docker",
+        "shellforgeai triage docker detail performance",
+        "shellforgeai remediation eligibility --target performance --explain",
+        "shellforgeai remediation self-test --profile standard",
+    )
+    assert all(command not in out for command in forbidden)
+
+
+def test_windows_cleanup_restart_services_refusal_is_explicit_and_windows_read_only(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    res = _run_windows_interactive(
+        monkeypatch,
+        tmp_path,
+        "Show me the system status\nClean up and restart services to fix it\n/exit\n",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "Refused: natural-language mutation is not allowed" in out
+    assert "Cleanup, restart, and service control are mutating/service-impacting" in out
+    assert "No command was executed" in out
+    assert "No action was taken" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows evidence --json" in out
+    assert "cleanup executed" not in out
+    assert "remediation executed" not in out
+    assert "rollback executed" not in out
+    assert "recovery executed" not in out
+
+
+def test_linux_generic_prompts_are_not_rerouted_to_windows(monkeypatch: Any, tmp_path: Any) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Linux")
+    res = runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input="Show me the system status\n/exit\n",
+    )
+    assert res.exit_code == 0
+    assert "sfai.cmd windows status --json" not in res.stdout

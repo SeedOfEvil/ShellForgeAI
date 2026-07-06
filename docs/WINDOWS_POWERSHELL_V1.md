@@ -172,3 +172,7 @@ On Linux/non-Windows hosts, the same Windows phrases return unsupported/Windows-
 ## Interactive assessment leakage guard
 
 Windows interactive performance diagnosis keeps the existing local read-only evidence path, but provider assessment text is now guarded against project/system-prompt acknowledgement leakage. If the provider returns AGENTS.md, workspace/project-instruction, documentation-invariant, or evidence-first-routing acknowledgement text instead of a diagnosis, ShellForgeAI suppresses that text and renders the deterministic Windows evidence-grounded fallback with safe next commands. This adds no new Windows collectors or command payloads and does not execute PowerShell, use WinRM/PSRemoting, spawn shell/subprocess execution, call a model again, or mutate the host.
+
+### Generic interactive parity prompts
+
+In a Windows local read-only interactive context, generic prompts such as `Show me the system status` and `What should I check first?` are handled deterministically with Windows safe-next guidance (`sfai.cmd windows status --json`, `sfai.cmd windows doctor --json`, `sfai.cmd windows evidence --json`, `sfai.cmd windows processes --json --limit 10`, and `sfai.cmd windows disks --json`). Cleanup/restart/services requests are refused clearly as mutating/service-impacting and are paired with the same read-only alternatives. These routes do not shell out to the wrapper, execute PowerShell, use WinRM/PSRemoting, call the model for next-check guidance, or mutate the host.

@@ -1391,3 +1391,7 @@ Windows interactive safe command hints are improved for explicit read-only statu
 ## Windows interactive assessment leakage guard
 
 Windows interactive performance diagnosis now rejects project/system-prompt acknowledgement text in provider assessments. If a model response restates AGENTS.md, workspace instructions, documentation invariants, or evidence-first routing instead of diagnosing the evidence, the REPL falls back to deterministic Windows local read-only guidance. No broad natural-language execution, new collector, model/provider change, PowerShell/WinRM, shell/subprocess execution, Docker/Compose mutation, cleanup, remediation, rollback, recovery, or host mutation is added.
+
+## Windows interactive parity prompt fixes
+
+Windows interactive parity now covers generic status, next-check, and cleanup/restart/services refusal prompts in the Windows local read-only lane. The REPL gives deterministic Windows status guidance for `Show me the system status`, bounded Windows safe-next guidance for `What should I check first?`, and a clear no-action mutation refusal for cleanup/restart/service-control phrasing. Broad natural-language execution, shell/subprocess execution, PowerShell/WinRM, new collectors, Docker/Compose mutation, cleanup, remediation, rollback, recovery, and service/process mutation remain out of scope.
