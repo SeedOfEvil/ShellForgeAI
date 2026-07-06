@@ -139,6 +139,58 @@ _COMMAND_LIKE_STARTS = (
 
 _COMMAND_LIKE_FLAGS = ("--json", "--profile", "--target", "--brief", "--limit")
 
+_WINDOWS_READ_ONLY_MUTATION_TERMS = (
+    "clean up",
+    "cleanup",
+    "restart",
+    "repair",
+    "remediate",
+    "fix",
+    "delete",
+    "remove",
+    "kill",
+    "terminate",
+    "stop",
+    "start",
+    "apply",
+    "execute",
+    "rollback",
+    "recover",
+)
+
+_WINDOWS_READ_ONLY_INTENT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^(?:show(?: me)?(?: the)? )?windows status$"), "windows_status"),
+    (re.compile(r"^(?:show(?: me)?(?: the)? )?windows doctor$"), "windows_doctor"),
+    (re.compile(r"^(?:show(?: me)?(?: the)? )?windows evidence$"), "windows_evidence"),
+    (
+        re.compile(r"^(?:show(?: me)?(?: the)? )?windows processes(?: limit (?P<limit>\d{1,3}))?$"),
+        "windows_processes",
+    ),
+)
+
+
+def _route_windows_read_only_intent(raw: str) -> RoutedCommand | None:
+    normalized = _normalize_intent_text(raw)
+    if "windows" not in normalized:
+        return None
+    for pattern, intent in _WINDOWS_READ_ONLY_INTENT_PATTERNS:
+        match = pattern.fullmatch(normalized)
+        if not match:
+            continue
+        if any(term in normalized for term in _WINDOWS_READ_ONLY_MUTATION_TERMS):
+            return RoutedCommand(name="mutation_refused", args=raw)
+        argv: tuple[str, ...]
+        if intent == "windows_processes":
+            limit = match.groupdict().get("limit") or "10"
+            argv = (intent, limit)
+        else:
+            argv = (intent,)
+        return RoutedCommand(name="windows_read_only_intent", args=intent, argv=argv)
+    if any(term in normalized for term in _WINDOWS_READ_ONLY_MUTATION_TERMS):
+        return RoutedCommand(name="mutation_refused", args=raw)
+    return None
+
+
 _ALLOWED_CLI_DISPATCH: dict[tuple[str, ...], tuple[str, ...]] = {
     ("version",): ("version",),
     ("doctor",): ("doctor",),
@@ -1148,6 +1200,10 @@ def route_input(text: str) -> RoutedCommand:
     )
     if any(phrase in exact_session for phrase in handoff_mutation_phrases):
         return RoutedCommand(name="mutation_refused", args=raw)
+
+    windows_read_only_intent = _route_windows_read_only_intent(raw)
+    if windows_read_only_intent is not None:
+        return windows_read_only_intent
 
     safe_dispatch = _dispatch_safe_cli_command(raw)
     if safe_dispatch is not None:

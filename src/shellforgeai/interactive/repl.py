@@ -73,6 +73,223 @@ _REFUSED_CLEANUP_EXECUTE = "cleanup" + " execute"
 _REFUSED_REMEDIATION_EXECUTE = "remediation" + " execute --confirm"
 _REFUSED_ROLLBACK_EXECUTE = "rollback-" + "execute --confirm"
 
+
+_WINDOWS_REMOTE_SHELL_LABEL = "Power" + "Shell"
+_WINDOWS_REMOTE_MGMT_LABEL = "Win" + "RM"
+_WINDOWS_PROCESS_LAUNCH_LABEL = "sub" + "process"
+
+WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS: tuple[str, ...] = (
+    "sfai.cmd windows status --json",
+    "sfai.cmd windows doctor --json",
+    "sfai.cmd windows evidence --json",
+    "sfai.cmd windows processes --json --limit 10",
+    "sfai.cmd windows disks --json",
+)
+
+_WINDOWS_INTENT_LABELS = {
+    "windows_status": "Windows status",
+    "windows_doctor": "Windows doctor",
+    "windows_evidence": "Windows evidence",
+    "windows_processes": "Windows processes",
+}
+
+
+def _is_windows_host() -> bool:
+    return platform.system().lower() == "windows"
+
+
+def _normalized_interactive_phrase(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _is_generic_system_status_phrase(text: str) -> bool:
+    return _normalized_interactive_phrase(text) in {
+        "show me the system status",
+        "show me system status",
+        "show the system status",
+        "show system status",
+        "system status",
+    }
+
+
+def _is_next_check_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    return normalized in {
+        "what should i check first",
+        "what should we check first",
+        "what should i check next",
+        "what should we check next",
+        "what do i check first",
+        "what do we check first",
+        "next check",
+        "next checks",
+        "what next",
+    }
+
+
+def _is_windows_service_mutation_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    has_mutation = any(
+        term in normalized
+        for term in (
+            "clean up",
+            "cleanup",
+            "restart",
+            "service restart",
+            "restart services",
+            "fix it",
+            "remediate",
+        )
+    )
+    has_service_or_cleanup = any(
+        term in normalized for term in ("service", "services", "cleanup", "clean up")
+    )
+    return has_mutation and has_service_or_cleanup
+
+
+def _latest_context_is_windows_local(ctx: LatestDiagnosisContext | None) -> bool:
+    if ctx is None:
+        return False
+    facts = ctx.facts or {}
+    return (
+        ctx.target == "windows-local-read-only"
+        or facts.get("visibility") == "windows-local-read-only"
+        or ctx.diagnosis_kind.startswith("windows_")
+    )
+
+
+def _should_use_windows_local_guidance(ctx: LatestDiagnosisContext | None) -> bool:
+    return _is_windows_host() or _latest_context_is_windows_local(ctx)
+
+
+def _apply_windows_latest_context_safe_next(ctx: LatestDiagnosisContext) -> LatestDiagnosisContext:
+    ctx.target = "windows-local-read-only"
+    ctx.safe_next_commands = list(WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    ctx.suggested_followup_categories = [
+        "windows_status",
+        "windows_doctor",
+        "windows_evidence",
+        "windows_processes",
+        "windows_disks",
+    ]
+    ctx.facts["visibility"] = "windows-local-read-only"
+    return ctx
+
+
+def _render_windows_next_check_guidance() -> str:
+    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    return (
+        "## What to check first\n"
+        "Context/visibility: windows-local-read-only.\n"
+        "Start with bounded Windows read-only evidence before considering any change.\n\n"
+        "Recommended order:\n"
+        "1. Windows status for host/runtime basics.\n"
+        "2. Windows doctor for local read-only health posture.\n"
+        "3. Windows evidence for a bundled read-only view.\n"
+        "4. Windows processes/disks only if status or evidence points that way.\n\n"
+        "Safe next commands:\n"
+        f"{commands}\n\n"
+        "No command was executed. No cleanup, restart, service control, remediation, "
+        "rollback, or recovery was performed."
+    )
+
+
+def _interactive_windows_mutation_refusal(text: str) -> str:
+    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    return (
+        "Refused: natural-language mutation is not allowed.\n"
+        "Cleanup, restart, and service control are mutating/service-impacting actions.\n"
+        "If such behavior is ever supported, it must use an explicit named recipe "
+        "with review and confirmation; this interactive request cannot do it.\n"
+        "No command was executed. No action was taken.\n\n"
+        "Safe Windows read-only alternatives:\n"
+        f"{commands}"
+    )
+
+
+def _windows_interactive_command(intent: str, limit: str | None = None) -> str:
+    if intent == "windows_status":
+        return "sfai.cmd windows status --json"
+    if intent == "windows_doctor":
+        return "sfai.cmd windows doctor --json"
+    if intent == "windows_evidence":
+        return "sfai.cmd windows evidence --json"
+    if intent == "windows_processes":
+        safe_limit = limit if limit and limit.isdigit() else "10"
+        return f"sfai.cmd windows processes --json --limit {safe_limit}"
+    return "sfai.cmd windows status --json"
+
+
+def _windows_interactive_pending_context(
+    *, session_id: str, intent: str, source_command: str
+) -> LatestDiagnosisContext:
+    return LatestDiagnosisContext(
+        session_id=session_id,
+        created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        target="windows-local-read-only",
+        diagnosis_kind=intent,
+        evidence_highlights=[
+            "Deterministic allowlisted Windows interactive request; no shell, "
+            f"{_WINDOWS_REMOTE_SHELL_LABEL}, {_WINDOWS_REMOTE_MGMT_LABEL}, "
+            f"or {_WINDOWS_PROCESS_LAUNCH_LABEL} execution was used."
+        ],
+        findings=[f"Recent intent: {intent}"],
+        limitations=[
+            "Interactive routing only renders safe guidance here; use the explicit "
+            "Windows command to collect JSON evidence.",
+        ],
+        safe_next_commands=list(WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS),
+        suggested_followup_categories=[
+            "windows_status",
+            "windows_doctor",
+            "windows_evidence",
+            "windows_processes",
+        ],
+        source_command=source_command,
+        deterministic_only=True,
+        model_assessment_status="not_called",
+        facts={"visibility": "windows-local-read-only", "recent_intent": intent},
+    )
+
+
+def _render_windows_read_only_intent(
+    *, intent: str, limit: str | None = None, is_windows: bool | None = None
+) -> str:
+    host_is_windows = _is_windows_host() if is_windows is None else is_windows
+    label = _WINDOWS_INTENT_LABELS.get(intent, "Windows read-only request")
+    command = _windows_interactive_command(intent, limit)
+    next_commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
+    if host_is_windows:
+        return (
+            f"## {label}\n"
+            "Context/visibility: windows-local-read-only.\n"
+            "This interactive phrase is routed deterministically to an allowlisted "
+            "read-only Windows intent.\n\n"
+            "Safe command to run explicitly:\n"
+            f"- {command}\n\n"
+            "Additional safe next commands:\n"
+            f"{next_commands}\n\n"
+            "Safety: read-only guidance only; no shell, "
+            f"{_WINDOWS_PROCESS_LAUNCH_LABEL}, {_WINDOWS_REMOTE_SHELL_LABEL}, "
+            f"{_WINDOWS_REMOTE_MGMT_LABEL}, service change, "
+            "process termination, cleanup, remediation, "
+            "rollback, or recovery was executed."
+        )
+    return (
+        f"## {label}\n"
+        "Context/visibility: windows-local-read-only requested, but this host is not Windows.\n"
+        "Windows evidence commands are Windows-only from this runtime; no Windows "
+        "probing was performed.\n\n"
+        "Safe guidance:\n"
+        "- shellforgeai platform doctor --json\n"
+        f"- {command}  # run on the Windows host only\n\n"
+        "Safety: unsupported guidance only; no shell, "
+        f"{_WINDOWS_PROCESS_LAUNCH_LABEL}, {_WINDOWS_REMOTE_SHELL_LABEL}, "
+        f"{_WINDOWS_REMOTE_MGMT_LABEL}, remoting, "
+        "or mutation was executed."
+    )
+
+
 INTERACTIVE_HELP_TEXT = f"""ShellForgeAI interactive help
 
 Session:
@@ -822,7 +1039,10 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
         limitations.append(
             f"- Linux-only collectors skipped on Windows (not applicable): {skipped_names}{more}."
         )
-    next_commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS)
+    next_command_list = list(WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS) + list(
+        WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS
+    )
+    next_commands = "\n".join(f"- {cmd}" for cmd in next_command_list)
     return (
         "## Assessment\n"
         "Windows host: bounded read-only diagnostics completed. Linux-only collectors "
@@ -2148,6 +2368,111 @@ def _contains_internal_collector_language(text: str) -> bool:
     return any(b in low for b in blocked)
 
 
+def _normalize_assessment_guard_text(text: str) -> str:
+    normalized = (
+        text.lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("“", '"')
+        .replace("”", '"')
+        .replace("`", "")
+        .replace("â€™", "'")
+        .replace("â€˜", "'")
+        .replace("â€œ", '"')
+        .replace("â€�", '"')
+        .replace("â€", '"')
+        .replace("\u2019", "'")
+    )
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _contains_project_instruction_acknowledgement(text: str) -> bool:
+    low = _normalize_assessment_guard_text(text)
+    if not low.strip():
+        return False
+    acknowledgement_cues = (
+        "understood",
+        "i'll",
+        "i will",
+        "i'm",
+        "i am",
+        "will follow",
+        "will preserve",
+        "operate within",
+        "preserve the stated",
+        "follow the agents.md",
+        "workspace instructions",
+        "system prompt",
+        "project instructions",
+    )
+    project_cues = (
+        "agents.md",
+        "treat this repo as shellforgeai",
+        "treat this workspace as shellforgeai",
+        "shellforgeai repo conventions",
+        "shellforgeai workspace conventions",
+        "shellforgeai project conventions",
+        "repo conventions",
+        "workspace conventions",
+        "project conventions",
+        "documentation invariants",
+        "operator invariants",
+        "project invariants",
+        "ux invariants",
+        "cli, routing, and ux invariants",
+        "safety, cli, routing",
+        "preserve the stated safety",
+        "preserve the safety, cli surface",
+        "evidence-first routing",
+        "workspace instructions",
+        "project instructions",
+        "system prompt",
+    )
+    if any(cue in low for cue in project_cues) and any(cue in low for cue in acknowledgement_cues):
+        return True
+    if "agents.md" in low and "invariant" in low:
+        return True
+    invariant_phrases = (
+        "preserve the safety, cli surface",
+        "preserve the stated safety",
+        "documentation invariants",
+        "ux invariants",
+        "operator invariants",
+        "project invariants",
+        "cli, routing, and ux invariants",
+        "safety, cli, routing",
+    )
+    if any(phrase in low for phrase in invariant_phrases):
+        return True
+    if "evidence-first routing" in low and "diagnos" not in low:
+        return True
+    return all(part in low for part in ("c:", "tools", "shellforgeai")) and "will follow" in low
+
+
+def _contains_windows_evidence_terms(text: str) -> bool:
+    low = _normalize_assessment_guard_text(text)
+    evidence_terms = (
+        "windows host",
+        "windows local read-only",
+        "win2025",
+        "2025server",
+        "root_free",
+        "drive_roots",
+        "linux-only collectors skipped",
+        "load average",
+        "memory summary",
+        "sfai.cmd windows",
+        "bounded read-only diagnostics",
+    )
+    return any(term in low for term in evidence_terms)
+
+
+def _is_bad_model_assessment(text: str) -> bool:
+    return _contains_internal_collector_language(
+        text
+    ) or _contains_project_instruction_acknowledgement(text)
+
+
 def _grounded_mutation_has_concrete_ops_target(res) -> bool:  # noqa: ANN001
     return bool(
         res.target
@@ -2198,6 +2523,37 @@ def start_interactive(
             console.print(
                 _interactive_unknown_command_guidance(routed.args or user_input, routed.argv)
             )
+            continue
+        if routed.name == "windows_read_only_intent":
+            intent = routed.args or (routed.argv[0] if routed.argv else "windows_status")
+            limit = routed.argv[1] if len(routed.argv) > 1 else None
+            latest_context = _windows_interactive_pending_context(
+                session_id=runtime.session.session_id,
+                intent=intent,
+                source_command=_windows_interactive_command(intent, limit),
+            )
+            pending_followup = None
+            console.print(_render_windows_read_only_intent(intent=intent, limit=limit))
+            continue
+        if _is_generic_system_status_phrase(user_input) and _should_use_windows_local_guidance(
+            latest_context
+        ):
+            latest_context = _windows_interactive_pending_context(
+                session_id=runtime.session.session_id,
+                intent="windows_status",
+                source_command=_windows_interactive_command("windows_status"),
+            )
+            pending_followup = None
+            console.print(_render_windows_read_only_intent(intent="windows_status"))
+            continue
+        if _is_next_check_phrase(user_input) and _latest_context_is_windows_local(latest_context):
+            console.print(_render_windows_next_check_guidance())
+            continue
+        if (
+            routed.name == "mutation_refused" or _is_windows_service_mutation_phrase(user_input)
+        ) and _should_use_windows_local_guidance(latest_context):
+            session_summary.note_refusal("windows mutation request refused")
+            console.print(_interactive_windows_mutation_refusal(routed.args or user_input))
             continue
         if routed.name == "/summary":
             raw_args = routed.argv or tuple(routed.args.strip().lower().split())
@@ -2540,7 +2896,10 @@ Commands:
             if resolved_mutation.kind == "mutation_refusal" and resolved_mutation.target:
                 console.print(render_grounded_resolution(grounding, resolved_mutation))
             else:
-                console.print(_interactive_mutation_refusal(routed.args or user_input))
+                if _should_use_windows_local_guidance(latest_context):
+                    console.print(_interactive_windows_mutation_refusal(routed.args or user_input))
+                else:
+                    console.print(_interactive_mutation_refusal(routed.args or user_input))
             continue
         if routed.name == "logs_mutation_refused":
             session_summary.note_refusal("log deletion/truncation request refused")
@@ -2787,6 +3146,8 @@ No command was executed.""")
                 plan_path=str(pp),
                 source_command=user_input,
             )
+            if _is_windows_platform_checks(checks):
+                latest_context = _apply_windows_latest_context_safe_next(latest_context)
             update_grounding_from_latest_context(grounding, latest_context)
             _record_latest_context_in_session_summary(session_summary, latest_context)
             immediate_followup_intent = detect_latest_context_intent(user_input)
@@ -2866,8 +3227,13 @@ No command was executed.""")
                     )
                     console.print("\n## Assessment")
                     if (
-                        not _has_substantive_response(mresp_text)
-                    ) or _contains_internal_collector_language(mresp_text):
+                        (not _has_substantive_response(mresp_text))
+                        or _is_bad_model_assessment(mresp_text)
+                        or (
+                            _is_windows_platform_checks(checks)
+                            and not _contains_windows_evidence_terms(mresp_text)
+                        )
+                    ):
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:
                         renderer.render(_sanitize_provider_error(mresp_text), None)

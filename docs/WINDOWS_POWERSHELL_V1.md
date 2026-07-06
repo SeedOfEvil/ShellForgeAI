@@ -162,3 +162,21 @@ Windows interactive performance diagnostics have a QA/harness-only saved-transcr
 ## Saved interactive transcript packet support
 
 For QA handoff only, `scripts/windows_smoke_packet.py` can include saved Windows interactive slow/performance and mutation-refusal transcripts alongside saved JSON artifacts by passing both `--slow-transcript` and `--mutation-transcript`. The helper reuses the saved-transcript acceptance checks, reports transcript path, SHA256, byte size, accepted/failed state, and an interactive summary in deterministic JSON/Markdown. It reads saved local files only and does not launch ShellForgeAI interactive mode, execute PowerShell, use WinRM/PSRemoting, contact QGA/Proxmox, call the network or a model, or mutate the Windows host.
+
+## Interactive Windows read-only request routing
+
+Interactive mode recognizes explicit safe Windows read-only requests such as `show me the windows status`, `windows status`, `windows doctor`, `windows evidence`, and `windows processes limit 10`. These phrases are deterministic allowlisted routing only: ShellForgeAI renders the corresponding safe command guidance (`sfai.cmd windows status --json`, `sfai.cmd windows doctor --json`, `sfai.cmd windows evidence --json`, and `sfai.cmd windows processes --json --limit 10`) and updates `/pending` to a `windows-local-read-only` context. The route does not invoke model/system-prompt synthesis first, does not execute PowerShell, does not use WinRM/PSRemoting, does not spawn a shell or subprocess, and does not mutate services, processes, disks, Docker/Compose, registry, execution policy, or the filesystem.
+
+On Linux/non-Windows hosts, the same Windows phrases return unsupported/Windows-only safe guidance and `shellforgeai platform doctor --json`; they do not probe Windows or switch to Linux/Docker collectors. Broad natural-language execution remains out of scope.
+
+## Interactive assessment leakage guard
+
+Windows interactive performance diagnosis keeps the existing local read-only evidence path, but provider assessment text is now guarded against project/system-prompt acknowledgement leakage. If the provider returns AGENTS.md, workspace/project-instruction, documentation-invariant, or evidence-first-routing acknowledgement text instead of a diagnosis, ShellForgeAI suppresses that text and renders the deterministic Windows evidence-grounded fallback with safe next commands. This adds no new Windows collectors or command payloads and does not execute PowerShell, use WinRM/PSRemoting, spawn shell/subprocess execution, call a model again, or mutate the host.
+
+### Generic interactive parity prompts
+
+In a Windows local read-only interactive context, generic prompts such as `Show me the system status` and `What should I check first?` are handled deterministically with Windows safe-next guidance (`sfai.cmd windows status --json`, `sfai.cmd windows doctor --json`, `sfai.cmd windows evidence --json`, `sfai.cmd windows processes --json --limit 10`, and `sfai.cmd windows disks --json`). Cleanup/restart/services requests are refused clearly as mutating/service-impacting and are paired with the same read-only alternatives. These routes do not shell out to the wrapper, execute PowerShell, use WinRM/PSRemoting, call the model for next-check guidance, or mutate the host.
+
+### Human SSH assessment acknowledgement fallback
+
+The Windows interactive performance path rejects provider assessments that merely acknowledge ShellForgeAI repo/workspace conventions or safety/CLI/routing/UX invariants. Smart-apostrophe and mojibake variants are normalized, and Windows evidence collection falls back to the deterministic read-only summary when provider text is non-diagnostic or lacks Windows evidence-bearing terms. The raw provider text may still be written to `model-response.md` for audit, but stdout stays operator-facing. No PowerShell, WinRM/PSRemoting, shell/subprocess execution, new collectors, or mutation are added.
