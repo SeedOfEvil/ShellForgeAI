@@ -2369,15 +2369,21 @@ def _contains_internal_collector_language(text: str) -> bool:
 
 
 def _normalize_assessment_guard_text(text: str) -> str:
-    return (
+    normalized = (
         text.lower()
         .replace("’", "'")
         .replace("‘", "'")
+        .replace("“", '"')
+        .replace("”", '"')
         .replace("`", "")
         .replace("â€™", "'")
         .replace("â€˜", "'")
+        .replace("â€œ", '"')
+        .replace("â€�", '"')
+        .replace("â€", '"')
         .replace("\u2019", "'")
     )
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _contains_project_instruction_acknowledgement(text: str) -> bool:
@@ -2386,11 +2392,14 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         return False
     acknowledgement_cues = (
         "understood",
-        "i'll treat",
-        "i will treat",
-        "i'm in",
-        "i am in",
+        "i'll",
+        "i will",
+        "i'm",
+        "i am",
         "will follow",
+        "will preserve",
+        "operate within",
+        "preserve the stated",
         "follow the agents.md",
         "workspace instructions",
         "system prompt",
@@ -2400,9 +2409,21 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         "agents.md",
         "treat this repo as shellforgeai",
         "treat this workspace as shellforgeai",
+        "shellforgeai repo conventions",
+        "shellforgeai workspace conventions",
+        "shellforgeai project conventions",
+        "repo conventions",
+        "workspace conventions",
+        "project conventions",
         "documentation invariants",
-        "evidence-first routing",
+        "operator invariants",
+        "project invariants",
+        "ux invariants",
+        "cli, routing, and ux invariants",
+        "safety, cli, routing",
+        "preserve the stated safety",
         "preserve the safety, cli surface",
+        "evidence-first routing",
         "workspace instructions",
         "project instructions",
         "system prompt",
@@ -2411,13 +2432,39 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         return True
     if "agents.md" in low and "invariant" in low:
         return True
-    if "preserve the safety, cli surface" in low:
-        return True
-    if "documentation invariants" in low:
+    invariant_phrases = (
+        "preserve the safety, cli surface",
+        "preserve the stated safety",
+        "documentation invariants",
+        "ux invariants",
+        "operator invariants",
+        "project invariants",
+        "cli, routing, and ux invariants",
+        "safety, cli, routing",
+    )
+    if any(phrase in low for phrase in invariant_phrases):
         return True
     if "evidence-first routing" in low and "diagnos" not in low:
         return True
     return all(part in low for part in ("c:", "tools", "shellforgeai")) and "will follow" in low
+
+
+def _contains_windows_evidence_terms(text: str) -> bool:
+    low = _normalize_assessment_guard_text(text)
+    evidence_terms = (
+        "windows host",
+        "windows local read-only",
+        "win2025",
+        "2025server",
+        "root_free",
+        "drive_roots",
+        "linux-only collectors skipped",
+        "load average",
+        "memory summary",
+        "sfai.cmd windows",
+        "bounded read-only diagnostics",
+    )
+    return any(term in low for term in evidence_terms)
 
 
 def _is_bad_model_assessment(text: str) -> bool:
@@ -3179,8 +3226,13 @@ No command was executed.""")
                         artifact_dir=runtime.session.artifact_dir,
                     )
                     console.print("\n## Assessment")
-                    if (not _has_substantive_response(mresp_text)) or _is_bad_model_assessment(
-                        mresp_text
+                    if (
+                        (not _has_substantive_response(mresp_text))
+                        or _is_bad_model_assessment(mresp_text)
+                        or (
+                            _is_windows_platform_checks(checks)
+                            and not _contains_windows_evidence_terms(mresp_text)
+                        )
                     ):
                         console.print(_deterministic_operator_summary(routed.args, checks))
                     elif not mresp_streamed:

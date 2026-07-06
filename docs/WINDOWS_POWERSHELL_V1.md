@@ -176,3 +176,7 @@ Windows interactive performance diagnosis keeps the existing local read-only evi
 ### Generic interactive parity prompts
 
 In a Windows local read-only interactive context, generic prompts such as `Show me the system status` and `What should I check first?` are handled deterministically with Windows safe-next guidance (`sfai.cmd windows status --json`, `sfai.cmd windows doctor --json`, `sfai.cmd windows evidence --json`, `sfai.cmd windows processes --json --limit 10`, and `sfai.cmd windows disks --json`). Cleanup/restart/services requests are refused clearly as mutating/service-impacting and are paired with the same read-only alternatives. These routes do not shell out to the wrapper, execute PowerShell, use WinRM/PSRemoting, call the model for next-check guidance, or mutate the host.
+
+### Human SSH assessment acknowledgement fallback
+
+The Windows interactive performance path rejects provider assessments that merely acknowledge ShellForgeAI repo/workspace conventions or safety/CLI/routing/UX invariants. Smart-apostrophe and mojibake variants are normalized, and Windows evidence collection falls back to the deterministic read-only summary when provider text is non-diagnostic or lacks Windows evidence-bearing terms. The raw provider text may still be written to `model-response.md` for audit, but stdout stays operator-facing. No PowerShell, WinRM/PSRemoting, shell/subprocess execution, new collectors, or mutation are added.

@@ -1395,3 +1395,7 @@ Windows interactive performance diagnosis now rejects project/system-prompt ackn
 ## Windows interactive parity prompt fixes
 
 Windows interactive parity now covers generic status, next-check, and cleanup/restart/services refusal prompts in the Windows local read-only lane. The REPL gives deterministic Windows status guidance for `Show me the system status`, bounded Windows safe-next guidance for `What should I check first?`, and a clear no-action mutation refusal for cleanup/restart/service-control phrasing. Broad natural-language execution, shell/subprocess execution, PowerShell/WinRM, new collectors, Docker/Compose mutation, cleanup, remediation, rollback, recovery, and service/process mutation remain out of scope.
+
+## Windows human SSH assessment acknowledgement fallback
+
+Windows interactive assessment leakage protection now covers the human SSH repro where the model answered with ShellForgeAI repo-conventions and safety/CLI/routing/UX-invariant acknowledgement text after valid Windows evidence collection. The guard normalizes mojibake/smart apostrophes, keeps audit artifacts, and renders deterministic Windows evidence-grounded fallback on stdout. Broad natural-language execution, shell/subprocess execution, PowerShell/WinRM, new collectors, model/provider changes, cleanup, remediation, rollback, recovery, and mutation remain out of scope.

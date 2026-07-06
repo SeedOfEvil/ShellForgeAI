@@ -46,10 +46,13 @@ LINUX_ONLY_TOOL_FUNCTIONS = [
     ("shellforgeai.tools.systemd", "list_failed", "systemd.list_failed"),
 ]
 
-BAD_ASSESSMENT = (
-    "Understood. Iâ€™ll treat this repo as ShellForgeAI and preserve the safety, "
-    "CLI surface, evidence-first routing, and documentation invariants in `AGENTS.md`."
+_BAD_ASSESSMENT_TAIL = (
+    "operate within the ShellForgeAI repo conventions and preserve the stated "
+    "safety, CLI, routing, and UX invariants."
 )
+BAD_ASSESSMENT = f"Understood. Iâ€™ll {_BAD_ASSESSMENT_TAIL}"
+BAD_ASSESSMENT_UNICODE = f"Understood. I’ll {_BAD_ASSESSMENT_TAIL}"
+BAD_ASSESSMENT_ASCII = f"Understood. I'll {_BAD_ASSESSMENT_TAIL}"
 
 
 def _fake_windows_status_payload(info: Any = None, **_: Any) -> dict[str, Any]:
@@ -121,11 +124,16 @@ class _UnavailableProvider:
 @pytest.mark.parametrize(
     "text",
     [
+        BAD_ASSESSMENT_ASCII,
+        BAD_ASSESSMENT_UNICODE,
+        BAD_ASSESSMENT,
         "Understood. I'll treat this repo as ShellForgeAI and preserve the safety, CLI surface.",
         "I will treat this workspace as ShellForgeAI and follow the AGENTS.md invariants.",
         "Understood; documentation invariants are preserved.",
         "Understood; evidence-first routing and documentation invariants are preserved.",
-        "Iâ€™ll treat this repo as ShellForgeAI and follow workspace instructions.",
+        "Understood. I'll operate within the ShellForgeAI workspace conventions.",
+        "Understood. ShellForgeAI project conventions and UX invariants are preserved.",
+        "Understood. Iâ€™ll treat this repo as ShellForgeAI and follow workspace instructions.",
         "I'm in C:\\Tools\\ShellForgeAI\\src and will follow project instructions.",
         BAD_ASSESSMENT,
     ],
@@ -140,6 +148,8 @@ def test_project_instruction_acknowledgement_text_is_rejected(text: str) -> None
     [
         "Windows local read-only diagnosis completed. Safety posture: no mutation was performed.",
         "Next safe command: ShellForgeAI windows status --json for follow-up evidence.",
+        "Run sfai.cmd windows status --json after reviewing this Windows evidence.",
+        "Windows host evidence: load average is unavailable and Linux-only collectors skipped.",
         "Read-only evidence shows load average is unavailable on Windows.",
     ],
 )
@@ -201,10 +211,18 @@ def test_windows_slow_path_replaces_project_instruction_acknowledgement(
     assert "Windows host" in out
     assert "sfai.cmd windows status --json" in out
     assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "operate within the ShellForgeAI repo conventions" not in out
+    assert "UX invariants" not in out
+    assert "preserve the stated safety" not in out
     assert "AGENTS.md" not in out
     assert "treat this repo" not in out
     assert "documentation invariants" not in out
     assert "system prompt" not in out.lower()
+    model_artifacts = list(tmp_path.rglob("model-response.md"))
+    assert model_artifacts
+    assert "operate within the ShellForgeAI repo conventions" in model_artifacts[0].read_text(
+        encoding="utf-8"
+    )
     for forbidden in (
         "cleanup executed",
         "remediation executed",
@@ -214,6 +232,30 @@ def test_windows_slow_path_replaces_project_instruction_acknowledgement(
         "natural-language mutation execution",
     ):
         assert forbidden not in out
+
+
+def test_windows_slow_typo_path_replaces_project_instruction_acknowledgement(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "shellforgeai.interactive.repl.build_provider",
+        lambda *_: _BadAcknowledgementProvider(),
+    )
+    res = runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input="This system feels sloww\n/exit\n",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Diagnose performance" in out
+    assert "Windows host" in out
+    assert "Linux-only collectors skipped" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "operate within the ShellForgeAI repo conventions" not in out
+    assert "UX invariants" not in out
 
 
 def test_model_unavailable_still_uses_deterministic_windows_fallback(
