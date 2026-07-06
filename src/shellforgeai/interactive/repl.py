@@ -161,6 +161,25 @@ def _is_latency_diagnosis_phrase(text: str) -> bool:
     return has_latency and has_diagnosis
 
 
+def _is_slow_diagnosis_phrase(text: str) -> bool:
+    normalized = _normalized_interactive_phrase(text)
+    return any(
+        phrase in normalized
+        for phrase in (
+            "system feels slow",
+            "system feels a bit slow",
+            "system feels sloww",
+            "feels slow",
+            "feels sloww",
+            "performance issue",
+        )
+    )
+
+
+def _is_windows_latency_or_slow_diagnosis_phrase(text: str) -> bool:
+    return _is_latency_diagnosis_phrase(text) or _is_slow_diagnosis_phrase(text)
+
+
 def _is_windows_service_mutation_phrase(text: str) -> bool:
     normalized = _normalized_interactive_phrase(text)
     has_mutation = any(
@@ -746,12 +765,19 @@ def _summarize_facts(checks: list[dict[str, str]]) -> dict[str, Any]:
 
 
 def _run_model_synthesis(
-    console: Console, provider, request: ModelRequest, raw: bool
+    console: Console,
+    provider,
+    request: ModelRequest,
+    raw: bool,
+    *,
+    stream_to_console: bool = True,
 ) -> tuple[str, bool]:
     streaming_enabled = os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
     final_text = ""
-    if (streaming_enabled or not hasattr(provider, "complete")) and hasattr(
-        provider, "stream_complete"
+    if (
+        stream_to_console
+        and (streaming_enabled or not hasattr(provider, "complete"))
+        and hasattr(provider, "stream_complete")
     ):
         with console.status("Synthesizing operator summary..."):
             pass
@@ -768,6 +794,24 @@ def _run_model_synthesis(
                 break
         console.print("")
         return final_text, True
+    if (
+        not stream_to_console
+        and hasattr(provider, "stream_complete")
+        and not hasattr(provider, "complete")
+    ):
+        chunks: list[str] = []
+        final_text = ""
+        with console.status("Asking model..."):
+            for event in provider.stream_complete(request):
+                etype = event.get("type")
+                if etype == "text":
+                    chunks.append(str(event.get("text", "")))
+                elif etype == "final":
+                    resp = event.get("response")
+                    if resp is not None:
+                        final_text = getattr(resp, "text", "") or ""
+                    break
+        return (final_text or "".join(chunks), False)
     with console.status("Asking model..."):
         resp = provider.complete(request)
     if not getattr(resp, "ok", True):
@@ -2696,7 +2740,7 @@ def start_interactive(
             CodexProvider.cleanup_active_processes()
             console.print("\nInterrupted safely. REPL is still healthy.")
             continue
-        if _is_windows_host() and _is_latency_diagnosis_phrase(user_input):
+        if _is_windows_host() and _is_windows_latency_or_slow_diagnosis_phrase(user_input):
             with console.status("Collecting Windows read-only evidence..."):
                 rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
             pending_followup = None
@@ -2746,7 +2790,7 @@ def start_interactive(
         if _should_use_windows_local_guidance(latest_context) and (
             _is_windows_strongest_signal_phrase(user_input)
             or _is_current_host_handoff_phrase(user_input)
-            or _is_latency_diagnosis_phrase(user_input)
+            or _is_windows_latency_or_slow_diagnosis_phrase(user_input)
         ):
             with console.status("Collecting Windows read-only evidence..."):
                 rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
@@ -3414,6 +3458,7 @@ No command was executed.""")
                             metadata={"command_kind": "diagnose", "intent": routed.args},
                         ),
                         raw=False,
+                        stream_to_console=not _is_windows_platform_checks(checks),
                     )
                     (runtime.session.artifact_dir / "model-response.md").write_text(
                         mresp_text, encoding="utf-8"

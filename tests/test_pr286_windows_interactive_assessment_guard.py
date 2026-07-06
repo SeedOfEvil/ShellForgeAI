@@ -12,6 +12,7 @@ from shellforgeai.cli import app
 from shellforgeai.interactive.repl import (
     _contains_project_instruction_acknowledgement,
     _deterministic_operator_summary,
+    _interactive_windows_mutation_refusal,
     _is_bad_model_assessment,
 )
 from shellforgeai.platform_detection import PlatformInfo
@@ -59,6 +60,20 @@ BAD_PROJECT_INVARIANTS = (
 )
 BAD_PROJECT_INVARIANTS_UNICODE = BAD_PROJECT_INVARIANTS.replace("I'll", "I’ll")
 BAD_PROJECT_INVARIANTS_MOJIBAKE = BAD_PROJECT_INVARIANTS.replace("I'll", "Iâ€™ll")
+BAD_WORKSPACE_INVARIANTS = (
+    "Understood. I'll treat this workspace as ShellForgeAI and preserve the "
+    "AGENTS.md invariants, especially the safety boundary, CLI compatibility, "
+    "evidence-first routing, and UX constraints."
+)
+BAD_WORKSPACE_INVARIANTS_UNICODE = BAD_WORKSPACE_INVARIANTS.replace("I'll", "I’ll")
+BAD_WORKSPACE_INVARIANTS_MOJIBAKE = BAD_WORKSPACE_INVARIANTS.replace("I'll", "Iâ€™ll")
+BAD_REPO_LINUX_HARNESS = (
+    "Understood. I'll follow the ShellForgeAI repo invariants and treat this as "
+    "a CLI-first Linux operations harness with validation-only apply, "
+    "evidence-first routing, and no unsafe execution."
+)
+BAD_REPO_LINUX_HARNESS_UNICODE = BAD_REPO_LINUX_HARNESS.replace("I'll", "I’ll")
+BAD_REPO_LINUX_HARNESS_MOJIBAKE = BAD_REPO_LINUX_HARNESS.replace("I'll", "Iâ€™ll")
 
 
 def _fake_windows_status_payload(info: Any = None, **_: Any) -> dict[str, Any]:
@@ -127,6 +142,12 @@ class _UnavailableProvider:
         raise RuntimeError("model unavailable in pr286 test")
 
 
+class _StreamingBadAcknowledgementProvider:
+    def stream_complete(self, req: Any) -> Any:
+        yield {"type": "text", "text": BAD_WORKSPACE_INVARIANTS}
+        yield {"type": "final", "response": type("R", (), {"text": BAD_WORKSPACE_INVARIANTS})()}
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -136,6 +157,12 @@ class _UnavailableProvider:
         BAD_PROJECT_INVARIANTS,
         BAD_PROJECT_INVARIANTS_UNICODE,
         BAD_PROJECT_INVARIANTS_MOJIBAKE,
+        BAD_WORKSPACE_INVARIANTS,
+        BAD_WORKSPACE_INVARIANTS_UNICODE,
+        BAD_WORKSPACE_INVARIANTS_MOJIBAKE,
+        BAD_REPO_LINUX_HARNESS,
+        BAD_REPO_LINUX_HARNESS_UNICODE,
+        BAD_REPO_LINUX_HARNESS_MOJIBAKE,
         "Understood. I'll treat this repo as ShellForgeAI and preserve the safety, CLI surface.",
         "I will treat this workspace as ShellForgeAI and follow the AGENTS.md invariants.",
         "Understood; documentation invariants are preserved.",
@@ -160,6 +187,10 @@ def test_project_instruction_acknowledgement_text_is_rejected(text: str) -> None
         "Run sfai.cmd windows status --json after reviewing this Windows evidence.",
         "Windows host evidence: load average is unavailable and Linux-only collectors skipped.",
         "Read-only evidence shows load average is unavailable on Windows.",
+        (
+            "Run sfai.cmd windows status --json, sfai.cmd windows evidence --json, "
+            "and sfai.cmd windows processes --json --limit 10."
+        ),
     ],
 )
 def test_legitimate_diagnostic_text_is_not_rejected(text: str) -> None:
@@ -204,10 +235,12 @@ def test_windows_slow_path_replaces_project_instruction_acknowledgement(
     windows_platform: list[str], monkeypatch: Any, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        "shellforgeai.interactive.repl.build_provider",
-        lambda *_: _BadAcknowledgementProvider(),
-    )
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows slow route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
     res = runner.invoke(
         app,
         ["interactive", "--yes-trust", "--no-trust-cache"],
@@ -227,11 +260,7 @@ def test_windows_slow_path_replaces_project_instruction_acknowledgement(
     assert "treat this repo" not in out
     assert "documentation invariants" not in out
     assert "system prompt" not in out.lower()
-    model_artifacts = list(tmp_path.rglob("model-response.md"))
-    assert model_artifacts
-    assert "operate within the ShellForgeAI repo conventions" in model_artifacts[0].read_text(
-        encoding="utf-8"
-    )
+    assert not list(tmp_path.rglob("model-response.md"))
     for forbidden in (
         "cleanup executed",
         "remediation executed",
@@ -247,10 +276,12 @@ def test_windows_slow_typo_path_replaces_project_instruction_acknowledgement(
     windows_platform: list[str], monkeypatch: Any, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        "shellforgeai.interactive.repl.build_provider",
-        lambda *_: _BadAcknowledgementProvider(),
-    )
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows slow typo route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
     res = runner.invoke(
         app,
         ["interactive", "--yes-trust", "--no-trust-cache"],
@@ -259,7 +290,7 @@ def test_windows_slow_typo_path_replaces_project_instruction_acknowledgement(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Diagnose performance" in out
+    assert "Windows latency first-pass diagnosis" in out
     assert "Windows host" in out
     assert "Linux-only collectors skipped" in out
     assert "sfai.cmd windows status --json" in out
@@ -267,14 +298,16 @@ def test_windows_slow_typo_path_replaces_project_instruction_acknowledgement(
     assert "UX invariants" not in out
 
 
-def test_model_unavailable_still_uses_deterministic_windows_fallback(
+def test_windows_slow_prompt_uses_deterministic_route_without_model(
     windows_platform: list[str], monkeypatch: Any, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        "shellforgeai.interactive.repl.build_provider",
-        lambda *_: _UnavailableProvider(),
-    )
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows slow route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
     res = runner.invoke(
         app,
         ["interactive", "--yes-trust", "--no-trust-cache"],
@@ -283,7 +316,7 @@ def test_model_unavailable_still_uses_deterministic_windows_fallback(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "model synthesis unavailable" in out or "model unavailable" in out
+    assert "Windows latency first-pass diagnosis" in out
     assert "Windows host" in out
     assert "sfai.cmd windows status --json" in out
 
@@ -369,6 +402,65 @@ def test_windows_latency_exact_prompt_routes_before_model_synthesis(
     assert "AGENTS.md guidance" not in out
     assert "ShellForgeAI project invariants" not in out
     assert "work in this repo" not in out
+
+
+def test_windows_capture_then_gate_blocks_streamed_bad_model_output(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "1")
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "shellforgeai.interactive.repl.build_provider",
+        lambda *_: _StreamingBadAcknowledgementProvider(),
+    )
+    res = runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input="High load\n/exit\n",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Understood" not in out
+    assert "AGENTS.md invariants" not in out
+    assert "workspace as ShellForgeAI" not in out
+    assert "Windows host" in out
+    assert "sfai.cmd windows status --json" in out
+    model_artifacts = list(tmp_path.rglob("model-response.md"))
+    assert model_artifacts
+    assert BAD_WORKSPACE_INVARIANTS in model_artifacts[0].read_text(encoding="utf-8")
+
+
+def test_windows_system_status_does_not_call_model(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows status route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
+    res = runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input="show me the system status\n/pending\n/exit\n",
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "windows-local-read-only" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows evidence --json" in out
+    assert "shellforgeai triage docker" not in out
+
+
+def test_windows_mutation_refusal_is_ascii_console_safe() -> None:
+    text = _interactive_windows_mutation_refusal("Clean up Windows and restart services to fix it")
+    text.encode("ascii", errors="strict")
+    text.encode("cp1252", errors="strict")
+    assert "No command was executed" in text
+    assert "No action was taken" in text
+    assert "->" not in text
+    assert "→" not in text
 
 
 def test_windows_strongest_signal_prompt_compares_categories_once(
