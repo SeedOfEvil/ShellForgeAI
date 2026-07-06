@@ -115,7 +115,7 @@ def _is_generic_system_status_phrase(text: str) -> bool:
 
 def _is_next_check_phrase(text: str) -> bool:
     normalized = _normalized_interactive_phrase(text)
-    return normalized in {
+    exact = normalized in {
         "what should i check first",
         "what should we check first",
         "what should i check next",
@@ -127,6 +127,11 @@ def _is_next_check_phrase(text: str) -> bool:
         "next checks",
         "what next",
     }
+    windows_host_hint = "windows" in normalized or "win2025" in normalized
+    embedded_next_check = ("what should" in normalized or "what do" in normalized) and (
+        "check first" in normalized or "check next" in normalized
+    )
+    return exact or (windows_host_hint and embedded_next_check)
 
 
 def _is_windows_strongest_signal_phrase(text: str) -> bool:
@@ -2615,7 +2620,9 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         "i am",
         "will follow",
         "i'll follow",
+        "i'll treat",
         "i will follow",
+        "i will treat",
         "will preserve",
         "operate within",
         "preserve the stated",
@@ -2640,6 +2647,13 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         "operator invariants",
         "project invariants",
         "shellforgeai project invariants",
+        "shellforgeai repo invariants",
+        "shellforgeai's safety boundary",
+        "cli invariants",
+        "cli compatibility",
+        "cli-first linux operations harness",
+        "validation-only apply",
+        "ux constraints",
         "agents.md guidance",
         "work in this repo",
         "ux invariants",
@@ -2663,6 +2677,8 @@ def _contains_project_instruction_acknowledgement(text: str) -> bool:
         "ux invariants",
         "operator invariants",
         "project invariants",
+        "repo invariants",
+        "cli invariants",
         "cli, routing, and ux invariants",
         "safety, cli, routing",
     )

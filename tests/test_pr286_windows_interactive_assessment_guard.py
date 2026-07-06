@@ -463,6 +463,106 @@ def test_windows_mutation_refusal_is_ascii_console_safe() -> None:
     assert "→" not in text
 
 
+def test_ask_windows_latency_prompt_is_windows_operator_output(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.commands.ask.platform.system", lambda: "Windows")
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows ask latency route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.cli.build_provider", _fail_provider)
+    res = runner.invoke(
+        app,
+        [
+            "ask",
+            "I am seeing weird latency in the app. Give me a practical first-pass diagnosis.",
+        ],
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Windows latency first-pass diagnosis" in out
+    assert "Windows host" in out
+    assert "Load average is not available on Windows" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "Evidence-backed ask:" not in out
+    assert "Ready. What do you want" not in out
+    assert "repo invariants" not in out
+
+
+def test_ask_windows_strongest_signal_prompt_is_windows_native(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.commands.ask.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows ask strongest-signal route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.cli.build_provider", _fail_provider)
+    res = runner.invoke(
+        app,
+        [
+            "ask",
+            (
+                "For this Windows host, what is the strongest CPU memory disk "
+                "and process signal right now?"
+            ),
+        ],
+    )
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Windows CPU/memory/disk/process comparison" in out
+    assert "- CPU/load:" in out
+    assert "- Memory:" in out
+    assert "- Disk:" in out
+    assert "- Process health:" in out
+    assert "Strongest available signal:" in out or "No single strong signal was found" in out
+    assert "Understood" not in out
+
+
+def test_ask_windows_next_check_prompt_avoids_docker(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.commands.ask.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows ask next-check route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.cli.build_provider", _fail_provider)
+    res = runner.invoke(app, ["ask", "On WIN2025-SFAI01 what should I check first?"])
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "What to check first" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "Read-only Docker triage ranking" not in out
+    assert "containers_seen=0" not in out
+    assert "shellforgeai triage docker --json" not in out
+
+
+def test_ask_windows_handoff_prompt_avoids_docker(
+    windows_platform: list[str], monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.commands.ask.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows ask handoff route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.cli.build_provider", _fail_provider)
+    res = runner.invoke(app, ["ask", "Write a concise operator handoff for this Windows host."])
+    out = res.stdout
+    assert res.exit_code == 0
+    assert windows_platform == []
+    assert "Windows host handoff" in out
+    assert "WIN2025-SFAI01" in out
+    assert "Docker suspects" not in out
+    assert "container-visible evidence" not in out
+
+
 def test_windows_strongest_signal_prompt_compares_categories_once(
     windows_platform: list[str], monkeypatch: Any, tmp_path: Path
 ) -> None:

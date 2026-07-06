@@ -21,6 +21,9 @@ WINDOWS_MARKERS = (
     "2025server",
     "linux-only collectors are skipped",
     "linux-only collectors skipped on windows",
+    "windows local read-only",
+    "windows-local-read-only",
+    "windows host: bounded read-only diagnostics completed",
 )
 PERF_MARKERS = ("diagnose performance", "performance", "read-only", "read only")
 UNAVAILABLE_MARKERS = (
@@ -33,6 +36,10 @@ UNAVAILABLE_MARKERS = (
 FOLLOWUP_MARKERS = (
     "shellforgeai windows status --json",
     "shellforgeai windows processes --json",
+    "sfai.cmd windows status --json",
+    "sfai.cmd windows doctor --json",
+    "sfai.cmd windows evidence --json",
+    "sfai.cmd windows processes --json --limit 10",
     "proceed",
     "dig deeper",
     "visibility: windows-local-read-only",
@@ -56,6 +63,16 @@ SLOW_FORBIDDEN = (
     ("name(id='null')", "Python AST null marker present"),
     ("loadavg=none", "Linux load average None marker present"),
     ("0.0gib/0.0gib", "fake zero GiB memory marker present"),
+    ("agents.md invariants", "project/system acknowledgement present"),
+    ("agents.md guidance", "project/system acknowledgement present"),
+    ("repo invariants", "project/system acknowledgement present"),
+    ("project invariants", "project/system acknowledgement present"),
+    ("cli invariants", "project/system acknowledgement present"),
+    ("work in this repo", "project/system acknowledgement present"),
+    ("read-only docker triage ranking", "Docker framing present in Windows transcript"),
+    ("containers_seen=0", "container framing present in Windows transcript"),
+    ("docker suspects", "Docker framing present in Windows transcript"),
+    ("container-visible evidence", "container framing present in Windows transcript"),
 )
 NEGATED_EXECUTION_PATTERNS = (
     re.compile(r"\bno\s+(shell\s+)?command\s+was\s+executed\b", re.I),
