@@ -95,6 +95,11 @@ NEGATED_EXECUTION_PATTERNS = (
         re.I,
     ),
     re.compile(
+        r"\bno\s+cleanup,\s+restart,\s+service\s+control,\s+remediation,\s+"
+        r"rollback,\s+or\s+recovery\s+was\s+(executed|performed)\b",
+        re.I,
+    ),
+    re.compile(
         r"\bno\s+shell\s+or\s+remoting\s+execution\b.*\bno\s+cleanup\b.*"
         r"\b(no\s+file\s+changes|file\s+changes\s+were\s+not)\b",
         re.I,

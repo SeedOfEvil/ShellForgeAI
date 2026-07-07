@@ -305,6 +305,7 @@ def test_negated_execution_statements_do_not_fail(tmp_path: Path) -> None:
         "No rollback/recovery was performed.",
         "No rollback or recovery was executed.",
         "Cleanup/remediation/rollback/recovery executed: false",
+        "No cleanup, restart, service control, remediation, rollback, or recovery was performed.",
         "No action was taken.",
         (
             "No shell or remoting execution, no service restart, no process termination, "
@@ -329,6 +330,9 @@ def test_mutation_execution_indicators_fail(tmp_path: Path) -> None:
         "remediation executed",
         "rollback executed",
         "recovery executed",
+        "rollback was performed",
+        "recovery was performed",
+        "restart executed",
         "docker prune executed",
         "running shell command",
         "ran command",

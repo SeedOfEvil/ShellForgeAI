@@ -575,6 +575,10 @@ def test_ask_windows_next_check_prompt_avoids_docker(monkeypatch: Any, tmp_path:
     out = res.stdout
     assert res.exit_code == 0
     assert "What to check first" in out
+    assert "Windows metric limitations" in out
+    assert "Load average is not available on Windows" in out
+    assert "Memory summary unavailable" in out
+    assert "Linux-only collectors skipped on Windows" in out
     assert "sfai.cmd windows status --json" in out
     assert "Read-only Docker triage ranking" not in out
     assert "containers_seen=0" not in out
@@ -634,6 +638,10 @@ def test_windows_exact_next_checks_are_deterministic_without_docker_leakage(
     out = res.stdout
     assert res.exit_code == 0
     assert "What to check first" in out
+    assert "Windows metric limitations" in out
+    assert "Load average is not available on Windows" in out
+    assert "Memory summary unavailable" in out
+    assert "Linux-only collectors skipped on Windows" in out
     assert "sfai.cmd windows status --json" in out
     assert "sfai.cmd windows doctor --json" in out
     assert "sfai.cmd windows evidence --json" in out
