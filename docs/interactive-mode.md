@@ -452,6 +452,12 @@ alternatives. Refused categories include:
 
 Real fixes only run through governed, named recipes with explicit confirmation.
 
+Read-only natural-language Docker diagnostics such as `docker feels broken what
+should I check first` route to bounded ShellForgeAI Docker triage guidance.
+Shell-like Docker inputs (`docker ps`) and Docker/Compose mutation phrases
+(`docker restart ...`, `docker compose restart ...`, `prune docker`) remain
+refused and are never executed as shell commands.
+
 `uname -a` and other bare host-evidence shell invocations are refused as
 not-a-shell: interactive mode cannot guarantee a non-shell evidence path for a
 raw `uname` invocation, so it answers with the not-a-shell refusal rather than
