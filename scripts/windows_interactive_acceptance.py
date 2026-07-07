@@ -91,7 +91,16 @@ NEGATED_EXECUTION_PATTERNS = (
         re.I,
     ),
     re.compile(
+        r"\bno\s+restart\s+or\s+service\s+control\s+was\s+(executed|performed)\b",
+        re.I,
+    ),
+    re.compile(
         r"\b(cleanup/remediation/rollback/recovery|rollback/recovery)\s+executed:\s*false\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(cleanup|remediation|rollback|recovery|restart|service\s+control|"
+        r"restart/service\s+control)\s+executed:\s*false\b",
         re.I,
     ),
     re.compile(

@@ -251,8 +251,11 @@ def _render_windows_next_check_guidance() -> str:
         "- Linux-only collectors skipped on Windows.\n\n"
         "Safe next commands:\n"
         f"{commands}\n\n"
-        "No command was executed. No cleanup, restart, service control, remediation, "
-        "rollback, or recovery was performed."
+        "No command was executed.\n"
+        "No cleanup was performed.\n"
+        "No restart or service control was performed.\n"
+        "No remediation was performed.\n"
+        "No rollback or recovery was performed."
     )
 
 
