@@ -105,6 +105,14 @@ def register(app: typer.Typer) -> None:
             has_handoff = _windows_prompt_hint(text) and "handoff" in normalized
             return has_latency or has_slow or has_strongest or has_handoff
 
+        def _windows_status_prompt(text: str) -> bool:
+            normalized = " ".join(text.lower().replace("-", " ").split())
+            return _windows_prompt_hint(text) and (
+                "status" in normalized
+                or "health" in normalized
+                or "what is happening" in normalized
+            )
+
         if not no_evidence and _windows_prompt_hint(question):
             from shellforgeai.interactive.repl import (
                 _interactive_windows_mutation_refusal,
@@ -124,7 +132,7 @@ def register(app: typer.Typer) -> None:
                 rendered, _latest_context = _render_windows_parity_prompt(runtime, question)
                 cli.console.print(rendered)
                 return
-            if cli._is_status_ask(question):
+            if _windows_status_prompt(question) or cli._is_status_ask(question):
                 cli.console.print(_render_windows_read_only_intent(intent="windows_status"))
                 return
         if not no_evidence:

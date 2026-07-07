@@ -85,6 +85,15 @@ NEGATED_EXECUTION_PATTERNS = (
         r"(executed|performed)\b",
         re.I,
     ),
+    re.compile(r"\bno\s+rollback/recovery\s+was\s+(executed|performed)\b", re.I),
+    re.compile(
+        r"\bno\s+rollback\s+or\s+recovery\s+was\s+(executed|performed)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(cleanup/remediation/rollback/recovery|rollback/recovery)\s+executed:\s*false\b",
+        re.I,
+    ),
     re.compile(
         r"\bno\s+shell\s+or\s+remoting\s+execution\b.*\bno\s+cleanup\b.*"
         r"\b(no\s+file\s+changes|file\s+changes\s+were\s+not)\b",

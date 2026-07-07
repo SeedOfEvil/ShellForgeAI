@@ -105,8 +105,8 @@ def test_mutation_phrase_mixed_with_windows_context_is_refused() -> None:
 
 
 def test_source_safety_no_routing_shell_powershell_winrm_subprocess_or_exec_lanes() -> None:
-    commands_source = Path("src/shellforgeai/interactive/commands.py").read_text()
-    repl_source = Path("src/shellforgeai/interactive/repl.py").read_text()
+    commands_source = Path("src/shellforgeai/interactive/commands.py").read_text(encoding="utf-8")
+    repl_source = Path("src/shellforgeai/interactive/repl.py").read_text(encoding="utf-8")
     combined = commands_source + repl_source
     pr285_slice = "\n".join(
         line

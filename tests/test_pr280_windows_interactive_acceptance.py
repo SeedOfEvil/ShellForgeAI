@@ -301,6 +301,10 @@ def test_negated_execution_statements_do_not_fail(tmp_path: Path) -> None:
         "No rollback was performed.",
         "No recovery was executed.",
         "No recovery was performed.",
+        "No rollback/recovery was executed.",
+        "No rollback/recovery was performed.",
+        "No rollback or recovery was executed.",
+        "Cleanup/remediation/rollback/recovery executed: false",
         "No action was taken.",
         (
             "No shell or remoting execution, no service restart, no process termination, "

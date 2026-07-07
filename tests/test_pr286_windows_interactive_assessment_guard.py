@@ -163,6 +163,11 @@ class _StreamingBadAcknowledgementProvider:
         BAD_REPO_LINUX_HARNESS,
         BAD_REPO_LINUX_HARNESS_UNICODE,
         BAD_REPO_LINUX_HARNESS_MOJIBAKE,
+        (
+            "Understood. I’ll operate within the ShellForgeAI project constraints and "
+            "preserve the safety, CLI, evidence-first routing, and UX invariants from "
+            "AGENTS.md."
+        ),
         "Understood. I'll treat this repo as ShellForgeAI and preserve the safety, CLI surface.",
         "I will treat this workspace as ShellForgeAI and follow the AGENTS.md invariants.",
         "Understood; documentation invariants are preserved.",
@@ -491,6 +496,39 @@ def test_ask_windows_latency_prompt_is_windows_operator_output(
     assert "Evidence-backed ask:" not in out
     assert "Ready. What do you want" not in out
     assert "repo invariants" not in out
+
+
+def test_ask_windows_status_prompt_is_deterministic_operator_output(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.commands.ask.platform.system", lambda: "Windows")
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+
+    def _fail_provider(*_: Any) -> Any:
+        raise AssertionError("Windows ask status route must not call model provider")
+
+    monkeypatch.setattr("shellforgeai.cli.build_provider", _fail_provider)
+    res = runner.invoke(app, ["ask", "show me the windows status"])
+    out = res.stdout
+    assert res.exit_code == 0
+    assert "Windows status" in out
+    assert "windows-local-read-only" in out
+    assert "Load average is not available on Windows" in out
+    assert "Linux-only collectors skipped on Windows" in out
+    assert "sfai.cmd windows status --json" in out
+    assert "sfai.cmd windows doctor --json" in out
+    assert "sfai.cmd windows evidence --json" in out
+    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "Provider:" not in out
+    assert "Model:" not in out
+    assert "Evidence-backed ask:" not in out
+    assert "AGENTS.md" not in out
+    assert "project constraints" not in out
+    assert "repo invariants" not in out
+    assert "CLI invariants" not in out
+    assert "Read-only Docker triage ranking" not in out
+    assert "containers_seen=0" not in out
 
 
 def test_ask_windows_strongest_signal_prompt_is_windows_native(
