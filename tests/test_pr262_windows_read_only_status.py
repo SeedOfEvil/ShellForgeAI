@@ -117,9 +117,11 @@ def test_text_output_is_concise() -> None:
     assert "ShellForgeAI Windows status" in text
     assert "Status: ok" in text
     assert "Disk:" in text
+    assert "Memory:" in text
+    assert "Load average is not available on Windows" in text
     assert "Not collected yet:" in text
     assert "Next safe command: shellforgeai windows doctor --json" in text
-    assert len(text.splitlines()) <= 10
+    assert len(text.splitlines()) <= 12
 
 
 def test_cli_windows_status_json_invokes_unsupported_on_linux(monkeypatch) -> None:

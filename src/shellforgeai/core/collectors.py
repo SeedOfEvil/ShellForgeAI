@@ -28,6 +28,7 @@ from shellforgeai.tools import (
 from shellforgeai.tools.services import docker_detect, nginx_detect, ssh_detect
 from shellforgeai.util.text import truncate_text
 from shellforgeai.windows_disks import windows_disks_payload
+from shellforgeai.windows_memory import windows_memory_payload, windows_memory_summary
 from shellforgeai.windows_status import windows_status_payload
 
 PARSE_FAILED: Any = object()
@@ -560,8 +561,43 @@ def _windows_disks_summary(payload: dict) -> str:
     returned = summary.get("returned_roots")
     available = summary.get("available_roots")
     if isinstance(returned, int) and isinstance(available, int):
-        return f"drive_roots={returned} available={available} (stdlib read-only)"
+        primary_free = summary.get("primary_root_free_bytes")
+        free_suffix = (
+            f" primary_root_free={_bytes_gib(primary_free)}" if primary_free is not None else ""
+        )
+        return f"drive_roots={returned} available={available}{free_suffix} (stdlib read-only)"
     return "windows disks preview collected (read-only)"
+
+
+def _windows_memory_item(info: PlatformInfo) -> EvidenceItem:
+    """Reuse the read-only Windows memory summary as ``system.cpu_memory`` evidence.
+
+    When physical-memory facts are collectible the item carries an honest
+    Windows-native memory posture; otherwise it degrades to the explicit
+    unavailable marker instead of a fake ``0.0GiB/0.0GiB`` value.
+    """
+    try:
+        payload = windows_memory_payload(info)
+    except Exception:  # memory reuse must never crash the diagnosis route
+        payload = {}
+    memory = payload.get("memory") if isinstance(payload, dict) else None
+    if isinstance(memory, dict) and memory.get("available"):
+        content, truncated = truncate_text(json.dumps(payload))
+        return EvidenceItem(
+            source="system.cpu_memory",
+            category=EvidenceCategory.host,
+            ok=True,
+            title="CPU/memory",
+            summary=windows_memory_summary(payload),
+            content=content,
+            truncated=truncated,
+            metadata={"status": "ok", "platform": "windows"},
+        )
+    return _windows_metric_unavailable_item(
+        "system.cpu_memory",
+        "CPU/memory",
+        "Memory summary unavailable from this collector on Windows",
+    )
 
 
 def _windows_payload_item(source: str, title: str, builder, summarizer) -> EvidenceItem:
@@ -636,11 +672,7 @@ def collect_windows_performance_evidence(
             "Host resources",
             "Load average is not available on Windows",
         ),
-        _windows_metric_unavailable_item(
-            "system.cpu_memory",
-            "CPU/memory",
-            "Memory summary unavailable from this collector on Windows",
-        ),
+        _windows_memory_item(info),
     ]
     items.extend(
         _linux_only_skip_item(source, title, mechanism)

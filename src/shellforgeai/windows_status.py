@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from shellforgeai.platform_detection import PlatformInfo, detect_platform
+from shellforgeai.windows_memory import (
+    LOAD_AVERAGE_UNAVAILABLE_MARKER,
+    MemorySource,
+    windows_memory_payload,
+    windows_memory_summary,
+)
 
 WINDOWS_STATUS_NEXT_SAFE_COMMAND = "shellforgeai windows doctor --json"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
@@ -111,8 +117,16 @@ def windows_status_payload(
     *,
     disk_usage: DiskUsageCollector | None = None,
     cwd: Path | None = None,
+    memory_source: MemorySource | None = None,
 ) -> dict[str, Any]:
-    """Build the PR262 Windows status JSON-compatible payload."""
+    """Build the PR262 Windows status JSON-compatible payload.
+
+    Since PR287 the payload also carries an honest, read-only Windows physical
+    memory summary reused from the Windows memory collector, plus explicit
+    load-average unavailable markers. Memory fails soft: when it cannot be
+    collected the ``memory`` block reports ``available`` false with an explicit
+    limitation instead of inventing zero values.
+    """
 
     info = info or detect_platform()
     if info.system != "windows":
@@ -123,6 +137,8 @@ def windows_status_payload(
     root_path = _windows_root_path(cwd_path)
     hostname = _safe_hostname()
     fqdn = _safe_fqdn(hostname)
+    memory_payload = windows_memory_payload(info, memory_source=memory_source)
+    memory_block = memory_payload.get("memory", {})
     return {
         "schema_version": 1,
         "mode": "windows_status",
@@ -157,6 +173,8 @@ def windows_status_payload(
                 **_usage_block(root_path, disk_usage),
             },
         },
+        "memory": memory_block,
+        "resource_limitations": [LOAD_AVERAGE_UNAVAILABLE_MARKER],
         "network": {
             "collection": "stdlib_only",
             "hostname": hostname,
@@ -216,10 +234,16 @@ def render_windows_status_text(payload: dict[str, Any]) -> str:
         lines.append(
             "Disk: "
             f"cwd_free={cwd_usage.get('free_bytes', 'unknown')} bytes; "
-            f"root_free={root_usage.get('free_bytes', 'unknown')} bytes"
+            f"root_free={root_usage.get('free_bytes', 'unknown')} bytes "
+            "(disk/root free space collected from Windows local read-only evidence)"
         )
+    memory = payload.get("memory") or {}
+    if memory:
+        lines.append("Memory: " + windows_memory_summary(payload))
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows status is not available on this host.")))
+    if payload.get("status") == "ok":
+        lines.append(f"- {LOAD_AVERAGE_UNAVAILABLE_MARKER}.")
     lines.append(
         "Not collected yet: PowerShell version, execution policy, services, processes, event logs."
     )

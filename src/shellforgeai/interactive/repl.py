@@ -1122,11 +1122,18 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
     facts = []
     unavailable = [c for c in checks if c.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS]
     skipped = [c for c in checks if c.get("status") == LINUX_ONLY_COLLECTOR_SKIP_STATUS]
+    memory_check = next((c for c in checks if c.get("tool") == "system.cpu_memory"), None)
+    memory_available = bool(memory_check) and memory_check.get("status") == "ok"
     for c in checks:
         if c in unavailable:
             continue
         if c.get("tool", "").startswith(("platform.", "windows.")) or c.get("tool") == "host.info":
             facts.append(f"- {c.get('summary', 'unavailable')}.")
+    if memory_available:
+        facts.append(
+            f"- Memory summary collected from Windows local read-only evidence: "
+            f"{memory_check.get('summary', 'memory posture collected')}."
+        )
     limitations = [f"- {c.get('summary', 'metric unavailable on Windows')}." for c in unavailable]
     if skipped:
         skipped_names = ", ".join(c.get("tool", "collector") for c in skipped[:8])
@@ -1147,8 +1154,12 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
         + "\n\n## Platform limitations\n"
         "Windows metric limitations:\n"
         "- Load average is not available on Windows.\n"
-        "- Memory summary unavailable from this collector on Windows.\n"
-        "- Linux-only collectors skipped on Windows.\n"
+        + (
+            "- Memory summary collected from Windows local read-only evidence.\n"
+            if memory_available
+            else "- Memory summary unavailable from this collector on Windows.\n"
+        )
+        + "- Linux-only collectors skipped on Windows.\n"
         + (
             "\n" + "\n".join(limitations)
             if limitations
