@@ -1142,10 +1142,14 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
         "## Facts found\n"
         + ("\n".join(facts) if facts else "- Windows platform evidence collected.")
         + "\n\n## Platform limitations\n"
+        "Windows metric limitations:\n"
+        "- Load average is not available on Windows.\n"
+        "- Memory summary unavailable from this collector on Windows.\n"
+        "- Linux-only collectors skipped on Windows.\n"
         + (
-            "\n".join(limitations)
+            "\n" + "\n".join(limitations)
             if limitations
-            else "- No additional platform limitations recorded."
+            else "\n- No additional platform limitations recorded."
         )
         + "\n\n## Next safe read-only commands\n"
         + next_commands

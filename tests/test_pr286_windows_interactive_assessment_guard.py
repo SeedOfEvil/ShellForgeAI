@@ -236,6 +236,17 @@ def test_deterministic_windows_fallback_has_operator_useful_content() -> None:
     assert "documentation invariants" not in text
 
 
+def test_windows_fallback_always_includes_metric_limitation_markers() -> None:
+    text = _deterministic_operator_summary(
+        "performance",
+        [{"tool": "platform.detect", "status": "ok", "summary": "Windows host detected."}],
+    )
+    assert "Windows metric limitations" in text
+    assert "Load average is not available on Windows" in text
+    assert "Memory summary unavailable from this collector on Windows" in text
+    assert "Linux-only collectors skipped on Windows" in text
+
+
 def test_windows_slow_path_replaces_project_instruction_acknowledgement(
     windows_platform: list[str], monkeypatch: Any, tmp_path: Path
 ) -> None:
