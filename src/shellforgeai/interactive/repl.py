@@ -1117,13 +1117,35 @@ def _storage_io_deep_dive_synthesis(
     )
 
 
+WINDOWS_MEMORY_UNAVAILABLE_MARKER = "Memory summary unavailable from this collector on Windows"
+
+
+def _windows_memory_signal(checks: list[dict[str, str]]) -> tuple[bool, str]:
+    """Return ``(available, summary)`` for the Windows memory check.
+
+    Availability is judged from the collected ``system.cpu_memory`` summary so the
+    slow/performance and strongest-signal renderers agree: memory counts as
+    available only when the collector produced a real posture string, not an
+    explicit unavailable marker. This is what lets enriched PR287 memory evidence
+    replace the stale "memory unavailable" wording when memory is present.
+    """
+    check = next((c for c in checks if c.get("tool") == "system.cpu_memory"), None)
+    if not check:
+        return False, ""
+    summary = (check.get("summary") or "").strip()
+    if not summary or check.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS:
+        return False, summary
+    if "unavailable" in summary.lower():
+        return False, summary
+    return True, summary
+
+
 def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
     """Bounded Windows-aware read-only summary for slow-system/performance asks."""
     facts = []
     unavailable = [c for c in checks if c.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS]
     skipped = [c for c in checks if c.get("status") == LINUX_ONLY_COLLECTOR_SKIP_STATUS]
-    memory_check = next((c for c in checks if c.get("tool") == "system.cpu_memory"), None)
-    memory_available = bool(memory_check) and memory_check.get("status") == "ok"
+    memory_available, memory_summary = _windows_memory_signal(checks)
     for c in checks:
         if c in unavailable:
             continue
@@ -1131,8 +1153,7 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
             facts.append(f"- {c.get('summary', 'unavailable')}.")
     if memory_available:
         facts.append(
-            f"- Memory summary collected from Windows local read-only evidence: "
-            f"{memory_check.get('summary', 'memory posture collected')}."
+            f"- Memory summary collected from Windows local read-only evidence: {memory_summary}."
         )
     limitations = [f"- {c.get('summary', 'metric unavailable on Windows')}." for c in unavailable]
     if skipped:
@@ -1187,12 +1208,13 @@ def _windows_strongest_signal_summary(checks: list[dict[str, str]]) -> str:
     disk_signal = summary("windows.disks", "Windows disk-root summary unavailable")
     status_signal = summary("windows.status", "Windows status/root-free summary unavailable")
     process_signal = summary("process.top", "Process health unavailable from this Windows route")
-    cpu_signal = summary(
-        "system.cpu_memory", "CPU detail unavailable from this collector on Windows"
-    )
     load_signal = summary("host.resources", "Load average unavailable on Windows")
-    memory_signal = summary(
-        "system.cpu_memory", "Memory summary unavailable from this collector on Windows"
+    memory_available, memory_summary = _windows_memory_signal(checks)
+    memory_signal = memory_summary if memory_available else WINDOWS_MEMORY_UNAVAILABLE_MARKER
+    cpu_signal = (
+        memory_summary
+        if memory_available
+        else summary("system.cpu_memory", "CPU detail unavailable from this collector on Windows")
     )
     candidates = [status_signal, disk_signal, process_signal]
     useful = [c for c in candidates if "unavailable" not in c.lower()]
@@ -1201,10 +1223,10 @@ def _windows_strongest_signal_summary(checks: list[dict[str, str]]) -> str:
         if useful
         else "No single strong signal was found from the bounded read-only evidence."
     )
-    limitations = [
-        "Load average unavailable on Windows.",
-        "Memory summary unavailable if the Windows collector cannot provide it.",
-    ]
+    limitations = ["Load average unavailable on Windows."]
+    if not memory_available:
+        # Only claim memory is unavailable when the collector actually said so.
+        limitations.append(f"{WINDOWS_MEMORY_UNAVAILABLE_MARKER}.")
     limitations.extend(unavailable)
     deduped_limitations = list(dict.fromkeys(limitations))
     commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)

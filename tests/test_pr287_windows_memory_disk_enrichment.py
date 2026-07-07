@@ -19,7 +19,17 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from shellforgeai.cli import app
-from shellforgeai.core.collectors import collect_windows_performance_evidence
+from shellforgeai.core.collectors import (
+    LINUX_ONLY_COLLECTOR_SKIP_STATUS,
+    WINDOWS_METRIC_UNAVAILABLE_STATUS,
+    collect_windows_performance_evidence,
+)
+from shellforgeai.interactive.repl import (
+    WINDOWS_MEMORY_UNAVAILABLE_MARKER,
+    _windows_latency_fallback_summary,
+    _windows_operator_summary,
+    _windows_strongest_signal_summary,
+)
 from shellforgeai.platform_detection import PlatformInfo
 from shellforgeai.windows_disks import (
     INODES_UNAVAILABLE_MARKER,
@@ -310,6 +320,96 @@ def test_windows_doctor_json_stays_read_only_and_non_mutating(monkeypatch) -> No
     assert payload["mutation_performed"] is False
     # Doctor does not invent memory/disk facts it does not collect.
     assert "0.0GiB" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# 5. Slow / performance guidance uses enriched memory when available
+# ---------------------------------------------------------------------------
+
+MEMORY_AVAILABLE_SUMMARY = "memory used=17.3% available=6.6GiB/8.0GiB (Windows local read-only)"
+
+
+def _windows_perf_checks(*, memory_available: bool) -> list[dict[str, str]]:
+    """Build a Windows performance checks list like the diagnose route produces."""
+    if memory_available:
+        memory_check = {
+            "tool": "system.cpu_memory",
+            "status": "ok",
+            "summary": MEMORY_AVAILABLE_SUMMARY,
+        }
+    else:
+        memory_check = {
+            "tool": "system.cpu_memory",
+            "status": WINDOWS_METRIC_UNAVAILABLE_STATUS,
+            "summary": MEMORY_UNAVAILABLE_MARKER,
+        }
+    return [
+        {"tool": "platform.detect", "status": "ok", "summary": "Windows host detected"},
+        {
+            "tool": "windows.status",
+            "status": "ok",
+            "summary": "hostname=WIN2025-SFAI01 root_free=58.9GiB/78.7GiB",
+        },
+        {
+            "tool": "windows.disks",
+            "status": "ok",
+            "summary": "drive_roots=3 available=1 primary_root_free=58.9GiB (stdlib read-only)",
+        },
+        {
+            "tool": "host.resources",
+            "status": WINDOWS_METRIC_UNAVAILABLE_STATUS,
+            "summary": "Load average is not available on Windows",
+        },
+        memory_check,
+        {
+            "tool": "disk.inodes",
+            "status": LINUX_ONLY_COLLECTOR_SKIP_STATUS,
+            "summary": "Linux-only collector skipped on Windows: Inode usage (df -i)",
+        },
+    ]
+
+
+def test_slow_guidance_uses_memory_when_available() -> None:
+    checks = _windows_perf_checks(memory_available=True)
+    slow = _windows_latency_fallback_summary(checks)
+    # Uses the enriched memory posture and does not falsely claim it is unavailable.
+    assert MEMORY_AVAILABLE_SUMMARY in slow
+    assert "Memory summary collected from Windows local read-only evidence" in slow
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in slow
+    assert "unavailable if the Windows collector" not in slow
+    # Honest limitations remain.
+    assert "Load average is not available on Windows" in slow
+    assert "Linux-only collectors skipped on Windows" in slow
+
+
+def test_slow_guidance_honest_when_memory_unavailable() -> None:
+    checks = _windows_perf_checks(memory_available=False)
+    slow = _windows_latency_fallback_summary(checks)
+    # Only says memory is unavailable when the collector actually reports so.
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in slow
+    # Does not invent memory values.
+    assert MEMORY_AVAILABLE_SUMMARY not in slow
+    assert "0.0GiB/0.0GiB" not in slow
+    assert "Load average is not available on Windows" in slow
+
+
+def test_strongest_signal_uses_memory_and_stays_honest() -> None:
+    available = _windows_strongest_signal_summary(_windows_perf_checks(memory_available=True))
+    assert MEMORY_AVAILABLE_SUMMARY in available
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in available
+    assert "Load average unavailable on Windows" in available
+
+    unavailable = _windows_strongest_signal_summary(_windows_perf_checks(memory_available=False))
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in unavailable
+    assert "Load average unavailable on Windows" in unavailable
+
+
+def test_operator_summary_memory_line_tracks_availability() -> None:
+    avail = _windows_operator_summary(_windows_perf_checks(memory_available=True))
+    assert "Memory summary collected from Windows local read-only evidence" in avail
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in avail
+    unavail = _windows_operator_summary(_windows_perf_checks(memory_available=False))
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in unavail
 
 
 # ---------------------------------------------------------------------------
