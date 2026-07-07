@@ -71,6 +71,70 @@ def register(app: typer.Typer) -> None:
 
         cli = _cli()
         runtime = cli._ctx(ctx)
+
+        def _windows_prompt_hint(text: str) -> bool:
+            normalized = " ".join(text.lower().replace("-", " ").split())
+            return (
+                "windows" in normalized
+                or "win2025" in normalized
+                or platform.system().lower() == "windows"
+            )
+
+        def _windows_next_check_prompt(text: str) -> bool:
+            normalized = " ".join(text.lower().replace("-", " ").split())
+            return (
+                _windows_prompt_hint(text)
+                and ("what should" in normalized or "what do" in normalized)
+                and ("check first" in normalized or "check next" in normalized)
+            )
+
+        def _windows_operator_prompt(text: str) -> bool:
+            normalized = " ".join(text.lower().replace("-", " ").split())
+            has_latency = "latency" in normalized and (
+                "diagnosis" in normalized or "diagnose" in normalized or "first pass" in normalized
+            )
+            has_slow = any(
+                phrase in normalized
+                for phrase in ("system feels slow", "system feels a bit slow", "system feels sloww")
+            )
+            has_strongest = (
+                _windows_prompt_hint(text)
+                and "strongest" in normalized
+                and all(term in normalized for term in ("cpu", "memory", "disk", "process"))
+            )
+            has_handoff = _windows_prompt_hint(text) and "handoff" in normalized
+            return has_latency or has_slow or has_strongest or has_handoff
+
+        def _windows_status_prompt(text: str) -> bool:
+            normalized = " ".join(text.lower().replace("-", " ").split())
+            return _windows_prompt_hint(text) and (
+                "status" in normalized
+                or "health" in normalized
+                or "what is happening" in normalized
+            )
+
+        if not no_evidence and _windows_prompt_hint(question):
+            from shellforgeai.interactive.repl import (
+                _interactive_windows_mutation_refusal,
+                _is_windows_service_mutation_phrase,
+                _render_windows_next_check_guidance,
+                _render_windows_parity_prompt,
+                _render_windows_read_only_intent,
+            )
+
+            if _is_windows_service_mutation_phrase(question):
+                cli.console.print(_interactive_windows_mutation_refusal(question))
+                return
+            if _windows_next_check_prompt(question):
+                cli.console.print(_render_windows_next_check_guidance())
+                return
+            if _windows_operator_prompt(question):
+                rendered, _latest_context = _render_windows_parity_prompt(runtime, question)
+                cli.console.print(rendered)
+                return
+            if _windows_status_prompt(question) or cli._is_status_ask(question):
+                cli.console.print(_render_windows_read_only_intent(intent="windows_status"))
+                return
         if not no_evidence:
             if cli._handle_receipt_recovery_ask(question):
                 return

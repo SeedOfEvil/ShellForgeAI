@@ -169,6 +169,36 @@ _WINDOWS_READ_ONLY_INTENT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+_DOCKER_READ_ONLY_TRIAGE_CUES = (
+    "feels broken",
+    "looks broken",
+    "seems broken",
+    "what should i check",
+    "what should i inspect",
+    "check first",
+    "check next",
+    "triage",
+    "diagnose",
+    "read only",
+    "read-only",
+)
+
+_DOCKER_TRIAGE_MUTATION_CUES = (
+    "clean up",
+    "cleanup",
+    "prune",
+    "remove",
+    "delete",
+    "restart",
+    "compose restart",
+    "docker " + "restart",
+    "docker compose " + "restart",
+    "fix it by",
+    "run this command",
+    "execute",
+)
+
+
 def _route_windows_read_only_intent(raw: str) -> RoutedCommand | None:
     normalized = _normalize_intent_text(raw)
     if "windows" not in normalized:
@@ -188,6 +218,21 @@ def _route_windows_read_only_intent(raw: str) -> RoutedCommand | None:
         return RoutedCommand(name="windows_read_only_intent", args=intent, argv=argv)
     if any(term in normalized for term in _WINDOWS_READ_ONLY_MUTATION_TERMS):
         return RoutedCommand(name="mutation_refused", args=raw)
+    return None
+
+
+def _route_docker_read_only_triage(raw: str) -> RoutedCommand | None:
+    normalized = _normalize_intent_text(raw)
+    if "docker" not in normalized:
+        return None
+    if any(cue in normalized for cue in _DOCKER_TRIAGE_MUTATION_CUES):
+        return RoutedCommand(name="mutation_refused", args=raw)
+    if any(cue in normalized for cue in _DOCKER_READ_ONLY_TRIAGE_CUES):
+        return RoutedCommand(
+            name="cli_dispatch",
+            args=raw,
+            argv=("triage", "docker"),
+        )
     return None
 
 
@@ -1208,6 +1253,9 @@ def route_input(text: str) -> RoutedCommand:
     safe_dispatch = _dispatch_safe_cli_command(raw)
     if safe_dispatch is not None:
         return safe_dispatch
+    docker_read_only_triage = _route_docker_read_only_triage(raw)
+    if docker_read_only_triage is not None:
+        return docker_read_only_triage
     dangerous_dispatch = _dispatch_dangerous_command(raw)
     if dangerous_dispatch is not None:
         return dangerous_dispatch
@@ -1780,6 +1828,10 @@ def route_input(text: str) -> RoutedCommand:
         "high memory",
         "high load",
         "performance issue",
+        "weird latency",
+        "latency in the app",
+        "practical first pass diagnosis",
+        "practical first-pass diagnosis",
         "laggy",
         "hanging",
         "system is crawling",

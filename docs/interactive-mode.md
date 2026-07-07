@@ -452,6 +452,12 @@ alternatives. Refused categories include:
 
 Real fixes only run through governed, named recipes with explicit confirmation.
 
+Read-only natural-language Docker diagnostics such as `docker feels broken what
+should I check first` route to bounded ShellForgeAI Docker triage guidance.
+Shell-like Docker inputs (`docker ps`) and Docker/Compose mutation phrases
+(`docker restart ...`, `docker compose restart ...`, `prune docker`) remain
+refused and are never executed as shell commands.
+
 `uname -a` and other bare host-evidence shell invocations are refused as
 not-a-shell: interactive mode cannot guarantee a non-shell evidence path for a
 raw `uname` invocation, so it answers with the not-a-shell refusal rather than
@@ -614,3 +620,26 @@ should keep running the PR184 command-surface golden guardrail.
 ## Windows read-only phrases
 
 Interactive mode deterministically recognizes explicit Windows read-only phrases such as `show me the windows status`, `windows doctor`, `windows evidence`, and `windows processes limit 10`. These phrases only render allowlisted safe command guidance and set `/pending` to a `windows-local-read-only` context with Windows safe-next commands. They do not execute shell commands, PowerShell, WinRM/PSRemoting, subprocesses, Docker/Compose, cleanup, remediation, rollback, recovery, or mutation, and broad natural-language execution remains out of scope.
+
+### Windows operator-parity prompts
+
+When the active context is Windows local read-only, interactive mode answers common operator prompts with Windows-native guidance instead of repo/project acknowledgements or Docker/container framing. Generic latency prompts get a first-pass Windows diagnosis from bounded read-only evidence; CPU/memory/disk/process comparison prompts explicitly compare the available categories, state when load average or memory summaries are unavailable, and identify the strongest available signal or say that no single strong signal was found. Current-host handoff prompts render a Windows host handoff with local visibility, evidence summary, limitations, and safe next checks.
+
+Safe Windows next checks are:
+
+```text
+sfai.cmd windows status --json
+sfai.cmd windows doctor --json
+sfai.cmd windows evidence --json
+sfai.cmd windows processes --json --limit 10
+sfai.cmd windows disks --json
+sfai.cmd windows services --json --limit 25
+```
+
+Interactive mode is not a shell. Natural-language cleanup, restart, service-control, process-control, rollback, recovery, or remediation requests are refused; the refusal states that no command/action was executed and offers read-only alternatives. These routes do not execute PowerShell, WinRM/PSRemoting, subprocesses, shell commands, Docker/Compose mutation, cleanup, remediation, rollback, recovery, service restart, or process termination.
+
+Transcript acceptance for Windows interactive smoke logs is negation-aware: statements such as `No cleanup was performed.`, `No cleanup was executed.`, `No rollback/recovery was executed.`, and `No command was executed.` are treated as safe refusal evidence, while true execution statements such as `cleanup executed` or `service restart executed` still fail validation.
+
+Windows latency/slow/status/next-check/handoff paths either route deterministically or capture model output before operator stdout; the Windows first-check guidance includes metric limitation markers for load average, memory summary, and skipped Linux-only collectors. Captured AGENTS/repo/project/invariant acknowledgements are written only to audit artifacts when applicable and are replaced on stdout with deterministic Windows read-only summaries. Windows mutation-refusal text is ASCII-safe for legacy consoles and continues to state that no command/action was executed.
+
+Windows ask and interactive routing share the same operator-first rules: explicit Windows host hints such as `Windows host` or `WIN2025-SFAI01` select Windows-native read-only output before Docker triage or model fallback. `show me the windows status`, app-latency, strongest-signal, next-check, and handoff prompts print the status/diagnosis/guidance itself, not just provider metadata or artifact links.
