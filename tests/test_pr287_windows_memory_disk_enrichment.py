@@ -26,6 +26,8 @@ from shellforgeai.core.collectors import (
 )
 from shellforgeai.interactive.repl import (
     WINDOWS_MEMORY_UNAVAILABLE_MARKER,
+    _render_windows_next_check_guidance,
+    _render_windows_read_only_intent,
     _windows_latency_fallback_summary,
     _windows_operator_summary,
     _windows_strongest_signal_summary,
@@ -410,6 +412,38 @@ def test_operator_summary_memory_line_tracks_availability() -> None:
     assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in avail
     unavail = _windows_operator_summary(_windows_perf_checks(memory_available=False))
     assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in unavail
+
+
+def test_first_check_guidance_uses_memory_when_available() -> None:
+    text = _render_windows_next_check_guidance(memory_payload=memory_payload_available())
+    assert "Memory summary collected from Windows local read-only evidence" in text
+    assert "memory used=62.5%" in text
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in text
+    # Honest limitations preserved.
+    assert "Load average is not available on Windows" in text
+    assert "Linux-only collectors skipped on Windows" in text
+
+
+def test_first_check_guidance_honest_when_memory_unavailable() -> None:
+    text = _render_windows_next_check_guidance(memory_payload=memory_payload_unavailable())
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in text
+    assert "memory used=" not in text
+
+
+def test_read_only_intent_uses_memory_when_available() -> None:
+    text = _render_windows_read_only_intent(
+        intent="windows_status", is_windows=True, memory_payload=memory_payload_available()
+    )
+    assert "Memory summary collected from Windows local read-only evidence" in text
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in text
+    assert "Load average is not available on Windows" in text
+
+
+def test_read_only_intent_honest_when_memory_unavailable() -> None:
+    text = _render_windows_read_only_intent(
+        intent="windows_status", is_windows=True, memory_payload=memory_payload_unavailable()
+    )
+    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in text
 
 
 # ---------------------------------------------------------------------------

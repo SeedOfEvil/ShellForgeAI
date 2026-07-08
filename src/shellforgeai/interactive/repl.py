@@ -61,6 +61,7 @@ from shellforgeai.llm.schemas import ModelRequest
 from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import disk, host, network, process, registry, storage, systemd
 from shellforgeai.version import get_build_info
+from shellforgeai.windows_memory import windows_memory_payload, windows_memory_summary
 
 from .commands import route_input
 from .guards import is_multiline_shell_fragment, is_shell_fragment_line, looks_like_shell_command
@@ -234,7 +235,38 @@ def _apply_windows_latest_context_safe_next(ctx: LatestDiagnosisContext) -> Late
     return ctx
 
 
-def _render_windows_next_check_guidance() -> str:
+WINDOWS_MEMORY_UNAVAILABLE_MARKER = "Memory summary unavailable from this collector on Windows"
+
+
+def _safe_windows_memory_payload() -> dict[str, Any]:
+    """Collect the bounded read-only Windows memory payload, never raising.
+
+    On non-Windows hosts this returns the unsupported payload (memory
+    unavailable); on Windows it returns the enriched PR287 memory posture.
+    """
+    try:
+        return windows_memory_payload()
+    except Exception:  # deterministic guidance must never crash on a memory read
+        return {}
+
+
+def _windows_memory_limitation_line(memory_payload: dict[str, Any] | None = None) -> str:
+    """Honest one-line memory statement for deterministic Windows guidance.
+
+    Uses enriched PR287 memory posture when the collector reports it available;
+    only claims memory is unavailable when the collector actually says so.
+    """
+    payload = memory_payload if memory_payload is not None else _safe_windows_memory_payload()
+    memory = (payload or {}).get("memory") or {}
+    if memory.get("available"):
+        return (
+            "- Memory summary collected from Windows local read-only evidence: "
+            f"{windows_memory_summary(payload)}."
+        )
+    return f"- {WINDOWS_MEMORY_UNAVAILABLE_MARKER}."
+
+
+def _render_windows_next_check_guidance(memory_payload: dict[str, Any] | None = None) -> str:
     commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
     return (
         "## What to check first\n"
@@ -247,7 +279,7 @@ def _render_windows_next_check_guidance() -> str:
         "4. Windows processes/disks only if status or evidence points that way.\n\n"
         "Windows metric limitations:\n"
         "- Load average is not available on Windows.\n"
-        "- Memory summary unavailable from this collector on Windows.\n"
+        f"{_windows_memory_limitation_line(memory_payload)}\n"
         "- Linux-only collectors skipped on Windows.\n\n"
         "Safe next commands:\n"
         f"{commands}\n\n"
@@ -318,7 +350,11 @@ def _windows_interactive_pending_context(
 
 
 def _render_windows_read_only_intent(
-    *, intent: str, limit: str | None = None, is_windows: bool | None = None
+    *,
+    intent: str,
+    limit: str | None = None,
+    is_windows: bool | None = None,
+    memory_payload: dict[str, Any] | None = None,
 ) -> str:
     host_is_windows = _is_windows_host() if is_windows is None else is_windows
     label = _WINDOWS_INTENT_LABELS.get(intent, "Windows read-only request")
@@ -334,8 +370,7 @@ def _render_windows_read_only_intent(
             f"- {command}\n\n"
             "Windows metric limitations to expect:\n"
             "- Load average is not available on Windows.\n"
-            "- Memory summary unavailable from this collector on Windows when only "
-            "bounded status guidance is rendered.\n"
+            f"{_windows_memory_limitation_line(memory_payload)}\n"
             "- Linux-only collectors skipped on Windows.\n\n"
             "Additional safe next commands:\n"
             f"{next_commands}\n\n"
@@ -1115,9 +1150,6 @@ def _storage_io_deep_dive_synthesis(
         "The remaining blind spot is host-level backing-storage visibility "
         "outside this container.\n"
     )
-
-
-WINDOWS_MEMORY_UNAVAILABLE_MARKER = "Memory summary unavailable from this collector on Windows"
 
 
 def _windows_memory_signal(checks: list[dict[str, str]]) -> tuple[bool, str]:
