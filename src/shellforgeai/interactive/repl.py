@@ -61,6 +61,7 @@ from shellforgeai.llm.schemas import ModelRequest
 from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import disk, host, network, process, registry, storage, systemd
 from shellforgeai.version import get_build_info
+from shellforgeai.windows_memory import windows_memory_payload, windows_memory_summary
 
 from .commands import route_input
 from .guards import is_multiline_shell_fragment, is_shell_fragment_line, looks_like_shell_command
@@ -234,7 +235,38 @@ def _apply_windows_latest_context_safe_next(ctx: LatestDiagnosisContext) -> Late
     return ctx
 
 
-def _render_windows_next_check_guidance() -> str:
+WINDOWS_MEMORY_UNAVAILABLE_MARKER = "Memory summary unavailable from this collector on Windows"
+
+
+def _safe_windows_memory_payload() -> dict[str, Any]:
+    """Collect the bounded read-only Windows memory payload, never raising.
+
+    On non-Windows hosts this returns the unsupported payload (memory
+    unavailable); on Windows it returns the enriched PR287 memory posture.
+    """
+    try:
+        return windows_memory_payload()
+    except Exception:  # deterministic guidance must never crash on a memory read
+        return {}
+
+
+def _windows_memory_limitation_line(memory_payload: dict[str, Any] | None = None) -> str:
+    """Honest one-line memory statement for deterministic Windows guidance.
+
+    Uses enriched PR287 memory posture when the collector reports it available;
+    only claims memory is unavailable when the collector actually says so.
+    """
+    payload = memory_payload if memory_payload is not None else _safe_windows_memory_payload()
+    memory = (payload or {}).get("memory") or {}
+    if memory.get("available"):
+        return (
+            "- Memory summary collected from Windows local read-only evidence: "
+            f"{windows_memory_summary(payload)}."
+        )
+    return f"- {WINDOWS_MEMORY_UNAVAILABLE_MARKER}."
+
+
+def _render_windows_next_check_guidance(memory_payload: dict[str, Any] | None = None) -> str:
     commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
     return (
         "## What to check first\n"
@@ -247,7 +279,7 @@ def _render_windows_next_check_guidance() -> str:
         "4. Windows processes/disks only if status or evidence points that way.\n\n"
         "Windows metric limitations:\n"
         "- Load average is not available on Windows.\n"
-        "- Memory summary unavailable from this collector on Windows.\n"
+        f"{_windows_memory_limitation_line(memory_payload)}\n"
         "- Linux-only collectors skipped on Windows.\n\n"
         "Safe next commands:\n"
         f"{commands}\n\n"
@@ -318,7 +350,11 @@ def _windows_interactive_pending_context(
 
 
 def _render_windows_read_only_intent(
-    *, intent: str, limit: str | None = None, is_windows: bool | None = None
+    *,
+    intent: str,
+    limit: str | None = None,
+    is_windows: bool | None = None,
+    memory_payload: dict[str, Any] | None = None,
 ) -> str:
     host_is_windows = _is_windows_host() if is_windows is None else is_windows
     label = _WINDOWS_INTENT_LABELS.get(intent, "Windows read-only request")
@@ -334,8 +370,7 @@ def _render_windows_read_only_intent(
             f"- {command}\n\n"
             "Windows metric limitations to expect:\n"
             "- Load average is not available on Windows.\n"
-            "- Memory summary unavailable from this collector on Windows when only "
-            "bounded status guidance is rendered.\n"
+            f"{_windows_memory_limitation_line(memory_payload)}\n"
             "- Linux-only collectors skipped on Windows.\n\n"
             "Additional safe next commands:\n"
             f"{next_commands}\n\n"
@@ -1117,16 +1152,41 @@ def _storage_io_deep_dive_synthesis(
     )
 
 
+def _windows_memory_signal(checks: list[dict[str, str]]) -> tuple[bool, str]:
+    """Return ``(available, summary)`` for the Windows memory check.
+
+    Availability is judged from the collected ``system.cpu_memory`` summary so the
+    slow/performance and strongest-signal renderers agree: memory counts as
+    available only when the collector produced a real posture string, not an
+    explicit unavailable marker. This is what lets enriched PR287 memory evidence
+    replace the stale "memory unavailable" wording when memory is present.
+    """
+    check = next((c for c in checks if c.get("tool") == "system.cpu_memory"), None)
+    if not check:
+        return False, ""
+    summary = (check.get("summary") or "").strip()
+    if not summary or check.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS:
+        return False, summary
+    if "unavailable" in summary.lower():
+        return False, summary
+    return True, summary
+
+
 def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
     """Bounded Windows-aware read-only summary for slow-system/performance asks."""
     facts = []
     unavailable = [c for c in checks if c.get("status") == WINDOWS_METRIC_UNAVAILABLE_STATUS]
     skipped = [c for c in checks if c.get("status") == LINUX_ONLY_COLLECTOR_SKIP_STATUS]
+    memory_available, memory_summary = _windows_memory_signal(checks)
     for c in checks:
         if c in unavailable:
             continue
         if c.get("tool", "").startswith(("platform.", "windows.")) or c.get("tool") == "host.info":
             facts.append(f"- {c.get('summary', 'unavailable')}.")
+    if memory_available:
+        facts.append(
+            f"- Memory summary collected from Windows local read-only evidence: {memory_summary}."
+        )
     limitations = [f"- {c.get('summary', 'metric unavailable on Windows')}." for c in unavailable]
     if skipped:
         skipped_names = ", ".join(c.get("tool", "collector") for c in skipped[:8])
@@ -1147,8 +1207,12 @@ def _windows_operator_summary(checks: list[dict[str, str]]) -> str:
         + "\n\n## Platform limitations\n"
         "Windows metric limitations:\n"
         "- Load average is not available on Windows.\n"
-        "- Memory summary unavailable from this collector on Windows.\n"
-        "- Linux-only collectors skipped on Windows.\n"
+        + (
+            "- Memory summary collected from Windows local read-only evidence.\n"
+            if memory_available
+            else "- Memory summary unavailable from this collector on Windows.\n"
+        )
+        + "- Linux-only collectors skipped on Windows.\n"
         + (
             "\n" + "\n".join(limitations)
             if limitations
@@ -1176,12 +1240,13 @@ def _windows_strongest_signal_summary(checks: list[dict[str, str]]) -> str:
     disk_signal = summary("windows.disks", "Windows disk-root summary unavailable")
     status_signal = summary("windows.status", "Windows status/root-free summary unavailable")
     process_signal = summary("process.top", "Process health unavailable from this Windows route")
-    cpu_signal = summary(
-        "system.cpu_memory", "CPU detail unavailable from this collector on Windows"
-    )
     load_signal = summary("host.resources", "Load average unavailable on Windows")
-    memory_signal = summary(
-        "system.cpu_memory", "Memory summary unavailable from this collector on Windows"
+    memory_available, memory_summary = _windows_memory_signal(checks)
+    memory_signal = memory_summary if memory_available else WINDOWS_MEMORY_UNAVAILABLE_MARKER
+    cpu_signal = (
+        memory_summary
+        if memory_available
+        else summary("system.cpu_memory", "CPU detail unavailable from this collector on Windows")
     )
     candidates = [status_signal, disk_signal, process_signal]
     useful = [c for c in candidates if "unavailable" not in c.lower()]
@@ -1190,10 +1255,10 @@ def _windows_strongest_signal_summary(checks: list[dict[str, str]]) -> str:
         if useful
         else "No single strong signal was found from the bounded read-only evidence."
     )
-    limitations = [
-        "Load average unavailable on Windows.",
-        "Memory summary unavailable if the Windows collector cannot provide it.",
-    ]
+    limitations = ["Load average unavailable on Windows."]
+    if not memory_available:
+        # Only claim memory is unavailable when the collector actually said so.
+        limitations.append(f"{WINDOWS_MEMORY_UNAVAILABLE_MARKER}.")
     limitations.extend(unavailable)
     deduped_limitations = list(dict.fromkeys(limitations))
     commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)

@@ -491,6 +491,30 @@ def _windows_performance_diagnosis(
     fake zero values.
     """
     items = collect_windows_performance_evidence(context, platform_info)
+    memory_item = next((item for item in items if item.source == "system.cpu_memory"), None)
+    memory_available = bool(memory_item) and memory_item.metadata.get("status") == "ok"
+    if memory_available:
+        memory_finding = Finding(
+            severity="info",
+            title="Windows memory summary collected (read-only)",
+            detail=(
+                "Windows physical memory posture was collected read-only via "
+                f"GlobalMemoryStatusEx: {memory_item.summary}."
+            ),
+            evidence_refs=["system.cpu_memory"],
+            confidence="high",
+        )
+    else:
+        memory_finding = Finding(
+            severity="limitation",
+            title="Memory summary unavailable from this collector",
+            detail=(
+                "Windows physical memory totals could not be collected here; missing "
+                "values are marked unavailable rather than rendered as 0.0GiB/0.0GiB."
+            ),
+            evidence_refs=["system.cpu_memory"],
+            confidence="high",
+        )
     findings = [
         Finding(
             severity="info",
@@ -510,16 +534,7 @@ def _windows_performance_diagnosis(
             evidence_refs=["host.resources"],
             confidence="high",
         ),
-        Finding(
-            severity="limitation",
-            title="Memory summary unavailable from this collector",
-            detail=(
-                "/proc-based memory totals are not collected on Windows; missing values "
-                "are marked unavailable rather than rendered as 0.0GiB/0.0GiB."
-            ),
-            evidence_refs=["system.cpu_memory"],
-            confidence="high",
-        ),
+        memory_finding,
     ]
     plan = Plan(
         plan_id=f"plan_{uuid4().hex[:8]}",
@@ -570,7 +585,11 @@ def _windows_performance_diagnosis(
             "view": "windows read-only diagnostics",
             "limitations": [
                 "Linux-only collectors are skipped on Windows",
-                "load average and /proc-based memory metrics are unavailable",
+                (
+                    "load average is not available on Windows; memory summary collected read-only"
+                    if memory_available
+                    else "load average and memory metrics are unavailable on Windows"
+                ),
             ],
         },
         safe_next_commands=list(WINDOWS_PERFORMANCE_NEXT_SAFE_COMMANDS),

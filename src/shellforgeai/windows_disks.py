@@ -34,12 +34,23 @@ MAX_DISKS_LIMIT = 64
 COLLECTION_METHOD = "stdlib_only"
 ROOT_DISCOVERY_LABEL = "os.listdrives_or_current_root_fallback"
 
+# Windows exposes drive/root capacity but has no Linux-style inode accounting,
+# so inode collectors are explicitly marked not-applicable rather than faked.
+INODES_UNAVAILABLE_MARKER = "Inodes are not available on Windows"
+LINUX_INODE_COLLECTORS_SKIPPED_MARKER = "Linux-only disk inode collectors skipped on Windows"
+WINDOWS_DISKS_LIMITATIONS = (
+    INODES_UNAVAILABLE_MARKER,
+    LINUX_INODE_COLLECTORS_SKIPPED_MARKER,
+)
+
 _NOT_COLLECTED_PR270 = {
     "drive_labels": "not collected because PR270 uses stdlib-only root usage checks",
     "volume_serials": "not collected because PR270 does not query Windows APIs or registry",
     "bitlocker": "planned for later read-only Windows evidence PR only if safe",
     "smart_health": "not collected because PR270 does not query device health APIs",
     "file_inventory": "not collected because PR270 does not enumerate files or directories",
+    "inodes": "not applicable on Windows; inodes are a Linux/Unix filesystem concept",
+    "filesystem_type": "not collected because PR270 does not query volume/filesystem APIs",
 }
 
 _WINDOWS_DISKS_SAFETY = {
@@ -129,17 +140,29 @@ def _discover_windows_roots() -> list[str]:
     return []
 
 
+def _used_percent(total_bytes: int, used_bytes: int) -> float | None:
+    """Honest per-root used percentage, or None when it cannot be derived."""
+
+    if total_bytes <= 0:
+        return None
+    return round(used_bytes / total_bytes * 100, 1)
+
+
 def _disk_item(root: str, disk_usage: DiskUsage) -> dict[str, Any]:
     try:
         total_bytes, used_bytes, free_bytes = disk_usage(root)
     except Exception:  # per-root failures must stay sanitized, never traceback
         return {"root": root, "status": "unavailable", "error": "disk_usage_failed"}
+    total_bytes = int(total_bytes)
+    used_bytes = int(used_bytes)
+    free_bytes = int(free_bytes)
     return {
         "root": root,
         "status": "ok",
-        "total_bytes": int(total_bytes),
-        "used_bytes": int(used_bytes),
-        "free_bytes": int(free_bytes),
+        "total_bytes": total_bytes,
+        "used_bytes": used_bytes,
+        "free_bytes": free_bytes,
+        "used_percent": _used_percent(total_bytes, used_bytes),
     }
 
 
@@ -170,6 +193,9 @@ def windows_disks_payload(
     truncated = total_roots > bounded_limit
     disks = [_disk_item(root, disk_usage) for root in roots[:bounded_limit]]
     available_roots = sum(1 for item in disks if item["status"] == "ok")
+    primary_root_free_bytes = next(
+        (item["free_bytes"] for item in disks if item["status"] == "ok"), None
+    )
     return {
         "schema_version": 1,
         "mode": "windows_disks",
@@ -197,8 +223,10 @@ def windows_disks_payload(
             "returned_roots": len(disks),
             "available_roots": available_roots,
             "unavailable_roots": len(disks) - available_roots,
+            "primary_root_free_bytes": primary_root_free_bytes,
         },
         "disks": disks,
+        "limitations": list(WINDOWS_DISKS_LIMITATIONS),
         "not_collected_in_pr270": dict(_NOT_COLLECTED_PR270),
         "safety": dict(_WINDOWS_DISKS_SAFETY),
         "next_safe_command": WINDOWS_DISKS_NEXT_SAFE_COMMAND,
@@ -278,9 +306,12 @@ def render_windows_disks_text(payload: dict[str, Any]) -> str:
         available = [item for item in payload.get("disks", []) if item.get("status") == "ok"]
         free_bytes = sum(int(item.get("free_bytes", 0)) for item in available)
         total_bytes = sum(int(item.get("total_bytes", 0)) for item in available)
+        primary_free = summary.get("primary_root_free_bytes")
+        primary_suffix = f"; primary_root_free={primary_free}" if primary_free is not None else ""
         lines.append(
             f"Disk usage: free={free_bytes} of total={total_bytes} bytes "
-            f"across {len(available)} available root(s)"
+            f"across {len(available)} available root(s){primary_suffix} "
+            "(disk/root free space collected from Windows local read-only evidence)"
         )
         collection = payload.get("collection") or {}
         lines.append(
@@ -290,6 +321,9 @@ def render_windows_disks_text(payload: dict[str, Any]) -> str:
         )
     if payload.get("status") in ("unsupported", "error"):
         lines.append(str(payload.get("reason", "Windows disks preview is unavailable.")))
+    if payload.get("status") == "ok":
+        limitations = payload.get("limitations") or list(WINDOWS_DISKS_LIMITATIONS)
+        lines.append("Limitations: " + "; ".join(limitations) + ".")
     lines.append(
         "Not collected yet: drive labels, volume serials, BitLocker, SMART health, "
         "file/directory inventory."

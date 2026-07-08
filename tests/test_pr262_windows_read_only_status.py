@@ -37,7 +37,10 @@ def test_mocked_windows_status_includes_host_runtime_and_filesystem_basics() -> 
     payload = windows_status_payload(WINDOWS_INFO, disk_usage=fake_disk_usage, cwd=Path("C:/safe"))
     assert payload["host"]["hostname"] is not None
     assert payload["host"]["fqdn"] is not None
-    assert payload["host"]["cwd"] == "C:/safe"
+    # Product output stays Windows-native (backslashes on Windows); compare with
+    # separators normalized so the assertion is path-separator agnostic instead of
+    # forcing fake Linux slash formatting into the payload.
+    assert payload["host"]["cwd"].replace("\\", "/") == "C:/safe"
     assert payload["host"]["user_context_collected"] is False
     assert payload["host"]["secret_or_auth_cache_read"] is False
     assert payload["python_runtime"]["executable"]
@@ -117,9 +120,11 @@ def test_text_output_is_concise() -> None:
     assert "ShellForgeAI Windows status" in text
     assert "Status: ok" in text
     assert "Disk:" in text
+    assert "Memory:" in text
+    assert "Load average is not available on Windows" in text
     assert "Not collected yet:" in text
     assert "Next safe command: shellforgeai windows doctor --json" in text
-    assert len(text.splitlines()) <= 10
+    assert len(text.splitlines()) <= 12
 
 
 def test_cli_windows_status_json_invokes_unsupported_on_linux(monkeypatch) -> None:

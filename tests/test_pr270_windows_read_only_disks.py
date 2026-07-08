@@ -90,9 +90,17 @@ def test_mocked_disk_root_returns_total_used_free_bytes() -> None:
         "total_bytes": 500_000_000_000,
         "used_bytes": 200_000_000_000,
         "free_bytes": 300_000_000_000,
+        "used_percent": 40.0,
     }
     for item in disks:
-        assert set(item) == {"root", "status", "total_bytes", "used_bytes", "free_bytes"}
+        assert set(item) == {
+            "root",
+            "status",
+            "total_bytes",
+            "used_bytes",
+            "free_bytes",
+            "used_percent",
+        }
 
 
 def test_multiple_mocked_roots_are_sorted_deterministic() -> None:
@@ -178,6 +186,8 @@ def test_summary_counts_available_and_unavailable_roots() -> None:
         "returned_roots": 3,
         "available_roots": 2,
         "unavailable_roots": 1,
+        # C:\ sorts first and is available, so it is the primary root here.
+        "primary_root_free_bytes": 300_000_000_000,
     }
 
 

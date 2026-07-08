@@ -134,14 +134,23 @@ def test_source_safety_no_routing_shell_powershell_winrm_subprocess_or_exec_lane
 runner = CliRunner()
 
 
+def _fail_provider(*_: Any) -> Any:
+    # Any real provider construction on the deterministic Windows routes would, on a
+    # host with a configured Codex environment, spawn a blocking `codex` subprocess
+    # (see llm/codex.py). Failing fast here keeps these tests deterministic and
+    # guarantees no lingering model/Codex child is left behind by the test.
+    raise AssertionError("deterministic Windows parity route must not call model provider")
+
+
 def _run_windows_interactive(monkeypatch: Any, tmp_path: Any, transcript: str) -> Any:
     monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
-
-    def _fail_provider(*_: Any) -> Any:
-        raise AssertionError("deterministic Windows parity route must not call model provider")
-
+    monkeypatch.setattr("shellforgeai.commands.ask.platform.system", lambda: "Windows")
+    # Block every provider entry point (repl direct calls and the cli.build_provider
+    # symbol used by the ask/model paths) so no import path can construct a real
+    # provider/Codex subprocess and hang the interactive loop.
     monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
+    monkeypatch.setattr("shellforgeai.cli.build_provider", _fail_provider)
     return runner.invoke(
         app,
         ["interactive", "--yes-trust", "--no-trust-cache"],
@@ -216,6 +225,33 @@ def test_windows_cleanup_restart_services_refusal_is_explicit_and_windows_read_o
     assert "remediation executed" not in out
     assert "rollback executed" not in out
     assert "recovery executed" not in out
+
+
+def test_windows_interactive_transcript_makes_no_model_or_codex_call(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    """Deterministic Windows routing must never construct a provider/Codex child.
+
+    Regression guard for the Windows validation hang: on a host with a configured
+    Codex environment, reaching the model path spawns a blocking ``codex``
+    subprocess. The deterministic routes must complete without any provider call
+    and leave no active Codex process behind, so the interactive loop cannot hang.
+    """
+    from shellforgeai.llm.codex import CodexProvider
+
+    before = set(CodexProvider._active_procs)
+    res = _run_windows_interactive(
+        monkeypatch,
+        tmp_path,
+        "Show me the system status\nWhat should I check first?\n"
+        "Clean up and restart services to fix it\n/exit\n",
+    )
+    # exit 0 proves _fail_provider was never invoked (it would raise AssertionError).
+    assert res.exit_code == 0
+    assert "Traceback" not in res.stdout
+    assert "must not call model provider" not in res.stdout
+    # No lingering Codex subprocess was created by the deterministic routes.
+    assert set(CodexProvider._active_procs) == before
 
 
 def test_linux_generic_prompts_are_not_rerouted_to_windows(monkeypatch: Any, tmp_path: Any) -> None:
