@@ -33,6 +33,13 @@ UNAVAILABLE_MARKERS = (
     "not_collected_on_windows",
     "linux_only_collector_skipped",
 )
+# PR287/PR288: when the transcript shows real Windows memory posture, it must
+# not simultaneously claim memory is unavailable from the same collector run.
+AVAILABLE_MEMORY_MARKERS = (
+    "memory used=",
+    "memory summary collected from windows local read-only evidence",
+)
+MEMORY_UNAVAILABLE_CLAIM = "memory summary unavailable"
 FOLLOWUP_MARKERS = (
     "shellforgeai windows status --json",
     "shellforgeai windows processes --json",
@@ -296,6 +303,14 @@ def _validate_slow(text: str | None) -> list[Check]:
                 "slow.safe_followup_marker",
                 _has_any(lower, FOLLOWUP_MARKERS),
                 "missing safe follow-up marker",
+            ),
+            _check(
+                "slow.no_contradictory_memory_claim",
+                not (
+                    _has_any(lower, AVAILABLE_MEMORY_MARKERS) and MEMORY_UNAVAILABLE_CLAIM in lower
+                ),
+                "transcript shows real Windows memory posture while also claiming "
+                "memory is unavailable",
             ),
         ]
     )

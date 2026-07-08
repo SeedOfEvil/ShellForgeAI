@@ -41,6 +41,7 @@ from shellforgeai.interactive.repl import (
 )
 from shellforgeai.platform_detection import PlatformInfo
 from shellforgeai.tools.base import ToolResult
+from shellforgeai.windows_memory import windows_memory_payload
 
 runner = CliRunner()
 
@@ -145,12 +146,25 @@ def _fake_windows_disks_payload(info: Any = None, **_: Any) -> dict[str, Any]:
     }
 
 
+def _failing_memory_source() -> dict[str, int]:
+    raise OSError("memory pinned unavailable in pr279 fixture")
+
+
+def _fake_windows_memory_payload_unavailable(info: Any = None, **_: Any) -> dict[str, Any]:
+    return windows_memory_payload(WINDOWS_INFO, memory_source=_failing_memory_source)
+
+
 @pytest.fixture
 def windows_platform(monkeypatch: Any) -> list[str]:
     """Fake Windows platform detection and trap Linux-only tool execution.
 
     Returns the list of Linux-only tool invocations observed; it must stay
     empty for every Windows-route test.
+
+    Memory is pinned to the deterministic unavailable fixture so the PR279-era
+    unavailable-memory assertions stay true-unavailable fixtures on any host,
+    including real Windows where PR287 memory enrichment would otherwise report
+    real memory posture.
     """
     monkeypatch.setattr("shellforgeai.core.diagnose.detect_platform", lambda: WINDOWS_INFO)
     monkeypatch.setattr("shellforgeai.core.collectors.detect_platform", lambda: WINDOWS_INFO)
@@ -161,6 +175,10 @@ def windows_platform(monkeypatch: Any) -> list[str]:
     monkeypatch.setattr(
         "shellforgeai.core.collectors.windows_disks_payload",
         _fake_windows_disks_payload,
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.collectors.windows_memory_payload",
+        _fake_windows_memory_payload_unavailable,
     )
     attempted: list[str] = []
     for module, func, label in LINUX_ONLY_TOOL_FUNCTIONS:
