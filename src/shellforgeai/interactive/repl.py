@@ -52,6 +52,13 @@ from shellforgeai.core.latest_context import (
     render_latest_context_pending,
 )
 from shellforgeai.core.plans import Plan, PlanStep
+from shellforgeai.core.windows_evidence_context import (
+    WINDOWS_EVIDENCE_MODEL_DIRECTIVE,
+    build_windows_evidence_context,
+    is_rejected_windows_model_answer,
+    render_windows_evidence_answer,
+    windows_evidence_prompt_facts,
+)
 from shellforgeai.interactive.banner import build_banner
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.codex import CodexProvider, classify_model_failure
@@ -3963,7 +3970,23 @@ No command was executed.""")
             "mode": runtime.session.mode,
             "workspace_trusted": True,
         }
-        if _is_machine_health_question(user_input):
+        # PR289 — Windows interactive evidence-context parity: fallthrough
+        # questions on a Windows host (or with active Windows evidence) carry
+        # the bounded read-only Windows evidence packet into model context so
+        # the model answers from actual host facts, not policy preamble.
+        windows_packet: dict[str, Any] | None = None
+        if _should_use_windows_local_guidance(latest_context):
+            with console.status("Collecting Windows read-only evidence..."):
+                windows_packet = build_windows_evidence_context()
+            context["identity"] = (
+                "Windows host with local read-only evidence; answers must come "
+                "from the Windows evidence packet."
+            )
+            context["windows_evidence"] = windows_packet
+            context["evidence"] = windows_evidence_prompt_facts(windows_packet)
+            context["evidence_label"] = "Windows local read-only evidence"
+            context["windows_evidence_directive"] = WINDOWS_EVIDENCE_MODEL_DIRECTIVE
+        if windows_packet is None and _is_machine_health_question(user_input):
             with console.status("Collecting evidence..."):
                 checks = _collect_machine_health()
             console.print(f"Collected {len(checks)} read-only evidence item(s).")
@@ -3990,7 +4013,11 @@ No command was executed.""")
             _record_latest_context_in_session_summary(session_summary, latest_context)
         with console.status("Preparing context..."):
             prompt = build_contextual_prompt(
-                user_input if routed.name != "ask" else routed.args, context, mode="standard"
+                user_input if routed.name != "ask" else routed.args,
+                context,
+                # The Windows evidence packet needs the larger context budget
+                # to keep its numeric facts intact in the prompt.
+                mode="full" if windows_packet is not None else "standard",
             )
         try:
             resp_text, resp_streamed = _run_model_synthesis(
@@ -4008,16 +4035,35 @@ No command was executed.""")
                     },
                 ),
                 raw=False,
+                # Capture-then-gate for Windows evidence answers: never stream
+                # ungated model output to operator stdout.
+                stream_to_console=windows_packet is None,
             )
         except Exception as exc:
-            console.print(_sanitize_provider_error(str(exc)))
+            if windows_packet is not None:
+                console.print(render_windows_evidence_answer(user_input, windows_packet))
+                console.print(
+                    "\nNote: model synthesis unavailable "
+                    f"({_sanitize_provider_error(str(exc))}); the Windows read-only "
+                    "evidence above is the answer."
+                )
+            else:
+                console.print(_sanitize_provider_error(str(exc)))
             continue
         with console.status("Writing artifacts..."):
             _ensure_artifact_dir(runtime)
             (runtime.session.artifact_dir / "model-response.md").write_text(
                 resp_text, encoding="utf-8"
             )
-        if not _has_substantive_response(resp_text) and kind == "diagnose":
+        if windows_packet is not None and (
+            not _has_substantive_response(resp_text)
+            or _is_bad_model_assessment(resp_text)
+            or is_rejected_windows_model_answer(resp_text)
+        ):
+            # Gated: raw model output stays in the audit artifact above, and the
+            # operator gets an evidence-grounded Windows answer instead.
+            console.print(render_windows_evidence_answer(user_input, windows_packet))
+        elif not _has_substantive_response(resp_text) and kind == "diagnose":
             console.print(
                 _deterministic_operator_summary("health", context.get("machine_health", []))
             )
