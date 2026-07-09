@@ -212,6 +212,9 @@ def build_summary(
     grounded = bool(answer_text) and answer_uses_process_or_service_evidence(answer_text)
     preamble = bool(answer_text) and bad_preamble_detected(answer_text)
     fell_back = bool(answer_text) and fallback_used(answer_text)
+    # A fallback/model-unavailable answer means the model-assisted answer did
+    # NOT run, regardless of how the child process exited.
+    model_assisted_answer_ran = model_assisted_answer_ran and not fell_back
     summary: dict[str, Any] = {
         "codex_login_checked": codex_login_checked,
         "codex_logged_in": codex_logged_in,

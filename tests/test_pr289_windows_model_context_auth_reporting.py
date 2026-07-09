@@ -331,3 +331,266 @@ def test_script_never_opens_codex_home_contents() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     for pattern in ('CODEX_HOME"]).read', "codex_home).read", "codex_home / ", "listdir"):
         assert pattern not in source
+
+
+# --- 7. product model doctor / provider honors tester-scoped CODEX_HOME --------
+
+
+import json as _json  # noqa: E402
+from typing import Any  # noqa: E402
+
+from typer.testing import CliRunner  # noqa: E402
+
+from shellforgeai.cli import app  # noqa: E402
+from shellforgeai.llm.codex import CodexProvider  # noqa: E402
+
+_cli_runner = CliRunner()
+
+
+class _FakeCompleted:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _fake_codex_cli(login_result: _FakeCompleted) -> tuple[Any, list[dict[str, Any]]]:
+    """Fake subprocess.run for the codex CLI: --version and login status only."""
+    calls: list[dict[str, Any]] = []
+
+    def _run(argv: list[str], **kwargs: Any) -> _FakeCompleted:
+        calls.append({"argv": list(argv), "kwargs": dict(kwargs)})
+        if argv[1:] == ["login", "status"]:
+            return login_result
+        if argv[1:] == ["--version"]:
+            return _FakeCompleted(0, stdout="codex 0.130.0")
+        raise AssertionError(f"unexpected codex CLI invocation: {argv}")
+
+    return _run, calls
+
+
+def _provider_with_fake_binary() -> CodexProvider:
+    provider = CodexProvider()
+    provider._resolved_binary = "C:\\fake\\codex-cli\\codex.CMD"
+    return provider
+
+
+def test_provider_login_status_accepts_stdout_phrase(monkeypatch: Any) -> None:
+    fake_run, calls = _fake_codex_cli(_FakeCompleted(0, stdout=f"{LOGIN_PHRASE}\n"))
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", fake_run)
+    provider = _provider_with_fake_binary()
+    status = provider.login_status()
+    assert status == {"checked": True, "ok": True, "reason": "codex_login_status_ok"}
+    login_call = calls[-1]
+    assert login_call["argv"][1:] == ["login", "status"]
+    # Same-process context: the login-status child inherits the provider
+    # process environment (no env override), so CODEX_HOME governs it.
+    assert "env" not in login_call["kwargs"]
+    assert "shell" not in login_call["kwargs"]
+
+
+def test_provider_login_status_accepts_stderr_phrase(monkeypatch: Any) -> None:
+    fake_run, _ = _fake_codex_cli(_FakeCompleted(0, stderr=f"info: {LOGIN_PHRASE}\n"))
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", fake_run)
+    assert _provider_with_fake_binary().login_status()["ok"] is True
+
+
+def test_provider_login_status_rejects_nonzero_exit(monkeypatch: Any) -> None:
+    fake_run, _ = _fake_codex_cli(_FakeCompleted(1, stdout=LOGIN_PHRASE))
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", fake_run)
+    assert _provider_with_fake_binary().login_status()["ok"] is False
+
+
+def test_provider_login_status_rejects_missing_phrase(monkeypatch: Any) -> None:
+    fake_run, _ = _fake_codex_cli(_FakeCompleted(0, stdout="Not logged in\n"))
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", fake_run)
+    assert _provider_with_fake_binary().login_status()["ok"] is False
+
+
+def _pin_codex_home(monkeypatch: Any, tmp_path: Path, *, configured: bool) -> None:
+    if configured:
+        monkeypatch.setenv("CODEX_HOME", "C:\\Users\\labuser\\.codex")
+    else:
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+    # Empty fake home: the profile-default auth cache does not exist, exactly
+    # like the QGA/SYSTEM profile on the lab host.
+    monkeypatch.setattr("shellforgeai.llm.codex.Path.home", staticmethod(lambda: tmp_path))
+
+
+def test_doctor_honors_codex_home_with_proven_login(monkeypatch: Any, tmp_path: Path) -> None:
+    _pin_codex_home(monkeypatch, tmp_path, configured=True)
+    fake_run, _ = _fake_codex_cli(_FakeCompleted(0, stdout=f"{LOGIN_PHRASE}\n"))
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", fake_run)
+    provider = _provider_with_fake_binary()
+    info = provider.doctor()
+    assert info["codex_home_configured"] is True
+    assert info["login_status_checked"] is True
+    assert info["login_status_ok"] is True
+    assert info["login_status_source"] == "codex_login_status"
+    assert info["auth_cache_contents_inspected"] is False
+    assert info["auth_readiness"] == "verified_login_status"
+    assert info["auth_reason"] == "codex_login_status_ok"
+    assert "missing_auth_cache" not in str(info["auth_readiness"])
+    assert info["codex_resolved_binary"] == "C:\\fake\\codex-cli\\codex.CMD"
+    assert provider.available() == (True, "ok")
+
+
+def test_doctor_codex_home_login_not_proven_holds_readiness(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    _pin_codex_home(monkeypatch, tmp_path, configured=True)
+    fake_run, _ = _fake_codex_cli(_FakeCompleted(1, stderr="not logged in"))
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", fake_run)
+    provider = _provider_with_fake_binary()
+    info = provider.doctor()
+    assert info["auth_readiness"] == "login_status_not_proven"
+    assert info["login_status_ok"] is False
+    ok, reason = provider.available()
+    assert ok is False
+    assert "login status not proven" in reason
+
+
+def test_doctor_without_codex_home_keeps_legacy_auth_cache_contract(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    _pin_codex_home(monkeypatch, tmp_path, configured=False)
+
+    def _no_login_calls(argv: list[str], **kwargs: Any) -> _FakeCompleted:
+        assert argv[1:] != ["login", "status"], "login status must not run without CODEX_HOME"
+        return _FakeCompleted(0, stdout="codex 0.130.0")
+
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", _no_login_calls)
+    info = _provider_with_fake_binary().doctor()
+    assert info["codex_home_configured"] is False
+    assert info["login_status_checked"] is False
+    assert info["auth_readiness"] == "missing_auth_cache"
+
+
+class _DoctorOnlyProvider:
+    def __init__(self, info: dict[str, Any], response_ok: bool = True) -> None:
+        self._info = info
+        self._response_ok = response_ok
+        self.complete_calls: list[Any] = []
+
+    def doctor(self) -> dict[str, Any]:
+        return dict(self._info)
+
+    def complete(self, req: Any) -> Any:
+        self.complete_calls.append(req)
+        return type(
+            "R",
+            (),
+            {
+                "ok": self._response_ok,
+                "text": "SFAI_MODEL_DOCTOR_READY",
+                "provider": "openai-codex",
+                "model": "gpt-5.5",
+                "error": None if self._response_ok else "probe failed",
+                "duration_ms": 12,
+                "metadata": {},
+                "raw": {},
+            },
+        )()
+
+
+_CODEX_HOME_DOCTOR_INFO: dict[str, Any] = {
+    "provider": "openai-codex",
+    "model": "gpt-5.5",
+    "codex_binary": "codex",
+    "codex_resolved_binary": "C:\\fake\\codex-cli\\codex.CMD",
+    "codex_found": True,
+    "codex_version": "codex 0.130.0",
+    "auth_cache_present": False,
+    "auth_cache_contents_inspected": False,
+    "codex_home_configured": True,
+    "login_status_checked": True,
+    "login_status_ok": True,
+    "login_status_source": "codex_login_status",
+    "auth_readiness": "verified_login_status",
+    "auth_reason": "codex_login_status_ok",
+    "live_probe_available": False,
+    "live_probe_performed": False,
+    "safe_next_command": "shellforgeai model doctor --json",
+}
+
+
+def test_model_doctor_json_reports_readiness_from_login_status(monkeypatch: Any) -> None:
+    import shellforgeai.cli as cli_mod
+
+    provider = _DoctorOnlyProvider(_CODEX_HOME_DOCTOR_INFO)
+    monkeypatch.setattr(cli_mod, "build_provider", lambda *a, **k: provider)
+    res = _cli_runner.invoke(app, ["model", "doctor", "--json"])
+    assert res.exit_code == 0
+    payload = _json.loads(res.stdout)
+    assert payload["ok"] is True
+    assert payload["status"] == "ok"
+    assert payload["auth_readiness"] == "verified_login_status"
+    assert payload["auth_readiness"] != "missing_auth_cache"
+    assert payload["codex_home_configured"] is True
+    assert payload["login_status_checked"] is True
+    assert payload["login_status_ok"] is True
+    assert payload["login_status_source"] == "codex_login_status"
+    assert payload["auth_cache_contents_inspected"] is False
+    assert payload["codex_resolved_binary"] == "C:\\fake\\codex-cli\\codex.CMD"
+    assert provider.complete_calls == []  # default doctor never calls the model
+
+
+def test_model_doctor_live_probe_runs_when_login_status_proven(monkeypatch: Any) -> None:
+    # The QGA/SYSTEM regression: auth_cache_present=false must not skip the
+    # live probe as not_configured when login status is proven via CODEX_HOME.
+    import shellforgeai.cli as cli_mod
+
+    provider = _DoctorOnlyProvider(_CODEX_HOME_DOCTOR_INFO)
+    monkeypatch.setattr(cli_mod, "build_provider", lambda *a, **k: provider)
+    res = _cli_runner.invoke(app, ["model", "doctor", "--live-probe", "--json"])
+    assert res.exit_code == 0
+    payload = _json.loads(res.stdout)
+    assert len(provider.complete_calls) == 1
+    assert payload["model_called"] is True
+    assert payload["live_probe_performed"] is True
+    assert payload["auth_readiness"] == "verified"
+    assert payload["probe"]["status"] == "passed"
+    assert payload["auth_readiness"] != "not_configured"
+
+
+def test_model_doctor_live_probe_still_skips_when_login_not_proven(monkeypatch: Any) -> None:
+    import shellforgeai.cli as cli_mod
+
+    info = dict(_CODEX_HOME_DOCTOR_INFO)
+    info.update(
+        {
+            "login_status_ok": False,
+            "auth_readiness": "login_status_not_proven",
+            "auth_reason": "login_status_not_proven",
+        }
+    )
+    provider = _DoctorOnlyProvider(info)
+    monkeypatch.setattr(cli_mod, "build_provider", lambda *a, **k: provider)
+    res = _cli_runner.invoke(app, ["model", "doctor", "--live-probe", "--json"])
+    assert res.exit_code == 0
+    payload = _json.loads(res.stdout)
+    assert provider.complete_calls == []
+    assert payload["model_called"] is False
+    assert payload["auth_readiness"] == "not_configured"
+    assert payload["probe"]["status"] == "skipped"
+
+
+def test_model_doctor_human_output_notes_login_status_and_no_cache_inspection(
+    monkeypatch: Any,
+) -> None:
+    import shellforgeai.cli as cli_mod
+
+    provider = _DoctorOnlyProvider(_CODEX_HOME_DOCTOR_INFO)
+    monkeypatch.setattr(cli_mod, "build_provider", lambda *a, **k: provider)
+    res = _cli_runner.invoke(app, ["model", "doctor"])
+    assert res.exit_code == 0
+    assert "Codex login status: proven (Logged in using ChatGPT)" in res.stdout
+    assert "Auth cache contents were not inspected." in res.stdout
+    assert "Suggested login:" not in res.stdout
+
+
+def test_summary_model_assisted_answer_ran_false_when_fallback_used() -> None:
+    summary = _summary(answer="## Windows evidence summary\nprocesses total=182")
+    assert summary["fallback_used"] is True
+    assert summary["model_assisted_answer_ran"] is False
+    assert summary["validation_status"] == "HOLD"

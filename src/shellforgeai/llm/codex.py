@@ -34,6 +34,19 @@ def _format_human_value(value: str | None) -> str:
     return f"'{str(value)}'"
 
 
+CODEX_LOGIN_STATUS_PHRASE = "Logged in using ChatGPT"
+CODEX_LOGIN_STATUS_TIMEOUT_SECONDS = 30
+
+
+def _codex_home_configured() -> bool:
+    """True when the caller supplied a tester-scoped CODEX_HOME environment.
+
+    The value itself is only inherited by Codex CLI child processes; nothing
+    inside the directory is ever read, listed, or parsed by ShellForgeAI.
+    """
+    return bool(os.environ.get("CODEX_HOME", "").strip())
+
+
 class CodexProvider:
     name = "openai-codex"
     _active_procs: set[subprocess.Popen[str]] = set()
@@ -88,9 +101,54 @@ class CodexProvider:
             f"reason={reason}; run: shellforgeai model doctor --json"
         )
 
+    def login_status(
+        self, timeout_seconds: int = CODEX_LOGIN_STATUS_TIMEOUT_SECONDS
+    ) -> dict[str, bool | str]:
+        """Safe command-level Codex login readiness via ``codex login status``.
+
+        Runs the resolved Codex CLI with the inherited process environment
+        (so a tester-scoped ``CODEX_HOME`` governs which auth state is
+        checked). Login is proven only by exit code 0 plus the
+        ``Logged in using ChatGPT`` phrase on stdout OR stderr. No auth-cache
+        or token file is ever read, copied, printed, archived, or parsed.
+        """
+        resolved = self._resolve_binary()
+        if resolved is None:
+            return {"checked": False, "ok": False, "reason": "codex_binary_missing"}
+        try:
+            r = subprocess.run(
+                [resolved, "login", "status"],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                stdin=subprocess.DEVNULL,
+            )
+        except subprocess.TimeoutExpired:
+            return {"checked": True, "ok": False, "reason": "login_status_timeout"}
+        except (FileNotFoundError, OSError):
+            return {"checked": True, "ok": False, "reason": "login_status_launch_failed"}
+        except Exception:
+            return {"checked": True, "ok": False, "reason": "login_status_error"}
+        ok = r.returncode == 0 and (
+            CODEX_LOGIN_STATUS_PHRASE in (r.stdout or "")
+            or CODEX_LOGIN_STATUS_PHRASE in (r.stderr or "")
+        )
+        return {
+            "checked": True,
+            "ok": ok,
+            "reason": "codex_login_status_ok" if ok else "login_status_not_proven",
+        }
+
     def available(self) -> tuple[bool, str]:
         if self._resolve_binary() is None:
             return False, self._provider_unavailable_error("codex executable not found")
+        if _codex_home_configured():
+            # Tester-scoped CODEX_HOME: readiness comes from safe command-level
+            # login status, never from a profile-default auth-cache path.
+            status = self.login_status()
+            if status.get("ok"):
+                return True, "ok"
+            return False, "codex login status not proven for configured CODEX_HOME"
         auth_cache = Path.home() / ".codex" / "auth.json"
         if not auth_cache.exists():
             return False, "codex auth cache missing"
@@ -115,9 +173,29 @@ class CodexProvider:
             except Exception:
                 version = "unknown"
         auth_cache_present = auth_cache.exists()
+        codex_home_configured = _codex_home_configured()
+        login_info: dict[str, bool | str] = {
+            "checked": False,
+            "ok": False,
+            "reason": "login_status_not_checked",
+        }
+        if found and codex_home_configured:
+            # PR289 — honor the tester-scoped CODEX_HOME context: readiness is
+            # proven by safe `codex login status` in the same process
+            # environment, not by a profile-default auth-cache path that the
+            # QGA/SYSTEM profile does not own.
+            login_info = self.login_status()
+        login_status_checked = bool(login_info.get("checked"))
+        login_status_ok = bool(login_info.get("ok"))
         if not found:
             auth_readiness = "missing_binary"
             auth_reason = "codex_binary_missing"
+        elif codex_home_configured and login_status_ok:
+            auth_readiness = "verified_login_status"
+            auth_reason = "codex_login_status_ok"
+        elif codex_home_configured:
+            auth_readiness = "login_status_not_proven"
+            auth_reason = str(login_info.get("reason") or "login_status_not_proven")
         elif auth_cache_present:
             auth_readiness = "not_verified"
             auth_reason = "auth_cache_present_live_probe_not_run"
@@ -133,6 +211,13 @@ class CodexProvider:
             "codex_found": bool(found),
             "codex_version": version,
             "auth_cache_present": auth_cache_present,
+            "auth_cache_contents_inspected": False,
+            "codex_home_configured": codex_home_configured,
+            "login_status_checked": login_status_checked,
+            "login_status_ok": login_status_ok,
+            "login_status_source": (
+                "codex_login_status" if login_status_checked else "not_checked"
+            ),
             "auth_readiness": auth_readiness,
             "auth_reason": auth_reason,
             "auth_verification_status": auth_readiness,
