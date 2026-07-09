@@ -238,6 +238,18 @@ def register(app: typer.Typer) -> None:
             )
 
             windows_packet = build_windows_evidence_context()
+            try:
+                # PR289 — record the exact Windows evidence packet passed into
+                # model context so QA acceptance can verify grounding from the
+                # established artifact flow (read-only; no new write surface).
+                import json as _json
+
+                cli._ensure_artifact_dir(runtime)
+                (runtime.session.artifact_dir / "windows-evidence-context.json").write_text(
+                    _json.dumps(windows_packet, indent=2, sort_keys=True), encoding="utf-8"
+                )
+            except Exception:
+                pass  # artifact recording must never break the ask path
 
         def _apply_windows_evidence_context(prompt_context: dict[str, Any]) -> None:
             if windows_packet is None:

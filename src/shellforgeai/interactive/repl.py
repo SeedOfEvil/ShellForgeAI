@@ -4055,6 +4055,13 @@ No command was executed.""")
             (runtime.session.artifact_dir / "model-response.md").write_text(
                 resp_text, encoding="utf-8"
             )
+            if windows_packet is not None:
+                # PR289 — record the exact Windows evidence packet passed into
+                # model context so QA acceptance can verify grounding from the
+                # established artifact flow (read-only; no new write surface).
+                (runtime.session.artifact_dir / "windows-evidence-context.json").write_text(
+                    json.dumps(windows_packet, indent=2, sort_keys=True), encoding="utf-8"
+                )
         if windows_packet is not None and (
             not _has_substantive_response(resp_text)
             or _is_bad_model_assessment(resp_text)
