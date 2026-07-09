@@ -261,6 +261,54 @@ and no file changes were performed.
     assert result["status"] == "ok"
 
 
+def _available_memory_slow_text() -> str:
+    return """
+Windows host: bounded read-only diagnostics completed.
+Windows local read-only / windows-local-read-only.
+Diagnose performance summary (read-only).
+Load average is not available on Windows.
+Memory summary collected from Windows local read-only evidence:
+memory used=20.0% available=6.4GiB/8.0GiB (Windows local read-only).
+Linux-only collectors skipped on Windows.
+Safe next commands:
+- sfai.cmd windows status --json
+- sfai.cmd windows evidence --json
+No shell or remoting execution, no service restart, no process termination, no cleanup,
+and no file changes were performed.
+"""
+
+
+def test_acceptance_helper_accepts_available_memory_transcript(tmp_path: Path) -> None:
+    # PR288: a PR287-era transcript with real memory posture (and no stale
+    # memory-unavailable claim) must pass; the honest load-average marker
+    # still satisfies the unavailable-metric contract.
+    code, result = _run(tmp_path, slow=_available_memory_slow_text())
+    assert code == 0
+    assert result["status"] == "ok"
+
+
+def test_acceptance_helper_rejects_contradictory_memory_claims(tmp_path: Path) -> None:
+    # PR288: showing real memory posture while also claiming memory is
+    # unavailable from the same collector run is contradictory.
+    transcript = (
+        _available_memory_slow_text()
+        + "\nMemory summary unavailable from this collector on Windows.\n"
+    )
+    code, result = _run(tmp_path, slow=transcript)
+    assert code == 1
+    assert any(
+        c["name"] == "slow.no_contradictory_memory_claim" and not c["passed"]
+        for c in result["checks"]
+    )
+
+
+def test_acceptance_helper_keeps_unavailable_memory_wording_valid(tmp_path: Path) -> None:
+    # PR288: true unavailable-memory transcripts (no invented memory values)
+    # remain valid; the unavailable wording is still the honest contract there.
+    _, result = _run(tmp_path)
+    assert all(c["passed"] for c in result["checks"] if c["name"].startswith("slow."))
+
+
 def test_acceptance_helper_rejects_project_acknowledgement(tmp_path: Path) -> None:
     transcript = _slow_text() + (
         "\nUnderstood. I'll follow the ShellForgeAI repo invariants and treat this as "

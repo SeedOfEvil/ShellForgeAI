@@ -17,6 +17,7 @@ from shellforgeai.interactive.repl import (
 )
 from shellforgeai.platform_detection import PlatformInfo
 from shellforgeai.tools.base import ToolResult
+from shellforgeai.windows_memory import windows_memory_payload
 
 runner = CliRunner()
 
@@ -109,6 +110,33 @@ def _fake_windows_disks_payload(info: Any = None, **_: Any) -> dict[str, Any]:
     }
 
 
+def _failing_memory_source() -> dict[str, int]:
+    raise OSError("memory pinned unavailable in pr286 fixture")
+
+
+def _fake_windows_memory_payload_unavailable(info: Any = None, **_: Any) -> dict[str, Any]:
+    return windows_memory_payload(WINDOWS_INFO, memory_source=_failing_memory_source)
+
+
+def _pin_windows_memory_unavailable(monkeypatch: Any) -> None:
+    """Pin the PR287 memory collector to a deterministic unavailable fixture.
+
+    The unavailable-memory assertions in this file are true-unavailable
+    fixtures only because of this pin; on a real Windows host the collector
+    would report real memory posture and the stale blanket assertions would
+    otherwise fail. Available-memory expectations live in
+    tests/test_pr288_windows_memory_assertion_cleanup.py.
+    """
+    monkeypatch.setattr(
+        "shellforgeai.core.collectors.windows_memory_payload",
+        _fake_windows_memory_payload_unavailable,
+    )
+    monkeypatch.setattr(
+        "shellforgeai.interactive.repl.windows_memory_payload",
+        _fake_windows_memory_payload_unavailable,
+    )
+
+
 @pytest.fixture
 def windows_platform(monkeypatch: Any) -> list[str]:
     monkeypatch.setattr("shellforgeai.core.diagnose.detect_platform", lambda: WINDOWS_INFO)
@@ -121,6 +149,7 @@ def windows_platform(monkeypatch: Any) -> list[str]:
         "shellforgeai.core.collectors.windows_disks_payload",
         _fake_windows_disks_payload,
     )
+    _pin_windows_memory_unavailable(monkeypatch)
     attempted: list[str] = []
     for module, func, label in LINUX_ONLY_TOOL_FUNCTIONS:
 
@@ -236,7 +265,10 @@ def test_deterministic_windows_fallback_has_operator_useful_content() -> None:
     assert "documentation invariants" not in text
 
 
-def test_windows_fallback_always_includes_metric_limitation_markers() -> None:
+def test_windows_fallback_without_memory_evidence_includes_metric_limitation_markers() -> None:
+    # No system.cpu_memory check at all is a true unavailable-memory fixture:
+    # the summary must keep the honest unavailable marker rather than invent
+    # memory values. The available-memory counterpart is covered by PR287/PR288.
     text = _deterministic_operator_summary(
         "performance",
         [{"tool": "platform.detect", "status": "ok", "summary": "Windows host detected."}],
@@ -577,6 +609,7 @@ def test_ask_windows_strongest_signal_prompt_is_windows_native(
 def test_ask_windows_next_check_prompt_avoids_docker(monkeypatch: Any, tmp_path: Path) -> None:
     monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("shellforgeai.commands.ask.platform.system", lambda: "Windows")
+    _pin_windows_memory_unavailable(monkeypatch)
 
     def _fail_provider(*_: Any) -> Any:
         raise AssertionError("Windows ask next-check route must not call model provider")
@@ -644,6 +677,7 @@ def test_windows_strongest_signal_prompt_compares_categories_once(
 def test_windows_exact_next_checks_are_deterministic_without_docker_leakage(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
+    _pin_windows_memory_unavailable(monkeypatch)
     res = _run_windows_parity(
         monkeypatch,
         tmp_path,
