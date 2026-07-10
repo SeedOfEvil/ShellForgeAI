@@ -99,3 +99,39 @@ codex process lingers, and the `model doctor --live-probe` budget is 60
 seconds — a realistic single model roundtrip, still never indefinite. A
 timed-out invocation is reported as a failure and keeps the authenticated
 Windows acceptance lane HOLD; it is never hidden as success.
+
+## Windows Codex repository trust (PR291)
+
+Codex separately gates execution on repository trust: it refuses `codex exec`
+from a directory it does not treat as a trusted git repository, failing with
+`Not inside a trusted directory and --skip-git-repo-check was not specified.`
+Staged Windows QGA/SYSTEM source directories
+(`C:\Tools\ShellForgeAI\src\ShellForgeAI-pr<PR>-<head>`) are exactly that
+case, so authenticated read-only Windows model assessments could fail even
+with proven login and collected evidence. This is distinct from
+ShellForgeAI's interactive workspace trust (`--yes-trust` skips only
+ShellForgeAI's own prompt) and from the Codex sandbox (`-s read-only` stays
+mandatory; the trust bypass does not weaken sandboxing or authorize
+mutation).
+
+The fix is one centralized provider option: `CodexProvider`'s
+`skip_git_repo_check` defaults to `false` and is enabled explicitly by
+configuration (`model.codex_skip_git_repo_check`, default `true`) or by the
+scoped Windows Codex lane; `skip_git_repo_check_used()` reports the
+effective state and appears in doctor/live-probe output. On Windows the
+provider builds the exec-scoped invocation proven live in the QA lane —
+`codex exec -s read-only --skip-git-repo-check [-m <model>] [--json]
+[--output-last-message <path>] -` with the prompt over stdin; `codex exec`
+is non-interactive by design, so no approval flag and no interactive trust
+prompt. POSIX/Docker command construction is unchanged.
+
+Failure reporting is bounded and sanitized: every `ModelResponse.metadata`
+carries `codex_exec_attempted`, `codex_exec_exit_code`,
+`codex_exec_timed_out`, `codex_exec_error_class` (`repository_trust`,
+`timeout`, `binary_resolution`, `auth`, `model`),
+`codex_exec_error_message`, `codex_exec_stderr_excerpt` (max 400 chars,
+control characters sanitized, token-like lines redacted), `codex_binary`,
+`sandbox_mode`, and `skip_git_repo_check_used`. A repository-trust rejection
+classifies as `repository_trust` — never as missing authentication — and
+keeps the authenticated Windows acceptance lane HOLD until a real
+model-assisted answer runs without fallback.

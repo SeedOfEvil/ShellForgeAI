@@ -65,6 +65,25 @@ def _bounded_error(text: object) -> str | None:
     return value[:240]
 
 
+def _probe_invocation_diagnostics(info: dict[str, Any], resp: Any | None = None) -> dict[str, Any]:
+    """Bounded PR291 invocation diagnostics for the live probe payload.
+
+    Reports the sandbox mode and whether the scoped Codex repository-trust
+    bypass (``--skip-git-repo-check``) was applied, preferring the actual
+    invocation metadata over the static doctor readiness fields. Never reads
+    auth-cache contents and never records the process environment.
+    """
+    meta: dict[str, Any] = {}
+    if resp is not None and getattr(resp, "metadata", None):
+        meta = resp.metadata
+    return {
+        "sandbox_mode": meta.get("sandbox_mode") or info.get("sandbox_mode") or info.get("sandbox"),
+        "skip_git_repo_check_used": bool(
+            meta.get("skip_git_repo_check_used", info.get("skip_git_repo_check_used", False))
+        ),
+    }
+
+
 def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[str, Any]:
     # PR289 — a tester-scoped CODEX_HOME proven by safe `codex login status`
     # configures the provider even when the profile-default auth cache is
@@ -90,6 +109,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "latency_ms": 0,
                 "error_class": "not_configured",
                 "error_message": "model credentials are not configured",
+                **_probe_invocation_diagnostics(info),
             },
             "model_call_performed": False,
         }
@@ -122,6 +142,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "latency_ms": latency_ms,
                 "error_class": "timeout",
                 "error_message": _bounded_error(exc) or "probe timed out",
+                **_probe_invocation_diagnostics(info),
             },
         }
     except Exception as exc:
@@ -138,6 +159,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "latency_ms": latency_ms,
                 "error_class": exc.__class__.__name__,
                 "error_message": _bounded_error(exc),
+                **_probe_invocation_diagnostics(info),
             },
         }
     latency_ms = int(resp.duration_ms or ((time.monotonic() - started) * 1000))
@@ -157,12 +179,21 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "latency_ms": latency_ms,
                 "error_class": None,
                 "error_message": None,
+                **_probe_invocation_diagnostics(info, resp),
             },
         }
     err = _bounded_error(resp.error) or "live probe failed"
-    err_class = (
-        "timeout" if "timeout" in err.lower() or "timed out" in err.lower() else "provider_error"
-    )
+    # PR291 — keep the failure class precise: a repository-trust rejection or
+    # other classified Codex invocation failure must never collapse into a
+    # generic provider/auth error.
+    meta = resp.metadata or {}
+    err_class = str(meta.get("codex_exec_error_class") or "")
+    if not err_class:
+        err_class = (
+            "timeout"
+            if "timeout" in err.lower() or "timed out" in err.lower()
+            else "provider_error"
+        )
     return {
         "auth_readiness": "failed",
         "model_call_performed": True,
@@ -175,6 +206,8 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
             "latency_ms": latency_ms,
             "error_class": err_class,
             "error_message": err,
+            "codex_exec_stderr_excerpt": str(meta.get("codex_exec_stderr_excerpt") or ""),
+            **_probe_invocation_diagnostics(info, resp),
         },
     }
 
@@ -387,6 +420,8 @@ def register(model_app: typer.Typer) -> None:
             "auth_reason": auth_reason,
             "auth_verification_status": auth_readiness,
             "auth_readiness_label": auth_readiness.replace("_", " "),
+            "sandbox_mode": info.get("sandbox_mode", info.get("sandbox")),
+            "skip_git_repo_check_used": bool(info.get("skip_git_repo_check_used", False)),
             "live_probe_requested": live_probe,
             "live_probe_available": live_probe_available,
             "live_probe_performed": live_probe_performed,

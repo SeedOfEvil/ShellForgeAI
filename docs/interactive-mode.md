@@ -17,6 +17,14 @@ the data dir; pass `--no-trust-cache` to re-prompt. Trust grants reads of
 workspace docs and writes to the audit/artifact dir under the data dir. It
 does **not** lift policy or enable mutation.
 
+`--yes-trust` skips only this ShellForgeAI workspace trust prompt. It is
+unrelated to Codex's repository/git trust gate: the Codex CLI can separately
+reject execution from directories that are not trusted git repositories
+(e.g. staged Windows QGA/SYSTEM source paths), which the scoped
+`--skip-git-repo-check` provider option bypasses. Neither mechanism enables
+shell execution or mutation, and the Codex `read-only` sandbox stays
+mandatory either way (see `docs/WINDOWS_POWERSHELL_V1.md`).
+
 ## Slash commands
 
 Deterministic. Unknown slash commands never call the model.

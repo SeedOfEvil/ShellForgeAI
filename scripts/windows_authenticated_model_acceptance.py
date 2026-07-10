@@ -72,9 +72,15 @@ FALLBACK_MARKERS = (
     "## windows evidence summary",
     "model assistance is unavailable",
     "model synthesis unavailable",
+    "model-assisted assessment unavailable",
+    "repository trust check blocked",
+    "model failure class:",
     "codex timed out",
     "timed out before producing a response",
 )
+
+# Bounded excerpt cap for sanitized failure lines kept in the summary.
+FAILURE_EXCERPT_MAX_CHARS = 400
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _PYTEST_FAILURE_RE = re.compile(r"\b\d+\s+(failed|errors?)\b|\bno tests ran\b", re.I)
@@ -411,6 +417,59 @@ def fallback_used(answer: str) -> bool:
     return any(marker in low for marker in FALLBACK_MARKERS)
 
 
+def _sanitize_failure_excerpt(line: str) -> str:
+    """Bounded, control-character-free excerpt; token-like lines are redacted."""
+    lowered = line.lower()
+    if any(
+        key in lowered
+        for key in ("token", "secret", "password", "api_key", "authorization", "bearer")
+    ):
+        return "[REDACTED]"
+    cleaned = "".join(ch if ch.isprintable() else " " for ch in line)
+    return cleaned.strip()[:FAILURE_EXCERPT_MAX_CHARS]
+
+
+def extract_model_failure_diagnostics(
+    answer: str | None, ask_exit_code: int | None = None
+) -> dict[str, Any]:
+    """PR291 — bounded, sanitized Codex failure diagnostics from the transcript.
+
+    Classifies the known failure modes precisely (``repository_trust``,
+    ``timeout``, ``model``) so a HOLD explains WHY the model-assisted answer
+    did not run. Only the answer transcript is inspected: no auth-cache read,
+    no environment capture, no token output.
+    """
+    text = answer or ""
+    low = re.sub(r"\s+", " ", text.lower())
+    error_class: str | None = None
+    match = re.search(r"model failure class:\s*([a-z_]+)", low)
+    if match and match.group(1) != "unknown":
+        error_class = match.group(1)
+    elif "repository trust check blocked" in low or "not inside a trusted directory" in low:
+        error_class = "repository_trust"
+    elif "timed out" in low:
+        error_class = "timeout"
+    elif fallback_used(text):
+        error_class = "model"
+    excerpt = ""
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "model failure class:" in lowered or any(
+            marker in lowered
+            for marker in FALLBACK_MARKERS
+            if marker != "## windows evidence summary"
+        ):
+            excerpt = _sanitize_failure_excerpt(line)
+            break
+    return {
+        "codex_exec_attempted": bool(text),
+        "codex_exec_exit_code": ask_exit_code,
+        "codex_exec_timed_out": error_class == "timeout",
+        "codex_exec_error_class": error_class,
+        "codex_exec_stderr_excerpt": excerpt,
+    }
+
+
 def evidence_context_contains_process_service(packet: Mapping[str, Any] | None) -> bool:
     if not packet:
         return False
@@ -430,6 +489,7 @@ def build_summary(
     model_assisted_answer_ran: bool,
     targeted_tests_exit_code: int | None,
     targeted_tests_output: str | None,
+    ask_exit_code: int | None = None,
 ) -> dict[str, Any]:
     """Assemble the acceptance summary with real, unloosened semantics."""
     answer_text = answer or ""
@@ -438,6 +498,7 @@ def build_summary(
     grounded = bool(answer_text) and grounding.answer_uses_process_or_service_evidence
     preamble = bool(answer_text) and bad_preamble_detected(answer_text)
     fell_back = bool(answer_text) and fallback_used(answer_text)
+    failure_diagnostics = extract_model_failure_diagnostics(answer_text, ask_exit_code)
     # A fallback/model-unavailable answer means the model-assisted answer did
     # NOT run, regardless of how the child process exited.
     model_assisted_answer_ran = model_assisted_answer_ran and not fell_back
@@ -455,6 +516,10 @@ def build_summary(
         "answer_uses_process_or_service_evidence": grounded,
         "bad_preamble_detected": preamble,
         "fallback_used": fell_back,
+        # PR291 — bounded, sanitized failure diagnostics so a HOLD explains
+        # whether repository trust, a timeout, or a model command failure
+        # blocked the model-assisted answer. Diagnostics never loosen PASS.
+        **failure_diagnostics,
         "targeted_tests_ok": tests_ok,
         "read_only": True,
         "mutation_performed": False,
@@ -519,10 +584,12 @@ def run_authenticated_acceptance(
     packet: dict[str, Any] | None = None
     answer: str | None = None
     ran = False
+    ask_exit_code: int | None = None
     if logged_in:
         packet = packet_builder()
         ask = ask_runner([sfai_binary, "ask", prompt], env)
         answer = ask.stdout
+        ask_exit_code = ask.exit_code
         ran = ask.exit_code == 0
     return build_summary(
         codex_login_checked=True,
@@ -534,6 +601,7 @@ def run_authenticated_acceptance(
         model_assisted_answer_ran=ran,
         targeted_tests_exit_code=targeted_tests_exit_code,
         targeted_tests_output=targeted_tests_output,
+        ask_exit_code=ask_exit_code,
     )
 
 

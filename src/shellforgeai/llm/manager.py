@@ -16,4 +16,7 @@ def build_provider(settings: Settings):
             skip_git_repo_check=settings.model.codex_skip_git_repo_check,
             allow_fallback=settings.model.allow_model_fallback,
         )
-    return CodexProvider(default_model=settings.model.model)
+    return CodexProvider(
+        default_model=settings.model.model,
+        skip_git_repo_check=settings.model.codex_skip_git_repo_check,
+    )

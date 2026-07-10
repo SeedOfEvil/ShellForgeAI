@@ -40,7 +40,11 @@ def _fake_popen_factory(returncode=0, stdout="ok", stderr="", last_message=None)
 def test_command_global_options_before_exec(monkeypatch):
     Fake, captured = _fake_popen_factory(stdout="", last_message="ok")
     monkeypatch.setattr("subprocess.Popen", Fake)
-    p = CodexProvider()
+    # POSIX/Docker lane shape: pin the non-Windows form and the explicit
+    # configured trust-bypass option (build_provider passes the config value;
+    # the bare constructor default is False since PR291).
+    monkeypatch.setattr("shellforgeai.llm.codex._windows_codex_lane", lambda: False)
+    p = CodexProvider(skip_git_repo_check=True)
     monkeypatch.setattr("shellforgeai.llm.codex.shutil.which", lambda b: f"/usr/bin/{b}")
     p.complete(ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex"))
     cmd = captured["cmd"]
