@@ -40,7 +40,7 @@ import os
 import re
 import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -80,29 +80,66 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _PYTEST_FAILURE_RE = re.compile(r"\b\d+\s+(failed|errors?)\b|\bno tests ran\b", re.I)
 _PYTEST_COMPLETION_RE = re.compile(r"\b\d+\s+passed\b|\[\s*100%\s*\]|^[.sxX]{3,}\s*$", re.M)
 
-# Strict evidence-reference patterns: a process/service term must carry a real
-# number (count/total/running) — generic "processes look fine" never counts.
-_PROCESS_SERVICE_EVIDENCE_RES = (
-    re.compile(r"\b\d+\s+(visible\s+|running\s+)?(process(es)?|services?)\b", re.I),
-    re.compile(r"\b(process(es)?|services?)\s+total\s*=\s*\d+", re.I),
-    re.compile(r"\brunning\s*=\s*\d+", re.I),
-    re.compile(r"\bwith\s+\d+\s+running\b", re.I),
-    re.compile(r"\b(process|service)\s+count\b\D{0,12}\d+", re.I),
-)
-
+# Missing-evidence language must name the specific missing category; generic
+# "check processes/services" wording is intentionally insufficient.
 _MISSING_EVIDENCE_MARKERS = (
     "not present in this evidence packet",
     "not in this evidence packet",
     "missing from the current evidence packet",
-    "lacks process",
-    "lacks service",
-    "lacks process/service",
-    "do not have process",
-    "do not have service",
-    "do not have process/service",
-    "don't have process",
-    "don't have service",
+    "do not have",
+    "don't have",
+    "unavailable",
+    "not available",
+    "lacks",
 )
+
+
+@dataclass(frozen=True)
+class GroundingFacts:
+    """Normalized process/service facts extracted from one evidence packet."""
+
+    process_available: bool = False
+    service_available: bool = False
+    process_total: int | None = None
+    process_returned: int | None = None
+    process_names: tuple[str, ...] = ()
+    process_collection: str | None = None
+    process_limitation: str | None = None
+    service_total: int | None = None
+    service_running: int | None = None
+    service_stopped: int | None = None
+    service_returned: int | None = None
+    service_names: tuple[str, ...] = ()
+    service_collection: str | None = None
+    service_limitation: str | None = None
+
+
+@dataclass(frozen=True)
+class GroundingResult:
+    """Explainable authenticated answer-grounding decision."""
+
+    process_evidence_available: bool
+    service_evidence_available: bool
+    process_grounding_detected: bool
+    service_grounding_detected: bool
+    matched_process_facts: list[str] = field(default_factory=list)
+    matched_service_facts: list[str] = field(default_factory=list)
+    missing_required_grounding: list[str] = field(default_factory=list)
+    answer_uses_process_or_service_evidence: bool = False
+    grounding_reason: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "process_evidence_available": self.process_evidence_available,
+            "service_evidence_available": self.service_evidence_available,
+            "process_grounding_detected": self.process_grounding_detected,
+            "service_grounding_detected": self.service_grounding_detected,
+            "matched_process_facts": self.matched_process_facts,
+            "matched_service_facts": self.matched_service_facts,
+            "missing_required_grounding": self.missing_required_grounding,
+            "answer_uses_process_or_service_evidence": self.answer_uses_process_or_service_evidence,
+            "grounding_reason": self.grounding_reason,
+        }
 
 
 @dataclass(frozen=True)
@@ -154,22 +191,207 @@ def targeted_tests_ok(exit_code: int | None, output: str | None) -> bool:
     return bool(_PYTEST_COMPLETION_RE.search(text))
 
 
-def answer_references_process_service_evidence(answer: str) -> bool:
-    return any(pattern.search(answer or "") for pattern in _PROCESS_SERVICE_EVIDENCE_RES)
+def _int_value(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _entry_names(entries: Any) -> tuple[str, ...]:
+    if not isinstance(entries, list):
+        return ()
+    names: list[str] = []
+    for entry in entries:
+        if isinstance(entry, Mapping) and entry.get("name"):
+            names.append(str(entry["name"]))
+    return tuple(names)
+
+
+def extract_grounding_facts(packet: Mapping[str, Any] | None) -> GroundingFacts:
+    """Extract comparable process/service facts from the run's evidence packet."""
+    if not packet:
+        return GroundingFacts()
+    processes = packet.get("processes") or {}
+    services = packet.get("services") or {}
+    if not isinstance(processes, Mapping):
+        processes = {}
+    if not isinstance(services, Mapping):
+        services = {}
+    return GroundingFacts(
+        process_available=bool(processes.get("available")),
+        service_available=bool(services.get("available")),
+        process_total=_int_value(processes.get("total_count")),
+        process_returned=_int_value(processes.get("returned_count")),
+        process_names=_entry_names(processes.get("entries")),
+        process_collection=str(processes.get("collection") or "") or None,
+        process_limitation=(
+            str(processes.get("limitation") or "")
+            or ("Process detail is not present in this evidence packet" if processes else "")
+            or None
+        ),
+        service_total=_int_value(services.get("total_count")),
+        service_running=_int_value(services.get("running_count")),
+        service_stopped=_int_value(services.get("stopped_count")),
+        service_returned=_int_value(services.get("returned_count")),
+        service_names=_entry_names(services.get("entries")),
+        service_collection=str(services.get("collection") or "") or None,
+        service_limitation=(
+            str(services.get("limitation") or "")
+            or ("Service detail is not present in this evidence packet" if services else "")
+            or None
+        ),
+    )
+
+
+def _normalized_text(answer: str) -> str:
+    return re.sub(r"\s+", " ", (answer or "").lower().replace(",", ""))
+
+
+def _number_near_term(text: str, number: int, terms: tuple[str, ...]) -> bool:
+    n = str(number)
+    term_alt = "|".join(re.escape(term) for term in terms)
+    return bool(
+        re.search(rf"\b{re.escape(n)}\b\D{{0,36}}\b({term_alt})\b", text)
+        or re.search(rf"\b({term_alt})\b\D{{0,36}}\b{re.escape(n)}\b", text)
+    )
+
+
+def _name_mentioned(text: str, name: str) -> bool:
+    low = name.lower()
+    if not low:
+        return False
+    if re.search(r"[\W_]", low):
+        return low in text
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(low)}(?![a-z0-9])", text))
+
+
+def _gap_acknowledged(text: str, category: str) -> bool:
+    command = (
+        "sfai.cmd windows processes --json --limit 10"
+        if category == "process"
+        else "sfai.cmd windows services --json"
+    )
+    status_command = "sfai.cmd windows status --json"
+    if command not in text and status_command not in text:
+        return False
+    if category not in text and f"{category}es" not in text and f"{category}s" not in text:
+        return False
+    return any(marker in text for marker in _MISSING_EVIDENCE_MARKERS)
+
+
+def _detect_process_grounding(text: str, facts: GroundingFacts) -> tuple[bool, list[str]]:
+    matches: list[str] = []
+    if facts.process_available:
+        if facts.process_total is not None and _number_near_term(
+            text, facts.process_total, ("process", "processes", "process total", "total processes")
+        ):
+            matches.append(f"process_total={facts.process_total}")
+        if facts.process_returned is not None and (
+            _number_near_term(
+                text, facts.process_returned, ("returned", "preview", "bounded", "included")
+            )
+            or re.search(
+                rf"showing\s+{facts.process_returned}\s+of\s+{facts.process_total}\s+process",
+                text,
+            )
+        ):
+            matches.append(f"process_returned={facts.process_returned}")
+        for name in facts.process_names:
+            if _name_mentioned(text, name):
+                matches.append(f"process_name={name}")
+        if "bounded" in text and "process" in text and facts.process_returned is not None:
+            matches.append("process_bounded_visibility")
+        if facts.process_collection and facts.process_collection.replace("_", "-") in text:
+            matches.append(f"process_collection={facts.process_collection}")
+        return bool(matches), matches
+    if facts.process_limitation and _gap_acknowledged(text, "process"):
+        return True, ["process_limitation_acknowledged"]
+    return False, matches
+
+
+def _detect_service_grounding(text: str, facts: GroundingFacts) -> tuple[bool, list[str]]:
+    matches: list[str] = []
+    if facts.service_available:
+        if facts.service_total is not None and _number_near_term(
+            text, facts.service_total, ("service", "services", "service total", "total services")
+        ):
+            matches.append(f"service_total={facts.service_total}")
+        if facts.service_running is not None and _number_near_term(
+            text, facts.service_running, ("running", "running services", "services running")
+        ):
+            matches.append(f"service_running={facts.service_running}")
+        if facts.service_stopped is not None and _number_near_term(
+            text, facts.service_stopped, ("stopped", "stopped services", "services stopped")
+        ):
+            matches.append(f"service_stopped={facts.service_stopped}")
+        if facts.service_returned is not None and _number_near_term(
+            text, facts.service_returned, ("returned", "preview", "bounded", "included")
+        ):
+            matches.append(f"service_returned={facts.service_returned}")
+        for name in facts.service_names:
+            if _name_mentioned(text, name):
+                matches.append(f"service_name={name}")
+        if facts.service_collection and facts.service_collection.replace("_", "-") in text:
+            matches.append(f"service_collection={facts.service_collection}")
+        return bool(matches), matches
+    if facts.service_limitation and _gap_acknowledged(text, "service"):
+        return True, ["service_limitation_acknowledged"]
+    return False, matches
+
+
+def evaluate_answer_grounding(answer: str, packet: Mapping[str, Any] | None) -> GroundingResult:
+    facts = extract_grounding_facts(packet)
+    text = _normalized_text(answer)
+    process_ok, process_matches = _detect_process_grounding(text, facts)
+    service_ok, service_matches = _detect_service_grounding(text, facts)
+    missing: list[str] = []
+    if (facts.process_available or facts.process_limitation) and not process_ok:
+        missing.append("process")
+    if (facts.service_available or facts.service_limitation) and not service_ok:
+        missing.append("service")
+    passed = not missing and (process_ok or service_ok)
+    reason = (
+        "grounded in available process and service evidence"
+        if passed and facts.process_available and facts.service_available
+        else "grounded in available evidence with explicit gap acknowledgement"
+        if passed
+        else "missing required grounding: " + ", ".join(missing)
+        if missing
+        else "no process/service evidence or explicit gap facts were available to validate"
+    )
+    return GroundingResult(
+        process_evidence_available=facts.process_available,
+        service_evidence_available=facts.service_available,
+        process_grounding_detected=process_ok,
+        service_grounding_detected=service_ok,
+        matched_process_facts=process_matches,
+        matched_service_facts=service_matches,
+        missing_required_grounding=missing,
+        answer_uses_process_or_service_evidence=passed,
+        grounding_reason=reason,
+    )
+
+
+def answer_references_process_service_evidence(
+    answer: str, packet: Mapping[str, Any] | None = None
+) -> bool:
+    if packet is not None:
+        return evaluate_answer_grounding(answer, packet).answer_uses_process_or_service_evidence
+    return bool(
+        re.search(r"\b\d+\s+(visible\s+|running\s+)?(process(es)?|services?)\b", answer or "", re.I)
+    )
 
 
 def answer_acknowledges_missing_evidence(answer: str) -> bool:
-    """Explicit missing-evidence acknowledgement plus BOTH safe gap commands."""
-    low = (answer or "").lower()
-    if not any(marker in low for marker in _MISSING_EVIDENCE_MARKERS):
-        return False
-    if not ("process" in low or "service" in low):
-        return False
-    return all(cmd in low for cmd in SAFE_GAP_COMMANDS)
+    """Backward-compatible thin-evidence check: both categories and commands."""
+    low = _normalized_text(answer)
+    return _gap_acknowledged(low, "process") and _gap_acknowledged(low, "service")
 
 
-def answer_uses_process_or_service_evidence(answer: str) -> bool:
-    """Strict grounding verdict; never loosened into generic passing."""
+def answer_uses_process_or_service_evidence(
+    answer: str, packet: Mapping[str, Any] | None = None
+) -> bool:
+    """Strict grounding verdict; generic process/service mentions never pass."""
+    if packet is not None:
+        return evaluate_answer_grounding(answer, packet).answer_uses_process_or_service_evidence
     return answer_references_process_service_evidence(
         answer
     ) or answer_acknowledges_missing_evidence(answer)
@@ -212,7 +434,8 @@ def build_summary(
     """Assemble the acceptance summary with real, unloosened semantics."""
     answer_text = answer or ""
     tests_ok = targeted_tests_ok(targeted_tests_exit_code, targeted_tests_output)
-    grounded = bool(answer_text) and answer_uses_process_or_service_evidence(answer_text)
+    grounding = evaluate_answer_grounding(answer_text, packet)
+    grounded = bool(answer_text) and grounding.answer_uses_process_or_service_evidence
     preamble = bool(answer_text) and bad_preamble_detected(answer_text)
     fell_back = bool(answer_text) and fallback_used(answer_text)
     # A fallback/model-unavailable answer means the model-assisted answer did
@@ -228,6 +451,7 @@ def build_summary(
             packet
         ),
         "model_assisted_answer_ran": model_assisted_answer_ran,
+        **grounding.as_dict(),
         "answer_uses_process_or_service_evidence": grounded,
         "bad_preamble_detected": preamble,
         "fallback_used": fell_back,
