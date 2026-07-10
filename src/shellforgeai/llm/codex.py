@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -45,6 +47,25 @@ def _codex_home_configured() -> bool:
     inside the directory is ever read, listed, or parsed by ShellForgeAI.
     """
     return bool(os.environ.get("CODEX_HOME", "").strip())
+
+
+# Codex exec reads the prompt from stdin when the prompt argument is "-".
+CODEX_STDIN_PROMPT_ARG = "-"
+
+
+def _prompt_via_stdin() -> bool:
+    """Send the prompt over stdin instead of argv on Windows.
+
+    On Windows the Codex CLI is a ``.CMD`` batch wrapper, so CreateProcess
+    routes the invocation through ``cmd.exe``. A multi-kilobyte evidence
+    prompt passed as an argv element there hits the cmd.exe 8191-character
+    command-line limit and its ``%``/``!``/metacharacter expansion rules,
+    which mangles or wedges the exec call even though short invocations like
+    ``codex login status`` work. Piping the prompt over stdin (with the
+    documented ``-`` prompt argument) keeps the command line tiny and
+    byte-exact. POSIX invocation is unchanged.
+    """
+    return os.name == "nt"
 
 
 class CodexProvider:
@@ -273,28 +294,55 @@ class CodexProvider:
         cmd.append(prompt)
         return cmd
 
+    @staticmethod
+    def _stop_timed_out_process(proc: subprocess.Popen) -> None:
+        """Best-effort bounded shutdown of a timed-out codex child.
+
+        On Windows the direct child is the ``cmd.exe`` batch wrapper, so a
+        CTRL_BREAK to its process group (created below) reaches the wrapped
+        codex process too before terminate/kill; POSIX terminate/kill is
+        unchanged. Never waits unbounded and never hides the timeout.
+        """
+        if os.name == "nt":
+            ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
+            if ctrl_break is not None:
+                with contextlib.suppress(Exception):
+                    proc.send_signal(ctrl_break)
+        proc.terminate()
+
     def _run(
         self, prompt: str, model: str, timeout: int
     ) -> tuple[int, str, str, str | None, list[str]]:
         """Return (returncode, stdout, stderr, last_message, cmd)."""
+        prompt_via_stdin = _prompt_via_stdin()
         with tempfile.TemporaryDirectory(prefix="sfai-codex-") as tmp:
             last_msg_path = Path(tmp) / "last_message.txt"
-            cmd = self._build_cmd(prompt, model, last_msg_path)
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
+            cmd = self._build_cmd(
+                CODEX_STDIN_PROMPT_ARG if prompt_via_stdin else prompt, model, last_msg_path
             )
+            popen_kwargs: dict = {
+                "stdin": subprocess.PIPE if prompt_via_stdin else subprocess.DEVNULL,
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+                "text": True,
+                "start_new_session": True,
+            }
+            if os.name == "nt":
+                # A dedicated process group lets the timeout handler signal the
+                # cmd.exe wrapper AND the codex process it spawned, instead of
+                # orphaning the child after killing only the wrapper.
+                popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            proc = subprocess.Popen(cmd, **popen_kwargs)
             with self._active_lock:
                 self._active_procs.add(proc)
+            communicate_kwargs: dict = {"timeout": timeout}
+            if prompt_via_stdin:
+                communicate_kwargs["input"] = prompt
             try:
                 try:
-                    out, err = proc.communicate(timeout=timeout)
+                    out, err = proc.communicate(**communicate_kwargs)
                 except subprocess.TimeoutExpired as exc:
-                    proc.terminate()
+                    self._stop_timed_out_process(proc)
                     try:
                         out, err = proc.communicate(timeout=2)
                     except subprocess.TimeoutExpired:
@@ -380,7 +428,10 @@ class CodexProvider:
                 model=request.model,
                 text="",
                 ok=False,
-                error="codex timed out",
+                error=(
+                    f"codex timed out after {request.timeout_seconds}s "
+                    "(bounded timeout; no indefinite wait)"
+                ),
                 duration_ms=int((time.monotonic() - started) * 1000),
                 raw={
                     "stderr": _redact(str(exc.stderr or "")),

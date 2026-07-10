@@ -594,3 +594,197 @@ def test_summary_model_assisted_answer_ran_false_when_fallback_used() -> None:
     assert summary["fallback_used"] is True
     assert summary["model_assisted_answer_ran"] is False
     assert summary["validation_status"] == "HOLD"
+
+
+# --- 8. Windows model invocation: prompt transport + bounded timeout -----------
+
+
+import subprocess as _subprocess_mod  # noqa: E402
+
+from shellforgeai.commands.model import MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS  # noqa: E402
+
+MULTILINE_EVIDENCE_PROMPT = (
+    "Question: What is running on this system?\n"
+    'Context:\n{\n  "windows_evidence": {"processes": {"total_count": 182}},\n'
+    '  "services": "total=98 running=61",\n'
+    '  "cmd_hazards": "100%% !delayed! ^caret & ampersand <redir>"\n}\n'
+) * 8
+
+
+class _RecordingPopen:
+    """Fake Popen capturing argv, kwargs, and the communicate() stdin input."""
+
+    instances: list[_RecordingPopen] = []
+
+    def __init__(self, cmd: list[str], **kwargs: Any) -> None:
+        self.cmd = list(cmd)
+        self.kwargs = dict(kwargs)
+        self.communicate_input: Any = "unset"
+        self.returncode = 0
+        type(self).instances.append(self)
+        for i, tok in enumerate(cmd):
+            if tok == "--output-last-message" and i + 1 < len(cmd):
+                Path(cmd[i + 1]).write_text("grounded windows answer", encoding="utf-8")
+
+    def communicate(self, input: Any = None, timeout: Any = None) -> tuple[str, str]:
+        self.communicate_input = input
+        return ("", "")
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.returncode = -15
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+
+def _reset_recording_popen() -> None:
+    _RecordingPopen.instances = []
+
+
+def test_windows_codex_prompt_goes_via_stdin_not_cmd_argv(monkeypatch: Any) -> None:
+    # Windows .CMD wrappers route through cmd.exe: multi-KB prompts in argv hit
+    # the 8191-char limit and %/! expansion. The prompt must travel over stdin.
+    _reset_recording_popen()
+    monkeypatch.setattr("shellforgeai.llm.codex._prompt_via_stdin", lambda: True)
+    monkeypatch.setattr("subprocess.Popen", _RecordingPopen)
+    provider = _provider_with_fake_binary()
+    from shellforgeai.llm.schemas import ModelRequest
+
+    resp = provider.complete(
+        ModelRequest(prompt=MULTILINE_EVIDENCE_PROMPT, model="gpt-5.5", provider="openai-codex")
+    )
+    assert resp.ok
+    proc = _RecordingPopen.instances[0]
+    assert MULTILINE_EVIDENCE_PROMPT not in proc.cmd
+    assert proc.cmd[-1] == "-"
+    assert proc.kwargs["stdin"] == _subprocess_mod.PIPE
+    assert proc.communicate_input == MULTILINE_EVIDENCE_PROMPT
+    assert len(" ".join(proc.cmd)) < 512  # command line stays tiny for cmd.exe
+
+
+def test_posix_codex_prompt_stays_in_argv(monkeypatch: Any) -> None:
+    _reset_recording_popen()
+    monkeypatch.setattr("shellforgeai.llm.codex._prompt_via_stdin", lambda: False)
+    monkeypatch.setattr("subprocess.Popen", _RecordingPopen)
+    provider = _provider_with_fake_binary()
+    from shellforgeai.llm.schemas import ModelRequest
+
+    resp = provider.complete(
+        ModelRequest(prompt="hi there", model="gpt-5.5", provider="openai-codex")
+    )
+    assert resp.ok
+    proc = _RecordingPopen.instances[0]
+    assert proc.cmd[-1] == "hi there"
+    assert proc.kwargs["stdin"] == _subprocess_mod.DEVNULL
+    assert proc.communicate_input is None
+
+
+class _HangingPopen:
+    """Fake Popen whose first communicate() times out; records shutdown calls."""
+
+    last: _HangingPopen | None = None
+
+    def __init__(self, cmd: list[str], **kwargs: Any) -> None:
+        self.cmd = list(cmd)
+        self.kwargs = dict(kwargs)
+        self.terminate_called = False
+        self.kill_called = False
+        self.signals: list[Any] = []
+        self._timed_out_once = False
+        self.returncode = None
+        type(self).last = self
+
+    def communicate(self, input: Any = None, timeout: Any = None) -> tuple[str, str]:
+        if not self._timed_out_once:
+            self._timed_out_once = True
+            raise _subprocess_mod.TimeoutExpired(cmd=self.cmd, timeout=timeout)
+        self.returncode = -15
+        return ("", "")
+
+    def poll(self) -> Any:
+        return self.returncode
+
+    def send_signal(self, sig: Any) -> None:
+        self.signals.append(sig)
+
+    def terminate(self) -> None:
+        self.terminate_called = True
+
+    def kill(self) -> None:
+        self.kill_called = True
+
+
+def test_codex_timeout_is_bounded_precise_and_stops_children(monkeypatch: Any) -> None:
+    monkeypatch.setattr("subprocess.Popen", _HangingPopen)
+    provider = _provider_with_fake_binary()
+    from shellforgeai.llm.codex import CodexProvider
+    from shellforgeai.llm.schemas import ModelRequest
+
+    resp = provider.complete(
+        ModelRequest(prompt="hi", model="gpt-5.5", provider="openai-codex", timeout_seconds=7)
+    )
+    assert not resp.ok
+    assert "timed out after 7s" in (resp.error or "")
+    assert "bounded timeout" in (resp.error or "")
+    proc = _HangingPopen.last
+    assert proc is not None
+    assert proc.terminate_called  # shutdown attempted, no indefinite wait
+    assert not CodexProvider._active_procs  # no lingering tracked child
+
+
+def test_probe_timeout_is_realistic_but_still_bounded() -> None:
+    # A real codex roundtrip regularly exceeds the old 10s, which misreported
+    # healthy auth as timeout; the probe stays bounded, never indefinite.
+    assert 30 <= MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS <= 120
+
+
+def test_live_probe_timeout_reports_failed_and_never_passes(monkeypatch: Any) -> None:
+    import shellforgeai.cli as cli_mod
+
+    class _TimeoutProbeProvider(_DoctorOnlyProvider):
+        def complete(self, req: Any) -> Any:
+            self.complete_calls.append(req)
+            return type(
+                "R",
+                (),
+                {
+                    "ok": False,
+                    "text": "",
+                    "provider": "openai-codex",
+                    "model": "gpt-5.5",
+                    "error": "codex timed out after 60s (bounded timeout; no indefinite wait)",
+                    "duration_ms": 60000,
+                    "metadata": {},
+                    "raw": {},
+                },
+            )()
+
+    provider = _TimeoutProbeProvider(_CODEX_HOME_DOCTOR_INFO)
+    monkeypatch.setattr(cli_mod, "build_provider", lambda *a, **k: provider)
+    res = _cli_runner.invoke(app, ["model", "doctor", "--live-probe", "--json"])
+    assert res.exit_code == 0
+    payload = _json.loads(res.stdout)
+    assert len(provider.complete_calls) == 1
+    assert payload["ok"] is False
+    assert payload["auth_readiness"] == "failed"
+    assert payload["probe"]["status"] == "failed"
+    assert payload["probe"]["error_class"] == "timeout"
+    assert "timed out" in payload["probe"]["error_message"]
+    assert payload["model_called"] is True  # the attempt is represented honestly
+
+
+def test_timeout_wording_counts_as_fallback_and_holds_acceptance() -> None:
+    timed_out_answer = (
+        "## Windows evidence summary\nFrom the evidence currently loaded, I can "
+        "see host facts.\nNote: model synthesis unavailable (codex timed out "
+        "after 180s); the Windows read-only evidence above is the answer."
+    )
+    assert wama.fallback_used(timed_out_answer)
+    summary = _summary(answer=timed_out_answer)
+    assert summary["fallback_used"] is True
+    assert summary["model_assisted_answer_ran"] is False
+    assert summary["validation_status"] == "HOLD"
+    assert wama.fallback_used("Codex timed out before producing a response.")

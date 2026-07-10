@@ -66,11 +66,14 @@ SAFE_GAP_COMMANDS = (
 )
 
 # Markers that identify the deterministic gated/model-unavailable fallback.
-# A fallback answer is safe operator output but is never a model-assisted pass.
+# A fallback answer is safe operator output but is never a model-assisted
+# pass; a timed-out model invocation keeps the lane HOLD the same way.
 FALLBACK_MARKERS = (
     "## windows evidence summary",
     "model assistance is unavailable",
     "model synthesis unavailable",
+    "codex timed out",
+    "timed out before producing a response",
 )
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

@@ -45,7 +45,11 @@ from shellforgeai.llm.schemas import ModelRequest, ModelResponse
 MODEL_DOCTOR_PROBE_PROMPT = (
     "ShellForgeAI model doctor readiness probe. Reply with exactly: SFAI_MODEL_DOCTOR_READY"
 )
-MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS = 10
+# PR289 — one bounded live probe still needs a realistic model roundtrip
+# budget: CLI startup plus a real completion regularly exceeds the old 10s,
+# which misreported healthy auth as "codex timed out" on Windows. Still
+# bounded; never indefinite.
+MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS = 60
 
 
 def _bounded_error(text: object) -> str | None:

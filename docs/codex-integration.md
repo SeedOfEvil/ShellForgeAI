@@ -81,3 +81,21 @@ archives, or parses auth-cache/token contents. Without `CODEX_HOME`, the
 existing default-profile behavior is unchanged. Codex model calls
 (`codex exec`) already inherit the process environment, so the same
 tester-scoped `CODEX_HOME` governs model-assisted synthesis.
+
+## Windows Codex invocation (PR289)
+
+On Windows the Codex CLI is a `.CMD` batch wrapper, so CreateProcess routes
+`codex exec` through `cmd.exe`. A multi-kilobyte evidence prompt passed as an
+argv element there hits the cmd.exe 8191-character command-line limit and its
+`%`/`!`/metacharacter expansion rules, which can mangle or wedge the exec call
+even though short invocations like `codex login status` work — the observed
+symptom was an authenticated model call that only ever timed out. Since PR289,
+Windows invocations send the prompt over stdin using the documented `-`
+prompt argument, keeping the command line tiny and the prompt byte-exact;
+POSIX/Linux invocation is unchanged (prompt in argv, stdin closed). Timeouts
+remain bounded and precise (`codex timed out after <N>s`), a timed-out child
+is signalled via its own Windows process group before terminate/kill so no
+codex process lingers, and the `model doctor --live-probe` budget is 60
+seconds — a realistic single model roundtrip, still never indefinite. A
+timed-out invocation is reported as a failure and keeps the authenticated
+Windows acceptance lane HOLD; it is never hidden as success.
