@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 import shellforgeai.cli as cli
 from shellforgeai.cli import app
+from shellforgeai.commands.model import MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS
 from shellforgeai.llm.schemas import ModelResponse
 
 runner = CliRunner()
@@ -112,7 +113,8 @@ def test_live_probe_success_calls_once_and_suppresses_secrets(monkeypatch):
     payload = json.loads(result.stdout)
     assert len(provider.calls) == 1
     req = provider.calls[0]
-    assert req.timeout_seconds == 10
+    # PR289 widened the bounded probe budget; pin the constant, not a literal.
+    assert req.timeout_seconds == MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS
     assert req.metadata["tools_allowed"] is False
     assert req.metadata["operator_prompt_included"] is False
     assert payload["auth_readiness"] == "verified"

@@ -45,7 +45,11 @@ from shellforgeai.llm.schemas import ModelRequest, ModelResponse
 MODEL_DOCTOR_PROBE_PROMPT = (
     "ShellForgeAI model doctor readiness probe. Reply with exactly: SFAI_MODEL_DOCTOR_READY"
 )
-MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS = 10
+# PR289 — one bounded live probe still needs a realistic model roundtrip
+# budget: CLI startup plus a real completion regularly exceeds the old 10s,
+# which misreported healthy auth as "codex timed out" on Windows. Still
+# bounded; never indefinite.
+MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS = 60
 
 
 def _bounded_error(text: object) -> str | None:
@@ -62,10 +66,18 @@ def _bounded_error(text: object) -> str | None:
 
 
 def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[str, Any]:
-    if not bool(info.get("auth_cache_present")) or str(info.get("auth_readiness")) in {
+    # PR289 — a tester-scoped CODEX_HOME proven by safe `codex login status`
+    # configures the provider even when the profile-default auth cache is
+    # absent (QGA/SYSTEM lanes). Skip as not_configured only when neither
+    # signal indicates credentials.
+    login_status_ok = bool(info.get("login_status_ok"))
+    if (not bool(info.get("auth_cache_present")) and not login_status_ok) or str(
+        info.get("auth_readiness")
+    ) in {
         "missing_auth_cache",
         "missing_binary",
         "not_configured",
+        "login_status_not_proven",
     }:
         return {
             "auth_readiness": "not_configured",
@@ -315,12 +327,16 @@ def register(model_app: typer.Typer) -> None:
         auth_cache_present = bool(info.get("auth_cache_present"))
         auth_readiness = str(info.get("auth_readiness") or "unknown")
         auth_reason = str(info.get("auth_reason") or "status_unknown")
+        codex_home_configured = bool(info.get("codex_home_configured"))
+        login_status_checked = bool(info.get("login_status_checked"))
+        login_status_ok = bool(info.get("login_status_ok"))
         ok = auth_readiness not in {
             "failed",
             "error",
             "missing_binary",
             "missing_auth_cache",
             "unauthorized",
+            "login_status_not_proven",
         }
         live_probe_available = bool(info.get("live_probe_available", False))
         live_probe_performed = bool(info.get("live_probe_performed", False))
@@ -359,8 +375,14 @@ def register(model_app: typer.Typer) -> None:
             "provider": info.get("provider"),
             "model": info.get("model"),
             "codex_binary": info.get("codex_binary"),
+            "codex_resolved_binary": info.get("codex_resolved_binary"),
             "codex_version": info.get("codex_version"),
             "auth_cache_present": auth_cache_present,
+            "auth_cache_contents_inspected": bool(info.get("auth_cache_contents_inspected", False)),
+            "codex_home_configured": codex_home_configured,
+            "login_status_checked": login_status_checked,
+            "login_status_ok": login_status_ok,
+            "login_status_source": info.get("login_status_source", "not_checked"),
             "auth_readiness": auth_readiness,
             "auth_reason": auth_reason,
             "auth_verification_status": auth_readiness,
@@ -387,6 +409,12 @@ def register(model_app: typer.Typer) -> None:
         for k, v in info.items():
             cli.console.print(f"{k}={v}")
         cli.console.print(f"Auth cache: {'present' if auth_cache_present else 'missing'}")
+        if login_status_checked:
+            cli.console.print(
+                "Codex login status: "
+                + ("proven (Logged in using ChatGPT)" if login_status_ok else "not proven")
+            )
+            cli.console.print("Auth cache contents were not inspected.")
         readiness_label = auth_readiness.replace("_", " ")
         cli.console.print(f"Live auth readiness: {readiness_label}")
         cli.console.print(f"Auth readiness: {readiness_label}")
@@ -407,7 +435,10 @@ def register(model_app: typer.Typer) -> None:
             cli.console.print(
                 "Codex CLI binary is missing; configure Codex before model-backed synthesis."
             )
-        elif auth_readiness in {"missing_auth_cache", "failed"} or not auth_cache_present:
+        elif not login_status_ok and (
+            auth_readiness in {"missing_auth_cache", "failed", "login_status_not_proven"}
+            or not auth_cache_present
+        ):
             cli.console.print("Suggested login: codex login (or codex login --device-auth)")
 
     @model_app.command("test")

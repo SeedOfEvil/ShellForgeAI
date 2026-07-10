@@ -226,6 +226,48 @@ def register(app: typer.Typer) -> None:
         ctx_mode = "full" if full_context else context
 
         route = AskRoute(mode=PLAIN) if no_evidence else route_ask_intent(question)
+        # PR289 — Windows interactive evidence-context parity: on a Windows
+        # host, model-backed asks carry the bounded read-only Windows evidence
+        # packet so answers are grounded in actual host facts.
+        windows_packet: dict[str, Any] | None = None
+        if not no_evidence and platform.system().lower() == "windows":
+            from shellforgeai.core.windows_evidence_context import (
+                WINDOWS_EVIDENCE_MODEL_DIRECTIVE,
+                build_windows_evidence_context,
+                windows_evidence_prompt_facts,
+            )
+
+            windows_packet = build_windows_evidence_context()
+            try:
+                # PR289 — record the exact Windows evidence packet passed into
+                # model context so QA acceptance can verify grounding from the
+                # established artifact flow (read-only; no new write surface).
+                import json as _json
+
+                cli._ensure_artifact_dir(runtime)
+                (runtime.session.artifact_dir / "windows-evidence-context.json").write_text(
+                    _json.dumps(windows_packet, indent=2, sort_keys=True), encoding="utf-8"
+                )
+            except Exception:
+                pass  # artifact recording must never break the ask path
+
+        def _apply_windows_evidence_context(prompt_context: dict[str, Any]) -> None:
+            if windows_packet is None:
+                return
+            prompt_context["identity"] = (
+                "Windows host with local read-only evidence; answers must come "
+                "from the Windows evidence packet."
+            )
+            prompt_context["windows_evidence"] = windows_packet
+            prompt_context["windows_evidence_directive"] = WINDOWS_EVIDENCE_MODEL_DIRECTIVE
+            prompt_context["evidence_label"] = "Windows local read-only evidence"
+            windows_rows = windows_evidence_prompt_facts(windows_packet)
+            existing_rows = prompt_context.get("evidence")
+            if isinstance(existing_rows, list):
+                prompt_context["evidence"] = windows_rows + existing_rows
+            else:
+                prompt_context["evidence"] = windows_rows
+
         # PR222 — ground Docker/operator questions in deterministic ShellForgeAI
         # triage evidence before formatting model assistance. Read-only: this
         # only reads the current Docker scene; it never mutates anything.
@@ -352,11 +394,14 @@ def register(app: typer.Typer) -> None:
                 )
             if docker_grounding is not None:
                 prompt_context["deterministic_docker_evidence"] = docker_grounding["prompt_block"]
-            # Reachability briefs and target-container blocks need more headroom
-            # than 2500 chars to stay intact in the prompt.
+            _apply_windows_evidence_context(prompt_context)
+            # Reachability briefs, target-container blocks, and the Windows
+            # evidence packet need more headroom than 2500 chars to stay
+            # intact in the prompt.
             effective_mode = (
                 "full"
-                if (net_brief is not None or tc_status is not None) and ctx_mode != "full"
+                if (net_brief is not None or tc_status is not None or windows_packet is not None)
+                and ctx_mode != "full"
                 else ctx_mode
             )
             prompt = build_contextual_prompt(question, prompt_context, mode=effective_mode)
@@ -373,7 +418,12 @@ def register(app: typer.Typer) -> None:
                 )
             if docker_grounding is not None:
                 prompt_context["deterministic_docker_evidence"] = docker_grounding["prompt_block"]
-            prompt = build_contextual_prompt(question, prompt_context, mode=ctx_mode)
+            _apply_windows_evidence_context(prompt_context)
+            prompt = build_contextual_prompt(
+                question,
+                prompt_context,
+                mode="full" if windows_packet is not None and ctx_mode != "full" else ctx_mode,
+            )
         resp = provider.complete(
             ModelRequest(
                 prompt=prompt,
@@ -384,6 +434,20 @@ def register(app: typer.Typer) -> None:
             )
         )
         if not resp.ok:
+            if windows_packet is not None:
+                # PR289 — model/auth failed, but the bounded read-only Windows
+                # evidence packet still answers safely.
+                from shellforgeai.core.windows_evidence_context import (
+                    render_windows_evidence_answer,
+                )
+
+                cli.console.print(render_windows_evidence_answer(question, windows_packet))
+                cli.console.print(
+                    "\nModel assistance is unavailable, so the read-only Windows "
+                    "evidence above is the answer."
+                )
+                cli.console.print("Check model auth with: shellforgeai model doctor --json")
+                return
             if docker_grounding is not None:
                 # PR222 — model/auth failed, but deterministic Docker triage
                 # evidence still answers safely. Emit the grounded block plus a
@@ -439,10 +503,24 @@ def register(app: typer.Typer) -> None:
             answer_text, removed_commands = filter_unsupported_command_suggestions(
                 resp.text, safe_next_command=docker_grounding.get("safe_next_command")
             )
+        windows_gated = False
+        if windows_packet is not None:
+            from shellforgeai.core.windows_evidence_context import (
+                is_rejected_windows_model_answer,
+                render_windows_evidence_answer,
+            )
+
+            if is_rejected_windows_model_answer(answer_text):
+                # PR289 — project/policy preamble, metadata-primary, or
+                # container-framed output never reaches stdout as the answer;
+                # replace it with the evidence-grounded Windows answer.
+                windows_gated = True
+                answer_text = render_windows_evidence_answer(question, windows_packet)
         cli.console.print(answer_text)
-        cli.console.print(
-            f"\nProvider: {resp.provider}\nModel: {resp.model}\n{cli._usage_line(resp)}"
-        )
+        if not windows_gated:
+            cli.console.print(
+                f"\nProvider: {resp.provider}\nModel: {resp.model}\n{cli._usage_line(resp)}"
+            )
         if docker_grounding is not None:
             cli.console.print("")
             cli._emit_docker_grounding_answer(

@@ -76,3 +76,9 @@ check through the configured provider. The probe uses a fixed internal payload,
 does not accept operator prompt text, does not execute tools, and performs no
 mutation. `--receipt-out DIR` writes bounded receipt artifacts without secrets.
 Tests for this surface use fake clients and do not call real providers.
+
+Since PR289, when a tester-scoped `CODEX_HOME` environment variable is
+present, Codex readiness is verified via safe `codex login status` in the
+inherited process environment instead of the profile-default auth-cache path
+(see `docs/codex-integration.md`); auth-cache/token contents are never read,
+and the live probe treats proven login status as configured credentials.
