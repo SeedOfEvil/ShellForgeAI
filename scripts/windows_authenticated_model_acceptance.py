@@ -75,6 +75,8 @@ FALLBACK_MARKERS = (
     "model-assisted assessment unavailable",
     "repository trust check blocked",
     "model failure class:",
+    "codex cli argument error",
+    "unexpected argument",
     "codex timed out",
     "timed out before producing a response",
 )
@@ -434,10 +436,10 @@ def extract_model_failure_diagnostics(
 ) -> dict[str, Any]:
     """PR291 — bounded, sanitized Codex failure diagnostics from the transcript.
 
-    Classifies the known failure modes precisely (``repository_trust``,
-    ``timeout``, ``model``) so a HOLD explains WHY the model-assisted answer
-    did not run. Only the answer transcript is inspected: no auth-cache read,
-    no environment capture, no token output.
+    Classifies the known failure modes precisely (``cli_argument_order``,
+    ``repository_trust``, ``timeout``, ``model``) so a HOLD explains WHY the
+    model-assisted answer did not run. Only the answer transcript is
+    inspected: no auth-cache read, no environment capture, no token output.
     """
     text = answer or ""
     low = re.sub(r"\s+", " ", text.lower())
@@ -445,6 +447,8 @@ def extract_model_failure_diagnostics(
     match = re.search(r"model failure class:\s*([a-z_]+)", low)
     if match and match.group(1) != "unknown":
         error_class = match.group(1)
+    elif "unexpected argument" in low:
+        error_class = "cli_argument_order"
     elif "repository trust check blocked" in low or "not inside a trusted directory" in low:
         error_class = "repository_trust"
     elif "timed out" in low:
@@ -499,9 +503,14 @@ def build_summary(
     preamble = bool(answer_text) and bad_preamble_detected(answer_text)
     fell_back = bool(answer_text) and fallback_used(answer_text)
     failure_diagnostics = extract_model_failure_diagnostics(answer_text, ask_exit_code)
-    # A fallback/model-unavailable answer means the model-assisted answer did
-    # NOT run, regardless of how the child process exited.
-    model_assisted_answer_ran = model_assisted_answer_ran and not fell_back
+    # PR291 fix — deterministic response capture: command start / process
+    # exit 0 alone is never proof of a model response. The captured answer
+    # must be non-empty and must not be the deterministic fallback.
+    model_response_nonempty = bool(answer_text.strip())
+    model_response_captured = model_response_nonempty and not fell_back
+    # A fallback/model-unavailable or empty answer means the model-assisted
+    # answer did NOT run, regardless of how the child process exited.
+    model_assisted_answer_ran = model_assisted_answer_ran and model_response_captured
     summary: dict[str, Any] = {
         "codex_login_checked": codex_login_checked,
         "codex_logged_in": codex_logged_in,
@@ -512,13 +521,16 @@ def build_summary(
             packet
         ),
         "model_assisted_answer_ran": model_assisted_answer_ran,
+        "model_response_nonempty": model_response_nonempty,
+        "model_response_captured": model_response_captured,
         **grounding.as_dict(),
         "answer_uses_process_or_service_evidence": grounded,
         "bad_preamble_detected": preamble,
         "fallback_used": fell_back,
         # PR291 — bounded, sanitized failure diagnostics so a HOLD explains
-        # whether repository trust, a timeout, or a model command failure
-        # blocked the model-assisted answer. Diagnostics never loosen PASS.
+        # whether a CLI argument-ordering failure, repository trust, a
+        # timeout, or a model command failure blocked the model-assisted
+        # answer. Diagnostics never loosen PASS.
         **failure_diagnostics,
         "targeted_tests_ok": tests_ok,
         "read_only": True,
@@ -532,6 +544,7 @@ def build_summary(
         and summary["evidence_collected"]
         and summary["evidence_context_contains_process_service"]
         and summary["model_assisted_answer_ran"]
+        and summary["model_response_captured"]
         and summary["answer_uses_process_or_service_evidence"]
         and summary["targeted_tests_ok"]
         and not summary["bad_preamble_detected"]

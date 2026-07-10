@@ -214,15 +214,23 @@ def test_diagnostics_never_record_the_environment(monkeypatch) -> None:
     provider = _provider(monkeypatch, _FailingPopen)
     resp = provider.complete(_request())
     assert set(resp.metadata) == {
+        "codex_command_built",
+        "codex_command_started",
         "codex_exec_attempted",
+        "model_call_attempted",
         "codex_exec_exit_code",
         "codex_exec_timed_out",
         "codex_exec_error_class",
         "codex_exec_error_message",
         "codex_exec_stderr_excerpt",
+        "output_last_message_requested",
+        "model_response_captured",
+        "model_response_nonempty",
+        "model_response_excerpt",
         "codex_binary",
         "codex_resolved_binary",
         "sandbox_mode",
+        "approval_policy",
         "skip_git_repo_check_used",
     }
     assert "CODEX_HOME" not in str(resp.metadata)

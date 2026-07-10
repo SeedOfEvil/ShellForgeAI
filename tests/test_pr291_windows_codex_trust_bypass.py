@@ -67,7 +67,7 @@ def _request(prompt: str = "What is running on this system?") -> ModelRequest:
     return ModelRequest(prompt=prompt, model="gpt-5.5", provider="openai-codex")
 
 
-def test_windows_scoped_invocation_uses_exec_read_only_and_trust_bypass(monkeypatch) -> None:
+def test_windows_scoped_invocation_uses_read_only_and_trust_bypass(monkeypatch) -> None:
     monkeypatch.setenv("CODEX_HOME", FAKE_CODEX_HOME)
     provider = _windows_provider(monkeypatch, skip_git_repo_check=True)
     resp = provider.complete(_request())
@@ -75,14 +75,18 @@ def test_windows_scoped_invocation_uses_exec_read_only_and_trust_bypass(monkeypa
     assert resp.text == "windows model answer"
     proc = _RecordingPopen.instances[0]
     cmd = proc.cmd
-    for token in ("exec", "-s", "read-only", "--skip-git-repo-check"):
+    for token in ("--sandbox", "read-only", "--ask-for-approval", "never", "exec"):
         assert token in cmd, f"{token} missing from scoped Windows invocation"
-    # Ordering proven on the installed Windows Codex CLI:
-    # codex exec -s read-only --skip-git-repo-check ... -
+    # Ordering verified on the installed Windows Codex CLI (v0.137.0):
+    # codex --model <m> --sandbox read-only --ask-for-approval never exec
+    #   --skip-git-repo-check ... -
     assert cmd[0] == FAKE_WINDOWS_BINARY
-    assert cmd.index("exec") < cmd.index("-s")
-    assert cmd[cmd.index("-s") + 1] == "read-only"
-    assert cmd.index("--skip-git-repo-check") > cmd.index("-s")
+    exec_idx = cmd.index("exec")
+    for global_flag in ("--model", "--sandbox", "--ask-for-approval"):
+        assert cmd.index(global_flag) < exec_idx, f"{global_flag} must precede exec"
+    assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+    assert cmd[cmd.index("--ask-for-approval") + 1] == "never"
+    assert cmd.index("--skip-git-repo-check") > exec_idx
     assert cmd[-1] == "-"  # prompt travels over stdin, never cmd.exe argv
 
 
@@ -134,8 +138,13 @@ def test_windows_successful_bypass_reports_diagnostics(monkeypatch) -> None:
     assert resp.metadata["codex_exec_timed_out"] is False
     assert resp.metadata["codex_exec_error_class"] is None
     assert resp.metadata["sandbox_mode"] == "read-only"
+    assert resp.metadata["approval_policy"] == "never"
     assert resp.metadata["skip_git_repo_check_used"] is True
     assert resp.metadata["codex_binary"] == FAKE_WINDOWS_BINARY
+    assert resp.metadata["codex_command_built"] is True
+    assert resp.metadata["codex_command_started"] is True
+    assert resp.metadata["model_response_captured"] is True
+    assert resp.metadata["model_response_nonempty"] is True
 
 
 def test_default_trust_bypass_false_outside_scoped_path(monkeypatch) -> None:
@@ -151,10 +160,10 @@ def test_default_trust_bypass_false_outside_scoped_path(monkeypatch) -> None:
     assert "--skip-git-repo-check" not in _RecordingPopen.instances[0].cmd
 
 
-def test_configured_linux_docker_invocation_shape_unchanged(monkeypatch) -> None:
+def test_configured_linux_docker_invocation_canonical_shape(monkeypatch) -> None:
     # With the explicit configured option (build_provider passes the config
-    # value, which defaults to true), the POSIX/Docker command construction is
-    # byte-identical to the pre-PR291 shape.
+    # value, which defaults to true), the POSIX/Docker command keeps the one
+    # canonical shape: global options before exec, exec options after.
     _RecordingPopen.instances = []
     monkeypatch.setattr("shellforgeai.llm.codex._windows_codex_lane", lambda: False)
     monkeypatch.setattr("shellforgeai.llm.codex._prompt_via_stdin", lambda: False)
@@ -166,12 +175,12 @@ def test_configured_linux_docker_invocation_shape_unchanged(monkeypatch) -> None
     last_message_path = cmd[cmd.index("--output-last-message") + 1]
     assert cmd == [
         "/usr/bin/codex",
+        "--model",
+        "gpt-5.5",
         "--sandbox",
         "read-only",
         "--ask-for-approval",
         "never",
-        "-m",
-        "gpt-5.5",
         "exec",
         "--skip-git-repo-check",
         "--json",

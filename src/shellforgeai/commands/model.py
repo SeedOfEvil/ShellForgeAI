@@ -84,6 +84,20 @@ def _probe_invocation_diagnostics(info: dict[str, Any], resp: Any | None = None)
     }
 
 
+def _auth_readiness_after_probe_timeout(info: dict[str, Any]) -> str:
+    """Auth readiness when the bounded live probe timed out.
+
+    A model-response timeout is a live-probe outcome, not an authentication
+    failure: when login status was already proven (``login_status_ok``), auth
+    readiness keeps its verified value instead of degrading to ``failed`` /
+    ``missing_auth_cache`` / ``not_configured``. Without proven login the
+    pre-existing behavior (``failed``) is kept — a timeout cannot prove auth.
+    """
+    if bool(info.get("login_status_ok")):
+        return str(info.get("auth_readiness") or "verified_login_status")
+    return "failed"
+
+
 def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[str, Any]:
     # PR289 — a tester-scoped CODEX_HOME proven by safe `codex login status`
     # configures the provider even when the profile-default auth cache is
@@ -109,9 +123,11 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "latency_ms": 0,
                 "error_class": "not_configured",
                 "error_message": "model credentials are not configured",
+                "model_response_captured": False,
                 **_probe_invocation_diagnostics(info),
             },
             "model_call_performed": False,
+            "timed_out": False,
         }
     req = ModelRequest(
         prompt=MODEL_DOCTOR_PROBE_PROMPT,
@@ -131,8 +147,9 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
     except TimeoutError as exc:
         latency_ms = int((time.monotonic() - started) * 1000)
         return {
-            "auth_readiness": "failed",
+            "auth_readiness": _auth_readiness_after_probe_timeout(info),
             "model_call_performed": True,
+            "timed_out": True,
             "probe": {
                 "status": "failed",
                 "provider": req.provider,
@@ -140,8 +157,9 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "timeout_seconds": MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
                 "request_id": None,
                 "latency_ms": latency_ms,
-                "error_class": "timeout",
+                "error_class": "model_probe_timeout",
                 "error_message": _bounded_error(exc) or "probe timed out",
+                "model_response_captured": False,
                 **_probe_invocation_diagnostics(info),
             },
         }
@@ -150,6 +168,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
         return {
             "auth_readiness": "failed",
             "model_call_performed": True,
+            "timed_out": False,
             "probe": {
                 "status": "failed",
                 "provider": req.provider,
@@ -159,6 +178,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "latency_ms": latency_ms,
                 "error_class": exc.__class__.__name__,
                 "error_message": _bounded_error(exc),
+                "model_response_captured": False,
                 **_probe_invocation_diagnostics(info),
             },
         }
@@ -167,9 +187,11 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
     if resp.metadata:
         request_id = resp.metadata.get("request_id") or resp.metadata.get("thread_id")
     if resp.ok:
+        meta = resp.metadata or {}
         return {
             "auth_readiness": "verified",
             "model_call_performed": True,
+            "timed_out": False,
             "probe": {
                 "status": "passed",
                 "provider": resp.provider or req.provider,
@@ -179,13 +201,19 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "latency_ms": latency_ms,
                 "error_class": None,
                 "error_message": None,
+                # Deterministic capture: ok already requires a non-empty final
+                # response; providers that report the --output-last-message
+                # capture explicitly take precedence.
+                "model_response_captured": bool(
+                    meta.get("model_response_captured", bool((resp.text or "").strip()))
+                ),
                 **_probe_invocation_diagnostics(info, resp),
             },
         }
     err = _bounded_error(resp.error) or "live probe failed"
-    # PR291 — keep the failure class precise: a repository-trust rejection or
-    # other classified Codex invocation failure must never collapse into a
-    # generic provider/auth error.
+    # PR291 — keep the failure class precise: a repository-trust rejection,
+    # CLI argument-ordering failure, or other classified Codex invocation
+    # failure must never collapse into a generic provider/auth error.
     meta = resp.metadata or {}
     err_class = str(meta.get("codex_exec_error_class") or "")
     if not err_class:
@@ -194,9 +222,15 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
             if "timeout" in err.lower() or "timed out" in err.lower()
             else "provider_error"
         )
+    timed_out = bool(meta.get("codex_exec_timed_out")) or err_class == "timeout"
+    if timed_out:
+        # PR291 fix — a bounded model-response timeout is a live-probe
+        # outcome, never an authentication failure once login is proven.
+        err_class = "model_probe_timeout"
     return {
-        "auth_readiness": "failed",
+        "auth_readiness": (_auth_readiness_after_probe_timeout(info) if timed_out else "failed"),
         "model_call_performed": True,
+        "timed_out": timed_out,
         "probe": {
             "status": "failed",
             "provider": resp.provider or req.provider,
@@ -207,6 +241,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
             "error_class": err_class,
             "error_message": err,
             "codex_exec_stderr_excerpt": str(meta.get("codex_exec_stderr_excerpt") or ""),
+            "model_response_captured": bool(meta.get("model_response_captured", False)),
             **_probe_invocation_diagnostics(info, resp),
         },
     }
@@ -375,11 +410,18 @@ def register(model_app: typer.Typer) -> None:
         live_probe_performed = bool(info.get("live_probe_performed", False))
         safe_next_command = str(info.get("safe_next_command") or "shellforgeai model doctor --json")
         live_result: dict[str, Any] | None = None
+        live_probe_timed_out = False
+        live_probe_error_class: str | None = None
+        live_probe_status = "not_requested"
+        live_probe_completed = False
+        model_call_attempted = False
+        model_response_captured = False
         if live_probe:
             if provider is None:
                 live_result = {
                     "auth_readiness": "failed",
                     "model_call_performed": False,
+                    "timed_out": False,
                     "probe": {
                         "status": "failed",
                         "provider": info.get("provider"),
@@ -389,15 +431,28 @@ def register(model_app: typer.Typer) -> None:
                         "latency_ms": 0,
                         "error_class": "doctor_unavailable",
                         "error_message": "model doctor provider unavailable",
+                        "model_response_captured": False,
                     },
                 }
             else:
                 live_result = _run_live_probe(provider, info, runtime)
             auth_readiness = str(live_result["auth_readiness"])
-            auth_reason = "live_probe_requested"
+            live_probe_timed_out = bool(live_result.get("timed_out"))
+            # PR291 fix — a bounded probe timeout keeps the proven auth
+            # readiness; the warning is expressed through the probe outcome
+            # fields and the overall doctor status, not by faking auth
+            # failure (never missing_auth_cache / not_configured here).
+            auth_reason = "live_probe_timed_out" if live_probe_timed_out else "live_probe_requested"
             live_probe_available = True
             live_probe_performed = bool(live_result["model_call_performed"])
-            ok = auth_readiness not in {"failed", "not_configured"}
+            model_call_attempted = live_probe_performed
+            live_probe_status = str(live_result["probe"].get("status") or "failed")
+            live_probe_error_class = live_result["probe"].get("error_class")
+            live_probe_completed = live_probe_performed and not live_probe_timed_out
+            model_response_captured = bool(live_result["probe"].get("model_response_captured"))
+            ok = (
+                auth_readiness not in {"failed", "not_configured"} and live_probe_status == "passed"
+            )
         payload = {
             "schema_version": 1,
             "mode": "model_doctor",
@@ -425,6 +480,12 @@ def register(model_app: typer.Typer) -> None:
             "live_probe_requested": live_probe,
             "live_probe_available": live_probe_available,
             "live_probe_performed": live_probe_performed,
+            "live_probe_completed": live_probe_completed,
+            "live_probe_status": live_probe_status,
+            "live_probe_timed_out": live_probe_timed_out,
+            "live_probe_error_class": live_probe_error_class,
+            "model_call_attempted": model_call_attempted,
+            "model_response_captured": model_response_captured,
             "model_called": live_probe_performed,
             "safe_next_command": safe_next_command,
             "warnings": warnings,

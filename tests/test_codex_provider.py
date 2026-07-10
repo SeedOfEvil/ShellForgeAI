@@ -50,7 +50,7 @@ def test_command_global_options_before_exec(monkeypatch):
     cmd = captured["cmd"]
     exec_idx = cmd.index("exec")
     # Global options must come before exec.
-    for flag in ("--sandbox", "read-only", "--ask-for-approval", "never", "-m", "gpt-5.5"):
+    for flag in ("--sandbox", "read-only", "--ask-for-approval", "never", "--model", "gpt-5.5"):
         assert flag in cmd
         assert cmd.index(flag) < exec_idx, f"{flag} must precede exec"
     # Exec-only options after exec.

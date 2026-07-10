@@ -460,15 +460,22 @@ def register(app: typer.Typer) -> None:
                     diagnostics = {
                         key: failure_meta.get(key)
                         for key in (
+                            "codex_command_built",
+                            "codex_command_started",
                             "codex_exec_attempted",
+                            "model_call_attempted",
                             "codex_exec_exit_code",
                             "codex_exec_timed_out",
                             "codex_exec_error_class",
                             "codex_exec_error_message",
                             "codex_exec_stderr_excerpt",
+                            "output_last_message_requested",
+                            "model_response_captured",
+                            "model_response_nonempty",
                             "codex_binary",
                             "codex_resolved_binary",
                             "sandbox_mode",
+                            "approval_policy",
                             "skip_git_repo_check_used",
                         )
                     }

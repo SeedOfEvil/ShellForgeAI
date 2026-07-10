@@ -55,15 +55,23 @@ def _install(monkeypatch, provider: FakeProvider) -> FakeProvider:
 
 def _success_metadata() -> dict:
     return {
+        "codex_command_built": True,
+        "codex_command_started": True,
         "codex_exec_attempted": True,
+        "model_call_attempted": True,
         "codex_exec_exit_code": 0,
         "codex_exec_timed_out": False,
         "codex_exec_error_class": None,
         "codex_exec_error_message": None,
         "codex_exec_stderr_excerpt": "",
+        "output_last_message_requested": True,
+        "model_response_captured": True,
+        "model_response_nonempty": True,
+        "model_response_excerpt": "SFAI_MODEL_DOCTOR_READY",
         "codex_binary": "codex",
         "codex_resolved_binary": "/usr/bin/codex",
         "sandbox_mode": "read-only",
+        "approval_policy": "never",
         "skip_git_repo_check_used": True,
     }
 
@@ -84,18 +92,21 @@ def test_trust_bypass_defaults_false_and_stays_scoped(monkeypatch) -> None:
     assert explicit.skip_git_repo_check_used() is True
 
 
-def test_windows_lane_uses_exec_scoped_sandbox_without_approval_flag(monkeypatch) -> None:
+def test_windows_lane_uses_canonical_global_form_with_scoped_bypass(monkeypatch) -> None:
     monkeypatch.setattr("shellforgeai.llm.codex._windows_codex_lane", lambda: True)
     provider = CodexProvider(binary="codex")
     provider._resolved_binary = "C:\\Tools\\ShellForgeAI\\tools\\codex-cli\\codex.CMD"
     cmd = provider._build_cmd("-", "gpt-5.5", None)
-    # Proven Windows lane form: exec-scoped read-only sandbox plus the trust
-    # bypass; codex exec is non-interactive by design so no approval flag.
-    assert cmd[1] == "exec"
-    assert cmd[2:4] == ["-s", "read-only"]
-    assert cmd[4] == "--skip-git-repo-check"
-    assert "--ask-for-approval" not in cmd
-    assert "--sandbox" not in cmd
+    # Verified on codex 0.137.0: global options (--model/--sandbox/
+    # --ask-for-approval) MUST precede exec; the scoped trust bypass is the
+    # only Windows-specific behavior and stays exec-scoped.
+    exec_idx = cmd.index("exec")
+    assert cmd[1:3] == ["--model", "gpt-5.5"]
+    assert cmd.index("--sandbox") < exec_idx
+    assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+    assert cmd.index("--ask-for-approval") < exec_idx
+    assert cmd[cmd.index("--ask-for-approval") + 1] == "never"
+    assert cmd[exec_idx + 1] == "--skip-git-repo-check"
 
 
 def test_posix_lane_keeps_global_option_form(monkeypatch) -> None:
@@ -198,6 +209,9 @@ def test_live_probe_timeout_failure_stays_bounded_and_explicit(monkeypatch) -> N
             "codex_exec_exit_code": None,
             "codex_exec_timed_out": True,
             "codex_exec_error_class": "timeout",
+            "model_response_captured": False,
+            "model_response_nonempty": False,
+            "model_response_excerpt": "",
         }
     )
     _install(
@@ -216,7 +230,11 @@ def test_live_probe_timeout_failure_stays_bounded_and_explicit(monkeypatch) -> N
     result = runner.invoke(app, ["model", "doctor", "--live-probe", "--json"])
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
-    assert payload["probe"]["error_class"] == "timeout"
+    assert payload["status"] == "warning"
+    assert payload["probe"]["error_class"] == "model_probe_timeout"
+    assert payload["live_probe_timed_out"] is True
+    assert payload["live_probe_error_class"] == "model_probe_timeout"
+    assert payload["model_response_captured"] is False
     assert "bounded timeout" in payload["probe"]["error_message"]
 
 
