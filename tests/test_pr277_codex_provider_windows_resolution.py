@@ -25,7 +25,7 @@ def _fake_popen(captured: dict, returncode: int = 0, stdout: str = "", stderr: s
                 with contextlib.suppress(OSError):
                     Path(cmd[idx + 1]).write_text("ready")
 
-        def communicate(self, timeout=None):
+        def communicate(self, input=None, timeout=None):
             return stdout, stderr
 
         def poll(self):

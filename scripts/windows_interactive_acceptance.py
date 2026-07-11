@@ -115,6 +115,19 @@ NEGATED_EXECUTION_PATTERNS = (
         r"rollback,\s+or\s+recovery\s+was\s+(executed|performed)\b",
         re.I,
     ),
+    # PR291 fix — general negated safety-noun list: "No cleanup, remediation,
+    # rollback, or recovery was executed." must count as explicit negation for
+    # ANY comma/or-separated combination of the safety nouns, not just the
+    # fixed lists above. Positive execution wording never matches (the
+    # leading "no" is required).
+    re.compile(
+        r"\bno\s+"
+        r"((cleanup|clean[- ]?up|remediation|rollback|recovery|restart|"
+        r"service\s+control)(,\s*(or\s+)?|\s+or\s+|/))*"
+        r"(cleanup|clean[- ]?up|remediation|rollback|recovery|restart|"
+        r"service\s+control)\s+was\s+(executed|performed)\b",
+        re.I,
+    ),
     re.compile(
         r"\bno\s+shell\s+or\s+remoting\s+execution\b.*\bno\s+cleanup\b.*"
         r"\b(no\s+file\s+changes|file\s+changes\s+were\s+not)\b",

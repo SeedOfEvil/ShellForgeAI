@@ -11,7 +11,7 @@ def test_codex_timeout_returns_structured_error(monkeypatch):
         def __init__(self, *a, **k):
             self._terminated = False
 
-        def communicate(self, timeout=None):
+        def communicate(self, input=None, timeout=None):
             if not self._terminated:
                 raise subprocess.TimeoutExpired(cmd=["codex"], timeout=timeout)
             return ("partial-out", "partial-err")
@@ -45,7 +45,7 @@ def test_cleanup_active_processes_terminates_children():
         def terminate(self):
             self.terminated = True
 
-        def communicate(self, timeout=None):
+        def communicate(self, input=None, timeout=None):
             return ("", "")
 
     child = P()

@@ -12,7 +12,7 @@ the one canonical builder shape on every platform:
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from shellforgeai.llm.codex import CodexProvider, classify_model_failure
 from shellforgeai.llm.schemas import ModelRequest
@@ -88,8 +88,38 @@ def test_builder_sections_are_explicit(monkeypatch) -> None:
     exec_opts = provider._exec_options(None)
     assert exec_opts[0] == "--skip-git-repo-check"
     assert "--output-last-message" not in exec_opts
-    with_capture = provider._exec_options(Path("/tmp/out.txt"))
-    assert with_capture[-2:] == ["--output-last-message", "/tmp/out.txt"]
+    # Path-neutral capture-pair check: the value is exactly the platform
+    # rendering of the given path (Windows renders "\\tmp\\out.txt"), so
+    # compare semantically instead of requiring POSIX separators.
+    capture_path = Path("/tmp/out.txt")
+    with_capture = provider._exec_options(capture_path)
+    assert with_capture[-2] == "--output-last-message"
+    assert with_capture[-1] == str(capture_path)
+    assert PurePath(with_capture[-1]) == PurePath(capture_path)
+
+
+def test_output_last_message_pairing_is_path_neutral(monkeypatch) -> None:
+    provider = _provider(monkeypatch, windows_lane=False)
+    for raw in (
+        "/tmp/out.txt",  # POSIX capture path
+        "C:/Tools/ShellForgeAI/artifacts/last-message.txt",  # Windows-style path
+        "/tmp/out dir/last message.txt",  # spaces stay one argv element
+    ):
+        capture_path = Path(raw)
+        opts = provider._exec_options(capture_path)
+        idx = opts.index("--output-last-message")
+        # The flag stays paired with its value as the final option pair, the
+        # value is one unmodified argv element, and semantics are unchanged.
+        assert idx == len(opts) - 2
+        assert opts[idx + 1] == str(capture_path)
+        assert PurePath(opts[idx + 1]) == PurePath(capture_path)
+        # Argument ordering stays protected around the capture pair.
+        cmd = provider._build_cmd("hi", "gpt-5.5", capture_path)
+        exec_idx = cmd.index("exec")
+        flag_idx = cmd.index("--output-last-message")
+        assert flag_idx > exec_idx
+        assert cmd[flag_idx + 1] == str(capture_path)
+        assert cmd[-1] == "hi"  # prompt stays in the final position
 
 
 def test_read_only_sandbox_and_never_approval_always_present(monkeypatch) -> None:
