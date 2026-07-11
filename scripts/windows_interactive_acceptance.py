@@ -161,6 +161,56 @@ _STRUCTURED_EXECUTION_TRUE = {
     name: re.compile(rf"\b{name}_(executed|performed)\s*[=:]\s*true\b", re.I)
     for name in ("cleanup", "remediation", "rollback", "recovery", "restart")
 }
+_MUTATION_PERFORMED_TRUE_RE = re.compile(r"\bmutation_performed\s*[=:]\s*true\b", re.I)
+
+# PR291 fix — console transcripts wrap long sentences across physical lines,
+# so a continuation line like "recovery was executed." loses the governing
+# "no" from the previous line. Wrapped lines are joined back into logical
+# statements before execution detection: a line continues when it lacks
+# terminal punctuation AND either ends with a list cue (comma / "or" /
+# "and" / "/") or the next line starts lowercase (mid-sentence wrap).
+# Bullet/status lines (capitalized, "-", digits) never merge, so unrelated
+# console lines stay separate.
+_STATEMENT_TERMINAL_PUNCT = (".", "!", "?", ";")
+_CONTINUATION_CUE_RE = re.compile(r"(,|/|\b(?:or|and))$", re.I)
+_STATEMENT_SPLIT_RE = re.compile(r"[.;!?]+")
+
+
+def _logical_blocks(text: str) -> list[str]:
+    normalized_lines = [_normalize_transcript_line(line) for line in text.splitlines()]
+    blocks: list[str] = []
+    current = ""
+    for index, line in enumerate(normalized_lines):
+        if not line:
+            if current:
+                blocks.append(current)
+                current = ""
+            continue
+        current = f"{current} {line}" if current else line
+        if line.endswith(_STATEMENT_TERMINAL_PUNCT):
+            blocks.append(current)
+            current = ""
+            continue
+        next_line = normalized_lines[index + 1] if index + 1 < len(normalized_lines) else ""
+        wraps_to_next = bool(
+            _CONTINUATION_CUE_RE.search(line) or (next_line[:1].islower() and next_line)
+        )
+        if not wraps_to_next:
+            blocks.append(current)
+            current = ""
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _logical_statements(text: str) -> list[str]:
+    """Sentence-level fragments reconstructed across console line wraps."""
+    statements: list[str] = []
+    for block in _logical_blocks(text):
+        statements.extend(
+            segment.strip() for segment in _STATEMENT_SPLIT_RE.split(block) if segment.strip()
+        )
+    return statements
 
 
 def _negated_execution_scope(line: str) -> bool:
@@ -309,16 +359,18 @@ def _contains_unsafe_execution_marker(text: str, marker_group: str) -> bool:
     patterns = dict(EXECUTION_PATTERNS)
     pattern = patterns[marker_group]
     structured_true = _STRUCTURED_EXECUTION_TRUE.get(marker_group)
-    for line in text.splitlines():
-        normalized = _normalize_transcript_line(line)
-        if not normalized:
-            continue
-        if structured_true is not None and structured_true.search(normalized):
-            # Structured true fields override any negated prose on the line.
+    # Structured execution flags always fail, regardless of surrounding prose.
+    if _MUTATION_PERFORMED_TRUE_RE.search(text):
+        return True
+    # PR291 fix — evaluate reconstructed logical statements so that a leading
+    # negation keeps governing its comma list even when the console wrapped
+    # the sentence across physical lines.
+    for statement in _logical_statements(text):
+        if structured_true is not None and structured_true.search(statement):
             return True
-        if _line_is_negated_execution_statement(normalized):
+        if _line_is_negated_execution_statement(statement):
             continue
-        if pattern.search(normalized):
+        if pattern.search(statement):
             return True
     return False
 

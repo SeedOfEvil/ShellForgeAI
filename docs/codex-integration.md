@@ -151,15 +151,25 @@ or auth failure — with a bounded stderr excerpt retained.
 
 Command parse/start success is NOT the same as a captured model response.
 Every provider invocation requests `--output-last-message <path>` under a
-bounded temp flow, reads the file only after the process exits, and reports
+bounded temp flow, reads the file only after the process ends (or during the
+bounded timeout cleanup, before the temp directory is removed), and reports
 the distinction explicitly in `ModelResponse.metadata`:
 `codex_command_built`/`codex_command_started` track the launch;
+`codex_process_completed` tracks whether the child finished inside the
+bounded timeout; `codex_child_cleanup_performed` records timeout cleanup;
+`output_last_message_path`/`output_file_created` describe the capture file;
+`stdin_prompt_sent`/`stdin_closed` describe the stdin prompt lifecycle; and
 `model_response_captured` is true only when the capture file held a
 non-empty final response, with `model_response_nonempty` and a bounded
 sanitized `model_response_excerpt` (240 chars). Exit code 0 with a missing
 capture file classifies as `output_capture_missing`; an empty capture file
 classifies as `empty_response`; both fail the invocation and keep
-authenticated acceptance HOLD.
+authenticated acceptance HOLD. A capture produced before a timeout is
+reported honestly (`output_file_created=true`, `model_response_captured=true`
+with `codex_exec_timed_out=true`, `codex_process_completed=false`) so the
+failure is explainable — but a timeout is never hidden and never converted
+into success: authenticated PASS still requires `codex_exec_timed_out=false`
+and exit code 0.
 
 A bounded model-response timeout is a live-probe/invocation outcome, not an
 authentication failure: when `codex login status` was already proven in the

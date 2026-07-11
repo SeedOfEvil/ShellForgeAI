@@ -409,6 +409,16 @@ class CodexProvider:
                     proc.send_signal(ctrl_break)
         proc.terminate()
 
+    @staticmethod
+    def _read_last_message(last_msg_path: Path) -> str | None:
+        """Bounded read of the deterministic capture file (None when absent)."""
+        try:
+            if last_msg_path.exists():
+                return last_msg_path.read_text(errors="ignore")[:65536].strip()
+        except OSError:
+            return None
+        return None
+
     def _run(
         self, prompt: str, model: str, timeout: int
     ) -> tuple[int, str, str, str | None, list[str]]:
@@ -450,18 +460,25 @@ class CodexProvider:
                             out, err = proc.communicate(timeout=2)
                         except subprocess.TimeoutExpired:
                             out, err = "", ""
-                    raise subprocess.TimeoutExpired(
+                    timeout_exc = subprocess.TimeoutExpired(
                         cmd=cmd, timeout=timeout, output=out, stderr=err
-                    ) from exc
+                    )
+                    # PR291 fix — inspect the deterministic capture BEFORE the
+                    # temp directory is cleaned up, so a timeout can still
+                    # report whether the final-response file was produced.
+                    # This never converts the timeout into success; it only
+                    # makes the failure explainable (output captured but
+                    # process timed out vs no output at all).
+                    timeout_exc.output_last_message_path = str(last_msg_path)
+                    timeout_exc.output_file_created = last_msg_path.exists()
+                    timeout_exc.last_message = self._read_last_message(last_msg_path)
+                    timeout_exc.child_cleanup_performed = True
+                    timeout_exc.prompt_via_stdin = prompt_via_stdin
+                    raise timeout_exc from exc
             finally:
                 with self._active_lock:
                     self._active_procs.discard(proc)
-            last_message: str | None = None
-            try:
-                if last_msg_path.exists():
-                    last_message = last_msg_path.read_text(errors="ignore")[:65536].strip()
-            except OSError:
-                last_message = None
+            last_message = self._read_last_message(last_msg_path)
             return proc.returncode, out, err, last_message, cmd
 
     def _exec_diagnostics(
@@ -478,6 +495,12 @@ class CodexProvider:
         command_started: bool = False,
         last_message: str | None = None,
         response_text: str = "",
+        process_completed: bool = False,
+        child_cleanup_performed: bool = False,
+        output_path: str | None = None,
+        output_file_created: bool | None = None,
+        stdin_prompt_sent: bool = False,
+        stdin_closed: bool = False,
     ) -> dict[str, object]:
         """Bounded, sanitized Codex invocation diagnostics.
 
@@ -487,14 +510,16 @@ class CodexProvider:
         missing/empty deterministic output capture, model command failures,
         and authentication readiness failures — without ever reading
         auth-cache contents or recording the process environment. Command
-        start success is tracked separately from model-response capture:
-        ``codex_command_started`` means the child launched;
-        ``model_response_captured`` means the ``--output-last-message`` file
-        held a non-empty final response.
+        start success, process completion, and model-response capture are
+        tracked separately: ``codex_command_started`` means the child
+        launched; ``codex_process_completed`` means it finished inside the
+        bounded timeout; ``model_response_captured`` means the
+        ``--output-last-message`` file held a non-empty final response (read
+        only after the process ended or was cleaned up). Output captured
+        while the process still timed out stays a failure — the capture flag
+        only makes the failure explainable, never a PASS.
         """
-        # Captured means: exit code 0 AND the --output-last-message file held
-        # a non-empty final response (read only after the process exited).
-        captured = bool(exit_code == 0 and last_message is not None and last_message.strip())
+        captured = bool(last_message is not None and last_message.strip())
         return {
             "codex_command_built": bool(command_built),
             "codex_command_started": bool(command_started),
@@ -502,15 +527,25 @@ class CodexProvider:
             "model_call_attempted": bool(attempted),
             "codex_exec_exit_code": exit_code,
             "codex_exec_timed_out": bool(timed_out),
+            "codex_process_completed": bool(process_completed),
+            "codex_child_cleanup_performed": bool(child_cleanup_performed),
             "codex_exec_error_class": error_class,
             "codex_exec_error_message": (
                 _sanitize_stderr_excerpt(error_message, 240) or None if error_message else None
             ),
             "codex_exec_stderr_excerpt": _sanitize_stderr_excerpt(stderr),
             "output_last_message_requested": bool(command_built),
+            "output_last_message_path": output_path,
+            "output_file_created": (
+                bool(output_file_created)
+                if output_file_created is not None
+                else last_message is not None
+            ),
             "model_response_captured": captured,
             "model_response_nonempty": bool((response_text or "").strip()),
             "model_response_excerpt": _sanitize_stderr_excerpt(response_text or "", 240),
+            "stdin_prompt_sent": bool(stdin_prompt_sent),
+            "stdin_closed": bool(stdin_closed),
             "codex_binary": self.binary,
             "codex_resolved_binary": resolved or "",
             "sandbox_mode": self.sandbox,
@@ -628,6 +663,16 @@ class CodexProvider:
                     resolved=resolved,
                     command_built=True,
                     command_started=True,
+                    process_completed=False,
+                    child_cleanup_performed=bool(getattr(exc, "child_cleanup_performed", True)),
+                    output_path=getattr(exc, "output_last_message_path", None),
+                    output_file_created=bool(getattr(exc, "output_file_created", False)),
+                    # A capture produced before the timeout is reported
+                    # honestly, but the invocation stays a bounded failure.
+                    last_message=getattr(exc, "last_message", None),
+                    response_text=getattr(exc, "last_message", None) or "",
+                    stdin_prompt_sent=bool(getattr(exc, "prompt_via_stdin", _prompt_via_stdin())),
+                    stdin_closed=True,
                 ),
             )
 
@@ -711,6 +756,11 @@ class CodexProvider:
                 error_class = str(
                     classify_model_failure(stdout=out, stderr=err, returncode=rc)["category"]
                 )
+        output_path: str | None = None
+        if "--output-last-message" in cmd:
+            path_index = cmd.index("--output-last-message") + 1
+            if path_index < len(cmd):
+                output_path = cmd[path_index]
         response_metadata: dict[str, object] = {
             **self._exec_diagnostics(
                 attempted=True,
@@ -725,6 +775,11 @@ class CodexProvider:
                 # The response fields describe the model answer, never
                 # error/stderr text that `text` may fall back to on failure.
                 response_text=text if ok else "",
+                process_completed=True,
+                output_path=output_path,
+                output_file_created=last_message is not None,
+                stdin_prompt_sent=_prompt_via_stdin(),
+                stdin_closed=True,
             ),
             **metadata,
         }
