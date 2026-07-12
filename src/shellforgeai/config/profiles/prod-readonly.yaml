@@ -1,0 +1,7 @@
+name: prod-readonly
+description: prod-readonly
+allow_risks: [read]
+ask_risks: []
+deny_risks: [change, service, system, danger]
+allow_shell_raw: false
+online_allowed: false

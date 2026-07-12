@@ -82,3 +82,9 @@ present, Codex readiness is verified via safe `codex login status` in the
 inherited process environment instead of the profile-default auth-cache path
 (see `docs/codex-integration.md`); auth-cache/token contents are never read,
 and the live probe treats proven login status as configured credentials.
+
+## Windows operator runtime/profile context
+
+Windows installed invocations do not rely on the operator's current working directory to find the ShellForgeAI profile. The supported wrapper sets `SHELLFORGEAI_RUNTIME_ROOT` from its own location (`%~dp0..`), and model-backed commands resolve profile context in this bounded order: explicit profile/runtime configuration, wrapper-supplied runtime root, installed package/executable roots, a valid current ShellForgeAI workspace, then packaged safe defaults when available. If none resolves, commands return `runtime_profile_not_resolved` guidance instead of a traceback.
+
+Tester-scoped Codex authentication remains external. `CODEX_HOME` is inherited from the process environment and ShellForgeAI verifies readiness only with `codex login status`; it does not read or print auth-cache/token contents. Missing `CODEX_HOME` is reported as `codex_context_not_configured_for_process`, while unproven login status is reported as `codex_login_not_verified`; expired/invalid auth is only reported when Codex output proves that condition.
