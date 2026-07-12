@@ -192,3 +192,7 @@ control characters sanitized, token-like lines redacted),
 repository-trust rejection classifies as `repository_trust` — never as
 missing authentication — and keeps the authenticated Windows acceptance
 lane HOLD until a real model-assisted answer is captured without fallback.
+
+## Windows runtime-root parity
+
+On Windows installed deployments, Codex-backed `ask`, `interactive`, and `model doctor` share the same ShellForgeAI runtime/profile context. The official `sfai.cmd` wrapper derives `SHELLFORGEAI_RUNTIME_ROOT` from its own `bin` directory and product code uses that bounded root before considering the current working directory. This lets normal operator sessions launched outside the source tree still collect Windows evidence and pass it to Codex when tester-scoped `CODEX_HOME` authentication is available. Missing `CODEX_HOME`, unverified login status, repository trust, and probe timeout remain distinct bounded diagnostics.

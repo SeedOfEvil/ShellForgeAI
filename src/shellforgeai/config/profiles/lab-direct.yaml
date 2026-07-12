@@ -1,0 +1,7 @@
+name: lab-direct
+description: lab-direct
+allow_risks: [read, change, service, system]
+ask_risks: [danger]
+deny_risks: []
+allow_shell_raw: true
+online_allowed: true

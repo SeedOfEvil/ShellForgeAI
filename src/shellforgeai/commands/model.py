@@ -462,6 +462,16 @@ def register(model_app: typer.Typer) -> None:
             "mutation_performed": False,
             "provider": info.get("provider"),
             "model": info.get("model"),
+            "runtime_root_resolved": bool(
+                runtime.session.config_summary.get("runtime_root_resolved")
+            ),
+            "profile_context_resolved": bool(
+                runtime.session.config_summary.get("profile_context_resolved", True)
+            ),
+            "runtime_context_source": runtime.session.config_summary.get(
+                "runtime_context_source", "current_working_directory"
+            ),
+            "runtime_root": runtime.session.config_summary.get("runtime_root", ""),
             "codex_binary": info.get("codex_binary"),
             "codex_resolved_binary": info.get("codex_resolved_binary"),
             "codex_version": info.get("codex_version"),

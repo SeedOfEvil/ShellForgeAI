@@ -228,6 +228,7 @@ from shellforgeai.core.runbook import (
     runbook_from_evidence_file,
     validate_runbook_payload,
 )
+from shellforgeai.core.runtime_resolution import resolve_runtime_profile_context
 from shellforgeai.core.session import build_session_context
 from shellforgeai.interactive.commands import route_input
 from shellforgeai.knowledge.search import search_local
@@ -727,8 +728,23 @@ def main(
             console.print(build.build_line())
         raise typer.Exit()
     settings = load_settings(config)
-    prof = load_profile(profile, Path.cwd())
+    runtime_profile = resolve_runtime_profile_context(profile, Path.cwd(), config_path=config)
+    if not runtime_profile.resolved:
+        console.print(
+            runtime_profile.error_message or "ShellForgeAI runtime/profile context unavailable."
+        )
+        console.print("Context sources checked: " + ", ".join(runtime_profile.checked_sources))
+        raise typer.Exit(2)
+    prof = load_profile(profile, runtime_profile.profile_root or Path.cwd())
     session = build_session_context(settings, prof, mode, Path.cwd())
+    session.config_summary.update(
+        {
+            "runtime_root_resolved": bool(runtime_profile.runtime_root),
+            "profile_context_resolved": True,
+            "runtime_context_source": runtime_profile.source,
+            "runtime_root": str(runtime_profile.runtime_root or ""),
+        }
+    )
     ctx.obj = {
         "runtime": RuntimeContext(settings=settings, profile=prof, session=session, verbose=verbose)
     }
@@ -9610,8 +9626,19 @@ def _build_ops_report_payload(
     from shellforgeai.core.self_test import run_self_test_commands
 
     settings = load_settings()
-    profile = load_profile(settings.app.default_profile, Path.cwd())
+    runtime_profile = resolve_runtime_profile_context(settings.app.default_profile, Path.cwd())
+    if not runtime_profile.resolved:
+        raise RuntimeError(runtime_profile.error_message or "runtime profile not resolved")
+    profile = load_profile(settings.app.default_profile, runtime_profile.profile_root or Path.cwd())
     session = build_session_context(settings, profile, mode="cli", cwd=Path.cwd())
+    session.config_summary.update(
+        {
+            "runtime_root_resolved": bool(runtime_profile.runtime_root),
+            "profile_context_resolved": True,
+            "runtime_context_source": runtime_profile.source,
+            "runtime_root": str(runtime_profile.runtime_root or ""),
+        }
+    )
     warnings: list[str] = []
     scene = triage_ranking.collect_scene()
     ranked = triage_ranking.rank_scene(scene)

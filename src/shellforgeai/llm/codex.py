@@ -232,10 +232,17 @@ class CodexProvider:
             status = self.login_status()
             if status.get("ok"):
                 return True, "ok"
-            return False, "codex login status not proven for configured CODEX_HOME"
+            return (
+                False,
+                "codex_login_not_verified: codex login status not proven for configured CODEX_HOME",
+            )
         auth_cache = Path.home() / ".codex" / "auth.json"
         if not auth_cache.exists():
-            return False, "codex auth cache missing"
+            return (
+                False,
+                "codex_context_not_configured_for_process: set CODEX_HOME for this "
+                "process context or run codex login status from the same account",
+            )
         return True, "ok"
 
     def doctor(self) -> dict[str, str | bool]:
@@ -277,15 +284,15 @@ class CodexProvider:
         elif codex_home_configured and login_status_ok:
             auth_readiness = "verified_login_status"
             auth_reason = "codex_login_status_ok"
-        elif codex_home_configured:
-            auth_readiness = "login_status_not_proven"
-            auth_reason = str(login_info.get("reason") or "login_status_not_proven")
         elif auth_cache_present:
             auth_readiness = "not_verified"
             auth_reason = "auth_cache_present_live_probe_not_run"
+        elif codex_home_configured:
+            auth_readiness = "login_status_not_proven"
+            auth_reason = str(login_info.get("reason") or "login_status_not_proven")
         else:
             auth_readiness = "missing_auth_cache"
-            auth_reason = "auth_cache_missing"
+            auth_reason = "codex_context_not_configured_for_process"
         return {
             "provider": self.name,
             "model": self.default_model,
@@ -870,6 +877,39 @@ def classify_model_failure(
             "reason": "timeout",
             "user_message": "Model-assisted assessment unavailable: model command timed out.",
             "next_step": "Retry model-assisted assessment later.",
+            "raw_suppressed": True,
+        }
+    low_blob = blob.lower()
+    if "codex_context_not_configured_for_process" in low_blob or (
+        "codex auth cache missing" in low_blob and "expired" not in low_blob
+    ):
+        return {
+            "status": "unavailable",
+            "category": "codex_context_not_configured_for_process",
+            "reason": "CODEX_HOME is not configured for this process context",
+            "user_message": (
+                "Model-assisted assessment unavailable: Codex context is not "
+                "configured for this process."
+            ),
+            "next_step": (
+                "Configure CODEX_HOME for the same account/process context, run "
+                "codex login status there, then run shellforgeai model doctor --json."
+            ),
+            "raw_suppressed": True,
+        }
+    if "codex_login_not_verified" in low_blob or "login status not proven" in low_blob:
+        return {
+            "status": "unavailable",
+            "category": "codex_login_not_verified",
+            "reason": "codex login status was not verified",
+            "user_message": (
+                "Model-assisted assessment unavailable: Codex login status was not "
+                "verified for this process."
+            ),
+            "next_step": (
+                "Run codex login status from the same process context and check "
+                "shellforgeai model doctor --json."
+            ),
             "raw_suppressed": True,
         }
     if reason:

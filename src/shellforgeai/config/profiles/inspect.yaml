@@ -1,0 +1,7 @@
+name: inspect
+description: inspect
+allow_risks: [read]
+ask_risks: [change]
+deny_risks: [service, system, danger]
+allow_shell_raw: false
+online_allowed: false

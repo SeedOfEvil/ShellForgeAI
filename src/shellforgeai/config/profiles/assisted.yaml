@@ -1,0 +1,7 @@
+name: assisted
+description: assisted
+allow_risks: [read, change]
+ask_risks: [service, system]
+deny_risks: [danger]
+allow_shell_raw: false
+online_allowed: true

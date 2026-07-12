@@ -981,3 +981,6 @@ python3 scripts/docker01_artifact_archive_plan.py \
 The audit validates required evidence files, JSON parsing, manifest/checksum integrity, fixture-only flags, rollback/restore proof, path guards, and the non-execution safety contract. It does not repeat rehearsal, create fixture files, archive files, restore files, or touch production paths. It can write audit artifacts only when `--out <fixture_audit_dir>` is supplied, and it can compare two fixture rehearsal evidence directories with `--compare-to <previous_fixture_rehearsal_dir>`.
 
 A passing fixture audit is evidence quality control only. It is not production readiness, does not enable production source action, and does not enable production cleanup. Future production source action still requires a separate reviewed lane and PR. SeedOfEvil remains final merge owner.
+### Windows installed runtime context
+
+On Windows, the supported `sfai.cmd` wrapper supplies `SHELLFORGEAI_RUNTIME_ROOT` from its own installation path so `ask`, `interactive`, and `model doctor` can resolve the ShellForgeAI profile when launched from operator directories such as `C:\Windows\System32`. Codex authentication remains tester-scoped and external via `CODEX_HOME`; ShellForgeAI verifies readiness with `codex login status` and does not read token/cache contents.
