@@ -25,7 +25,7 @@ Config keys (under `model:`):
 | `codex_binary` | `codex` | |
 | `codex_sandbox` | `read-only` | |
 | `codex_json` | `true` | Parse JSON event stream. |
-| `codex_skip_git_repo_check` | `true` | |
+| `codex_skip_git_repo_check` | `true` | Bypasses only Codex's repository/git trust gate (PR291). The provider option defaults to `false`; this config enables it explicitly, and the scoped Windows Codex lane enables it for staged QGA/SYSTEM source directories. Never weakens the `read-only` sandbox. |
 | `allow_model_fallback` | `true` | |
 
 Env overrides:

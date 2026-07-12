@@ -446,6 +446,53 @@ def register(app: typer.Typer) -> None:
                     "\nModel assistance is unavailable, so the read-only Windows "
                     "evidence above is the answer."
                 )
+                # PR291 — preserve the actual bounded Codex failure reason so
+                # the lane can distinguish repository trust, timeout, binary
+                # resolution, and auth readiness failures. No auth-cache read,
+                # no environment dump; stderr excerpt is bounded + sanitized.
+                failure_meta = getattr(resp, "metadata", None) or {}
+                failure_class = str(failure_meta.get("codex_exec_error_class") or "unknown")
+                cli.console.print(f"Model failure class: {failure_class}")
+                try:
+                    import json as _json
+
+                    cli._ensure_artifact_dir(runtime)
+                    diagnostics = {
+                        key: failure_meta.get(key)
+                        for key in (
+                            "codex_command_built",
+                            "codex_command_started",
+                            "codex_exec_attempted",
+                            "model_call_attempted",
+                            "codex_exec_exit_code",
+                            "codex_exec_timed_out",
+                            "codex_process_completed",
+                            "codex_child_cleanup_performed",
+                            "codex_exec_error_class",
+                            "codex_exec_error_message",
+                            "codex_exec_stderr_excerpt",
+                            "output_last_message_requested",
+                            "output_last_message_path",
+                            "output_file_created",
+                            "model_response_captured",
+                            "model_response_nonempty",
+                            "model_response_excerpt",
+                            "stdin_prompt_sent",
+                            "stdin_closed",
+                            "codex_binary",
+                            "codex_resolved_binary",
+                            "sandbox_mode",
+                            "approval_policy",
+                            "skip_git_repo_check_used",
+                        )
+                    }
+                    diagnostics["model_assisted_answer_ran"] = False
+                    diagnostics["fallback_used"] = True
+                    (runtime.session.artifact_dir / "model-failure-diagnostics.json").write_text(
+                        _json.dumps(diagnostics, indent=2, sort_keys=True), encoding="utf-8"
+                    )
+                except Exception:
+                    pass  # diagnostics recording must never break the ask path
                 cli.console.print("Check model auth with: shellforgeai model doctor --json")
                 return
             if docker_grounding is not None:

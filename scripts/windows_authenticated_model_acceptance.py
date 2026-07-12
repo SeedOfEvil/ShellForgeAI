@@ -72,9 +72,27 @@ FALLBACK_MARKERS = (
     "## windows evidence summary",
     "model assistance is unavailable",
     "model synthesis unavailable",
+    "model-assisted assessment unavailable",
+    "repository trust check blocked",
+    "model failure class:",
+    "codex cli argument error",
+    "unexpected argument",
     "codex timed out",
     "timed out before producing a response",
 )
+
+# Bounded excerpt cap for sanitized failure lines kept in the summary.
+FAILURE_EXCERPT_MAX_CHARS = 400
+
+# PR291 fix — deterministic Windows-targeted pytest selection. The maintained
+# Windows runner launches processes without a shell (ProcessStartInfo), so a
+# literal ``tests/test_pr291_*.py`` wildcard reaches pytest unexpanded and
+# pytest exits 4 ("file or directory not found"). The targeted set is
+# therefore resolved HERE with Python filesystem APIs (sorted, explicit file
+# paths; never shell glob expansion, never any shell).
+TARGETED_TEST_GLOBS = ("test_pr291_*.py",)
+TARGETED_TEST_EXPLICIT_FILES = ("test_codex_provider.py",)
+TARGETED_TEST_OUTPUT_EXCERPT_MAX_CHARS = 2000
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _PYTEST_FAILURE_RE = re.compile(r"\b\d+\s+(failed|errors?)\b|\bno tests ran\b", re.I)
@@ -411,6 +429,61 @@ def fallback_used(answer: str) -> bool:
     return any(marker in low for marker in FALLBACK_MARKERS)
 
 
+def _sanitize_failure_excerpt(line: str) -> str:
+    """Bounded, control-character-free excerpt; token-like lines are redacted."""
+    lowered = line.lower()
+    if any(
+        key in lowered
+        for key in ("token", "secret", "password", "api_key", "authorization", "bearer")
+    ):
+        return "[REDACTED]"
+    cleaned = "".join(ch if ch.isprintable() else " " for ch in line)
+    return cleaned.strip()[:FAILURE_EXCERPT_MAX_CHARS]
+
+
+def extract_model_failure_diagnostics(
+    answer: str | None, ask_exit_code: int | None = None
+) -> dict[str, Any]:
+    """PR291 — bounded, sanitized Codex failure diagnostics from the transcript.
+
+    Classifies the known failure modes precisely (``cli_argument_order``,
+    ``repository_trust``, ``timeout``, ``model``) so a HOLD explains WHY the
+    model-assisted answer did not run. Only the answer transcript is
+    inspected: no auth-cache read, no environment capture, no token output.
+    """
+    text = answer or ""
+    low = re.sub(r"\s+", " ", text.lower())
+    error_class: str | None = None
+    match = re.search(r"model failure class:\s*([a-z_]+)", low)
+    if match and match.group(1) != "unknown":
+        error_class = match.group(1)
+    elif "unexpected argument" in low:
+        error_class = "cli_argument_order"
+    elif "repository trust check blocked" in low or "not inside a trusted directory" in low:
+        error_class = "repository_trust"
+    elif "timed out" in low:
+        error_class = "timeout"
+    elif fallback_used(text):
+        error_class = "model"
+    excerpt = ""
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "model failure class:" in lowered or any(
+            marker in lowered
+            for marker in FALLBACK_MARKERS
+            if marker != "## windows evidence summary"
+        ):
+            excerpt = _sanitize_failure_excerpt(line)
+            break
+    return {
+        "codex_exec_attempted": bool(text),
+        "codex_exec_exit_code": ask_exit_code,
+        "codex_exec_timed_out": error_class == "timeout",
+        "codex_exec_error_class": error_class,
+        "codex_exec_stderr_excerpt": excerpt,
+    }
+
+
 def evidence_context_contains_process_service(packet: Mapping[str, Any] | None) -> bool:
     if not packet:
         return False
@@ -430,6 +503,8 @@ def build_summary(
     model_assisted_answer_ran: bool,
     targeted_tests_exit_code: int | None,
     targeted_tests_output: str | None,
+    ask_exit_code: int | None = None,
+    targeted_selection: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the acceptance summary with real, unloosened semantics."""
     answer_text = answer or ""
@@ -438,9 +513,15 @@ def build_summary(
     grounded = bool(answer_text) and grounding.answer_uses_process_or_service_evidence
     preamble = bool(answer_text) and bad_preamble_detected(answer_text)
     fell_back = bool(answer_text) and fallback_used(answer_text)
-    # A fallback/model-unavailable answer means the model-assisted answer did
-    # NOT run, regardless of how the child process exited.
-    model_assisted_answer_ran = model_assisted_answer_ran and not fell_back
+    failure_diagnostics = extract_model_failure_diagnostics(answer_text, ask_exit_code)
+    # PR291 fix — deterministic response capture: command start / process
+    # exit 0 alone is never proof of a model response. The captured answer
+    # must be non-empty and must not be the deterministic fallback.
+    model_response_nonempty = bool(answer_text.strip())
+    model_response_captured = model_response_nonempty and not fell_back
+    # A fallback/model-unavailable or empty answer means the model-assisted
+    # answer did NOT run, regardless of how the child process exited.
+    model_assisted_answer_ran = model_assisted_answer_ran and model_response_captured
     summary: dict[str, Any] = {
         "codex_login_checked": codex_login_checked,
         "codex_logged_in": codex_logged_in,
@@ -451,14 +532,45 @@ def build_summary(
             packet
         ),
         "model_assisted_answer_ran": model_assisted_answer_ran,
+        "model_response_nonempty": model_response_nonempty,
+        "model_response_captured": model_response_captured,
         **grounding.as_dict(),
         "answer_uses_process_or_service_evidence": grounded,
         "bad_preamble_detected": preamble,
         "fallback_used": fell_back,
+        # PR291 — bounded, sanitized failure diagnostics so a HOLD explains
+        # whether a CLI argument-ordering failure, repository trust, a
+        # timeout, or a model command failure blocked the model-assisted
+        # answer. Diagnostics never loosen PASS.
+        **failure_diagnostics,
         "targeted_tests_ok": tests_ok,
         "read_only": True,
         "mutation_performed": False,
     }
+    # PR291 fix — deterministic test-selection reporting: surface the resolved
+    # explicit file list (or the precise selection error). A saved output that
+    # shows pytest's exit-4 signature for a literal unexpanded wildcard is
+    # classified as a selection error so the lane sees WHY the targeted run
+    # never executed (targeted_tests_ok stays honest either way).
+    if targeted_selection is None and _looks_like_unexpanded_wildcard_failure(
+        targeted_tests_output
+    ):
+        targeted_selection = {
+            "targeted_test_selection_error": (
+                "literal wildcard passed unexpanded to pytest (no shell glob "
+                "expansion); resolve explicit files with "
+                "resolve_targeted_test_files/--run-targeted-tests instead"
+            )
+        }
+    if targeted_selection is not None:
+        for key in (
+            "targeted_test_files_resolved",
+            "targeted_test_file_count",
+            "targeted_pytest_exit_code",
+            "targeted_test_selection_error",
+        ):
+            if key in targeted_selection:
+                summary[key] = targeted_selection[key]
     required = (
         summary["codex_login_checked"]
         and summary["codex_logged_in"]
@@ -467,6 +579,7 @@ def build_summary(
         and summary["evidence_collected"]
         and summary["evidence_context_contains_process_service"]
         and summary["model_assisted_answer_ran"]
+        and summary["model_response_captured"]
         and summary["answer_uses_process_or_service_evidence"]
         and summary["targeted_tests_ok"]
         and not summary["bad_preamble_detected"]
@@ -491,6 +604,81 @@ def _default_runner(argv: list[str], env: dict[str, str]) -> CommandResult:
     return CommandResult(exit_code=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
+def resolve_targeted_test_files(tests_dir: Path | None = None) -> list[str]:
+    """Deterministic, shell-free resolution of the targeted Windows test set.
+
+    Expands ``test_pr291_*.py`` with :meth:`pathlib.Path.glob` and adds the
+    explicit provider-compatibility file, returning a sorted list of explicit
+    file paths so no wildcard ever reaches pytest through a no-shell process
+    launcher.
+    """
+    base = tests_dir if tests_dir is not None else REPO_ROOT / "tests"
+    resolved: set[Path] = set()
+    for pattern in TARGETED_TEST_GLOBS:
+        resolved.update(path for path in base.glob(pattern) if path.is_file())
+    for name in TARGETED_TEST_EXPLICIT_FILES:
+        candidate = base / name
+        if candidate.is_file():
+            resolved.add(candidate)
+    return sorted(str(path) for path in resolved)
+
+
+def _bounded_test_output_excerpt(output: str) -> str:
+    """Bounded, ANSI/control-sanitized tail of the targeted pytest output."""
+    plain = _ANSI_RE.sub("", output or "")
+    cleaned = "".join(ch if ch == "\n" or ch.isprintable() else " " for ch in plain)
+    return cleaned[-TARGETED_TEST_OUTPUT_EXCERPT_MAX_CHARS:]
+
+
+def run_targeted_tests(
+    tests_dir: Path | None = None,
+    *,
+    runner: Runner | None = None,
+    base_env: Mapping[str, str] | None = None,
+    python_executable: str | None = None,
+) -> dict[str, Any]:
+    """Run the resolved targeted set with explicit file paths (no shell).
+
+    An empty resolution is a clear selection error: pytest is never launched
+    and ``targeted_tests_ok`` is never reported true. ``targeted_tests_ok``
+    stays exit-code-first with completion evidence, so it can never be false
+    merely because a literal wildcard was passed unexpanded — wildcards are
+    expanded here, in Python, before pytest starts.
+    """
+    files = resolve_targeted_test_files(tests_dir)
+    result: dict[str, Any] = {
+        "targeted_test_files_resolved": files,
+        "targeted_test_file_count": len(files),
+        "targeted_pytest_exit_code": None,
+        "targeted_tests_ok": False,
+        "targeted_test_selection_error": None,
+        "targeted_pytest_output_excerpt": "",
+    }
+    if not files:
+        result["targeted_test_selection_error"] = (
+            "no targeted test files resolved (expected test_pr291_*.py and "
+            "test_codex_provider.py under the tests directory)"
+        )
+        return result
+    runner = runner or _default_runner
+    env = dict(os.environ if base_env is None else base_env)
+    argv = [python_executable or sys.executable, "-m", "pytest", "-q", *files]
+    run = runner(argv, env)
+    output = f"{run.stdout}\n{run.stderr}"
+    result["targeted_pytest_exit_code"] = run.exit_code
+    result["targeted_tests_ok"] = targeted_tests_ok(run.exit_code, output)
+    result["targeted_pytest_output_excerpt"] = _bounded_test_output_excerpt(output)
+    return result
+
+
+def _looks_like_unexpanded_wildcard_failure(output: str | None) -> bool:
+    """Detect pytest's exit-4 signature for a literal unexpanded wildcard."""
+    if not output:
+        return False
+    low = output.lower()
+    return "file or directory not found" in low and "*" in output
+
+
 def run_authenticated_acceptance(
     *,
     codex_binary: str,
@@ -503,6 +691,7 @@ def run_authenticated_acceptance(
     targeted_tests_exit_code: int | None = None,
     targeted_tests_output: str | None = None,
     base_env: Mapping[str, str] | None = None,
+    targeted_selection: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Live orchestration: login proof FIRST, then the model-assisted answer.
 
@@ -519,10 +708,12 @@ def run_authenticated_acceptance(
     packet: dict[str, Any] | None = None
     answer: str | None = None
     ran = False
+    ask_exit_code: int | None = None
     if logged_in:
         packet = packet_builder()
         ask = ask_runner([sfai_binary, "ask", prompt], env)
         answer = ask.stdout
+        ask_exit_code = ask.exit_code
         ran = ask.exit_code == 0
     return build_summary(
         codex_login_checked=True,
@@ -534,6 +725,8 @@ def run_authenticated_acceptance(
         model_assisted_answer_ran=ran,
         targeted_tests_exit_code=targeted_tests_exit_code,
         targeted_tests_output=targeted_tests_output,
+        ask_exit_code=ask_exit_code,
+        targeted_selection=targeted_selection,
     )
 
 
@@ -577,11 +770,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--targeted-tests-exit-code", type=int, default=None)
     parser.add_argument("--targeted-tests-output", type=Path, default=None)
+    parser.add_argument(
+        "--tests-dir",
+        type=Path,
+        default=None,
+        help="Tests directory for deterministic targeted-test resolution.",
+    )
+    parser.add_argument(
+        "--print-targeted-tests",
+        action="store_true",
+        help=(
+            "Print the deterministically resolved targeted test files (one "
+            "per line) and exit; exit 4 when none resolve. No shell glob "
+            "expansion is ever required."
+        ),
+    )
+    parser.add_argument(
+        "--run-targeted-tests",
+        action="store_true",
+        help=(
+            "Resolve the targeted test files in Python and run pytest with "
+            "explicit file paths (argv list, no shell); overrides "
+            "--targeted-tests-exit-code/--targeted-tests-output."
+        ),
+    )
     parser.add_argument("--json", action="store_true", dest="emit_json")
     parser.add_argument("--markdown", action="store_true")
     parser.add_argument("--out-json", type=Path)
     parser.add_argument("--out-markdown", type=Path)
     args = parser.parse_args(argv)
+    if args.print_targeted_tests:
+        return args
     if not (args.emit_json or args.markdown or args.out_json or args.out_markdown):
         parser.error(
             "select at least one output mode: --json, --markdown, --out-json, or --out-markdown"
@@ -595,14 +814,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_result(args: argparse.Namespace) -> dict[str, Any]:
     targeted_output = _read_text(args.targeted_tests_output)
+    targeted_exit_code = args.targeted_tests_exit_code
+    targeted_selection: dict[str, Any] | None = None
+    if getattr(args, "run_targeted_tests", False):
+        # PR291 fix — deterministic selection + explicit file paths; the
+        # resolved list and any selection error are reported in the summary.
+        targeted_selection = run_targeted_tests(args.tests_dir)
+        targeted_exit_code = targeted_selection["targeted_pytest_exit_code"]
+        targeted_output = targeted_selection["targeted_pytest_output_excerpt"]
     if args.live:
         summary = run_authenticated_acceptance(
             codex_binary=args.codex_binary,
             sfai_binary=args.sfai_binary,
             prompt=args.prompt,
             codex_home=args.codex_home,
-            targeted_tests_exit_code=args.targeted_tests_exit_code,
+            targeted_tests_exit_code=targeted_exit_code,
             targeted_tests_output=targeted_output,
+            targeted_selection=targeted_selection,
         )
     else:
         login_stdout = _read_text(args.login_status_stdout) or ""
@@ -626,8 +854,9 @@ def build_result(args: argparse.Namespace) -> dict[str, Any]:
             packet=packet,
             answer=answer,
             model_assisted_answer_ran=bool(answer) and logged_in,
-            targeted_tests_exit_code=args.targeted_tests_exit_code,
+            targeted_tests_exit_code=targeted_exit_code,
             targeted_tests_output=targeted_output,
+            targeted_selection=targeted_selection,
         )
     return {
         "schema_version": 1,
@@ -670,6 +899,17 @@ def render_markdown(result: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.print_targeted_tests:
+        files = resolve_targeted_test_files(args.tests_dir)
+        for path in files:
+            print(path)
+        if not files:
+            print(
+                "targeted_test_selection_error: no targeted test files resolved",
+                file=sys.stderr,
+            )
+            return 4
+        return 0
     result = build_result(args)
     payload = json.dumps(result, indent=2, sort_keys=True)
     if args.emit_json:

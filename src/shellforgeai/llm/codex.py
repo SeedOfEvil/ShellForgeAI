@@ -52,6 +52,38 @@ def _codex_home_configured() -> bool:
 # Codex exec reads the prompt from stdin when the prompt argument is "-".
 CODEX_STDIN_PROMPT_ARG = "-"
 
+# Bounded stderr excerpt kept in provider diagnostics and validation artifacts.
+CODEX_STDERR_EXCERPT_MAX_CHARS = 400
+
+# Codex CLI phrases that identify the repository/git trust gate. Staged
+# Windows QGA/SYSTEM source directories (C:\Tools\ShellForgeAI\src\...) are
+# not trusted git repositories, so Codex refuses to exec from them unless
+# --skip-git-repo-check is supplied.
+CODEX_REPO_TRUST_MARKERS = (
+    "not inside a trusted directory",
+    "--skip-git-repo-check was not specified",
+)
+
+
+def _sanitize_stderr_excerpt(text: str, limit: int = CODEX_STDERR_EXCERPT_MAX_CHARS) -> str:
+    """Bounded, sanitized stderr/failure excerpt for diagnostics artifacts.
+
+    Token-like lines are redacted, control characters are replaced with
+    spaces, blank lines are dropped, and the result is capped so validation
+    artifacts never carry unbounded, token-bearing, or unprintable output.
+    """
+    if not text:
+        return ""
+    redacted = _redact(str(text))
+    cleaned = "".join(ch if ch == "\n" or ch.isprintable() else " " for ch in redacted)
+    compact = "\n".join(ln.strip() for ln in cleaned.splitlines() if ln.strip())
+    return compact[:limit]
+
+
+def _is_repo_trust_failure(text: str) -> bool:
+    low = (text or "").lower()
+    return any(marker in low for marker in CODEX_REPO_TRUST_MARKERS)
+
 
 def _prompt_via_stdin() -> bool:
     """Send the prompt over stdin instead of argv on Windows.
@@ -64,6 +96,22 @@ def _prompt_via_stdin() -> bool:
     ``codex login status`` work. Piping the prompt over stdin (with the
     documented ``-`` prompt argument) keeps the command line tiny and
     byte-exact. POSIX invocation is unchanged.
+    """
+    return os.name == "nt"
+
+
+def _windows_codex_lane() -> bool:
+    """True when product Codex execution runs on a Windows host.
+
+    Windows model assessments (model doctor live probe, ask, interactive,
+    authenticated acceptance) execute from staged QGA/SYSTEM source
+    directories such as ``C:\\Tools\\ShellForgeAI\\src\\ShellForgeAI-pr<PR>-<head>``
+    that Codex never treats as trusted git repositories. The scoped
+    repository-trust bypass applies only here (command construction itself is
+    identical on every platform; only the stdin prompt transport differs).
+    This bypasses ONLY Codex's repository/git trust gate — the mandatory
+    ``read-only`` sandbox, ``--ask-for-approval never``, and every
+    ShellForgeAI mutation/execution boundary stay intact.
     """
     return os.name == "nt"
 
@@ -81,10 +129,14 @@ class CodexProvider:
         timeout_seconds: int = 180,
         sandbox: str = "read-only",
         use_json: bool = True,
-        skip_git_repo_check: bool = True,
+        skip_git_repo_check: bool = False,
         allow_fallback: bool = True,
         approval: str = "never",
     ) -> None:
+        # skip_git_repo_check is the one centralized trust-bypass option: it
+        # defaults to False and is enabled explicitly by configuration
+        # (``model.codex_skip_git_repo_check`` via ``build_provider``) or by
+        # the scoped Windows Codex lane (see ``skip_git_repo_check_used``).
         self.binary = binary
         self.default_model = default_model
         self.fallback_model = fallback_model
@@ -95,6 +147,17 @@ class CodexProvider:
         self.allow_fallback = allow_fallback
         self.approval = approval
         self._resolved_binary: str | None = None
+
+    def skip_git_repo_check_used(self) -> bool:
+        """Effective scoped repository-trust-bypass state for exec invocations.
+
+        False by default; enabled explicitly via configuration
+        (``codex_skip_git_repo_check``) or by the scoped Windows Codex lane,
+        where staged QGA/SYSTEM source directories are never trusted git
+        repositories. This bypasses ONLY Codex's repository/git trust gate;
+        the ``read-only`` sandbox and approval boundaries are unchanged.
+        """
+        return bool(self.skip_git_repo_check or _windows_codex_lane())
 
     def _has_path_separator(self) -> bool:
         return any(sep in self.binary for sep in {"/", "\\", os.sep, os.altsep} if sep)
@@ -249,6 +312,8 @@ class CodexProvider:
             "safe_next_command": "shellforgeai model doctor --json",
             "auth_next_step": "codex login --device-auth",
             "sandbox": self.sandbox,
+            "sandbox_mode": self.sandbox,
+            "skip_git_repo_check_used": self.skip_git_repo_check_used(),
             "approval": self.approval,
             "timeout_seconds": str(self.timeout_seconds),
             "fallback_enabled": self.allow_fallback,
@@ -271,28 +336,62 @@ class CodexProvider:
             except Exception:
                 continue
 
-    def _build_cmd(self, prompt: str, model: str, last_message_path: Path | None) -> list[str]:
-        """Build a codex-cli 0.130.0 invocation.
+    def _global_options(self, model: str) -> list[str]:
+        """Global Codex options — they MUST precede the ``exec`` subcommand.
 
-        Shape: ``codex [GLOBAL OPTIONS] exec [EXEC OPTIONS] [PROMPT]``.
-        Global options must precede ``exec``; ``--ask-for-approval`` and
-        ``--sandbox`` are global.
+        ``--model``, ``--sandbox``, and ``--ask-for-approval`` are global
+        Codex CLI options: the installed CLIs (codex 0.130.0 on Linux/Docker,
+        codex 0.137.0 on the Windows QA lane) reject them after ``exec``
+        (``error: unexpected argument '--ask-for-approval' found``).
+        """
+        opts: list[str] = []
+        if model:
+            opts.extend(["--model", model])
+        opts.extend(["--sandbox", self.sandbox, "--ask-for-approval", self.approval])
+        return opts
+
+    def _exec_options(self, last_message_path: Path | None) -> list[str]:
+        """Exec-scoped Codex options — they follow the ``exec`` subcommand.
+
+        ``--skip-git-repo-check`` (the scoped repository-trust bypass),
+        ``--json``, and ``--output-last-message`` (deterministic final
+        model-response capture) are ``codex exec`` options.
+        """
+        opts: list[str] = []
+        if self.skip_git_repo_check_used():
+            opts.append("--skip-git-repo-check")
+        if self.use_json:
+            opts.append("--json")
+        if last_message_path is not None:
+            opts.extend(["--output-last-message", str(last_message_path)])
+        return opts
+
+    def _build_cmd(self, prompt: str, model: str, last_message_path: Path | None) -> list[str]:
+        """Build the one canonical codex-cli invocation for every platform.
+
+        Sections, in order: executable, global options, the ``exec``
+        subcommand, exec-scoped options, prompt (or the ``-`` stdin target on
+        Windows). Verified against codex 0.130.0 (Linux/Docker) and codex
+        0.137.0 (Windows QA lane):
+
+        ``codex --model <model> --sandbox read-only --ask-for-approval never
+        exec --skip-git-repo-check [--json] [--output-last-message <path>]
+        <prompt|->``
+
+        Global options never appear after ``exec``. The read-only sandbox and
+        ``--ask-for-approval never`` are always present; the trust bypass is
+        exec-scoped and never weakens either.
         """
         resolved = self._resolve_binary()
         if resolved is None:
             raise FileNotFoundError(self._provider_unavailable_error("codex executable not found"))
-        cmd = [resolved, "--sandbox", self.sandbox, "--ask-for-approval", self.approval]
-        if model:
-            cmd.extend(["-m", model])
-        cmd.append("exec")
-        if self.skip_git_repo_check:
-            cmd.append("--skip-git-repo-check")
-        if self.use_json:
-            cmd.append("--json")
-        if last_message_path is not None:
-            cmd.extend(["--output-last-message", str(last_message_path)])
-        cmd.append(prompt)
-        return cmd
+        return [
+            resolved,
+            *self._global_options(model),
+            "exec",
+            *self._exec_options(last_message_path),
+            prompt,
+        ]
 
     @staticmethod
     def _stop_timed_out_process(proc: subprocess.Popen) -> None:
@@ -309,6 +408,16 @@ class CodexProvider:
                 with contextlib.suppress(Exception):
                     proc.send_signal(ctrl_break)
         proc.terminate()
+
+    @staticmethod
+    def _read_last_message(last_msg_path: Path) -> str | None:
+        """Bounded read of the deterministic capture file (None when absent)."""
+        try:
+            if last_msg_path.exists():
+                return last_msg_path.read_text(errors="ignore")[:65536].strip()
+        except OSError:
+            return None
+        return None
 
     def _run(
         self, prompt: str, model: str, timeout: int
@@ -351,19 +460,98 @@ class CodexProvider:
                             out, err = proc.communicate(timeout=2)
                         except subprocess.TimeoutExpired:
                             out, err = "", ""
-                    raise subprocess.TimeoutExpired(
+                    timeout_exc = subprocess.TimeoutExpired(
                         cmd=cmd, timeout=timeout, output=out, stderr=err
-                    ) from exc
+                    )
+                    # PR291 fix — inspect the deterministic capture BEFORE the
+                    # temp directory is cleaned up, so a timeout can still
+                    # report whether the final-response file was produced.
+                    # This never converts the timeout into success; it only
+                    # makes the failure explainable (output captured but
+                    # process timed out vs no output at all).
+                    timeout_exc.output_last_message_path = str(last_msg_path)
+                    timeout_exc.output_file_created = last_msg_path.exists()
+                    timeout_exc.last_message = self._read_last_message(last_msg_path)
+                    timeout_exc.child_cleanup_performed = True
+                    timeout_exc.prompt_via_stdin = prompt_via_stdin
+                    raise timeout_exc from exc
             finally:
                 with self._active_lock:
                     self._active_procs.discard(proc)
-            last_message: str | None = None
-            try:
-                if last_msg_path.exists():
-                    last_message = last_msg_path.read_text(errors="ignore")[:65536].strip()
-            except OSError:
-                last_message = None
+            last_message = self._read_last_message(last_msg_path)
             return proc.returncode, out, err, last_message, cmd
+
+    def _exec_diagnostics(
+        self,
+        *,
+        attempted: bool,
+        exit_code: int | None = None,
+        timed_out: bool = False,
+        error_class: str | None = None,
+        error_message: str | None = None,
+        stderr: str = "",
+        resolved: str | None = None,
+        command_built: bool = False,
+        command_started: bool = False,
+        last_message: str | None = None,
+        response_text: str = "",
+        process_completed: bool = False,
+        child_cleanup_performed: bool = False,
+        output_path: str | None = None,
+        output_file_created: bool | None = None,
+        stdin_prompt_sent: bool = False,
+        stdin_closed: bool = False,
+    ) -> dict[str, object]:
+        """Bounded, sanitized Codex invocation diagnostics.
+
+        Attached to every ``ModelResponse.metadata`` so provider results and
+        validation artifacts can distinguish CLI argument-ordering failures,
+        repository trust failures, timeouts, binary resolution failures,
+        missing/empty deterministic output capture, model command failures,
+        and authentication readiness failures — without ever reading
+        auth-cache contents or recording the process environment. Command
+        start success, process completion, and model-response capture are
+        tracked separately: ``codex_command_started`` means the child
+        launched; ``codex_process_completed`` means it finished inside the
+        bounded timeout; ``model_response_captured`` means the
+        ``--output-last-message`` file held a non-empty final response (read
+        only after the process ended or was cleaned up). Output captured
+        while the process still timed out stays a failure — the capture flag
+        only makes the failure explainable, never a PASS.
+        """
+        captured = bool(last_message is not None and last_message.strip())
+        return {
+            "codex_command_built": bool(command_built),
+            "codex_command_started": bool(command_started),
+            "codex_exec_attempted": bool(attempted),
+            "model_call_attempted": bool(attempted),
+            "codex_exec_exit_code": exit_code,
+            "codex_exec_timed_out": bool(timed_out),
+            "codex_process_completed": bool(process_completed),
+            "codex_child_cleanup_performed": bool(child_cleanup_performed),
+            "codex_exec_error_class": error_class,
+            "codex_exec_error_message": (
+                _sanitize_stderr_excerpt(error_message, 240) or None if error_message else None
+            ),
+            "codex_exec_stderr_excerpt": _sanitize_stderr_excerpt(stderr),
+            "output_last_message_requested": bool(command_built),
+            "output_last_message_path": output_path,
+            "output_file_created": (
+                bool(output_file_created)
+                if output_file_created is not None
+                else last_message is not None
+            ),
+            "model_response_captured": captured,
+            "model_response_nonempty": bool((response_text or "").strip()),
+            "model_response_excerpt": _sanitize_stderr_excerpt(response_text or "", 240),
+            "stdin_prompt_sent": bool(stdin_prompt_sent),
+            "stdin_closed": bool(stdin_closed),
+            "codex_binary": self.binary,
+            "codex_resolved_binary": resolved or "",
+            "sandbox_mode": self.sandbox,
+            "approval_policy": self.approval,
+            "skip_git_repo_check_used": self.skip_git_repo_check_used(),
+        }
 
     def stream_complete(self, request: ModelRequest):
         response = self.complete(request)
@@ -373,6 +561,17 @@ class CodexProvider:
 
     def _classify_error(self, rc: int, err: str, out: str = "") -> str:
         failure = classify_model_failure(stdout=out, stderr=err, returncode=rc)
+        if failure["category"] == "cli_argument_order":
+            return (
+                "codex CLI argument error: global options "
+                "(--model/--sandbox/--ask-for-approval) must precede the exec subcommand"
+            )
+        if failure["category"] == "repository_trust":
+            return (
+                "codex repository trust check blocked execution: the working "
+                "directory is not a trusted git repository "
+                "(scoped --skip-git-repo-check bypass not applied)"
+            )
         if failure["category"] == "auth":
             return (
                 "codex auth failed; run: codex login --device-auth"
@@ -399,44 +598,82 @@ class CodexProvider:
         warnings: list[str] = []
         resolved = self._resolve_binary()
         if resolved is None:
+            unavailable_error = self._provider_unavailable_error(
+                "codex executable not found", resolved
+            )
             return ModelResponse(
                 provider=self.name,
                 model=request.model,
                 text="",
                 ok=False,
-                error=self._provider_unavailable_error("codex executable not found", resolved),
+                error=unavailable_error,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 raw={"stderr": ""},
+                metadata=self._exec_diagnostics(
+                    attempted=False,
+                    error_class="binary_resolution",
+                    error_message=unavailable_error,
+                    resolved=resolved,
+                ),
             )
         try:
             rc, out, err, last_message, cmd = self._run(
                 request.prompt, request.model or self.default_model, request.timeout_seconds
             )
         except (FileNotFoundError, OSError) as exc:
+            unavailable_error = self._provider_unavailable_error(exc.__class__.__name__, resolved)
             return ModelResponse(
                 provider=self.name,
                 model=request.model,
                 text="",
                 ok=False,
-                error=self._provider_unavailable_error(exc.__class__.__name__, resolved),
+                error=unavailable_error,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 raw={"stderr": ""},
+                metadata=self._exec_diagnostics(
+                    attempted=True,
+                    error_class="binary_resolution",
+                    error_message=unavailable_error,
+                    resolved=resolved,
+                    command_built=True,
+                ),
             )
         except subprocess.TimeoutExpired as exc:
+            timeout_error = (
+                f"codex timed out after {request.timeout_seconds}s "
+                "(bounded timeout; no indefinite wait)"
+            )
             return ModelResponse(
                 provider=self.name,
                 model=request.model,
                 text="",
                 ok=False,
-                error=(
-                    f"codex timed out after {request.timeout_seconds}s "
-                    "(bounded timeout; no indefinite wait)"
-                ),
+                error=timeout_error,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 raw={
                     "stderr": _redact(str(exc.stderr or "")),
                     "stdout": _redact(str(exc.output or "")),
                 },
+                metadata=self._exec_diagnostics(
+                    attempted=True,
+                    timed_out=True,
+                    error_class="timeout",
+                    error_message=timeout_error,
+                    stderr=str(exc.stderr or ""),
+                    resolved=resolved,
+                    command_built=True,
+                    command_started=True,
+                    process_completed=False,
+                    child_cleanup_performed=bool(getattr(exc, "child_cleanup_performed", True)),
+                    output_path=getattr(exc, "output_last_message_path", None),
+                    output_file_created=bool(getattr(exc, "output_file_created", False)),
+                    # A capture produced before the timeout is reported
+                    # honestly, but the invocation stays a bounded failure.
+                    last_message=getattr(exc, "last_message", None),
+                    response_text=getattr(exc, "last_message", None) or "",
+                    stdin_prompt_sent=bool(getattr(exc, "prompt_via_stdin", _prompt_via_stdin())),
+                    stdin_closed=True,
+                ),
             )
 
         model_used = request.model or self.default_model
@@ -452,14 +689,24 @@ class CodexProvider:
                     request.prompt, self.fallback_model, request.timeout_seconds
                 )
             except (FileNotFoundError, OSError) as exc:
+                unavailable_error = self._provider_unavailable_error(
+                    exc.__class__.__name__, resolved
+                )
                 return ModelResponse(
                     provider=self.name,
                     model=request.model,
                     text="",
                     ok=False,
-                    error=self._provider_unavailable_error(exc.__class__.__name__, resolved),
+                    error=unavailable_error,
                     duration_ms=int((time.monotonic() - started) * 1000),
                     raw={"stderr": ""},
+                    metadata=self._exec_diagnostics(
+                        attempted=True,
+                        error_class="binary_resolution",
+                        error_message=unavailable_error,
+                        resolved=resolved,
+                        command_built=True,
+                    ),
                 )
             model_used = self.fallback_model
             warnings.append(
@@ -488,12 +735,54 @@ class CodexProvider:
         if not text:
             text = (out or err).strip()
 
+        error_class: str | None = None
         if rc == 0 and not text:
-            error: str | None = "codex returned no final response"
+            # Process start/exit success is NOT model-response success: the
+            # deterministic --output-last-message capture must hold a
+            # non-empty final response. Classify the two gaps explicitly.
+            if last_message is None:
+                error: str | None = (
+                    "codex returned no final response (--output-last-message file was not created)"
+                )
+                error_class = "output_capture_missing"
+            else:
+                error = "codex returned no final response (empty final message output)"
+                error_class = "empty_response"
             ok = False
         else:
             error = None if rc == 0 else self._classify_error(rc, err, out)
             ok = rc == 0
+            if not ok:
+                error_class = str(
+                    classify_model_failure(stdout=out, stderr=err, returncode=rc)["category"]
+                )
+        output_path: str | None = None
+        if "--output-last-message" in cmd:
+            path_index = cmd.index("--output-last-message") + 1
+            if path_index < len(cmd):
+                output_path = cmd[path_index]
+        response_metadata: dict[str, object] = {
+            **self._exec_diagnostics(
+                attempted=True,
+                exit_code=rc,
+                error_class=error_class,
+                error_message=error,
+                stderr=err,
+                resolved=resolved,
+                command_built=True,
+                command_started=True,
+                last_message=last_message,
+                # The response fields describe the model answer, never
+                # error/stderr text that `text` may fall back to on failure.
+                response_text=text if ok else "",
+                process_completed=True,
+                output_path=output_path,
+                output_file_created=last_message is not None,
+                stdin_prompt_sent=_prompt_via_stdin(),
+                stdin_closed=True,
+            ),
+            **metadata,
+        }
 
         return ModelResponse(
             provider=self.name,
@@ -509,7 +798,7 @@ class CodexProvider:
             duration_ms=int((time.monotonic() - started) * 1000),
             usage=usage,
             warnings=warnings,
-            metadata=metadata,
+            metadata=response_metadata,
         )
 
 
@@ -538,6 +827,42 @@ def classify_model_failure(
         event_blob += f"\n{ev.get('type', '')} {ev.get('message', '')}"
     if not reason and event_blob:
         reason = _auth_reason_blob(event_blob)
+    if "unexpected argument" in blob.lower() or "unexpected argument" in event_blob.lower():
+        # The Codex CLI rejected the command line before running anything —
+        # typically a global option (--model/--sandbox/--ask-for-approval)
+        # placed after the exec subcommand. Never a model or auth failure.
+        return {
+            "status": "unavailable",
+            "category": "cli_argument_order",
+            "reason": "cli_argument_order",
+            "user_message": (
+                "Model-assisted assessment unavailable: Codex CLI rejected the "
+                "command arguments (global options must precede exec)."
+            ),
+            "next_step": (
+                "Keep --model/--sandbox/--ask-for-approval before the exec "
+                "subcommand; only exec-scoped options follow it."
+            ),
+            "raw_suppressed": True,
+        }
+    if _is_repo_trust_failure(blob) or _is_repo_trust_failure(event_blob):
+        # Codex's repository/git trust gate is not an authentication failure:
+        # the staged source directory is not a trusted git repository. Keep
+        # this class precise so operators are not sent to `codex login`.
+        return {
+            "status": "unavailable",
+            "category": "repository_trust",
+            "reason": "repository_trust",
+            "user_message": (
+                "Model-assisted assessment unavailable: Codex repository trust "
+                "check blocked execution from this directory."
+            ),
+            "next_step": (
+                "Enable the scoped Codex --skip-git-repo-check bypass "
+                "(codex_skip_git_repo_check) for staged source directories."
+            ),
+            "raw_suppressed": True,
+        }
     if returncode == 124 or "timed out" in blob.lower():
         return {
             "status": "unavailable",

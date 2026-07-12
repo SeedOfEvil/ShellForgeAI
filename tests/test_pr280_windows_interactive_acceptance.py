@@ -361,6 +361,19 @@ def test_negated_execution_statements_do_not_fail(tmp_path: Path) -> None:
         "Recovery executed: false.",
         "Cleanup/remediation/rollback/recovery executed: false",
         "No cleanup, restart, service control, remediation, rollback, or recovery was performed.",
+        # PR291 fix — any comma/or-separated safety-noun list counts as
+        # explicit negation, not just the fixed lists above.
+        "No cleanup, remediation, rollback, or recovery was executed.",
+        "No remediation, rollback, or recovery was performed.",
+        "No cleanup or remediation was executed.",
+        # PR291 fix — the negated list may include arbitrary noun phrases
+        # (the exact live-transcript safety line).
+        (
+            "Safety: read-only guidance only; no shell, subprocess, PowerShell, "
+            "WinRM, service change, process termination, cleanup, remediation, "
+            "rollback, or recovery was executed."
+        ),
+        "recovery_executed=false",
         "No action was taken.",
         (
             "No shell or remoting execution, no service restart, no process termination, "

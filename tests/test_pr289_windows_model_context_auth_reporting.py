@@ -741,7 +741,11 @@ def test_probe_timeout_is_realistic_but_still_bounded() -> None:
     assert 30 <= MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS <= 120
 
 
-def test_live_probe_timeout_reports_failed_and_never_passes(monkeypatch: Any) -> None:
+def test_live_probe_timeout_warns_but_keeps_proven_auth_and_never_passes(monkeypatch: Any) -> None:
+    # PR291 fix — a bounded model-response timeout is a live-probe outcome,
+    # not an auth failure: with login already proven, auth readiness stays
+    # verified while the doctor warns and the probe reports the explicit
+    # model_probe_timeout class. It still never passes.
     import shellforgeai.cli as cli_mod
 
     class _TimeoutProbeProvider(_DoctorOnlyProvider):
@@ -769,9 +773,14 @@ def test_live_probe_timeout_reports_failed_and_never_passes(monkeypatch: Any) ->
     payload = _json.loads(res.stdout)
     assert len(provider.complete_calls) == 1
     assert payload["ok"] is False
-    assert payload["auth_readiness"] == "failed"
+    assert payload["status"] == "warning"
+    assert payload["auth_readiness"] == "verified_login_status"
+    assert payload["login_status_ok"] is True
+    assert payload["live_probe_timed_out"] is True
+    assert payload["live_probe_error_class"] == "model_probe_timeout"
+    assert payload["model_response_captured"] is False
     assert payload["probe"]["status"] == "failed"
-    assert payload["probe"]["error_class"] == "timeout"
+    assert payload["probe"]["error_class"] == "model_probe_timeout"
     assert "timed out" in payload["probe"]["error_message"]
     assert payload["model_called"] is True  # the attempt is represented honestly
 

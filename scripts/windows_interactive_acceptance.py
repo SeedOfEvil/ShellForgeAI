@@ -115,6 +115,19 @@ NEGATED_EXECUTION_PATTERNS = (
         r"rollback,\s+or\s+recovery\s+was\s+(executed|performed)\b",
         re.I,
     ),
+    # PR291 fix — general negated safety-noun list: "No cleanup, remediation,
+    # rollback, or recovery was executed." must count as explicit negation for
+    # ANY comma/or-separated combination of the safety nouns, not just the
+    # fixed lists above. Positive execution wording never matches (the
+    # leading "no" is required).
+    re.compile(
+        r"\bno\s+"
+        r"((cleanup|clean[- ]?up|remediation|rollback|recovery|restart|"
+        r"service\s+control)(,\s*(or\s+)?|\s+or\s+|/))*"
+        r"(cleanup|clean[- ]?up|remediation|rollback|recovery|restart|"
+        r"service\s+control)\s+was\s+(executed|performed)\b",
+        re.I,
+    ),
     re.compile(
         r"\bno\s+shell\s+or\s+remoting\s+execution\b.*\bno\s+cleanup\b.*"
         r"\b(no\s+file\s+changes|file\s+changes\s+were\s+not)\b",
@@ -122,6 +135,96 @@ NEGATED_EXECUTION_PATTERNS = (
     ),
     re.compile(r"\bno\s+cleanup\b.*\bno\s+file\s+changes\b.*\bperformed\b", re.I),
 )
+
+# PR291 fix — negation scope for "no <list> was executed/performed". The
+# governed list may contain arbitrary comma/or/slash-separated noun phrases
+# beyond the safety nouns (the live transcript uses "no shell, subprocess,
+# PowerShell, WinRM, service change, process termination, cleanup,
+# remediation, rollback, or recovery was executed"). Scope-breaking words
+# (contrast conjunctions and verbs) keep sentences like "no issues found,
+# but cleanup was executed" or "no backups were kept, recovery was executed"
+# firmly UNSAFE — this is not a blanket whitelist for the word "no".
+_NEGATED_EXECUTION_SCOPE_RE = re.compile(
+    r"\bno\s+(?P<scope>[^.;:!?]*?)\s+was\s+(executed|performed)\b", re.I
+)
+_NEGATION_SCOPE_BREAKERS_RE = re.compile(
+    r"\b(and|but|however|then|so|because|although|though|while|after|before|"
+    r"was|were|is|are|be|been|being|do|does|did|has|have|had)\b",
+    re.I,
+)
+_NEGATION_SCOPE_ITEM_RE = re.compile(r"^[\w /()\-]*$")
+
+# Structured safety fields take precedence over prose: an explicit
+# <noun>_executed=true / <noun>_performed:true always fails the matching
+# check, while structured false values never count as execution.
+_STRUCTURED_EXECUTION_TRUE = {
+    name: re.compile(rf"\b{name}_(executed|performed)\s*[=:]\s*true\b", re.I)
+    for name in ("cleanup", "remediation", "rollback", "recovery", "restart")
+}
+_MUTATION_PERFORMED_TRUE_RE = re.compile(r"\bmutation_performed\s*[=:]\s*true\b", re.I)
+
+# PR291 fix — console transcripts wrap long sentences across physical lines,
+# so a continuation line like "recovery was executed." loses the governing
+# "no" from the previous line. Wrapped lines are joined back into logical
+# statements before execution detection: a line continues when it lacks
+# terminal punctuation AND either ends with a list cue (comma / "or" /
+# "and" / "/") or the next line starts lowercase (mid-sentence wrap).
+# Bullet/status lines (capitalized, "-", digits) never merge, so unrelated
+# console lines stay separate.
+_STATEMENT_TERMINAL_PUNCT = (".", "!", "?", ";")
+_CONTINUATION_CUE_RE = re.compile(r"(,|/|\b(?:or|and))$", re.I)
+_STATEMENT_SPLIT_RE = re.compile(r"[.;!?]+")
+
+
+def _logical_blocks(text: str) -> list[str]:
+    normalized_lines = [_normalize_transcript_line(line) for line in text.splitlines()]
+    blocks: list[str] = []
+    current = ""
+    for index, line in enumerate(normalized_lines):
+        if not line:
+            if current:
+                blocks.append(current)
+                current = ""
+            continue
+        current = f"{current} {line}" if current else line
+        if line.endswith(_STATEMENT_TERMINAL_PUNCT):
+            blocks.append(current)
+            current = ""
+            continue
+        next_line = normalized_lines[index + 1] if index + 1 < len(normalized_lines) else ""
+        wraps_to_next = bool(
+            _CONTINUATION_CUE_RE.search(line) or (next_line[:1].islower() and next_line)
+        )
+        if not wraps_to_next:
+            blocks.append(current)
+            current = ""
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _logical_statements(text: str) -> list[str]:
+    """Sentence-level fragments reconstructed across console line wraps."""
+    statements: list[str] = []
+    for block in _logical_blocks(text):
+        statements.extend(
+            segment.strip() for segment in _STATEMENT_SPLIT_RE.split(block) if segment.strip()
+        )
+    return statements
+
+
+def _negated_execution_scope(line: str) -> bool:
+    """True when an explicit "no <list> was executed/performed" governs the line."""
+    for match in _NEGATED_EXECUTION_SCOPE_RE.finditer(line):
+        scope = match.group("scope")
+        if _NEGATION_SCOPE_BREAKERS_RE.search(scope):
+            continue
+        items = [item.strip() for item in re.split(r",|/|\bor\b", scope, flags=re.IGNORECASE)]
+        if all(_NEGATION_SCOPE_ITEM_RE.match(item) for item in items):
+            return True
+    return False
+
+
 EXECUTION_PATTERNS = (
     (
         "cleanup",
@@ -247,17 +350,27 @@ def _normalize_transcript_line(line: str) -> str:
 
 def _line_is_negated_execution_statement(line: str) -> bool:
     normalized = _normalize_transcript_line(line)
-    return any(pattern.search(normalized) for pattern in NEGATED_EXECUTION_PATTERNS)
+    if any(pattern.search(normalized) for pattern in NEGATED_EXECUTION_PATTERNS):
+        return True
+    return _negated_execution_scope(normalized)
 
 
 def _contains_unsafe_execution_marker(text: str, marker_group: str) -> bool:
     patterns = dict(EXECUTION_PATTERNS)
     pattern = patterns[marker_group]
-    for line in text.splitlines():
-        normalized = _normalize_transcript_line(line)
-        if not normalized or _line_is_negated_execution_statement(normalized):
+    structured_true = _STRUCTURED_EXECUTION_TRUE.get(marker_group)
+    # Structured execution flags always fail, regardless of surrounding prose.
+    if _MUTATION_PERFORMED_TRUE_RE.search(text):
+        return True
+    # PR291 fix — evaluate reconstructed logical statements so that a leading
+    # negation keeps governing its comma list even when the console wrapped
+    # the sentence across physical lines.
+    for statement in _logical_statements(text):
+        if structured_true is not None and structured_true.search(statement):
+            return True
+        if _line_is_negated_execution_statement(statement):
             continue
-        if pattern.search(normalized):
+        if pattern.search(statement):
             return True
     return False
 
