@@ -54,6 +54,8 @@ CODEX_STDIN_PROMPT_ARG = "-"
 
 # Bounded stderr excerpt kept in provider diagnostics and validation artifacts.
 CODEX_STDERR_EXCERPT_MAX_CHARS = 400
+CODEX_SUBPROCESS_ENCODING = "utf-8"
+CODEX_SUBPROCESS_ERRORS = "replace"
 
 # Codex CLI phrases that identify the repository/git trust gate. Staged
 # Windows QGA/SYSTEM source directories (C:\Tools\ShellForgeAI\src\...) are
@@ -204,6 +206,8 @@ class CodexProvider:
                 [resolved, "login", "status"],
                 capture_output=True,
                 text=True,
+                encoding=CODEX_SUBPROCESS_ENCODING,
+                errors=CODEX_SUBPROCESS_ERRORS,
                 timeout=timeout_seconds,
                 stdin=subprocess.DEVNULL,
             )
@@ -421,8 +425,8 @@ class CodexProvider:
         """Bounded read of the deterministic capture file (None when absent)."""
         try:
             if last_msg_path.exists():
-                return last_msg_path.read_text(errors="ignore")[:65536].strip()
-        except OSError:
+                return last_msg_path.read_text(encoding=CODEX_SUBPROCESS_ENCODING)[:65536].strip()
+        except (OSError, UnicodeError):
             return None
         return None
 
@@ -441,6 +445,8 @@ class CodexProvider:
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.PIPE,
                 "text": True,
+                "encoding": CODEX_SUBPROCESS_ENCODING,
+                "errors": CODEX_SUBPROCESS_ERRORS,
                 "start_new_session": True,
             }
             if os.name == "nt":
@@ -508,6 +514,8 @@ class CodexProvider:
         output_file_created: bool | None = None,
         stdin_prompt_sent: bool = False,
         stdin_closed: bool = False,
+        prompt_character_count: int | None = None,
+        prompt_utf8_byte_count: int | None = None,
     ) -> dict[str, object]:
         """Bounded, sanitized Codex invocation diagnostics.
 
@@ -553,6 +561,12 @@ class CodexProvider:
             "model_response_excerpt": _sanitize_stderr_excerpt(response_text or "", 240),
             "stdin_prompt_sent": bool(stdin_prompt_sent),
             "stdin_closed": bool(stdin_closed),
+            "stdin_encoding": CODEX_SUBPROCESS_ENCODING,
+            "stdout_encoding": CODEX_SUBPROCESS_ENCODING,
+            "stderr_encoding": CODEX_SUBPROCESS_ENCODING,
+            "output_file_encoding": CODEX_SUBPROCESS_ENCODING,
+            "prompt_character_count": prompt_character_count,
+            "prompt_utf8_byte_count": prompt_utf8_byte_count,
             "codex_binary": self.binary,
             "codex_resolved_binary": resolved or "",
             "sandbox_mode": self.sandbox,
@@ -579,6 +593,8 @@ class CodexProvider:
                 "directory is not a trusted git repository "
                 "(scoped --skip-git-repo-check bypass not applied)"
             )
+        if failure["category"] == "stdin_encoding":
+            return "codex rejected provider stdin as non-UTF-8 input"
         if failure["category"] == "auth":
             return (
                 "codex auth failed; run: codex login --device-auth"
@@ -680,6 +696,8 @@ class CodexProvider:
                     response_text=getattr(exc, "last_message", None) or "",
                     stdin_prompt_sent=bool(getattr(exc, "prompt_via_stdin", _prompt_via_stdin())),
                     stdin_closed=True,
+                    prompt_character_count=len(request.prompt),
+                    prompt_utf8_byte_count=len(request.prompt.encode(CODEX_SUBPROCESS_ENCODING)),
                 ),
             )
 
@@ -787,6 +805,8 @@ class CodexProvider:
                 output_file_created=last_message is not None,
                 stdin_prompt_sent=_prompt_via_stdin(),
                 stdin_closed=True,
+                prompt_character_count=len(request.prompt),
+                prompt_utf8_byte_count=len(request.prompt.encode(CODEX_SUBPROCESS_ENCODING)),
             ),
             **metadata,
         }
@@ -867,6 +887,25 @@ def classify_model_failure(
             "next_step": (
                 "Enable the scoped Codex --skip-git-repo-check bypass "
                 "(codex_skip_git_repo_check) for staged source directories."
+            ),
+            "raw_suppressed": True,
+        }
+    encoding_blob = "\n".join([blob, event_blob]).lower()
+    if (
+        "input is not valid utf-8" in encoding_blob
+        or "failed to read prompt from stdin" in encoding_blob
+    ):
+        return {
+            "status": "unavailable",
+            "category": "stdin_encoding",
+            "reason": "provider_stdin_not_utf8",
+            "user_message": (
+                "Model-assisted assessment unavailable: Codex rejected provider "
+                "stdin as non-UTF-8 input."
+            ),
+            "next_step": (
+                "Retry with the ShellForgeAI provider boundary using explicit "
+                "UTF-8 stdin/stdout/stderr encoding."
             ),
             "raw_suppressed": True,
         }

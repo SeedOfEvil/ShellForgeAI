@@ -22,7 +22,7 @@ def _fake_popen_factory(returncode=0, stdout="ok", stderr="", last_message=None)
                 for i, tok in enumerate(cmd):
                     if tok == "--output-last-message" and i + 1 < len(cmd):
                         with contextlib.suppress(OSError):
-                            Path(cmd[i + 1]).write_text(last_message)
+                            Path(cmd[i + 1]).write_text(last_message, encoding="utf-8")
 
         # Subprocess-compatible signature: the provider sends the prompt via
         # communicate(input=...) when stdin prompt delivery is enabled.

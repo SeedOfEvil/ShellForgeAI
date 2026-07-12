@@ -196,3 +196,7 @@ lane HOLD until a real model-assisted answer is captured without fallback.
 ## Windows runtime-root parity
 
 On Windows installed deployments, Codex-backed `ask`, `interactive`, and `model doctor` share the same ShellForgeAI runtime/profile context. The official `sfai.cmd` wrapper derives `SHELLFORGEAI_RUNTIME_ROOT` from its own `bin` directory and product code uses that bounded root before considering the current working directory. This lets normal operator sessions launched outside the source tree still collect Windows evidence and pass it to Codex when tester-scoped `CODEX_HOME` authentication is available. Missing `CODEX_HOME`, unverified login status, repository trust, and probe timeout remain distinct bounded diagnostics.
+
+## Codex subprocess UTF-8 boundary
+
+ShellForgeAI sends Codex prompts over stdin using explicit UTF-8 text-mode subprocess I/O (`encoding="utf-8"`, `errors="replace"`) and captures stdout/stderr with the same explicit encoding. The deterministic `--output-last-message` response file is read as UTF-8. This avoids Windows ANSI-code-page or console-locale dependence and does not require operators to set `PYTHONUTF8`, `PYTHONIOENCODING`, or `chcp 65001`. Diagnostics record safe encoding names and prompt counts, not prompt contents, auth-cache contents, tokens, or environment dumps.
