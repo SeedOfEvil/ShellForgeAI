@@ -200,3 +200,10 @@ On Windows installed deployments, Codex-backed `ask`, `interactive`, and `model 
 ## Codex subprocess UTF-8 boundary
 
 ShellForgeAI sends Codex prompts over stdin using explicit UTF-8 text-mode subprocess I/O (`encoding="utf-8"`, `errors="replace"`) and captures stdout/stderr with the same explicit encoding. The deterministic `--output-last-message` response file is read as UTF-8. This avoids Windows ANSI-code-page or console-locale dependence and does not require operators to set `PYTHONUTF8`, `PYTHONIOENCODING`, or `chcp 65001`. Diagnostics record safe encoding names and prompt counts, not prompt contents, auth-cache contents, tokens, or environment dumps.
+
+
+## Model-call lifecycle diagnostics
+
+Codex-backed synthesis reports a shared model-call lifecycle for `ask`, interactive use, and the model-doctor live probe. Human text output shows concise phase messages such as preparing context, starting the provider, sending read-only evidence, waiting for the response, and capturing the response. JSON/diagnostic payloads carry bounded phase and timing fields only; they do not include prompt text, evidence bundles, environment dumps, tokens, or auth-cache contents. The provider deadline covers prompt construction, process startup, stdin delivery, response capture, process exit, and owned-child cleanup.
+
+Owned-process cleanup is scoped to the exact provider process created for that invocation. ShellForgeAI does not kill by broad process name and does not expose process termination as an operator feature.

@@ -88,3 +88,10 @@ and the live probe treats proven login status as configured credentials.
 Windows installed invocations do not rely on the operator's current working directory to find the ShellForgeAI profile. The supported wrapper sets `SHELLFORGEAI_RUNTIME_ROOT` from its own location (`%~dp0..`), and model-backed commands resolve profile context in this bounded order: explicit profile/runtime configuration, wrapper-supplied runtime root, installed package/executable roots, a valid current ShellForgeAI workspace, then packaged safe defaults when available. If none resolves, commands return `runtime_profile_not_resolved` guidance instead of a traceback.
 
 Tester-scoped Codex authentication remains external. `CODEX_HOME` is inherited from the process environment and ShellForgeAI verifies readiness only with `codex login status`; it does not read or print auth-cache/token contents. Missing `CODEX_HOME` is reported as `codex_context_not_configured_for_process`, while unproven login status is reported as `codex_login_not_verified`; expired/invalid auth is only reported when Codex output proves that condition.
+
+
+## Provider observability and timeout containment
+
+Model provider responses include safe lifecycle diagnostics: `model_phase`, bounded `model_phase_history`, monotonic duration fields, timeout classification, provider PID metadata, and owned-child cleanup status. Missing timing checkpoints are reported as null rather than fabricated. Codex doctor output also reports the safe CLI version string as `codex_cli_version` and the resolved executable path using the existing bounded path fields.
+
+The configured model timeout is the end-to-end deadline for a provider call. If it is exceeded, the call is failed, partial output remains diagnostic only, `model_assisted_answer_ran` must not be treated as successful, and deterministic fallback remains explicit.

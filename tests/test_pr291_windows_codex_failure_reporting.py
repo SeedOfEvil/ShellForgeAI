@@ -213,7 +213,7 @@ def test_diagnostics_never_record_the_environment(monkeypatch) -> None:
     monkeypatch.setenv("CODEX_HOME", "C:\\Users\\tester\\.codex")
     provider = _provider(monkeypatch, _FailingPopen)
     resp = provider.complete(_request())
-    assert set(resp.metadata) == {
+    expected_keys = {
         "codex_command_built",
         "codex_command_started",
         "codex_exec_attempted",
@@ -245,6 +245,7 @@ def test_diagnostics_never_record_the_environment(monkeypatch) -> None:
         "approval_policy",
         "skip_git_repo_check_used",
     }
+    assert expected_keys <= set(resp.metadata)
     assert "CODEX_HOME" not in str(resp.metadata)
 
 

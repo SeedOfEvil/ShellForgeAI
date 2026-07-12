@@ -20,6 +20,29 @@ from typing import Any
 
 import typer
 
+_MODEL_PHASE_MESSAGES = {
+    "preparing_context": "Preparing model context...",
+    "building_prompt": "Building model prompt...",
+    "starting_provider": "Starting model provider...",
+    "sending_prompt": "Sending read-only evidence...",
+    "waiting_for_response": "Waiting for model response...",
+    "response_file_detected": "Model response file detected...",
+    "capturing_response": "Capturing model response...",
+    "cleaning_up_children": "Cleaning up model child processes...",
+}
+
+
+def _model_progress_callback() -> Any:
+    seen: set[str] = set()
+
+    def _progress(phase: str) -> None:
+        message = _MODEL_PHASE_MESSAGES.get(phase)
+        if message and phase not in seen:
+            seen.add(phase)
+            print(message, file=sys.stderr)
+
+    return _progress
+
 
 def _cli() -> Any:
     return sys.modules["shellforgeai.cli"]
@@ -430,7 +453,7 @@ def register(app: typer.Typer) -> None:
                 model=runtime.settings.model.model,
                 provider=runtime.settings.model.provider,
                 timeout_seconds=runtime.settings.model.timeout_seconds,
-                metadata={"raw": raw},
+                metadata={"raw": raw, "progress_callback": _model_progress_callback()},
             )
         )
         if not resp.ok:
