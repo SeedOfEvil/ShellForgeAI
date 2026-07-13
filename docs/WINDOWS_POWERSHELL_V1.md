@@ -226,3 +226,9 @@ Fallthrough model-backed prompts on a Windows host (for example `What is running
 ## Codex UTF-8 subprocess I/O
 
 Windows model-assisted ask and interactive paths do not rely on PowerShell console encoding, `PYTHONUTF8`, `PYTHONIOENCODING`, or a UTF-8 system locale. ShellForgeAI explicitly uses UTF-8 at the Codex subprocess boundary for stdin, stdout, stderr, and the deterministic final-message capture file. If Codex reports invalid UTF-8 input, ShellForgeAI classifies that as a provider stdin encoding failure rather than authentication, runtime-profile, or repository-trust failure. No PowerShell, WinRM/PSRemoting, shell execution, or mutation behavior is added.
+
+## Windows network command
+
+`shellforgeai windows network` and `shellforgeai windows network --json` inspect local Windows network interfaces with a bounded read-only collector. The command reports deterministic interface ordering, up/down state, MTU, reported link speed, reliable duplex when available, IPv4/IPv6 addresses, and cumulative per-interface byte/packet/error/drop counters when the in-process API provides them. Output is capped at 32 interfaces and 16 IPv4/IPv6 addresses per interface; JSON includes total/returned counts plus truncation flags, and text output stays concise for operators.
+
+The collector uses local in-process Python network interface APIs and does not execute PowerShell, WinRM/PSRemoting, shell commands, `ipconfig`, `netsh`, route commands, DNS lookups, reverse DNS, packet capture, socket/connection enumeration, remote probes, firewall inventory, or network mutation. MAC/link-layer addresses, adapter GUIDs, PNP identifiers, Wi-Fi profiles, credentials, and hardware serials are omitted. Counters are cumulative snapshots, not throughput, bandwidth, packet-loss, or internet-reachability measurements. On non-Windows hosts the command returns the established structured unsupported response and does not substitute the Linux network collector.

@@ -129,6 +129,23 @@ PROCESSES_SAFETY_FALSE_KEYS = (
     "model_called",
     "network_call",
 )
+NETWORK_SAFETY_FALSE_KEYS = (
+    "powershell_executed",
+    "winrm_used",
+    "remote_execution",
+    "packet_capture",
+    "sock" + "et_inventory",
+    "dns_lookup",
+    "route_table_lookup",
+    "network_mutation",
+    "shell_true",
+    "arbitrary_command_execution",
+    "secret_read",
+    "auth_cache_read",
+    "model_called",
+    "network_call",
+)
+
 MEMORY_SAFETY_FALSE_KEYS = (
     "powershell_executed",
     "winrm_used",
@@ -1123,6 +1140,84 @@ def _process_item_checks(item: Any, label: str) -> list[Check]:
     return checks
 
 
+def _validate_network(payload: Any, *, label: str = "network") -> list[Check]:
+    checks = [
+        _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
+    ]
+    if not isinstance(payload, dict):
+        return checks
+    checks.extend(
+        [
+            _check(f"{label}.schema_version", payload.get("schema_version") == 1),
+            _check(f"{label}.mode", payload.get("mode") == "windows_network"),
+            _check(f"{label}.status", payload.get("status") == "ok"),
+            _check(f"{label}.platform.system", _nested(payload, "platform", "system") == "windows"),
+            _check(f"{label}.read_only", payload.get("read_only") is True),
+            _check(f"{label}.mutation_performed", payload.get("mutation_performed") is False),
+        ]
+    )
+    for key in NETWORK_SAFETY_FALSE_KEYS:
+        checks.append(_check(f"{label}.safety.{key}", _nested(payload, "safety", key) is False))
+    summary = payload.get("summary")
+    interfaces = payload.get("interfaces")
+    checks.append(_check(f"{label}.summary.object", isinstance(summary, dict)))
+    checks.append(_check(f"{label}.interfaces.list", isinstance(interfaces, list)))
+    if isinstance(summary, dict):
+        for key in (
+            "interfaces_total",
+            "interfaces_returned",
+            "interfaces_up",
+            "interfaces_down",
+            "ipv4_addresses",
+            "ipv6_addresses",
+            "interfaces_with_errors",
+        ):
+            checks.append(_check(f"{label}.summary.{key}", _non_negative_int(summary.get(key))))
+        returned = summary.get("interfaces_returned")
+        total = summary.get("interfaces_total")
+        cap = _nested(payload, "caps", "max_interfaces")
+        if _non_negative_int(returned) and _non_negative_int(total):
+            checks.append(_check(f"{label}.summary.returned_lte_total", returned <= total))
+        if _non_negative_int(returned) and _non_negative_int(cap):
+            checks.append(_check(f"{label}.summary.returned_lte_cap", returned <= cap))
+    if isinstance(interfaces, list):
+        for index, iface in enumerate(interfaces):
+            prefix = f"{label}.interfaces[{index}]"
+            checks.append(
+                _check(
+                    f"{prefix}.name",
+                    isinstance(iface, dict)
+                    and isinstance(iface.get("name"), str)
+                    and bool(iface.get("name")),
+                )
+            )
+            if isinstance(iface, dict):
+                checks.append(
+                    _check(f"{prefix}.no_mac_field", "mac" not in iface and "guid" not in iface)
+                )
+                addresses = iface.get("addresses")
+                checks.append(_check(f"{prefix}.addresses.list", isinstance(addresses, list)))
+                if isinstance(addresses, list):
+                    for a_index, address in enumerate(addresses):
+                        family = address.get("family") if isinstance(address, dict) else None
+                        checks.append(
+                            _check(
+                                f"{prefix}.addresses[{a_index}].family", family in {"ipv4", "ipv6"}
+                            )
+                        )
+    serialized = json.dumps(payload, sort_keys=True).lower()
+    checks.extend(
+        [
+            _check(f"{label}.privacy.no_mac_field", "mac_address" not in serialized),
+            _check(
+                f"{label}.privacy.no_guid_field",
+                "adapter_guid" not in serialized and "pnp" not in serialized,
+            ),
+        ]
+    )
+    return checks
+
+
 def _validate_memory(payload: Any, *, label: str = "memory") -> list[Check]:
     checks = [
         _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
@@ -1503,11 +1598,13 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         "disks": None,
         "processes": None,
         "memory": None,
+        "network": None,
     }
     services_json = getattr(args, "services_json", None)
     disks_json = getattr(args, "disks_json", None)
     processes_json = getattr(args, "processes_json", None)
     memory_json = getattr(args, "memory_json", None)
+    network_json = getattr(args, "network_json", None)
 
     if args.evidence_json:
         payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
@@ -1575,6 +1672,12 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         if payloads["memory"] is not None:
             checks.extend(_validate_memory(payloads["memory"]))
 
+    if network_json:
+        payloads["network"], read_checks = _read_json_file(Path(network_json), "network")
+        checks.extend(read_checks)
+        if payloads["network"] is not None:
+            checks.extend(_validate_network(payloads["network"]))
+
     checks.extend(
         _cross_check(
             payloads["evidence"],
@@ -1610,6 +1713,9 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
     if memory_json:
         inputs["memory_json"] = str(Path(memory_json))
         artifacts["memory"] = _artifact_summary(payloads["memory"], "windows_memory", True)
+    if network_json:
+        inputs["network_json"] = str(Path(network_json))
+        artifacts["network"] = _artifact_summary(payloads["network"], "windows_network", True)
 
     passed = sum(1 for check in checks if check.passed)
     failed = len(checks) - passed
@@ -1674,6 +1780,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to saved 'shellforgeai windows memory --json' output.",
     )
     parser.add_argument(
+        "--network-json",
+        help="Optional path to saved 'shellforgeai windows network --json' output.",
+    )
+    parser.add_argument(
         "--expected-host", help="Optional expected Windows hostname, for example WIN2025-SFAI01."
     )
     parser.add_argument(
@@ -1690,10 +1800,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         or args.disks_json
         or args.processes_json
         or args.memory_json
+        or args.network_json
     ):
         parser.error(
             "at least one of --evidence-json, --status-json, --doctor-json, "
-            "--services-json, --disks-json, --processes-json, or --memory-json is required"
+            "--services-json, --disks-json, --processes-json, --memory-json, "
+            "or --network-json is required"
         )
     return args
 
