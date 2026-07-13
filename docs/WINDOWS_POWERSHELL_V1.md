@@ -103,6 +103,8 @@ shellforgeai windows services --json
 shellforgeai windows services
 shellforgeai windows disks --json
 shellforgeai windows disks
+shellforgeai windows memory --json
+shellforgeai windows memory
 shellforgeai windows processes --json
 shellforgeai windows processes --json --limit 10
 shellforgeai windows processes
@@ -110,6 +112,13 @@ shellforgeai ask "It is 2AM and this Windows server feels broken. What should I 
 ```
 
 The `ask` example should remain evidence-first: collect typed local Windows evidence first when a Windows lane exists, then synthesize a safe inspection summary. It must not run natural-language commands.
+
+
+## Windows memory command
+
+`shellforgeai windows memory` and `shellforgeai windows memory --json` expose the existing local read-only Windows physical-memory collector as a dedicated operator command. The command uses the bounded `GlobalMemoryStatusEx` collector already used by ShellForgeAI Windows guidance; it does not execute PowerShell, WinRM/PSRemoting, subprocesses, remote collection, model calls, cleanup, optimization, repair, remediation, or service/process control.
+
+The text view is intentionally short: status, read-only/no-mutation flags, total/used/available physical memory, used percent when available, and bounded warnings for unavailable Windows-only fields such as load average. The JSON view uses the `windows_memory` envelope with `read_only: true`, `mutation_performed: false`, `platform.system: windows`, and a `memory` object containing integer byte fields and numeric percentages when available. Optional/unavailable values are reported as `null` with limitations instead of fabricated zero values. On non-Windows hosts the command returns the same structured unsupported-platform style as the other `shellforgeai windows ...` commands and does not substitute Linux memory collection.
 
 ## Interactive performance diagnostics on Windows
 

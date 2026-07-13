@@ -1,4 +1,4 @@
-"""Read-only Windows V1 doctor, status, evidence, services, disks, and processes commands."""
+"""Read-only Windows V1 commands."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from shellforgeai.windows_evidence import (
     validate_evidence_services_limit,
     windows_evidence_payload,
 )
+from shellforgeai.windows_memory import render_windows_memory_text, windows_memory_payload
 from shellforgeai.windows_processes import (
     DEFAULT_PROCESSES_LIMIT,
     render_windows_processes_text,
@@ -177,6 +178,19 @@ def register(windows_app: typer.Typer) -> None:
             return
 
         console.print(render_windows_disks_text(payload))
+
+    @windows_app.command("memory")
+    def windows_memory(
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        """Inspect Windows physical memory using a bounded read-only collector."""
+
+        payload = windows_memory_payload()
+        if json_output:
+            typer.echo(json.dumps(payload, sort_keys=True))
+            return
+
+        console.print(render_windows_memory_text(payload))
 
     @windows_app.command("processes")
     def windows_processes(

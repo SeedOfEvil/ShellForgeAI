@@ -248,24 +248,45 @@ def windows_memory_summary(payload: dict[str, Any]) -> str:
     )
 
 
+def _format_gib(value: Any) -> str:
+    try:
+        return f"{int(value) / (1024**3):.1f} GiB"
+    except (TypeError, ValueError):
+        return "unavailable"
+
+
+def _format_percent(value: Any) -> str:
+    try:
+        return f"{float(value):.1f}%"
+    except (TypeError, ValueError):
+        return "unavailable"
+
+
 def render_windows_memory_text(payload: dict[str, Any]) -> str:
     """Render concise operator-facing text for the Windows memory payload."""
 
-    platform_system = payload.get("platform", {}).get("system", "unknown")
     lines = [
         "ShellForgeAI Windows memory",
         f"Status: {payload.get('status', 'unknown')}",
-        f"Platform: {platform_system}",
         f"Read-only: {str(payload.get('read_only', False)).lower()}",
         f"Mutation performed: {str(payload.get('mutation_performed', True)).lower()}",
     ]
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows memory summary is unavailable.")))
     else:
-        lines.append("Memory: " + windows_memory_summary(payload))
+        memory = payload.get("memory") or {}
+        if memory.get("available"):
+            lines.extend(
+                [
+                    "Memory: " + windows_memory_summary(payload),
+                    f"Total: {_format_gib(memory.get('total_bytes'))}",
+                    f"Used: {_format_gib(memory.get('used_bytes'))}",
+                    f"Available: {_format_gib(memory.get('available_bytes'))}",
+                    f"Used percent: {_format_percent(memory.get('used_percent'))}",
+                ]
+            )
+        else:
+            lines.append("Memory: unavailable")
     for limitation in payload.get("limitations", []):
-        lines.append(f"- {limitation}.")
-    lines.append(
-        f"Next safe command: {payload.get('next_safe_command', UNSUPPORTED_NEXT_SAFE_COMMAND)}"
-    )
+        lines.append(f"Warning: {limitation}.")
     return os.linesep.join(lines)
