@@ -984,3 +984,7 @@ A passing fixture audit is evidence quality control only. It is not production r
 ### Windows installed runtime context
 
 On Windows, the supported `sfai.cmd` wrapper supplies `SHELLFORGEAI_RUNTIME_ROOT` from its own installation path so `ask`, `interactive`, and `model doctor` can resolve the ShellForgeAI profile when launched from operator directories such as `C:\Windows\System32`. Codex authentication remains tester-scoped and external via `CODEX_HOME`; ShellForgeAI verifies readiness with `codex login status` and does not read token/cache contents.
+
+### Windows network snapshot
+
+`shellforgeai windows network [--json]` provides a bounded local Windows network interface view. It reports interface names, up/down state, MTU, reported link speed, IPv4/IPv6 addresses, cumulative counters when available, and truncation metadata. It is read-only and local-only: it does not capture packets, inspect sockets, resolve DNS, enumerate routes, probe remote hosts, expose MAC/link-layer identifiers or adapter GUIDs, or change network settings. On non-Windows hosts it returns structured unsupported output rather than substituting Linux collection.

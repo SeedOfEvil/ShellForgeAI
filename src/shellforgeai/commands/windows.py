@@ -26,6 +26,7 @@ from shellforgeai.windows_evidence import (
     windows_evidence_payload,
 )
 from shellforgeai.windows_memory import render_windows_memory_text, windows_memory_payload
+from shellforgeai.windows_network import render_windows_network_text, windows_network_payload
 from shellforgeai.windows_processes import (
     DEFAULT_PROCESSES_LIMIT,
     render_windows_processes_text,
@@ -191,6 +192,19 @@ def register(windows_app: typer.Typer) -> None:
             return
 
         console.print(render_windows_memory_text(payload))
+
+    @windows_app.command("network")
+    def windows_network(
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        """Inspect local Windows network interfaces using a bounded read-only collector."""
+
+        payload = windows_network_payload()
+        if json_output:
+            typer.echo(json.dumps(payload, sort_keys=True))
+            return
+
+        console.print(render_windows_network_text(payload))
 
     @windows_app.command("processes")
     def windows_processes(
