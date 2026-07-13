@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from shellforgeai.llm.codex_events import parse_codex_jsonl
+from shellforgeai.llm.lifecycle import ModelCallLifecycle
 from shellforgeai.llm.schemas import ModelRequest, ModelResponse
 
 
@@ -305,6 +306,7 @@ class CodexProvider:
             "codex_resolved_binary": found or "",
             "codex_found": bool(found),
             "codex_version": version,
+            "codex_cli_version": version,
             "auth_cache_present": auth_cache_present,
             "auth_cache_contents_inspected": False,
             "codex_home_configured": codex_home_configured,
@@ -430,16 +432,75 @@ class CodexProvider:
             return None
         return None
 
+    @staticmethod
+    def _popen_pid(proc: subprocess.Popen) -> int | None:
+        return getattr(proc, "pid", None)
+
+    def _cleanup_owned_process(
+        self, proc: subprocess.Popen, lifecycle: ModelCallLifecycle, reason: str
+    ) -> dict[str, object]:
+        lifecycle.transition("cleaning_up_children")
+        lifecycle.mark("cleanup_start")
+        graceful = False
+        forced = False
+        remaining: list[int] = []
+        pid = self._popen_pid(proc)
+        try:
+            if proc.poll() is None:
+                self._stop_timed_out_process(proc)
+                graceful = True
+                try:
+                    proc.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    forced = True
+                    proc.kill()
+                    try:
+                        proc.communicate(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        if pid is not None:
+                            remaining.append(pid)
+            verified = proc.poll() is not None and not remaining
+        except Exception:
+            verified = False
+            if pid is not None:
+                remaining.append(pid)
+        lifecycle.mark("cleanup_end")
+        return {
+            "provider_pid": pid,
+            "owned_child_pids": [pid] if pid is not None else [],
+            "child_cleanup_requested": True,
+            "child_cleanup_reason": reason,
+            "child_cleanup_graceful": graceful,
+            "child_cleanup_forced": forced,
+            "child_cleanup_verified": verified,
+            "remaining_owned_child_pids": remaining,
+        }
+
     def _run(
-        self, prompt: str, model: str, timeout: int
-    ) -> tuple[int, str, str, str | None, list[str]]:
-        """Return (returncode, stdout, stderr, last_message, cmd)."""
+        self, prompt: str, model: str, timeout: int, lifecycle: ModelCallLifecycle
+    ) -> tuple[int, str, str, str | None, list[str], dict[str, object]]:
+        """Return (returncode, stdout, stderr, last_message, cmd, runtime_meta)."""
         prompt_via_stdin = _prompt_via_stdin()
+        runtime_meta: dict[str, object] = {
+            "provider_pid": None,
+            "owned_child_pids": [],
+            "child_cleanup_requested": False,
+            "child_cleanup_reason": None,
+            "child_cleanup_graceful": False,
+            "child_cleanup_forced": False,
+            "child_cleanup_verified": True,
+            "remaining_owned_child_pids": [],
+            "partial_output_detected": False,
+            "partial_output_nonempty": False,
+        }
         with tempfile.TemporaryDirectory(prefix="sfai-codex-") as tmp:
             last_msg_path = Path(tmp) / "last_message.txt"
+            lifecycle.transition("building_prompt")
+            lifecycle.mark("prompt_start")
             cmd = self._build_cmd(
                 CODEX_STDIN_PROMPT_ARG if prompt_via_stdin else prompt, model, last_msg_path
             )
+            lifecycle.mark("prompt_end")
             popen_kwargs: dict = {
                 "stdin": subprocess.PIPE if prompt_via_stdin else subprocess.DEVNULL,
                 "stdout": subprocess.PIPE,
@@ -450,49 +511,80 @@ class CodexProvider:
                 "start_new_session": True,
             }
             if os.name == "nt":
-                # A dedicated process group lets the timeout handler signal the
-                # cmd.exe wrapper AND the codex process it spawned, instead of
-                # orphaning the child after killing only the wrapper.
                 popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            lifecycle.transition("starting_provider")
+            lifecycle.mark("spawn_start")
             proc = subprocess.Popen(cmd, **popen_kwargs)
+            lifecycle.mark("spawn_end")
+            runtime_meta["provider_pid"] = self._popen_pid(proc)
+            if runtime_meta["provider_pid"] is not None:
+                runtime_meta["owned_child_pids"] = [runtime_meta["provider_pid"]]
             with self._active_lock:
                 self._active_procs.add(proc)
             communicate_kwargs: dict = {"timeout": timeout}
             if prompt_via_stdin:
                 communicate_kwargs["input"] = prompt
+            lifecycle.transition("sending_prompt")
+            lifecycle.mark("stdin_write_start")
             try:
                 try:
+                    lifecycle.transition("waiting_for_response")
                     out, err = proc.communicate(**communicate_kwargs)
+                    lifecycle.mark("stdin_write_end")
+                    lifecycle.mark("stdin_close")
+                    if out:
+                        lifecycle.mark("first_stdout")
+                    if err:
+                        lifecycle.mark("first_stderr")
+                    if last_msg_path.exists():
+                        lifecycle.mark("output_file_first_seen")
+                        lifecycle.transition("response_file_detected")
+                        if self._read_last_message(last_msg_path):
+                            lifecycle.mark("output_file_nonempty")
+                    lifecycle.mark("provider_exit")
                 except subprocess.TimeoutExpired as exc:
-                    self._stop_timed_out_process(proc)
+                    lifecycle.mark("stdin_write_end")
+                    lifecycle.mark("stdin_close")
+                    lifecycle.timeout_phase = lifecycle.phase
+                    cleanup = self._cleanup_owned_process(proc, lifecycle, "timeout")
+                    runtime_meta.update(cleanup)
                     try:
-                        out, err = proc.communicate(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        try:
-                            out, err = proc.communicate(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            out, err = "", ""
+                        out = str(exc.output or "")
+                        err = str(exc.stderr or "")
+                    except Exception:
+                        out, err = "", ""
+                    runtime_meta["partial_output_detected"] = bool(
+                        out or err or last_msg_path.exists()
+                    )
+                    last = self._read_last_message(last_msg_path)
+                    runtime_meta["partial_output_nonempty"] = bool(
+                        (out or err or last or "").strip()
+                    )
                     timeout_exc = subprocess.TimeoutExpired(
                         cmd=cmd, timeout=timeout, output=out, stderr=err
                     )
-                    # PR291 fix — inspect the deterministic capture BEFORE the
-                    # temp directory is cleaned up, so a timeout can still
-                    # report whether the final-response file was produced.
-                    # This never converts the timeout into success; it only
-                    # makes the failure explainable (output captured but
-                    # process timed out vs no output at all).
                     timeout_exc.output_last_message_path = str(last_msg_path)
                     timeout_exc.output_file_created = last_msg_path.exists()
-                    timeout_exc.last_message = self._read_last_message(last_msg_path)
+                    timeout_exc.last_message = last
                     timeout_exc.child_cleanup_performed = True
                     timeout_exc.prompt_via_stdin = prompt_via_stdin
+                    timeout_exc.lifecycle = lifecycle
+                    lifecycle.transition("timed_out")
+                    timeout_exc.runtime_meta = runtime_meta
                     raise timeout_exc from exc
             finally:
                 with self._active_lock:
                     self._active_procs.discard(proc)
+            lifecycle.transition("capturing_response")
+            lifecycle.mark("response_capture_start")
             last_message = self._read_last_message(last_msg_path)
-            return proc.returncode, out, err, last_message, cmd
+            lifecycle.mark("response_capture_end")
+            if last_message:
+                lifecycle.mark("output_file_nonempty")
+            lifecycle.transition("provider_exited")
+            if proc.returncode == 0:
+                lifecycle.transition("completed")
+            return proc.returncode, out, err, last_message, cmd, runtime_meta
 
     def _exec_diagnostics(
         self,
@@ -618,6 +710,12 @@ class CodexProvider:
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         started = time.monotonic()
+        progress = request.metadata.get("progress_callback")
+        lifecycle = ModelCallLifecycle(
+            request.timeout_seconds, time.monotonic, progress if callable(progress) else None
+        )
+        lifecycle.mark("context_start")
+        lifecycle.mark("context_end")
         warnings: list[str] = []
         resolved = self._resolve_binary()
         if resolved is None:
@@ -632,16 +730,22 @@ class CodexProvider:
                 error=unavailable_error,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 raw={"stderr": ""},
-                metadata=self._exec_diagnostics(
-                    attempted=False,
-                    error_class="binary_resolution",
-                    error_message=unavailable_error,
-                    resolved=resolved,
-                ),
+                metadata={
+                    **self._exec_diagnostics(
+                        attempted=False,
+                        error_class="binary_resolution",
+                        error_message=unavailable_error,
+                        resolved=resolved,
+                    ),
+                    **lifecycle.timing_fields(),
+                },
             )
         try:
-            rc, out, err, last_message, cmd = self._run(
-                request.prompt, request.model or self.default_model, request.timeout_seconds
+            rc, out, err, last_message, cmd, runtime_meta = self._run(
+                request.prompt,
+                request.model or self.default_model,
+                request.timeout_seconds,
+                lifecycle,
             )
         except (FileNotFoundError, OSError) as exc:
             unavailable_error = self._provider_unavailable_error(exc.__class__.__name__, resolved)
@@ -653,13 +757,16 @@ class CodexProvider:
                 error=unavailable_error,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 raw={"stderr": ""},
-                metadata=self._exec_diagnostics(
-                    attempted=True,
-                    error_class="binary_resolution",
-                    error_message=unavailable_error,
-                    resolved=resolved,
-                    command_built=True,
-                ),
+                metadata={
+                    **self._exec_diagnostics(
+                        attempted=True,
+                        error_class="binary_resolution",
+                        error_message=unavailable_error,
+                        resolved=resolved,
+                        command_built=True,
+                    ),
+                    **lifecycle.timing_fields(),
+                },
             )
         except subprocess.TimeoutExpired as exc:
             timeout_error = (
@@ -677,28 +784,36 @@ class CodexProvider:
                     "stderr": _redact(str(exc.stderr or "")),
                     "stdout": _redact(str(exc.output or "")),
                 },
-                metadata=self._exec_diagnostics(
-                    attempted=True,
-                    timed_out=True,
-                    error_class="timeout",
-                    error_message=timeout_error,
-                    stderr=str(exc.stderr or ""),
-                    resolved=resolved,
-                    command_built=True,
-                    command_started=True,
-                    process_completed=False,
-                    child_cleanup_performed=bool(getattr(exc, "child_cleanup_performed", True)),
-                    output_path=getattr(exc, "output_last_message_path", None),
-                    output_file_created=bool(getattr(exc, "output_file_created", False)),
-                    # A capture produced before the timeout is reported
-                    # honestly, but the invocation stays a bounded failure.
-                    last_message=getattr(exc, "last_message", None),
-                    response_text=getattr(exc, "last_message", None) or "",
-                    stdin_prompt_sent=bool(getattr(exc, "prompt_via_stdin", _prompt_via_stdin())),
-                    stdin_closed=True,
-                    prompt_character_count=len(request.prompt),
-                    prompt_utf8_byte_count=len(request.prompt.encode(CODEX_SUBPROCESS_ENCODING)),
-                ),
+                metadata={
+                    **self._exec_diagnostics(
+                        attempted=True,
+                        timed_out=True,
+                        error_class="timeout",
+                        error_message=timeout_error,
+                        stderr=str(exc.stderr or ""),
+                        resolved=resolved,
+                        command_built=True,
+                        command_started=True,
+                        process_completed=False,
+                        child_cleanup_performed=bool(getattr(exc, "child_cleanup_performed", True)),
+                        output_path=getattr(exc, "output_last_message_path", None),
+                        output_file_created=bool(getattr(exc, "output_file_created", False)),
+                        # A capture produced before the timeout is reported
+                        # honestly, but the invocation stays a bounded failure.
+                        last_message=getattr(exc, "last_message", None),
+                        response_text=getattr(exc, "last_message", None) or "",
+                        stdin_prompt_sent=bool(
+                            getattr(exc, "prompt_via_stdin", _prompt_via_stdin())
+                        ),
+                        stdin_closed=True,
+                        prompt_character_count=len(request.prompt),
+                        prompt_utf8_byte_count=len(
+                            request.prompt.encode(CODEX_SUBPROCESS_ENCODING)
+                        ),
+                    ),
+                    **lifecycle.timing_fields(),
+                    **getattr(exc, "runtime_meta", {}),
+                },
             )
 
         model_used = request.model or self.default_model
@@ -710,8 +825,8 @@ class CodexProvider:
             and "model" in (err + out).lower()
         ):
             try:
-                rc, out, err, last_message, cmd = self._run(
-                    request.prompt, self.fallback_model, request.timeout_seconds
+                rc, out, err, last_message, cmd, runtime_meta = self._run(
+                    request.prompt, self.fallback_model, request.timeout_seconds, lifecycle
                 )
             except (FileNotFoundError, OSError) as exc:
                 unavailable_error = self._provider_unavailable_error(
@@ -725,13 +840,16 @@ class CodexProvider:
                     error=unavailable_error,
                     duration_ms=int((time.monotonic() - started) * 1000),
                     raw={"stderr": ""},
-                    metadata=self._exec_diagnostics(
-                        attempted=True,
-                        error_class="binary_resolution",
-                        error_message=unavailable_error,
-                        resolved=resolved,
-                        command_built=True,
-                    ),
+                    metadata={
+                        **self._exec_diagnostics(
+                            attempted=True,
+                            error_class="binary_resolution",
+                            error_message=unavailable_error,
+                            resolved=resolved,
+                            command_built=True,
+                        ),
+                        **lifecycle.timing_fields(),
+                    },
                 )
             model_used = self.fallback_model
             warnings.append(
@@ -786,6 +904,8 @@ class CodexProvider:
             path_index = cmd.index("--output-last-message") + 1
             if path_index < len(cmd):
                 output_path = cmd[path_index]
+        if not ok:
+            lifecycle.ensure_terminal("failed")
         response_metadata: dict[str, object] = {
             **self._exec_diagnostics(
                 attempted=True,
@@ -809,6 +929,8 @@ class CodexProvider:
                 prompt_utf8_byte_count=len(request.prompt.encode(CODEX_SUBPROCESS_ENCODING)),
             ),
             **metadata,
+            **lifecycle.timing_fields(),
+            **runtime_meta,
         }
 
         return ModelResponse(
