@@ -78,7 +78,7 @@ use QEMU Guest Agent, or run host-management tools.
    `windows-evidence.json`, `windows-evidence-with-disks.json`,
    `windows-evidence-with-processes.json`, `windows-status.json`,
    `windows-doctor.json`, `windows-services.json`, `windows-disks.json`, and
-   `windows-processes.json`.
+   `windows-processes.json`, and `windows-memory.json`.
 
    Windows smoke commands for the current lane:
 
@@ -91,12 +91,13 @@ use QEMU Guest Agent, or run host-management tools.
    shellforgeai windows evidence --json --include-processes --processes-limit 10
    shellforgeai windows evidence --include-processes
    shellforgeai windows processes --json
+   shellforgeai windows memory --json
    shellforgeai windows processes --json --limit 10
    shellforgeai windows processes
    shellforgeai windows services --json --limit 25
    shellforgeai windows disks --json
    ```
-7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`. PR269 validates evidence bundles that embed the opt-in services component with the same key safety expectations as the standalone services artifact; a standalone `--services-json` artifact is not required when the bundle embeds services. PR271 extends the saved-artifact validator and packet helper support to `windows-disks.json`; the disks artifact validator accepts unavailable roots only when they are sanitized as safe disk usage failures (for example `disk_usage_failed`), never tracebacks or raw exception detail. PR272 validates evidence bundles that embed the opt-in disks component with the same key safety expectations as the standalone disks artifact; a standalone `--disks-json` artifact is not required when the bundle embeds disks, and standalone `windows-disks.json` support from PR271 remains valid. PR275 adds saved-artifact validator and packet support for `windows-processes.json` via `--processes-json`: it validates saved PR274 process artifacts only, runs no ShellForgeAI product commands, collects no new process data, does not add processes to the evidence bundle, and validates that process artifacts carry only PID, parent PID, image basename/name, and thread count — never command lines, environments, memory, handles, modules, owners/users, or network connections. PR276 validates evidence bundles that embed the opt-in processes component with the same key safety expectations as the standalone processes artifact (including the per-item field allowlist); a standalone `--processes-json` artifact is not required when the bundle embeds processes, and standalone `windows-processes.json` support from PR275 remains valid.
+7. PR265 extends the saved-JSON acceptance validator to support `shellforgeai windows evidence --json` artifacts. PR268 adds saved-artifact validation and packet support for `windows-services.json`. PR269 validates evidence bundles that embed the opt-in services component with the same key safety expectations as the standalone services artifact; a standalone `--services-json` artifact is not required when the bundle embeds services. PR271 extends the saved-artifact validator and packet helper support to `windows-disks.json`; the disks artifact validator accepts unavailable roots only when they are sanitized as safe disk usage failures (for example `disk_usage_failed`), never tracebacks or raw exception detail. PR272 validates evidence bundles that embed the opt-in disks component with the same key safety expectations as the standalone disks artifact; a standalone `--disks-json` artifact is not required when the bundle embeds disks, and standalone `windows-disks.json` support from PR271 remains valid. PR275 adds saved-artifact validator and packet support for `windows-processes.json` via `--processes-json`: it validates saved PR274 process artifacts only, runs no ShellForgeAI product commands, collects no new process data, does not add processes to the evidence bundle, and validates that process artifacts carry only PID, parent PID, image basename/name, and thread count — never command lines, environments, memory, handles, modules, owners/users, or network connections. PR276 validates evidence bundles that embed the opt-in processes component with the same key safety expectations as the standalone processes artifact (including the per-item field allowlist); a standalone `--processes-json` artifact is not required when the bundle embeds processes, and standalone `windows-processes.json` support from PR275 remains valid. `windows-memory.json` is a standalone saved artifact for `shellforgeai windows memory --json`; validation checks the existing read-only memory collector envelope and sane numeric memory fields when available.
 8. Use `scripts/windows_smoke_packet.py` when a PR needs a deterministic QA handoff packet from saved evidence/status/doctor JSON, optionally including services/disks/processes JSON and, since PR281, optional saved Windows interactive slow/mutation-refusal transcripts.
 9. Archive the raw JSON artifacts exactly as captured. Deterministic capture
    methods are preferred, but operators do not need to rewrite files that include
@@ -464,6 +465,7 @@ python scripts/windows_smoke_acceptance.py --status-json status.json --doctor-js
 python scripts/windows_smoke_acceptance.py --services-json windows-services.json --json
 python scripts/windows_smoke_acceptance.py --disks-json windows-disks.json --json
 python scripts/windows_smoke_acceptance.py --processes-json windows-processes.json --json
+python scripts/windows_smoke_acceptance.py --memory-json windows-memory.json --json
 python scripts/windows_smoke_acceptance.py --processes-json windows-processes.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
 python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --disks-json windows-disks.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
 python scripts/windows_smoke_acceptance.py --evidence-json windows-evidence.json --status-json windows-status.json --doctor-json windows-doctor.json --processes-json windows-processes.json --expected-host WIN2025-SFAI01 --expected-python 3.14.6 --json
@@ -634,3 +636,7 @@ Each Windows feature PR should include:
 Do not combine this harness with new PowerShell probing, WinRM/PSRemoting,
 service/process/event-log inventory, firewall evidence, Windows Update evidence,
 package install/bootstrap logic, or mutation recipes.
+
+### Windows memory artifact
+
+`shellforgeai windows memory --json` is accepted as `--memory-json windows-memory.json`. The validator checks the `windows_memory` mode, Windows platform, read-only/no-mutation flags, bounded no-PowerShell/no-WinRM/no-model safety flags, a present `memory` object, sane integer byte fields when available, and numeric used percentage between 0 and 100. This artifact is local-only read-only evidence and does not perform memory cleanup, optimization, remediation, remote collection, or process/service control.

@@ -129,6 +129,28 @@ PROCESSES_SAFETY_FALSE_KEYS = (
     "model_called",
     "network_call",
 )
+MEMORY_SAFETY_FALSE_KEYS = (
+    "powershell_executed",
+    "winrm_used",
+    "remote_execution",
+    "process_memory_read",
+    "process_termination_executed",
+    "service_restart_executed",
+    "registry_modified",
+    "execution_policy_modified",
+    "software_install_executed",
+    "cleanup_executed",
+    "remediation_executed",
+    "rollback_executed",
+    "recovery_executed",
+    "natural_language_execution",
+    "shell_true",
+    "arbitrary_command_execution",
+    "secret_read",
+    "auth_cache_read",
+    "model_called",
+    "network_call",
+)
 PROCESSES_MIN_LIMIT = 1
 PROCESSES_MAX_LIMIT = 200
 PROCESSES_METHOD = "ctypes_toolhelp32_snapshot"
@@ -1101,6 +1123,64 @@ def _process_item_checks(item: Any, label: str) -> list[Check]:
     return checks
 
 
+def _validate_memory(payload: Any, *, label: str = "memory") -> list[Check]:
+    checks = [
+        _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
+    ]
+    if not isinstance(payload, dict):
+        return checks
+    checks.extend(
+        [
+            _check(f"{label}.schema_version", payload.get("schema_version") == 1),
+            _check(f"{label}.mode", payload.get("mode") == "windows_memory"),
+            _check(f"{label}.status", payload.get("status") == "ok"),
+            _check(f"{label}.platform.system", _nested(payload, "platform", "system") == "windows"),
+            _check(f"{label}.read_only", payload.get("read_only") is True),
+            _check(f"{label}.mutation_performed", payload.get("mutation_performed") is False),
+            _check(
+                f"{label}.windows_v1.available", _nested(payload, "windows_v1", "available") is True
+            ),
+        ]
+    )
+    for key in WINDOWS_V1_FALSE_KEYS:
+        checks.append(
+            _check(f"{label}.windows_v1.{key}", _nested(payload, "windows_v1", key) is False)
+        )
+    for key in MEMORY_SAFETY_FALSE_KEYS:
+        checks.append(_check(f"{label}.safety.{key}", _nested(payload, "safety", key) is False))
+    memory = payload.get("memory")
+    checks.append(
+        _check(f"{label}.memory.object", isinstance(memory, dict), "memory object required")
+    )
+    if isinstance(memory, dict) and memory.get("available") is True:
+        total = memory.get("total_bytes")
+        available = memory.get("available_bytes")
+        used = memory.get("used_bytes")
+        percent = memory.get("used_percent")
+        checks.extend(
+            [
+                _check(f"{label}.memory.total_bytes", isinstance(total, int) and total > 0),
+                _check(
+                    f"{label}.memory.available_bytes", isinstance(available, int) and available >= 0
+                ),
+                _check(f"{label}.memory.used_bytes", isinstance(used, int) and used >= 0),
+                _check(
+                    f"{label}.memory.available_lte_total",
+                    isinstance(total, int) and isinstance(available, int) and available <= total,
+                ),
+                _check(
+                    f"{label}.memory.used_lte_total",
+                    isinstance(total, int) and isinstance(used, int) and used <= total,
+                ),
+                _check(
+                    f"{label}.memory.used_percent",
+                    isinstance(percent, int | float) and 0 <= percent <= 100,
+                ),
+            ]
+        )
+    return checks
+
+
 def _validate_processes(
     payload: Any,
     expected_host: str | None,
@@ -1422,10 +1502,12 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         "services": None,
         "disks": None,
         "processes": None,
+        "memory": None,
     }
     services_json = getattr(args, "services_json", None)
     disks_json = getattr(args, "disks_json", None)
     processes_json = getattr(args, "processes_json", None)
+    memory_json = getattr(args, "memory_json", None)
 
     if args.evidence_json:
         payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
@@ -1487,6 +1569,12 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
                 _validate_processes(payloads["processes"], args.expected_host, args.expected_python)
             )
 
+    if memory_json:
+        payloads["memory"], read_checks = _read_json_file(Path(memory_json), "memory")
+        checks.extend(read_checks)
+        if payloads["memory"] is not None:
+            checks.extend(_validate_memory(payloads["memory"]))
+
     checks.extend(
         _cross_check(
             payloads["evidence"],
@@ -1519,6 +1607,9 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
     if processes_json:
         inputs["processes_json"] = str(Path(processes_json))
         artifacts["processes"] = _artifact_summary(payloads["processes"], "windows_processes", True)
+    if memory_json:
+        inputs["memory_json"] = str(Path(memory_json))
+        artifacts["memory"] = _artifact_summary(payloads["memory"], "windows_memory", True)
 
     passed = sum(1 for check in checks if check.passed)
     failed = len(checks) - passed
@@ -1579,6 +1670,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to saved 'shellforgeai windows processes --json' output.",
     )
     parser.add_argument(
+        "--memory-json",
+        help="Optional path to saved 'shellforgeai windows memory --json' output.",
+    )
+    parser.add_argument(
         "--expected-host", help="Optional expected Windows hostname, for example WIN2025-SFAI01."
     )
     parser.add_argument(
@@ -1594,10 +1689,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         or args.services_json
         or args.disks_json
         or args.processes_json
+        or args.memory_json
     ):
         parser.error(
             "at least one of --evidence-json, --status-json, --doctor-json, "
-            "--services-json, --disks-json, or --processes-json is required"
+            "--services-json, --disks-json, --processes-json, or --memory-json is required"
         )
     return args
 
