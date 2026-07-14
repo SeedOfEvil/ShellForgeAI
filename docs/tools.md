@@ -91,3 +91,7 @@ commands (`start`, `stop`, `restart`, `rm`, `exec`, `cp`, `build`,
 `pull`, `prune`, compose mutation). When the Docker CLI/daemon is
 unreachable the missing visibility surfaces as a limitation finding
 instead of false-healthy output.
+
+### Windows volumes
+
+`shellforgeai windows volumes [--json] [--limit N]` is a bounded read-only local Windows drive-root volume/filesystem collector. It uses the existing `psutil>=5.9` runtime dependency to inspect only local drive-root partition metadata and capacity; it skips UNC, remote/mapped-network, volume-GUID, and folder-mounted paths, and it emits aggregate skipped counts rather than raw unsafe identifiers. The command reports safe drive letters/mountpoints, filesystem, conservative kind/access classification, capacity when available, limitations, and safety flags. It does not inspect files, directories, labels, serials, BitLocker, physical disks, SMART/health, remote shares, or perform mount/format/repair/resize/cleanup/recovery actions. On unsupported hosts it returns structured unsupported output and does not substitute Linux collectors. `windows disks` remains the separate stdlib-only root/capacity command.

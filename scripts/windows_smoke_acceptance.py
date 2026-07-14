@@ -1218,6 +1218,88 @@ def _validate_network(payload: Any, *, label: str = "network") -> list[Check]:
     return checks
 
 
+def _validate_volumes(payload: Any, *, label: str = "volumes") -> list[Check]:
+    checks: list[Check] = []
+    if not isinstance(payload, dict):
+        return [_check(f"{label}.object", False, "expected JSON object")]
+    checks.extend(
+        [
+            _check(f"{label}.mode", payload.get("mode") == "windows_volumes"),
+            _check(f"{label}.platform", _nested(payload, "platform", "system") == "windows"),
+            _check(f"{label}.read_only", payload.get("read_only") is True),
+            _check(f"{label}.mutation_performed", payload.get("mutation_performed") is False),
+            _check(
+                f"{label}.no_scans",
+                _nested(payload, "collection", "directory_scan_performed") is False
+                and _nested(payload, "collection", "file_scan_performed") is False,
+            ),
+            _check(
+                f"{label}.no_remote_probe",
+                _nested(payload, "collection", "remote_volume_probe_performed") is False,
+            ),
+            _check(f"{label}.no_model", _nested(payload, "safety", "model_called") is False),
+            _check(f"{label}.no_network", _nested(payload, "safety", "network_call") is False),
+            _check(f"{label}.no_shell", _nested(payload, "safety", "shell_true") is False),
+            _check(
+                f"{label}.no_powershell_winrm",
+                _nested(payload, "safety", "powershell_executed") is False
+                and _nested(payload, "safety", "winrm_used") is False,
+            ),
+        ]
+    )
+    volumes = payload.get("volumes")
+    checks.append(_check(f"{label}.volumes.list", isinstance(volumes, list)))
+    limit = _nested(payload, "collection", "limit")
+    if isinstance(volumes, list):
+        if isinstance(limit, int):
+            checks.append(_check(f"{label}.volumes.bounded", len(volumes) <= limit))
+        guid_re = re.compile(r"volume\{[0-9a-fA-F-]+\}")
+        for index, volume in enumerate(volumes):
+            prefix = f"{label}.volumes[{index}]"
+            drive = volume.get("drive") if isinstance(volume, dict) else None
+            mount = volume.get("mountpoint") if isinstance(volume, dict) else None
+            checks.append(
+                _check(
+                    f"{prefix}.drive",
+                    isinstance(drive, str) and re.fullmatch(r"[A-Z]:", drive or "") is not None,
+                )
+            )
+            checks.append(
+                _check(
+                    f"{prefix}.mountpoint",
+                    isinstance(mount, str) and re.fullmatch(r"[A-Z]:\\", mount or "") is not None,
+                )
+            )
+            text = json.dumps(volume, sort_keys=True) if isinstance(volume, dict) else ""
+            checks.append(
+                _check(
+                    f"{prefix}.privacy",
+                    not guid_re.search(text.lower())
+                    and "serial" not in text.lower()
+                    and "label" not in text.lower(),
+                )
+            )
+            fs = volume.get("filesystem") if isinstance(volume, dict) else None
+            checks.append(
+                _check(
+                    f"{prefix}.filesystem_bounded",
+                    fs is None or (isinstance(fs, str) and len(fs) <= 32),
+                )
+            )
+            for key in ("total_bytes", "used_bytes", "free_bytes"):
+                value = volume.get(key) if isinstance(volume, dict) else None
+                if value is not None:
+                    checks.append(_check(f"{prefix}.{key}", isinstance(value, int) and value >= 0))
+            pct = volume.get("used_percent") if isinstance(volume, dict) else None
+            if pct is not None:
+                checks.append(
+                    _check(
+                        f"{prefix}.used_percent", isinstance(pct, int | float) and 0 <= pct <= 100
+                    )
+                )
+    return checks
+
+
 def _validate_memory(payload: Any, *, label: str = "memory") -> list[Check]:
     checks = [
         _check(f"{label}.object", isinstance(payload, dict), "top-level JSON must be an object")
@@ -1599,12 +1681,14 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         "processes": None,
         "memory": None,
         "network": None,
+        "volumes": None,
     }
     services_json = getattr(args, "services_json", None)
     disks_json = getattr(args, "disks_json", None)
     processes_json = getattr(args, "processes_json", None)
     memory_json = getattr(args, "memory_json", None)
     network_json = getattr(args, "network_json", None)
+    volumes_json = getattr(args, "volumes_json", None)
 
     if args.evidence_json:
         payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
@@ -1678,6 +1762,12 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         if payloads["network"] is not None:
             checks.extend(_validate_network(payloads["network"]))
 
+    if volumes_json:
+        payloads["volumes"], read_checks = _read_json_file(Path(volumes_json), "volumes")
+        checks.extend(read_checks)
+        if payloads["volumes"] is not None:
+            checks.extend(_validate_volumes(payloads["volumes"]))
+
     checks.extend(
         _cross_check(
             payloads["evidence"],
@@ -1716,6 +1806,9 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
     if network_json:
         inputs["network_json"] = str(Path(network_json))
         artifacts["network"] = _artifact_summary(payloads["network"], "windows_network", True)
+    if volumes_json:
+        inputs["volumes_json"] = str(Path(volumes_json))
+        artifacts["volumes"] = _artifact_summary(payloads["volumes"], "windows_volumes", True)
 
     passed = sum(1 for check in checks if check.passed)
     failed = len(checks) - passed
@@ -1784,6 +1877,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to saved 'shellforgeai windows network --json' output.",
     )
     parser.add_argument(
+        "--volumes-json",
+        help="Optional path to saved 'shellforgeai windows volumes --json' output.",
+    )
+    parser.add_argument(
         "--expected-host", help="Optional expected Windows hostname, for example WIN2025-SFAI01."
     )
     parser.add_argument(
@@ -1801,11 +1898,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         or args.processes_json
         or args.memory_json
         or args.network_json
+        or args.volumes_json
     ):
         parser.error(
             "at least one of --evidence-json, --status-json, --doctor-json, "
             "--services-json, --disks-json, --processes-json, --memory-json, "
-            "or --network-json is required"
+            "--network-json, or --volumes-json is required"
         )
     return args
 

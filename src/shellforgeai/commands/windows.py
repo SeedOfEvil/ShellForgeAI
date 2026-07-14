@@ -39,6 +39,12 @@ from shellforgeai.windows_services import (
     windows_services_payload,
 )
 from shellforgeai.windows_status import render_windows_status_text, windows_status_payload
+from shellforgeai.windows_volumes import (
+    DEFAULT_VOLUMES_LIMIT,
+    render_windows_volumes_text,
+    validate_volumes_limit,
+    windows_volumes_payload,
+)
 
 console = Console(markup=False, width=120)
 
@@ -205,6 +211,27 @@ def register(windows_app: typer.Typer) -> None:
             return
 
         console.print(render_windows_network_text(payload))
+
+    @windows_app.command("volumes")
+    def windows_volumes(
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="Bounded max local drive-root volumes to report (1-64)."),
+        ] = DEFAULT_VOLUMES_LIMIT,
+    ) -> None:
+        """Inspect local Windows drive-root volumes/filesystems read-only."""
+
+        try:
+            validated_limit = validate_volumes_limit(limit)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--limit") from exc
+        payload = windows_volumes_payload(limit=validated_limit)
+        if json_output:
+            typer.echo(json.dumps(payload, sort_keys=True))
+            return
+
+        console.print(render_windows_volumes_text(payload))
 
     @windows_app.command("processes")
     def windows_processes(
