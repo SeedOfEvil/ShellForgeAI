@@ -39,6 +39,75 @@ SYSTEM_PROPERTY_PATHS = (
     "Event/System/Keywords",
 )
 
+EVT_VAR_TYPE_NULL = 0
+EVT_VAR_TYPE_STRING = 1
+EVT_VAR_TYPE_ANSI_STRING = 2
+EVT_VAR_TYPE_SBYTE = 3
+EVT_VAR_TYPE_BYTE = 4
+EVT_VAR_TYPE_INT16 = 5
+EVT_VAR_TYPE_UINT16 = 6
+EVT_VAR_TYPE_INT32 = 7
+EVT_VAR_TYPE_UINT32 = 8
+EVT_VAR_TYPE_INT64 = 9
+EVT_VAR_TYPE_UINT64 = 10
+EVT_VAR_TYPE_SINGLE = 11
+EVT_VAR_TYPE_DOUBLE = 12
+EVT_VAR_TYPE_BOOLEAN = 13
+EVT_VAR_TYPE_BINARY = 14
+EVT_VAR_TYPE_GUID = 15
+EVT_VAR_TYPE_SIZE_T = 16
+EVT_VAR_TYPE_FILETIME = 17
+EVT_VAR_TYPE_SYS_TIME = 18
+EVT_VAR_TYPE_SID = 19
+EVT_VAR_TYPE_HEX_INT32 = 20
+EVT_VAR_TYPE_HEX_INT64 = 21
+EVT_VARIANT_TYPE_ARRAY = 0x80
+EVT_VARIANT_TYPE_MASK = 0x7F
+_WINDOWS_FILETIME_EPOCH_OFFSET = 116444736000000000
+
+
+class EvtVariantValue(ctypes.Union):
+    _fields_ = [
+        ("StringVal", ctypes.c_wchar_p),
+        ("AnsiStringVal", ctypes.c_char_p),
+        ("SByteVal", ctypes.c_int8),
+        ("ByteVal", ctypes.c_uint8),
+        ("Int16Val", ctypes.c_int16),
+        ("UInt16Val", ctypes.c_uint16),
+        ("Int32Val", ctypes.c_int32),
+        ("UInt32Val", ctypes.c_uint32),
+        ("Int64Val", ctypes.c_int64),
+        ("UInt64Val", ctypes.c_uint64),
+        ("SingleVal", ctypes.c_float),
+        ("DoubleVal", ctypes.c_double),
+        ("BooleanVal", ctypes.c_int32),
+        ("BinaryVal", ctypes.c_void_p),
+        ("GuidVal", ctypes.c_void_p),
+        ("SizeTVal", ctypes.c_size_t),
+        ("FileTimeVal", ctypes.c_uint64),
+        ("SysTimeVal", ctypes.c_void_p),
+        ("SidVal", ctypes.c_void_p),
+        ("HexInt32Val", ctypes.c_uint32),
+        ("HexInt64Val", ctypes.c_uint64),
+    ]
+
+
+class EVT_VARIANT(ctypes.Structure):
+    _fields_ = [
+        ("value", EvtVariantValue),
+        ("Count", ctypes.c_uint32),
+        ("Type", ctypes.c_uint32),
+    ]
+
+
+class EventMetadataContractError(ValueError):
+    """Selected Event Log metadata did not match the PR298 scalar contract."""
+
+    def __init__(self, category: str) -> None:
+        super().__init__(category)
+        self.category = category
+
+
 _EVENT_SAFETY = {
     "read_only": True,
     "mutation_performed": False,
@@ -162,27 +231,57 @@ def normalize_timestamp(value: Any) -> str | None:
     return dt.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _normalize_event(raw: RawEventMetadata) -> tuple[dict[str, Any], str | None]:
-    event_id = _int_or_none(raw.event_id, minimum=0)
-    if event_id is None:
-        event_id = 0
+def _require_int_range(value: Any, *, field: str, minimum: int, maximum: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise EventMetadataContractError(f"invalid_required_{field}")
+    if value < minimum or value > maximum:
+        raise EventMetadataContractError(f"invalid_required_{field}")
+    return value
+
+
+def _optional_int_range(
+    value: Any, *, field: str, minimum: int, maximum: int
+) -> tuple[int | None, str | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum or value > maximum:
+        return None, f"optional_{field}_omitted"
+    return value, None
+
+
+def _normalize_event(raw: RawEventMetadata) -> tuple[dict[str, Any], list[str]]:
+    warnings: list[str] = []
+    if not isinstance(raw.provider, str) or raw.provider == "":
+        raise EventMetadataContractError("invalid_required_provider")
+    event_id = _require_int_range(raw.event_id, field="event_id", minimum=0, maximum=65535)
+    numeric_level = _require_int_range(raw.level, field="level", minimum=1, maximum=3)
+    level = normalize_level(numeric_level)
+    if level == "unknown":
+        raise EventMetadataContractError("invalid_required_level")
+    time_created_utc = normalize_timestamp(raw.time_created_utc)
+    if time_created_utc is None:
+        raise EventMetadataContractError("invalid_required_time_created_utc")
+    record_id = _require_int_range(raw.record_id, field="record_id", minimum=1, maximum=(2**64) - 1)
     item: dict[str, Any] = {
         "provider": _sanitize_provider(raw.provider),
         "event_id": event_id,
-        "level": normalize_level(raw.level),
-        "time_created_utc": normalize_timestamp(raw.time_created_utc),
-        "record_id": _int_or_none(raw.record_id, minimum=1),
+        "level": level,
+        "time_created_utc": time_created_utc,
+        "record_id": record_id,
     }
-    for key in ("task", "opcode", "keywords"):
-        numeric = _int_or_none(getattr(raw, key), minimum=0)
+    for key, maximum in (("task", 65535), ("opcode", 255), ("keywords", (2**64) - 1)):
+        numeric, warning = _optional_int_range(
+            getattr(raw, key), field=key, minimum=0, maximum=maximum
+        )
         if numeric is not None:
             item[key] = numeric
-    warning = (
-        None
-        if item["level"] in LEVELS
-        else "An event had an unexpected level and was normalized as unknown."
-    )
-    return item, warning
+        if warning:
+            warnings.append(warning)
+    return item, warnings
+
+
+def _bounded_warning(category: str, count: int) -> dict[str, Any]:
+    return {"category": category, "count": count}
 
 
 def _sort_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -304,6 +403,7 @@ def windows_events_payload(
     native = native or CtypesWevtapi()
     query_handle = render_context = None
     events: list[dict[str, Any]] = []
+    warning_counts: Counter[str] = Counter()
     truncated = False
     try:
         query_handle = native.query(query_text)
@@ -317,19 +417,15 @@ def windows_events_payload(
                     if len(events) >= limit:
                         truncated = True
                         break
-                    item, warning = _normalize_event(
+                    item, item_warnings = _normalize_event(
                         native.render_metadata(render_context, event_handle)
                     )
                     events.append(item)
-                    if warning and warning not in payload["warnings"]:
-                        payload["warnings"].append(warning)
-                except Exception as exc:
-                    msg = (
-                        "One event could not be rendered as selected metadata: "
-                        f"{type(exc).__name__}."
-                    )
-                    if msg not in payload["warnings"]:
-                        payload["warnings"].append(msg)
+                    warning_counts.update(item_warnings)
+                except EventMetadataContractError as exc:
+                    warning_counts.update([exc.category])
+                except Exception:
+                    warning_counts.update(["render_metadata_failed"])
                 finally:
                     native.close(event_handle)
             if truncated:
@@ -351,12 +447,139 @@ def windows_events_payload(
             native.close(query_handle)
     events = _sort_events(events)[:limit]
     payload["collection"]["truncated"] = truncated
+    payload["warnings"] = [
+        _bounded_warning(category, warning_counts[category]) for category in sorted(warning_counts)
+    ]
     summary, top = _summary(events, truncated, since_hours, limit)
+    if payload.get("status") != "error" and not events and warning_counts:
+        payload["status"] = "partial"
+        payload["errors"].append(
+            {
+                "type": "metadata_contract",
+                "message": (
+                    "Windows Event Log metadata was present but failed "
+                    "the selected metadata contract."
+                ),
+                "winerror": None,
+            }
+        )
     payload.setdefault("status", "ok")
     payload["summary"] = summary
     payload["top_provider_event_pairs"] = top
     payload["events"] = events
     return payload
+
+
+def decode_evt_variant(variant: EVT_VARIANT) -> Any:
+    raw_type = int(variant.Type)
+    if raw_type & EVT_VARIANT_TYPE_ARRAY:
+        raise EventMetadataContractError("array_variant_unsupported")
+    base_type = raw_type & EVT_VARIANT_TYPE_MASK
+    value = variant.value
+    if base_type == EVT_VAR_TYPE_NULL:
+        return None
+    if base_type == EVT_VAR_TYPE_STRING:
+        return ctypes.wstring_at(value.StringVal) if value.StringVal else None
+    if base_type == EVT_VAR_TYPE_ANSI_STRING:
+        return value.AnsiStringVal.decode("utf-8", "replace") if value.AnsiStringVal else None
+    if base_type == EVT_VAR_TYPE_SBYTE:
+        return int(value.SByteVal)
+    if base_type == EVT_VAR_TYPE_BYTE:
+        return int(value.ByteVal)
+    if base_type == EVT_VAR_TYPE_INT16:
+        return int(value.Int16Val)
+    if base_type == EVT_VAR_TYPE_UINT16:
+        return int(value.UInt16Val)
+    if base_type == EVT_VAR_TYPE_INT32:
+        return int(value.Int32Val)
+    if base_type == EVT_VAR_TYPE_UINT32:
+        return int(value.UInt32Val)
+    if base_type == EVT_VAR_TYPE_INT64:
+        return int(value.Int64Val)
+    if base_type == EVT_VAR_TYPE_UINT64:
+        return int(value.UInt64Val)
+    if base_type == EVT_VAR_TYPE_SINGLE:
+        return float(value.SingleVal)
+    if base_type == EVT_VAR_TYPE_DOUBLE:
+        return float(value.DoubleVal)
+    if base_type == EVT_VAR_TYPE_BOOLEAN:
+        return bool(value.BooleanVal)
+    if base_type == EVT_VAR_TYPE_SIZE_T:
+        return int(value.SizeTVal)
+    if base_type == EVT_VAR_TYPE_FILETIME:
+        filetime = int(value.FileTimeVal)
+        try:
+            seconds = (filetime - _WINDOWS_FILETIME_EPOCH_OFFSET) / 10_000_000
+            return datetime.fromtimestamp(seconds, UTC)
+        except (OSError, OverflowError, ValueError) as exc:
+            raise EventMetadataContractError("invalid_filetime") from exc
+    if base_type == EVT_VAR_TYPE_HEX_INT32:
+        return int(value.HexInt32Val)
+    if base_type == EVT_VAR_TYPE_HEX_INT64:
+        return int(value.HexInt64Val)
+    raise EventMetadataContractError("unsupported_variant_type")
+
+
+def _decode_expected_variant(
+    variant: EVT_VARIANT, *, expected: int | tuple[int, ...], required: bool, field: str
+) -> Any:
+    raw_type = int(variant.Type)
+    if raw_type & EVT_VARIANT_TYPE_ARRAY:
+        raise EventMetadataContractError(f"array_{field}")
+    base_type = raw_type & EVT_VARIANT_TYPE_MASK
+    if base_type == EVT_VAR_TYPE_NULL:
+        if required:
+            raise EventMetadataContractError(f"invalid_required_{field}")
+        return None
+    expected_types = expected if isinstance(expected, tuple) else (expected,)
+    if base_type not in expected_types:
+        if required:
+            raise EventMetadataContractError(f"invalid_required_{field}")
+        raise EventMetadataContractError(f"optional_{field}_omitted")
+    return decode_evt_variant(variant)
+
+
+def _decode_optional_variant(
+    variants: Any, index: int, *, expected: int | tuple[int, ...], field: str
+) -> Any:
+    try:
+        return _decode_expected_variant(
+            variants[index], expected=expected, required=False, field=field
+        )
+    except EventMetadataContractError as exc:
+        if exc.category.startswith(f"optional_{field}_"):
+            return None
+        raise
+
+
+def decode_selected_event_metadata(variants: Any, property_count: int) -> RawEventMetadata:
+    if property_count < len(SYSTEM_PROPERTY_PATHS):
+        raise EventMetadataContractError("missing_required_property")
+    return RawEventMetadata(
+        provider=_decode_expected_variant(
+            variants[0], expected=EVT_VAR_TYPE_STRING, required=True, field="provider"
+        ),
+        event_id=_decode_expected_variant(
+            variants[1], expected=EVT_VAR_TYPE_UINT16, required=True, field="event_id"
+        ),
+        level=_decode_expected_variant(
+            variants[2], expected=EVT_VAR_TYPE_BYTE, required=True, field="level"
+        ),
+        time_created_utc=_decode_expected_variant(
+            variants[3], expected=EVT_VAR_TYPE_FILETIME, required=True, field="time_created_utc"
+        ),
+        record_id=_decode_expected_variant(
+            variants[4], expected=EVT_VAR_TYPE_UINT64, required=True, field="record_id"
+        ),
+        task=_decode_optional_variant(variants, 5, expected=EVT_VAR_TYPE_UINT16, field="task"),
+        opcode=_decode_optional_variant(variants, 6, expected=EVT_VAR_TYPE_BYTE, field="opcode"),
+        keywords=_decode_optional_variant(
+            variants,
+            7,
+            expected=(EVT_VAR_TYPE_UINT64, EVT_VAR_TYPE_HEX_INT64),
+            field="keywords",
+        ),
+    )
 
 
 class CtypesWevtapi:
@@ -427,35 +650,8 @@ class CtypesWevtapi:
         if not ok:
             raise ctypes.WinError(ctypes.get_last_error())
 
-        class EVT_VARIANT(ctypes.Structure):
-            _fields_ = [
-                ("value", ctypes.c_ulonglong),
-                ("count", ctypes.c_ulong),
-                ("type", ctypes.c_ulong),
-            ]
-
         variants = ctypes.cast(raw, ctypes.POINTER(EVT_VARIANT))
-        values = [
-            self._variant_value(variants[i])
-            for i in range(min(property_count.value, len(SYSTEM_PROPERTY_PATHS)))
-        ]
-        values.extend([None] * (len(SYSTEM_PROPERTY_PATHS) - len(values)))
-        return RawEventMetadata(*values[:8])
-
-    @staticmethod
-    def _variant_value(variant: Any) -> Any:
-        variant_type = int(variant.type) & 0x7F
-        if variant_type == 0:
-            return None
-        if variant_type == 1:  # EvtVarTypeString
-            return ctypes.wstring_at(variant.value) if variant.value else None
-        if variant_type in {4, 5, 6, 7, 8, 9, 10}:
-            return int(variant.value)
-        if variant_type == 17:  # EvtVarTypeFileTime
-            windows_epoch_offset = 116444736000000000
-            seconds = (int(variant.value) - windows_epoch_offset) / 10_000_000
-            return datetime.fromtimestamp(seconds, UTC)
-        return None
+        return decode_selected_event_metadata(variants, int(property_count.value))
 
     def close(self, handle: Any) -> None:
         if handle:

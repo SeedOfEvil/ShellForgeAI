@@ -2028,32 +2028,51 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
                 checks.append(_check(f"events.item_{idx}.object", False))
                 continue
             checks.append(_check(f"events.item_{idx}.keys", set(event) <= allowed))
+            required = {"provider", "event_id", "level", "time_created_utc", "record_id"}
+            checks.append(_check(f"events.item_{idx}.required_keys", required <= set(event)))
             checks.append(
                 _check(
                     f"events.item_{idx}.provider",
                     isinstance(event.get("provider"), str)
-                    and len(event.get("provider", "")) <= 256,
+                    and 0 < len(event.get("provider", "")) <= 256,
                 )
             )
             checks.append(
                 _check(
                     f"events.item_{idx}.event_id",
-                    isinstance(event.get("event_id"), int) and event.get("event_id") >= 0,
+                    isinstance(event.get("event_id"), int)
+                    and not isinstance(event.get("event_id"), bool)
+                    and 0 <= event.get("event_id") <= 65535,
                 )
             )
             checks.append(
                 _check(
                     f"events.item_{idx}.level",
-                    event.get("level") in {"critical", "error", "warning", "unknown"},
+                    event.get("level") in {"critical", "error", "warning"},
                 )
             )
             rid = event.get("record_id")
             checks.append(
                 _check(
                     f"events.item_{idx}.record_id",
-                    rid is None or (isinstance(rid, int) and rid > 0),
+                    isinstance(rid, int) and not isinstance(rid, bool) and rid > 0,
                 )
             )
+            for optional_key, maximum in (
+                ("task", 65535),
+                ("opcode", 255),
+                ("keywords", (2**64) - 1),
+            ):
+                if optional_key in event:
+                    value = event.get(optional_key)
+                    checks.append(
+                        _check(
+                            f"events.item_{idx}.{optional_key}",
+                            isinstance(value, int)
+                            and not isinstance(value, bool)
+                            and 0 <= value <= maximum,
+                        )
+                    )
             ts = event.get("time_created_utc")
             checks.append(
                 _check(
@@ -2086,6 +2105,30 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
             not (forbidden & set(json.dumps(payload).lower().replace('"', '"').split('"'))),
         )
     )
+    summary = payload.get("summary", {})
+    if payload.get("status") == "ok":
+        checks.append(_check("events.summary_unknown_zero", summary.get("unknown", 0) == 0))
+    emitted_pairs = {
+        (event.get("provider"), event.get("event_id"), event.get("level"))
+        for event in events
+        if isinstance(event, dict)
+    }
+    for idx, pair in enumerate(payload.get("top_provider_event_pairs", [])):
+        checks.append(
+            _check(
+                f"events.aggregation_{idx}.represented",
+                (pair.get("provider"), pair.get("event_id"), pair.get("level")) in emitted_pairs,
+            )
+        )
+    if payload.get("status") == "ok" and not events:
+        invalid_warnings = [
+            warning
+            for warning in payload.get("warnings", [])
+            if isinstance(warning, dict)
+            and str(warning.get("category", "")).startswith("invalid_required_")
+        ]
+        checks.append(_check("events.no_hidden_all_invalid_success", not invalid_warnings))
+
     safety = payload.get("safety", {})
     for key in (
         "powershell_executed",

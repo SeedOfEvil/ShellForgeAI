@@ -126,17 +126,15 @@ def test_success_normalization_summary_order_aggregation_and_privacy() -> None:
             (rec("B\x00ad", 2, 1, "2026-07-15T05:00:00Z", 5, task=1, opcode=2, keywords=3),),
             (rec("Provider", 1001, 3, "2026-07-15T05:30:00Z", 10),),
             (rec("Provider", 1001, 3, "2026-07-15T05:31:00Z", 11),),
-            (rec(None, 9, 9, None, None),),
         ]
     )
     payload = windows_events_payload(WINDOWS, native=native, limit=10, since_hours=24)
     assert payload["status"] == "ok"
     assert payload["collection"]["channel"] == "System"
     assert payload["events"][0]["time_created_utc"] == "2026-07-15T05:31:00Z"
-    assert payload["events"][-1]["provider"] == "unknown"
     assert payload["summary"]["critical"] == 1
     assert payload["summary"]["warning"] == 2
-    assert payload["summary"]["unknown"] == 1
+    assert payload["summary"]["unknown"] == 0
     assert payload["top_provider_event_pairs"][0]["provider"] == "Provider"
     assert payload["top_provider_event_pairs"][0]["count"] == 2
     event_keys = set().union(*(event.keys() for event in payload["events"]))
@@ -171,7 +169,7 @@ def test_empty_truncation_and_handle_cleanup() -> None:
     assert payload["events"] == []
     assert payload["summary"]["events_returned"] == 0
     assert empty.closed == ["context", "query"]
-    many = FakeNative([(rec(rid=i),) for i in range(5)])
+    many = FakeNative([(rec(rid=i + 1),) for i in range(5)])
     limited = windows_events_payload(WINDOWS, native=many, limit=2)
     assert len(limited["events"]) == 2
     assert limited["collection"]["truncated"] is True
