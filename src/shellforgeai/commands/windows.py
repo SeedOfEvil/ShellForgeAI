@@ -15,6 +15,14 @@ from shellforgeai.windows_disks import (
     windows_disks_payload,
 )
 from shellforgeai.windows_doctor import render_windows_doctor_text, windows_doctor_payload
+from shellforgeai.windows_events import (
+    DEFAULT_EVENTS_LIMIT,
+    DEFAULT_SINCE_HOURS,
+    render_windows_events_text,
+    validate_events_limit,
+    validate_since_hours,
+    windows_events_payload,
+)
 from shellforgeai.windows_evidence import (
     EVIDENCE_DISKS_DEFAULT_LIMIT,
     EVIDENCE_PROCESSES_DEFAULT_LIMIT,
@@ -232,6 +240,35 @@ def register(windows_app: typer.Typer) -> None:
             return
 
         console.print(render_windows_volumes_text(payload))
+
+    @windows_app.command("events")
+    def windows_events(
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="Bounded max System events to list (1-200)."),
+        ] = DEFAULT_EVENTS_LIMIT,
+        since_hours: Annotated[
+            int,
+            typer.Option(
+                "--since-hours", help="Bounded System Event Log lookback in hours (1-168)."
+            ),
+        ] = DEFAULT_SINCE_HOURS,
+    ) -> None:
+        """Inspect local Windows System Critical/Error/Warning metadata read-only."""
+
+        try:
+            validated_limit = validate_events_limit(limit)
+            validated_since_hours = validate_since_hours(since_hours)
+        except ValueError as exc:
+            hint = "--since-hours" if "--since-hours" in str(exc) else "--limit"
+            raise typer.BadParameter(str(exc), param_hint=hint) from exc
+        payload = windows_events_payload(limit=validated_limit, since_hours=validated_since_hours)
+        if json_output:
+            typer.echo(json.dumps(payload, sort_keys=True))
+            return
+
+        console.print(render_windows_events_text(payload))
 
     @windows_app.command("processes")
     def windows_processes(
