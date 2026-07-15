@@ -615,10 +615,146 @@ def _validate_services(
                     f"expected non-negative integer state_counts.{key}",
                 )
             )
+
+        runtime_summary = summary.get("runtime_summary")
+        if isinstance(runtime_summary, dict):
+            for key in (
+                "running_with_process_id",
+                "running_without_process_id",
+                "pending_services",
+                "services_with_nonzero_win32_exit_code",
+                "services_with_nonzero_service_specific_exit_code",
+                "services_with_checkpoint",
+                "services_with_wait_hint",
+                "services_accepting_stop",
+                "services_accepting_pause_continue",
+                "services_running_in_system_process",
+                "runtime_signal_services",
+            ):
+                checks.append(
+                    _check(
+                        f"{label}.services.runtime_summary.{key}",
+                        _non_negative_int(runtime_summary.get(key)),
+                        f"expected non-negative integer runtime_summary.{key}",
+                    )
+                )
         items = summary.get("items")
         checks.append(
             _check(f"{label}.services.items", isinstance(items, list), "expected services list")
         )
+        if isinstance(items, list):
+            allowed_controls = {
+                "stop",
+                "pause_continue",
+                "shutdown",
+                "param_change",
+                "netbind_change",
+                "hardware_profile_change",
+                "power_event",
+                "session_change",
+                "preshutdown",
+                "time_change",
+                "trigger_event",
+                "user_logoff",
+            }
+            allowed_signals = {
+                "pending",
+                "process_attached",
+                "nonzero_win32_exit_code",
+                "nonzero_service_specific_exit_code",
+                "checkpoint_present",
+                "wait_hint_present",
+                "runs_in_system_process",
+            }
+            forbidden_item_keys = {
+                "binary_path",
+                "command_line",
+                "account",
+                "description",
+                "dependencies",
+                "recovery_options",
+                "registry",
+                "owner",
+                "environment",
+                "modules",
+                "handles",
+            }
+            for index, item in enumerate(items):
+                checks.append(
+                    _check(
+                        f"{label}.services.items.{index}.runtime_fields",
+                        isinstance(item, dict)
+                        and {"name", "display_name", "state"}.issubset(item)
+                        and (
+                            "process_id" not in item
+                            or {
+                                "process_id",
+                                "controls_accepted",
+                                "controls_accepted_unknown_mask",
+                                "win32_exit_code",
+                                "service_specific_exit_code",
+                                "checkpoint",
+                                "wait_hint_ms",
+                                "runs_in_system_process",
+                                "runtime_signals",
+                            }.issubset(item)
+                        ),
+                        "expected service identity and PR297 runtime fields when present",
+                    )
+                )
+                if not isinstance(item, dict):
+                    continue
+                if "process_id" not in item:
+                    continue
+                pid = item.get("process_id")
+                controls = item.get("controls_accepted")
+                signals = item.get("runtime_signals")
+                checks.extend(
+                    [
+                        _check(
+                            f"{label}.services.items.{index}.process_id",
+                            pid is None or (_non_negative_int(pid) and pid > 0),
+                            "expected null or positive integer process_id",
+                        ),
+                        _check(
+                            f"{label}.services.items.{index}.controls_accepted",
+                            isinstance(controls, list)
+                            and len(controls) == len(set(controls))
+                            and set(controls).issubset(allowed_controls),
+                            "expected bounded normalized controls list",
+                        ),
+                        _check(
+                            f"{label}.services.items.{index}.controls_unknown",
+                            _non_negative_int(item.get("controls_accepted_unknown_mask")),
+                            "expected non-negative controls_accepted_unknown_mask",
+                        ),
+                        _check(
+                            f"{label}.services.items.{index}.numeric_runtime",
+                            all(
+                                _non_negative_int(item.get(key))
+                                for key in (
+                                    "win32_exit_code",
+                                    "service_specific_exit_code",
+                                    "checkpoint",
+                                    "wait_hint_ms",
+                                )
+                            ),
+                            "expected non-negative integer runtime fields",
+                        ),
+                        _check(
+                            f"{label}.services.items.{index}.runtime_signals",
+                            isinstance(signals, list)
+                            and len(signals) == len(set(signals))
+                            and set(signals).issubset(allowed_signals),
+                            "expected bounded runtime_signals list",
+                        ),
+                        _check(
+                            f"{label}.services.items.{index}.no_config_or_process_details",
+                            forbidden_item_keys.isdisjoint(item),
+                            "expected no service config or process detail fields",
+                        ),
+                    ]
+                )
         limits = summary.get("collection_limits")
         truncated = _nested(summary, "collection_limits", "truncated")
         checks.append(

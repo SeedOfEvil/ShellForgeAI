@@ -25,17 +25,31 @@ _MIN_MAX_SERVICES = 1
 _HARD_MAX_SERVICES = 500
 
 _NOT_COLLECTED_PR267 = {
-    "service_binary_path": (
-        "not collected because PR267 does not read service configuration or registry"
+    "service_binary_path": "not collected; service configuration and registry are not read",
+    "service_executable_command_line": (
+        "not collected; process/configuration inspection is out of scope"
     ),
-    "service_account": (
-        "not collected because PR267 does not read service configuration or registry"
+    "service_account": "not collected; service configuration and registry are not read",
+    "service_description": "not collected; service configuration is out of scope",
+    "service_dependencies": "not collected; dependency traversal is out of scope",
+    "delayed_auto_start_configuration": "not collected; service configuration is out of scope",
+    "trigger_configuration": "not collected; service configuration is out of scope",
+    "service_recovery_options": "not collected; recovery/failure actions are out of scope",
+    "failure_actions": "not collected; recovery/failure actions are out of scope",
+    "security_descriptor": "not collected; permissions/ACLs are out of scope",
+    "permissions_acls": "not collected; permissions/ACLs are out of scope",
+    "registry_configuration": "not collected; registry access is out of scope",
+    "process_details": "not collected; process inspection is out of scope",
+    "process_details_beyond_scm_pid": (
+        "not collected; the PID already returned by SCM is not opened or inspected"
     ),
-    "service_description": "planned for later read-only Windows evidence PR",
-    "service_dependencies": "planned for later read-only Windows evidence PR",
-    "service_recovery_options": "planned for later read-only Windows evidence PR",
-    "process_details": "planned for later read-only Windows evidence PR",
-    "event_logs": "planned for later read-only Windows evidence PR",
+    "event_logs": "not collected; event-log collection is out of scope",
+    "process_owner": "not collected; process inspection is out of scope",
+    "process_command_line": "not collected; process inspection is out of scope",
+    "process_environment": "not collected; process inspection is out of scope",
+    "service_event_logs": "not collected; event-log collection is out of scope",
+    "service_restart_history": "not collected; event-log/recovery collection is out of scope",
+    "remote_service_state": "not collected; remote collection is out of scope",
     "firewall": "planned for later read-only Windows evidence PR",
     "windows_update": "planned for later read-only Windows evidence PR",
 }
@@ -121,12 +135,19 @@ _SERVICE_INTERACTIVE_PROCESS_FLAG = 0x00000100
 
 @dataclass(frozen=True)
 class RawServiceRecord:
-    """One enumerated service: identity and current state only."""
+    """One enumerated service from SERVICE_STATUS_PROCESS."""
 
     name: str
     display_name: str
     state_code: int
     service_type_code: int
+    process_id: int = 0
+    controls_accepted_mask: int = 0
+    win32_exit_code: int = 0
+    service_specific_exit_code: int = 0
+    checkpoint: int = 0
+    wait_hint_ms: int = 0
+    service_flags: int = 0
 
 
 ServiceEnumerator = Callable[[], Sequence[RawServiceRecord]]
@@ -155,6 +176,54 @@ def bounded_max_services(value: int) -> int:
     return max(_MIN_MAX_SERVICES, min(numeric, _HARD_MAX_SERVICES))
 
 
+_PENDING_STATES = {"start_pending", "stop_pending", "continue_pending", "pause_pending"}
+_SERVICE_RUNS_IN_SYSTEM_PROCESS = 0x00000001
+_ACCEPTED_CONTROLS: tuple[tuple[int, str], ...] = (
+    (0x00000001, "stop"),
+    (0x00000002, "pause_continue"),
+    (0x00000004, "shutdown"),
+    (0x00000008, "param_change"),
+    (0x00000010, "netbind_change"),
+    (0x00000020, "hardware_profile_change"),
+    (0x00000040, "power_event"),
+    (0x00000080, "session_change"),
+    (0x00000100, "preshutdown"),
+    (0x00000200, "time_change"),
+    (0x00000400, "trigger_event"),
+    (0x00000800, "user_logoff"),
+)
+_KNOWN_ACCEPTED_CONTROLS_MASK = 0
+for _mask, _label in _ACCEPTED_CONTROLS:
+    _KNOWN_ACCEPTED_CONTROLS_MASK |= _mask
+
+
+def normalize_controls(mask: int) -> tuple[list[str], int]:
+    numeric = max(0, int(mask))
+    return [
+        label for bit, label in _ACCEPTED_CONTROLS if numeric & bit
+    ], numeric & ~_KNOWN_ACCEPTED_CONTROLS_MASK
+
+
+def runtime_signals(record: RawServiceRecord) -> list[str]:
+    state = service_state_label(record.state_code)
+    signals: list[str] = []
+    if state in _PENDING_STATES:
+        signals.append("pending")
+    if record.process_id > 0:
+        signals.append("process_attached")
+    if record.win32_exit_code > 0:
+        signals.append("nonzero_win32_exit_code")
+    if record.service_specific_exit_code > 0:
+        signals.append("nonzero_service_specific_exit_code")
+    if record.checkpoint > 0:
+        signals.append("checkpoint_present")
+    if record.wait_hint_ms > 0:
+        signals.append("wait_hint_present")
+    if record.service_flags & _SERVICE_RUNS_IN_SYSTEM_PROCESS:
+        signals.append("runs_in_system_process")
+    return signals
+
+
 def summarize_service_states(records: Sequence[RawServiceRecord]) -> dict[str, int]:
     """Count services per state with every known state key present."""
 
@@ -168,13 +237,66 @@ def _sorted_records(records: Sequence[RawServiceRecord]) -> list[RawServiceRecor
     return sorted(records, key=lambda record: (record.name.casefold(), record.name))
 
 
-def _service_item(record: RawServiceRecord) -> dict[str, str]:
+def _service_item(record: RawServiceRecord) -> dict[str, Any]:
+    controls, unknown_mask = normalize_controls(record.controls_accepted_mask)
     return {
         "name": record.name,
         "display_name": record.display_name,
         "state": service_state_label(record.state_code),
         "service_type": service_type_label(record.service_type_code),
+        "process_id": record.process_id if record.process_id > 0 else None,
+        "controls_accepted": controls,
+        "controls_accepted_unknown_mask": unknown_mask,
+        "win32_exit_code": max(0, int(record.win32_exit_code)),
+        "service_specific_exit_code": max(0, int(record.service_specific_exit_code)),
+        "checkpoint": max(0, int(record.checkpoint)),
+        "wait_hint_ms": max(0, int(record.wait_hint_ms)),
+        "runs_in_system_process": bool(record.service_flags & _SERVICE_RUNS_IN_SYSTEM_PROCESS),
+        "runtime_signals": runtime_signals(record),
     }
+
+
+def summarize_service_runtime(records: Sequence[RawServiceRecord]) -> dict[str, int]:
+    summary = {
+        "running_with_process_id": 0,
+        "running_without_process_id": 0,
+        "pending_services": 0,
+        "services_with_nonzero_win32_exit_code": 0,
+        "services_with_nonzero_service_specific_exit_code": 0,
+        "services_with_checkpoint": 0,
+        "services_with_wait_hint": 0,
+        "services_accepting_stop": 0,
+        "services_accepting_pause_continue": 0,
+        "services_running_in_system_process": 0,
+        "runtime_signal_services": 0,
+    }
+    for record in records:
+        state = service_state_label(record.state_code)
+        controls, _unknown = normalize_controls(record.controls_accepted_mask)
+        signals = runtime_signals(record)
+        if state == "running" and record.process_id > 0:
+            summary["running_with_process_id"] += 1
+        if state == "running" and record.process_id <= 0:
+            summary["running_without_process_id"] += 1
+        if state in _PENDING_STATES:
+            summary["pending_services"] += 1
+        if record.win32_exit_code > 0:
+            summary["services_with_nonzero_win32_exit_code"] += 1
+        if record.service_specific_exit_code > 0:
+            summary["services_with_nonzero_service_specific_exit_code"] += 1
+        if record.checkpoint > 0:
+            summary["services_with_checkpoint"] += 1
+        if record.wait_hint_ms > 0:
+            summary["services_with_wait_hint"] += 1
+        if "stop" in controls:
+            summary["services_accepting_stop"] += 1
+        if "pause_continue" in controls:
+            summary["services_accepting_pause_continue"] += 1
+        if record.service_flags & _SERVICE_RUNS_IN_SYSTEM_PROCESS:
+            summary["services_running_in_system_process"] += 1
+        if signals:
+            summary["runtime_signal_services"] += 1
+    return summary
 
 
 def _enumerate_windows_services() -> list[RawServiceRecord]:
@@ -272,6 +394,13 @@ def _enumerate_windows_services() -> list[RawServiceRecord]:
                         display_name=str(entry.lpDisplayName or ""),
                         state_code=int(status.dwCurrentState),
                         service_type_code=int(status.dwServiceType),
+                        process_id=int(status.dwProcessId),
+                        controls_accepted_mask=int(status.dwControlsAccepted),
+                        win32_exit_code=int(status.dwWin32ExitCode),
+                        service_specific_exit_code=int(status.dwServiceSpecificExitCode),
+                        checkpoint=int(status.dwCheckPoint),
+                        wait_hint_ms=int(status.dwWaitHint),
+                        service_flags=int(status.dwServiceFlags),
                     )
                 )
             if success:
@@ -324,6 +453,7 @@ def windows_services_payload(
             "collection": "local_windows_service_state_summary",
             "total_count": total_count,
             "state_counts": summarize_service_states(ordered),
+            "runtime_summary": summarize_service_runtime(ordered),
             "items": [_service_item(record) for record in ordered[:limit]],
             "collection_limits": {
                 "max_services": limit,
@@ -407,6 +537,46 @@ def render_windows_services_text(payload: dict[str, Any]) -> str:
             "States: " + "; ".join(f"{key}={state_counts.get(key, 0)}" for key in _STATE_COUNT_KEYS)
         )
         limits = services.get("collection_limits") or {}
+        runtime = services.get("runtime_summary") or {}
+        nonzero_exit_codes = runtime.get("services_with_nonzero_win32_exit_code", 0) + runtime.get(
+            "services_with_nonzero_service_specific_exit_code", 0
+        )
+        lines.append(
+            "Runtime: "
+            f"running_with_pid={runtime.get('running_with_process_id', 0)}; "
+            f"pending={runtime.get('pending_services', 0)}; "
+            f"nonzero_exit_codes={nonzero_exit_codes}; "
+            f"system_process={runtime.get('services_running_in_system_process', 0)}"
+        )
+        lines.append("Runtime signals are point-in-time observations, not failure diagnoses.")
+        preview = [
+            item
+            for item in services.get("items", [])
+            if item.get("state") in _PENDING_STATES
+            or item.get("win32_exit_code", 0) > 0
+            or item.get("service_specific_exit_code", 0) > 0
+        ]
+        preview = sorted(
+            preview,
+            key=lambda item: (str(item.get("name", "")).casefold(), str(item.get("name", ""))),
+        )
+        if preview:
+            lines.append("Runtime signal preview:")
+            for item in preview[:10]:
+                pid = item.get("process_id")
+                pid_text = f" pid={pid};" if pid else ""
+                lines.append(
+                    f"- {item.get('name', '')}: state={item.get('state', 'unknown')};{pid_text} "
+                    f"win32_exit_code={item.get('win32_exit_code', 0)}; "
+                    f"service_specific_exit_code={item.get('service_specific_exit_code', 0)}; "
+                    f"checkpoint={item.get('checkpoint', 0)}; "
+                    f"wait_hint_ms={item.get('wait_hint_ms', 0)}"
+                )
+            if len(preview) > 10:
+                lines.append(
+                    "Runtime signal preview truncated: "
+                    f"{len(preview) - 10} additional services not shown."
+                )
         lines.append(
             "Collection limit: "
             f"max_services={limits.get('max_services', DEFAULT_MAX_SERVICES)}; "
