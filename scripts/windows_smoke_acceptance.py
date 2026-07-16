@@ -475,7 +475,66 @@ def _validate_evidence(
         )
         checks.extend(_validate_embedded_processes_block(payload, processes))
 
-    expected_component_count = 2 + int(has_services) + int(has_disks) + int(has_processes)
+    events = _nested(payload, "components", "events")
+    has_events = isinstance(components, dict) and "events" in components
+    if has_events and isinstance(events, dict):
+        checks.extend(_validate_events_artifact(events))
+        embedded_events = payload.get("embedded_events")
+        summary = events.get("summary", {}) if isinstance(events.get("summary"), dict) else {}
+        collection = (
+            events.get("collection", {}) if isinstance(events.get("collection"), dict) else {}
+        )
+        checks.extend(
+            [
+                _check("evidence.embedded_events.object", isinstance(embedded_events, dict)),
+                _check(
+                    "evidence.embedded_events.included",
+                    isinstance(embedded_events, dict) and embedded_events.get("included") is True,
+                ),
+                _check(
+                    "evidence.embedded_events.status",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("status") == events.get("status"),
+                ),
+                _check(
+                    "evidence.embedded_events.limit",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("limit")
+                    == summary.get("limit", collection.get("limit")),
+                ),
+                _check(
+                    "evidence.embedded_events.since_hours",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("since_hours")
+                    == summary.get("since_hours", collection.get("since_hours")),
+                ),
+                _check(
+                    "evidence.embedded_events.returned_count",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("returned_count") == summary.get("events_returned"),
+                ),
+                _check(
+                    "evidence.embedded_events.truncated",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("truncated")
+                    == summary.get("truncated", collection.get("truncated")),
+                ),
+            ]
+        )
+    else:
+        checks.append(
+            _check(
+                "evidence.default_no_events_component",
+                isinstance(components, dict) and "events" not in components,
+            )
+        )
+        checks.append(
+            _check("evidence.default_no_embedded_events", "embedded_events" not in payload)
+        )
+
+    expected_component_count = (
+        2 + int(has_services) + int(has_disks) + int(has_processes) + int(has_events)
+    )
     expected_ok = {"doctor", "status"}
     if has_services:
         expected_ok.add("services")
@@ -483,6 +542,8 @@ def _validate_evidence(
         expected_ok.add("disks")
     if has_processes:
         expected_ok.add("processes")
+    if has_events and isinstance(events, dict) and events.get("status") == "ok":
+        expected_ok.add("events")
     ok_components = _nested(payload, "summary", "ok_components")
     failed_components = _nested(payload, "summary", "failed_components")
     checks.extend(

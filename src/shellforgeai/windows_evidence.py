@@ -26,6 +26,13 @@ from shellforgeai.windows_disks import (
     windows_disks_payload,
 )
 from shellforgeai.windows_doctor import windows_doctor_payload
+from shellforgeai.windows_events import (
+    DEFAULT_EVENTS_LIMIT,
+    DEFAULT_SINCE_HOURS,
+    validate_events_limit,
+    validate_since_hours,
+    windows_events_payload,
+)
 from shellforgeai.windows_processes import MAX_PROCESSES_LIMIT, windows_processes_payload
 from shellforgeai.windows_services import DEFAULT_MAX_SERVICES, windows_services_payload
 from shellforgeai.windows_status import windows_status_payload
@@ -33,6 +40,9 @@ from shellforgeai.windows_status import windows_status_payload
 WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND = "shellforgeai windows status --json"
 WINDOWS_EVIDENCE_DISKS_NEXT_SAFE_COMMAND = "shellforgeai windows disks --json"
 WINDOWS_EVIDENCE_PROCESSES_NEXT_SAFE_COMMAND = "shellforgeai windows processes --json --limit 10"
+WINDOWS_EVIDENCE_EVENTS_NEXT_SAFE_COMMAND = (
+    "shellforgeai windows events --json --limit {limit} --since-hours {since_hours}"
+)
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
 
 EVIDENCE_SERVICES_DEFAULT_LIMIT = 25
@@ -133,6 +143,7 @@ PayloadBuilder = Callable[[PlatformInfo], dict[str, Any]]
 ServicesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 DisksBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 ProcessesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
+EventsBuilder = Callable[[PlatformInfo, int, int], dict[str, Any]]
 
 
 def validate_evidence_services_limit(value: Any) -> int:
@@ -182,6 +193,10 @@ def _default_disks_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
 
 def _default_processes_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
     return windows_processes_payload(info, limit=limit)
+
+
+def _default_events_builder(info: PlatformInfo, limit: int, since_hours: int) -> dict[str, Any]:
+    return windows_events_payload(info, limit=limit, since_hours=since_hours)
 
 
 def _embedded_services_component(payload: dict[str, Any], limit: int) -> dict[str, Any]:
@@ -234,6 +249,106 @@ def _embedded_processes_component(payload: dict[str, Any], limit: int) -> dict[s
     return component
 
 
+def validate_evidence_events_limit(value: Any) -> int:
+    """Validate the opt-in bundled Windows System events limit."""
+
+    return validate_events_limit(value)
+
+
+def validate_evidence_events_since_hours(value: Any) -> int:
+    """Validate the opt-in bundled Windows System events lookback."""
+
+    return validate_since_hours(value)
+
+
+def _embedded_events_summary(component: dict[str, Any]) -> dict[str, Any]:
+    summary = component.get("summary") if isinstance(component.get("summary"), dict) else {}
+    collection = (
+        component.get("collection") if isinstance(component.get("collection"), dict) else {}
+    )
+    return {
+        "included": True,
+        "status": component.get("status", "unknown"),
+        "limit": int(summary.get("limit", collection.get("limit", 0)) or 0),
+        "since_hours": int(summary.get("since_hours", collection.get("since_hours", 0)) or 0),
+        "returned_count": int(summary.get("events_returned", 0) or 0),
+        "truncated": bool(summary.get("truncated", collection.get("truncated", False))),
+        "critical": int(summary.get("critical", 0) or 0),
+        "error": int(summary.get("error", 0) or 0),
+        "warning": int(summary.get("warning", 0) or 0),
+        "unknown": int(summary.get("unknown", 0) or 0),
+    }
+
+
+def _events_component_error(limit: int, since_hours: int) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "mode": "windows_events",
+        "status": "error",
+        "read_only": True,
+        "mutation_performed": False,
+        "collection": {
+            "method": "wevtapi_system_metadata",
+            "channel": "System",
+            "levels": ["critical", "error", "warning"],
+            "since_hours": since_hours,
+            "limit": limit,
+            "truncated": False,
+            "rendered_messages_collected": False,
+            "event_xml_collected": False,
+            "event_data_collected": False,
+            "user_data_collected": False,
+            "remote_session_used": False,
+        },
+        "summary": {
+            "events_returned": 0,
+            "critical": 0,
+            "error": 0,
+            "warning": 0,
+            "unknown": 0,
+            "truncated": False,
+            "since_hours": since_hours,
+            "limit": limit,
+        },
+        "events": [],
+        "top_provider_event_pairs": [],
+        "warnings": [],
+        "errors": [
+            {
+                "type": "events_component_failed",
+                "message": "Windows Event Log metadata component failed.",
+            }
+        ],
+        "limitations": [
+            "Only local System-channel Critical, Error, and Warning metadata was requested."
+        ],
+        "safety": {
+            "read_only": True,
+            "mutation_performed": False,
+            "powershell_executed": False,
+            "winrm_used": False,
+            "remote_execution": False,
+            "shell_true": False,
+            "arbitrary_command_execution": False,
+            "event_log_write_performed": False,
+            "event_log_clear_performed": False,
+            "event_log_export_performed": False,
+            "event_subscription_created": False,
+            "registry_modified": False,
+            "service_control_executed": False,
+            "process_termination_executed": False,
+            "cleanup_executed": False,
+            "remediation_executed": False,
+            "rollback_executed": False,
+            "recovery_executed": False,
+            "secret_read": False,
+            "auth_cache_read": False,
+            "model_called": False,
+            "network_call": False,
+        },
+    }
+
+
 def _component_summary(components: dict[str, dict[str, Any]]) -> dict[str, Any]:
     ok_components = [name for name, payload in components.items() if payload.get("status") == "ok"]
     failed_components = [
@@ -260,6 +375,10 @@ def windows_evidence_payload(
     include_processes: bool = False,
     processes_limit: int | None = None,
     processes_builder: ProcessesBuilder = _default_processes_builder,
+    include_events: bool = False,
+    events_limit: int | None = None,
+    events_since_hours: int | None = None,
+    events_builder: EventsBuilder = _default_events_builder,
 ) -> dict[str, Any]:
     """Build the Windows evidence bundle payload.
 
@@ -272,6 +391,11 @@ def windows_evidence_payload(
     ``include_processes`` is explicitly requested, bounded by a validated
     limit, and built by reusing the existing PR274 read-only processes payload.
     """
+
+    if not include_events and events_limit is not None:
+        raise ValueError("events limit requires include_events=True")
+    if not include_events and events_since_hours is not None:
+        raise ValueError("events since-hours requires include_events=True")
 
     info = info or detect_platform()
     if info.system != "windows":
@@ -332,6 +456,30 @@ def windows_evidence_payload(
         )
         safety.update(_EVIDENCE_PROCESSES_SAFETY)
         next_safe_command = WINDOWS_EVIDENCE_PROCESSES_NEXT_SAFE_COMMAND
+    embedded_events: dict[str, Any] | None = None
+    if include_events:
+        bounded_events_limit = validate_evidence_events_limit(
+            DEFAULT_EVENTS_LIMIT if events_limit is None else events_limit
+        )
+        bounded_events_since_hours = validate_evidence_events_since_hours(
+            DEFAULT_SINCE_HOURS if events_since_hours is None else events_since_hours
+        )
+        try:
+            events_component = events_builder(
+                info, bounded_events_limit, bounded_events_since_hours
+            )
+        except Exception:
+            events_component = _events_component_error(
+                bounded_events_limit, bounded_events_since_hours
+            )
+        components["events"] = events_component
+        embedded_events = _embedded_events_summary(events_component)
+        not_collected["event_logs"] = (
+            "included as explicit opt-in bounded local System Event metadata via --include-events"
+        )
+        next_safe_command = WINDOWS_EVIDENCE_EVENTS_NEXT_SAFE_COMMAND.format(
+            limit=bounded_events_limit, since_hours=bounded_events_since_hours
+        )
     summary = _component_summary(components)
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -359,6 +507,8 @@ def windows_evidence_payload(
     if embedded_processes is not None:
         payload["embedded_processes"] = embedded_processes
         payload["not_collected_in_pr276"] = dict(_NOT_COLLECTED_PR276)
+    if embedded_events is not None:
+        payload["embedded_events"] = embedded_events
     return payload
 
 
@@ -441,6 +591,20 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
             f"limit={processes_component.get('limit', 0)}; "
             f"truncated={str(processes_component.get('truncated', False)).lower()}"
         )
+    events_summary = payload.get("embedded_events")
+    if isinstance(events_summary, dict):
+        lines.append(
+            "Events component: "
+            f"status={events_summary.get('status', 'unknown')}; "
+            f"returned={events_summary.get('returned_count', 0)}; "
+            f"limit={events_summary.get('limit', 0)}; "
+            f"since_hours={events_summary.get('since_hours', 0)}; "
+            f"truncated={str(events_summary.get('truncated', False)).lower()}; "
+            f"critical={events_summary.get('critical', 0)}; "
+            f"error={events_summary.get('error', 0)}; "
+            f"warning={events_summary.get('warning', 0)}; "
+            f"unknown={events_summary.get('unknown', 0)}"
+        )
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows evidence bundle is unavailable.")))
     pending = [
@@ -456,6 +620,8 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
         pending.remove("services")
     if isinstance(processes_component, dict):
         pending.remove("processes")
+    if isinstance(events_summary, dict):
+        pending.remove("event logs")
     lines.append("Not collected yet: " + ", ".join(pending) + ".")
     lines.append(
         f"Next safe command: {payload.get('next_safe_command', UNSUPPORTED_NEXT_SAFE_COMMAND)}"
