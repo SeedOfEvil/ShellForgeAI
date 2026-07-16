@@ -254,6 +254,7 @@ def _validate_common(
     expected_host: str | None,
     expected_python: str | None,
     require_details: bool = True,
+    expected_statuses: frozenset[str] = frozenset({"ok"}),
 ) -> list[Check]:
     checks: list[Check] = []
     checks.append(
@@ -269,7 +270,11 @@ def _validate_common(
                 payload.get("mode") == expected_mode,
                 f"expected mode {expected_mode!r}",
             ),
-            _check(f"{label}.status", payload.get("status") == "ok", "expected status 'ok'"),
+            _check(
+                f"{label}.status",
+                payload.get("status") in expected_statuses,
+                f"expected status in {sorted(expected_statuses)!r}",
+            ),
             _check(
                 f"{label}.platform.system",
                 _nested(payload, "platform", "system") == "windows",
@@ -380,6 +385,7 @@ def _validate_evidence(
         expected_host=expected_host,
         expected_python=expected_python,
         require_details=False,
+        expected_statuses=frozenset({"ok", "component_failure"}),
     )
     if not isinstance(payload, dict):
         return checks
@@ -548,7 +554,6 @@ def _validate_evidence(
             ]
         )
         if events.get("status") == "error":
-            dumped_events = json.dumps(events)
             checks.extend(
                 [
                     _check(
@@ -569,9 +574,7 @@ def _validate_evidence(
                     _check("evidence.events_failure.events_empty", events.get("events") == []),
                     _check(
                         "evidence.events_failure.sanitized",
-                        "Traceback" not in dumped_events
-                        and "secret" not in dumped_events.lower()
-                        and "sensitive" not in dumped_events.lower(),
+                        _event_error_values_are_sanitized(events.get("errors")),
                     ),
                 ]
             )
@@ -625,6 +628,16 @@ def _validate_evidence(
                 f"expected {', '.join(sorted(expected_ok))} ok components",
             ),
         ]
+    )
+    expected_evidence_status = (
+        "component_failure" if isinstance(failed_components, list) and failed_components else "ok"
+    )
+    checks.append(
+        _check(
+            "evidence.status_matches_component_health",
+            payload.get("status") == expected_evidence_status,
+            f"expected evidence status {expected_evidence_status!r}",
+        )
     )
     not_collected = payload.get("not_collected_in_pr264")
     for key in NOT_COLLECTED_PR264_KEYS:
@@ -2112,6 +2125,80 @@ def _render_text(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+EVENTS_FALLBACK_ERROR = {
+    "type": "events_component_failed",
+    "message": "Windows Event Log metadata component failed.",
+}
+EVENTS_COLLECTION_ERROR_MESSAGE = "Windows Event Log metadata collection failed."
+_EVENTS_ERROR_VALUE_FORBIDDEN_RE = re.compile(
+    r"(Traceback|OSError|RuntimeError|C:\\|secret-marker|raw query|"
+    r"System\[\(Level=|0x[0-9a-fA-F]{6,})"
+)
+
+
+def _event_error_values_are_sanitized(errors: Any) -> bool:
+    if not isinstance(errors, list) or len(errors) > 1:
+        return False
+    for entry in errors:
+        if not isinstance(entry, dict):
+            return False
+        for key, value in entry.items():
+            if key == "type":
+                continue
+            if isinstance(value, str) and _EVENTS_ERROR_VALUE_FORBIDDEN_RE.search(value):
+                return False
+    return True
+
+
+def _validate_events_errors(payload: dict[str, Any]) -> list[Check]:
+    errors = payload.get("errors", [])
+    checks = [_check("events.errors.list", isinstance(errors, list))]
+    if not isinstance(errors, list):
+        return checks
+    checks.append(_check("events.errors.bounded", len(errors) <= 1))
+    for idx, entry in enumerate(errors):
+        checks.append(_check(f"events.errors.{idx}.object", isinstance(entry, dict)))
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") == "events_component_failed":
+            checks.extend(
+                [
+                    _check(
+                        f"events.errors.{idx}.fallback_keys",
+                        set(entry) == set(EVENTS_FALLBACK_ERROR),
+                    ),
+                    _check(
+                        f"events.errors.{idx}.fallback_exact",
+                        entry == EVENTS_FALLBACK_ERROR,
+                    ),
+                ]
+            )
+        else:
+            checks.extend(
+                [
+                    _check(
+                        f"events.errors.{idx}.collection_keys",
+                        set(entry) <= {"type", "message", "winerror"},
+                    ),
+                    _check(
+                        f"events.errors.{idx}.collection_type",
+                        isinstance(entry.get("type"), str) and bool(entry.get("type")),
+                    ),
+                    _check(
+                        f"events.errors.{idx}.collection_message",
+                        entry.get("message") == EVENTS_COLLECTION_ERROR_MESSAGE,
+                    ),
+                ]
+            )
+        checks.append(
+            _check(
+                f"events.errors.{idx}.sanitized_values",
+                _event_error_values_are_sanitized([entry]),
+            )
+        )
+    return checks
+
+
 def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
     checks: list[Check] = []
     checks.append(_check("events.mode", payload.get("mode") == "windows_events"))
@@ -2208,27 +2295,6 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
             if last_key is not None:
                 checks.append(_check(f"events.item_{idx}.newest_first", key <= last_key))
             last_key = key
-    forbidden = {
-        "message",
-        "xml",
-        "event_data",
-        "user_data",
-        "sid",
-        "username",
-        "computer",
-        "activity_id",
-        "process_id",
-        "thread_id",
-        "command_line",
-        "file_path",
-        "registry_path",
-    }
-    checks.append(
-        _check(
-            "events.privacy_keys",
-            not (forbidden & set(json.dumps(payload).lower().replace('"', '"').split('"'))),
-        )
-    )
     summary = payload.get("summary", {})
     if payload.get("status") == "ok":
         checks.append(_check("events.summary_unknown_zero", summary.get("unknown", 0) == 0))
@@ -2237,7 +2303,18 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
         for event in events
         if isinstance(event, dict)
     }
-    for idx, pair in enumerate(payload.get("top_provider_event_pairs", [])):
+    top_pairs = payload.get("top_provider_event_pairs", [])
+    checks.append(_check("events.top_provider_event_pairs.array", isinstance(top_pairs, list)))
+    for idx, pair in enumerate(top_pairs if isinstance(top_pairs, list) else []):
+        if not isinstance(pair, dict):
+            checks.append(_check(f"events.aggregation_{idx}.object", False))
+            continue
+        checks.append(
+            _check(
+                f"events.aggregation_{idx}.keys",
+                set(pair) <= {"provider", "event_id", "level", "count", "most_recent_utc"},
+            )
+        )
         most_recent = pair.get("most_recent_utc")
         if most_recent is not None:
             checks.append(
@@ -2261,6 +2338,8 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
             and str(warning.get("category", "")).startswith("invalid_required_")
         ]
         checks.append(_check("events.no_hidden_all_invalid_success", not invalid_warnings))
+
+    checks.extend(_validate_events_errors(payload))
 
     safety = payload.get("safety", {})
     for key in (
