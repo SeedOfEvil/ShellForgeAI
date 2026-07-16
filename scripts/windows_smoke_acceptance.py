@@ -182,6 +182,8 @@ PROCESSES_NOT_COLLECTED_PR274_KEYS = (
     "network_connections",
 )
 WINDOWS_V1_FALSE_KEYS = ("powershell_executed", "winrm_used", "remote_execution")
+EVENTS_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$")
+
 NOT_COLLECTED_PR264_KEYS = (
     "powershell_version",
     "execution_policy",
@@ -1818,6 +1820,7 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         "memory": None,
         "network": None,
         "volumes": None,
+        "events": None,
     }
     services_json = getattr(args, "services_json", None)
     disks_json = getattr(args, "disks_json", None)
@@ -1825,6 +1828,7 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
     memory_json = getattr(args, "memory_json", None)
     network_json = getattr(args, "network_json", None)
     volumes_json = getattr(args, "volumes_json", None)
+    events_json = getattr(args, "events_json", None)
 
     if args.evidence_json:
         payloads["evidence"], read_checks = _read_json_file(Path(args.evidence_json), "evidence")
@@ -1898,6 +1902,12 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
         if payloads["network"] is not None:
             checks.extend(_validate_network(payloads["network"]))
 
+    if events_json:
+        payloads["events"], read_checks = _read_json_file(Path(events_json), "events")
+        checks.extend(read_checks)
+        if payloads["events"] is not None:
+            checks.extend(_validate_events_artifact(payloads["events"]))
+
     if volumes_json:
         payloads["volumes"], read_checks = _read_json_file(Path(volumes_json), "volumes")
         checks.extend(read_checks)
@@ -1942,6 +1952,8 @@ def _result(args: argparse.Namespace) -> dict[str, Any]:
     if network_json:
         inputs["network_json"] = str(Path(network_json))
         artifacts["network"] = _artifact_summary(payloads["network"], "windows_network", True)
+    if events_json:
+        inputs["events_json"] = str(Path(events_json))
     if volumes_json:
         inputs["volumes_json"] = str(Path(volumes_json))
         artifacts["volumes"] = _artifact_summary(payloads["volumes"], "windows_volumes", True)
@@ -1976,6 +1988,174 @@ def _render_text(result: dict[str, Any]) -> str:
             f"- {check['name']}: {check.get('reason', 'check failed')}" for check in failed
         )
     return "\n".join(lines)
+
+
+def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
+    checks: list[Check] = []
+    checks.append(_check("events.mode", payload.get("mode") == "windows_events"))
+    checks.append(_check("events.platform", payload.get("platform", {}).get("system") == "windows"))
+    checks.append(_check("events.read_only", payload.get("read_only") is True))
+    checks.append(_check("events.no_mutation", payload.get("mutation_performed") is False))
+    collection = payload.get("collection", {})
+    checks.append(_check("events.channel_system", collection.get("channel") == "System"))
+    checks.append(
+        _check("events.levels", collection.get("levels") == ["critical", "error", "warning"])
+    )
+    limit = collection.get("limit")
+    checks.append(_check("events.limit_bounded", isinstance(limit, int) and 1 <= limit <= 200))
+    checks.append(
+        _check(
+            "events.lookback_bounded",
+            isinstance(collection.get("since_hours"), int)
+            and 1 <= collection.get("since_hours") <= 168,
+        )
+    )
+    events = payload.get("events", [])
+    checks.append(_check("events.array", isinstance(events, list)))
+    if isinstance(events, list) and isinstance(limit, int):
+        checks.append(_check("events.count_within_limit", len(events) <= limit))
+        allowed = {
+            "provider",
+            "event_id",
+            "level",
+            "time_created_utc",
+            "record_id",
+            "task",
+            "opcode",
+            "keywords",
+        }
+        last_key: tuple[str, int] | None = None
+        for idx, event in enumerate(events):
+            if not isinstance(event, dict):
+                checks.append(_check(f"events.item_{idx}.object", False))
+                continue
+            checks.append(_check(f"events.item_{idx}.keys", set(event) <= allowed))
+            required = {"provider", "event_id", "level", "time_created_utc", "record_id"}
+            checks.append(_check(f"events.item_{idx}.required_keys", required <= set(event)))
+            checks.append(
+                _check(
+                    f"events.item_{idx}.provider",
+                    isinstance(event.get("provider"), str)
+                    and 0 < len(event.get("provider", "")) <= 256,
+                )
+            )
+            checks.append(
+                _check(
+                    f"events.item_{idx}.event_id",
+                    isinstance(event.get("event_id"), int)
+                    and not isinstance(event.get("event_id"), bool)
+                    and 0 <= event.get("event_id") <= 65535,
+                )
+            )
+            checks.append(
+                _check(
+                    f"events.item_{idx}.level",
+                    event.get("level") in {"critical", "error", "warning"},
+                )
+            )
+            rid = event.get("record_id")
+            checks.append(
+                _check(
+                    f"events.item_{idx}.record_id",
+                    isinstance(rid, int) and not isinstance(rid, bool) and rid > 0,
+                )
+            )
+            for optional_key, maximum in (
+                ("task", 65535),
+                ("opcode", 255),
+                ("keywords", (2**64) - 1),
+            ):
+                if optional_key in event:
+                    value = event.get(optional_key)
+                    checks.append(
+                        _check(
+                            f"events.item_{idx}.{optional_key}",
+                            isinstance(value, int)
+                            and not isinstance(value, bool)
+                            and 0 <= value <= maximum,
+                        )
+                    )
+            ts = event.get("time_created_utc")
+            checks.append(
+                _check(
+                    f"events.item_{idx}.timestamp",
+                    isinstance(ts, str) and EVENTS_TIMESTAMP_RE.match(ts) is not None,
+                )
+            )
+            key = (ts or "", int(rid or 0))
+            if last_key is not None:
+                checks.append(_check(f"events.item_{idx}.newest_first", key <= last_key))
+            last_key = key
+    forbidden = {
+        "message",
+        "xml",
+        "event_data",
+        "user_data",
+        "sid",
+        "username",
+        "computer",
+        "activity_id",
+        "process_id",
+        "thread_id",
+        "command_line",
+        "file_path",
+        "registry_path",
+    }
+    checks.append(
+        _check(
+            "events.privacy_keys",
+            not (forbidden & set(json.dumps(payload).lower().replace('"', '"').split('"'))),
+        )
+    )
+    summary = payload.get("summary", {})
+    if payload.get("status") == "ok":
+        checks.append(_check("events.summary_unknown_zero", summary.get("unknown", 0) == 0))
+    emitted_pairs = {
+        (event.get("provider"), event.get("event_id"), event.get("level"))
+        for event in events
+        if isinstance(event, dict)
+    }
+    for idx, pair in enumerate(payload.get("top_provider_event_pairs", [])):
+        most_recent = pair.get("most_recent_utc")
+        if most_recent is not None:
+            checks.append(
+                _check(
+                    f"events.aggregation_{idx}.most_recent_timestamp",
+                    isinstance(most_recent, str)
+                    and EVENTS_TIMESTAMP_RE.match(most_recent) is not None,
+                )
+            )
+        checks.append(
+            _check(
+                f"events.aggregation_{idx}.represented",
+                (pair.get("provider"), pair.get("event_id"), pair.get("level")) in emitted_pairs,
+            )
+        )
+    if payload.get("status") == "ok" and not events:
+        invalid_warnings = [
+            warning
+            for warning in payload.get("warnings", [])
+            if isinstance(warning, dict)
+            and str(warning.get("category", "")).startswith("invalid_required_")
+        ]
+        checks.append(_check("events.no_hidden_all_invalid_success", not invalid_warnings))
+
+    safety = payload.get("safety", {})
+    for key in (
+        "powershell_executed",
+        "winrm_used",
+        "remote_execution",
+        "shell_true",
+        "arbitrary_command_execution",
+        "model_called",
+        "network_call",
+        "event_log_write_performed",
+        "event_log_clear_performed",
+        "event_log_export_performed",
+        "event_subscription_created",
+    ):
+        checks.append(_check(f"events.safety.{key}", safety.get(key) is False))
+    return checks
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -2013,6 +2193,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to saved 'shellforgeai windows network --json' output.",
     )
     parser.add_argument(
+        "--events-json",
+        type=Path,
+        help=(
+            "Optional path to saved 'shellforgeai windows events --json "
+            "--since-hours 24 --limit 50' output."
+        ),
+    )
+    parser.add_argument(
         "--volumes-json",
         help="Optional path to saved 'shellforgeai windows volumes --json' output.",
     )
@@ -2035,11 +2223,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         or args.memory_json
         or args.network_json
         or args.volumes_json
+        or args.events_json
     ):
         parser.error(
             "at least one of --evidence-json, --status-json, --doctor-json, "
             "--services-json, --disks-json, --processes-json, --memory-json, "
-            "--network-json, or --volumes-json is required"
+            "--network-json, --events-json, or --volumes-json is required"
         )
     return args
 
