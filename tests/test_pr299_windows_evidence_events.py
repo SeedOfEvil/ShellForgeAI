@@ -30,6 +30,22 @@ def evidence(**kwargs):
     return windows_evidence_payload(WINDOWS, doctor_builder=doctor, status_builder=status, **kwargs)
 
 
+def assert_embedded_events_parity(payload):
+    component = payload["components"]["events"]
+    summary = component["summary"]
+    collection = component["collection"]
+    embedded = payload["embedded_events"]
+    assert embedded["status"] == component["status"]
+    assert embedded["limit"] == summary.get("limit", collection["limit"])
+    assert embedded["since_hours"] == summary.get("since_hours", collection["since_hours"])
+    assert embedded["returned_count"] == summary["events_returned"]
+    assert embedded["truncated"] == summary.get("truncated", collection["truncated"])
+    assert embedded["critical"] == summary["critical"]
+    assert embedded["error"] == summary["error"]
+    assert embedded["warning"] == summary["warning"]
+    assert embedded["unknown"] == summary["unknown"]
+
+
 def event_payload(*, status="ok", limit=50, since_hours=24, truncated=True):
     events = [
         {
@@ -139,6 +155,7 @@ def test_include_events_uses_defaults_and_embeds_component_once() -> None:
         "warning": 1,
         "unknown": 0,
     }
+    assert_embedded_events_parity(payload)
     assert (
         payload["next_safe_command"]
         == "shellforgeai windows events --json --limit 50 --since-hours 24"
@@ -212,18 +229,89 @@ def test_bounds_and_flag_dependency_validation() -> None:
             raise AssertionError(kwargs)
 
 
-def test_events_failure_is_isolated_and_sanitized() -> None:
+def test_events_failure_is_isolated_and_sanitized_with_platform_envelope() -> None:
     payload = evidence(
         include_events=True,
-        events_builder=lambda *_args: (_ for _ in ()).throw(RuntimeError("secret path C:/x")),
+        events_limit=7,
+        events_since_hours=6,
+        events_builder=lambda *_args: (_ for _ in ()).throw(
+            OSError(r"secret host path C:\sensitive\value")
+        ),
     )
+    event_component = payload["components"]["events"]
     assert payload["status"] == "component_failure"
     assert payload["summary"]["ok_components"] == ["doctor", "status"]
     assert payload["summary"]["failed_components"] == ["events"]
-    assert payload["components"]["events"]["status"] == "error"
+    assert event_component["schema_version"] == 1
+    assert event_component["mode"] == "windows_events"
+    assert event_component["status"] == "error"
+    assert event_component["platform"] == {"system": "windows"}
+    assert event_component["read_only"] is True
+    assert event_component["mutation_performed"] is False
+    assert event_component["collection"]["method"] == "wevtapi_system_metadata"
+    assert event_component["collection"]["channel"] == "System"
+    assert event_component["collection"]["levels"] == ["critical", "error", "warning"]
+    assert event_component["collection"]["limit"] == 7
+    assert event_component["collection"]["since_hours"] == 6
+    assert event_component["collection"]["truncated"] is False
+    assert event_component["summary"] == {
+        "events_returned": 0,
+        "critical": 0,
+        "error": 0,
+        "warning": 0,
+        "unknown": 0,
+        "truncated": False,
+        "since_hours": 6,
+        "limit": 7,
+    }
+    assert event_component["events"] == []
+    assert event_component["top_provider_event_pairs"] == []
+    for key in (
+        "powershell_executed",
+        "winrm_used",
+        "remote_execution",
+        "shell_true",
+        "arbitrary_command_execution",
+        "event_log_write_performed",
+        "event_log_clear_performed",
+        "event_log_export_performed",
+        "event_subscription_created",
+        "registry_modified",
+        "service_control_executed",
+        "process_termination_executed",
+        "cleanup_executed",
+        "remediation_executed",
+        "rollback_executed",
+        "recovery_executed",
+        "secret_read",
+        "auth_cache_read",
+        "model_called",
+        "network_call",
+    ):
+        assert event_component["safety"][key] is False
+    assert_embedded_events_parity(payload)
+    assert payload["embedded_events"] == {
+        "included": True,
+        "status": "error",
+        "limit": 7,
+        "since_hours": 6,
+        "returned_count": 0,
+        "truncated": False,
+        "critical": 0,
+        "error": 0,
+        "warning": 0,
+        "unknown": 0,
+    }
     dumped = json.dumps(payload)
-    assert "secret path" not in dumped
-    assert "Traceback" not in dumped
+    for forbidden in (
+        "secret host path",
+        r"C:\sensitive",
+        "Traceback",
+        "OSError",
+        "0x",
+        "System[(Level=1",
+    ):
+        assert forbidden not in dumped
 
 
 def test_cli_help_and_dependency_errors() -> None:
@@ -247,10 +335,31 @@ def test_cli_help_and_dependency_errors() -> None:
         assert args[0] in (result.output + (result.stderr or ""))
 
 
-def test_cli_json_include_events_on_linux_is_structured_unsupported() -> None:
+def test_cli_json_include_events_on_linux_is_structured_unsupported(monkeypatch) -> None:
+    def forbidden_events_builder(*_args, **_kwargs):
+        raise AssertionError("events collector must not run on simulated Linux")
+
+    monkeypatch.setattr("shellforgeai.windows_evidence.detect_platform", lambda: LINUX)
+    monkeypatch.setattr(
+        "shellforgeai.windows_evidence.windows_events_payload", forbidden_events_builder
+    )
+
     result = CliRunner().invoke(app, ["windows", "evidence", "--include-events", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
+    dumped = json.dumps(payload)
     assert payload["status"] == "unsupported"
+    assert payload["platform"] == {"system": "linux"}
     assert payload["read_only"] is True
     assert payload["mutation_performed"] is False
+    assert "components" not in payload
+    assert "events" not in dumped
+    assert "embedded_events" not in payload
+    assert "Traceback" not in dumped
+    assert "journal" not in dumped.lower()
+    assert "syslog" not in dumped.lower()
+    assert "wevtapi" not in dumped.lower()
+    assert "message" not in dumped.lower()
+    assert "xml" not in dumped.lower()
+    assert "event_data" not in dumped.lower()
+    assert "user_data" not in dumped.lower()

@@ -484,6 +484,12 @@ def _validate_evidence(
         collection = (
             events.get("collection", {}) if isinstance(events.get("collection"), dict) else {}
         )
+        checks.append(
+            _check(
+                "evidence.components.events.platform",
+                events.get("platform", {}).get("system") == "windows",
+            )
+        )
         checks.extend(
             [
                 _check("evidence.embedded_events.object", isinstance(embedded_events, dict)),
@@ -519,8 +525,56 @@ def _validate_evidence(
                     and embedded_events.get("truncated")
                     == summary.get("truncated", collection.get("truncated")),
                 ),
+                _check(
+                    "evidence.embedded_events.critical",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("critical") == summary.get("critical"),
+                ),
+                _check(
+                    "evidence.embedded_events.error",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("error") == summary.get("error"),
+                ),
+                _check(
+                    "evidence.embedded_events.warning",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("warning") == summary.get("warning"),
+                ),
+                _check(
+                    "evidence.embedded_events.unknown",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("unknown") == summary.get("unknown"),
+                ),
             ]
         )
+        if events.get("status") == "error":
+            dumped_events = json.dumps(events)
+            checks.extend(
+                [
+                    _check(
+                        "evidence.events_failure.bounds.limit",
+                        isinstance(collection.get("limit"), int),
+                    ),
+                    _check(
+                        "evidence.events_failure.bounds.since_hours",
+                        isinstance(collection.get("since_hours"), int),
+                    ),
+                    _check(
+                        "evidence.events_failure.summary_zero", summary.get("events_returned") == 0
+                    ),
+                    _check("evidence.events_failure.critical_zero", summary.get("critical") == 0),
+                    _check("evidence.events_failure.error_zero", summary.get("error") == 0),
+                    _check("evidence.events_failure.warning_zero", summary.get("warning") == 0),
+                    _check("evidence.events_failure.unknown_zero", summary.get("unknown") == 0),
+                    _check("evidence.events_failure.events_empty", events.get("events") == []),
+                    _check(
+                        "evidence.events_failure.sanitized",
+                        "Traceback" not in dumped_events
+                        and "secret" not in dumped_events.lower()
+                        and "sensitive" not in dumped_events.lower(),
+                    ),
+                ]
+            )
     else:
         checks.append(
             _check(
@@ -555,8 +609,15 @@ def _validate_evidence(
             ),
             _check(
                 "evidence.summary.failed_components",
-                failed_components == [],
-                "expected no failed components",
+                failed_components
+                == [
+                    name
+                    for name in ("services", "disks", "processes", "events")
+                    if isinstance(components, dict)
+                    and isinstance(components.get(name), dict)
+                    and components[name].get("status") != "ok"
+                ],
+                "expected failed components to match unhealthy optional components",
             ),
             _check(
                 "evidence.summary.ok_components",

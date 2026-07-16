@@ -280,11 +280,12 @@ def _embedded_events_summary(component: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _events_component_error(limit: int, since_hours: int) -> dict[str, Any]:
+def _events_component_error(info: PlatformInfo, limit: int, since_hours: int) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "mode": "windows_events",
         "status": "error",
+        "platform": {"system": info.system},
         "read_only": True,
         "mutation_performed": False,
         "collection": {
@@ -470,7 +471,7 @@ def windows_evidence_payload(
             )
         except Exception:
             events_component = _events_component_error(
-                bounded_events_limit, bounded_events_since_hours
+                info, bounded_events_limit, bounded_events_since_hours
             )
         components["events"] = events_component
         embedded_events = _embedded_events_summary(events_component)
