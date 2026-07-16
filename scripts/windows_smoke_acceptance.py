@@ -182,6 +182,8 @@ PROCESSES_NOT_COLLECTED_PR274_KEYS = (
     "network_connections",
 )
 WINDOWS_V1_FALSE_KEYS = ("powershell_executed", "winrm_used", "remote_execution")
+EVENTS_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$")
+
 NOT_COLLECTED_PR264_KEYS = (
     "powershell_version",
     "execution_policy",
@@ -2077,7 +2079,7 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
             checks.append(
                 _check(
                     f"events.item_{idx}.timestamp",
-                    ts is None or (isinstance(ts, str) and ts.endswith("Z")),
+                    isinstance(ts, str) and EVENTS_TIMESTAMP_RE.match(ts) is not None,
                 )
             )
             key = (ts or "", int(rid or 0))
@@ -2114,6 +2116,15 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
         if isinstance(event, dict)
     }
     for idx, pair in enumerate(payload.get("top_provider_event_pairs", [])):
+        most_recent = pair.get("most_recent_utc")
+        if most_recent is not None:
+            checks.append(
+                _check(
+                    f"events.aggregation_{idx}.most_recent_timestamp",
+                    isinstance(most_recent, str)
+                    and EVENTS_TIMESTAMP_RE.match(most_recent) is not None,
+                )
+            )
         checks.append(
             _check(
                 f"events.aggregation_{idx}.represented",

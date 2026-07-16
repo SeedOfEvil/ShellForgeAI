@@ -67,7 +67,9 @@ class FakeNative:
         self.closed.append(handle)
 
 
-def rec(provider="Provider", event_id=1001, level=3, ts="2026-07-15T05:30:00Z", rid=10, **kw):
+def rec(
+    provider="Provider", event_id=1001, level=3, ts="2026-07-15T05:30:00.0000000Z", rid=10, **kw
+):
     return RawEventMetadata(provider, event_id, level, ts, rid, **kw)
 
 
@@ -123,15 +125,19 @@ def test_fixed_query_and_selected_property_context() -> None:
 def test_success_normalization_summary_order_aggregation_and_privacy() -> None:
     native = FakeNative(
         [
-            (rec("B\x00ad", 2, 1, "2026-07-15T05:00:00Z", 5, task=1, opcode=2, keywords=3),),
-            (rec("Provider", 1001, 3, "2026-07-15T05:30:00Z", 10),),
-            (rec("Provider", 1001, 3, "2026-07-15T05:31:00Z", 11),),
+            (
+                rec(
+                    "B\x00ad", 2, 1, "2026-07-15T05:00:00.0000000Z", 5, task=1, opcode=2, keywords=3
+                ),
+            ),
+            (rec("Provider", 1001, 3, "2026-07-15T05:30:00.0000000Z", 10),),
+            (rec("Provider", 1001, 3, "2026-07-15T05:31:00.0000000Z", 11),),
         ]
     )
     payload = windows_events_payload(WINDOWS, native=native, limit=10, since_hours=24)
     assert payload["status"] == "ok"
     assert payload["collection"]["channel"] == "System"
-    assert payload["events"][0]["time_created_utc"] == "2026-07-15T05:31:00Z"
+    assert payload["events"][0]["time_created_utc"] == "2026-07-15T05:31:00.0000000Z"
     assert payload["summary"]["critical"] == 1
     assert payload["summary"]["warning"] == 2
     assert payload["summary"]["unknown"] == 0
@@ -208,7 +214,7 @@ def test_unsupported_platform_does_not_initialize_native_and_text_is_bounded() -
                     "provider": "P",
                     "event_id": i,
                     "level": "warning",
-                    "time_created_utc": "2026-07-15T00:00:00Z",
+                    "time_created_utc": "2026-07-15T00:00:00.0000000Z",
                     "record_id": i,
                 }
                 for i in range(12)

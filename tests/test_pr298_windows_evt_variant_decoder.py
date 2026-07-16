@@ -25,13 +25,13 @@ from shellforgeai.windows_events import (
     EventMetadataContractError,
     EvtVariantValue,
     RawEventMetadata,
+    WindowsFileTime,
     decode_evt_variant,
     decode_selected_event_metadata,
     windows_events_payload,
 )
 
 WINDOWS = PlatformInfo("windows", "Windows", "nt", "2025", "AMD64")
-FILETIME_EPOCH_OFFSET = 116444736000000000
 
 
 def _variant(
@@ -46,8 +46,15 @@ def _variant(
     return variant
 
 
-def _filetime(dt: datetime) -> int:
-    return int(dt.timestamp() * 10_000_000) + FILETIME_EPOCH_OFFSET
+def _filetime(dt: datetime, fractional_ticks: int = 0) -> int:
+    epoch = datetime(1601, 1, 1, tzinfo=UTC)
+    delta = dt.astimezone(UTC) - epoch
+    return (
+        delta.days * 24 * 60 * 60 * 10_000_000
+        + delta.seconds * 10_000_000
+        + delta.microseconds * 10
+        + fractional_ticks
+    )
 
 
 def test_evt_variant_abi_layout_matches_windows_x64_contract() -> None:
@@ -99,7 +106,9 @@ def test_null_string_filetime_array_and_unsupported_variant_behavior() -> None:
         == "disk"
     )
     dt = datetime(2026, 7, 15, 5, 30, tzinfo=UTC)
-    assert decode_evt_variant(_variant(EVT_VAR_TYPE_FILETIME, "FileTimeVal", _filetime(dt))) == dt
+    assert decode_evt_variant(
+        _variant(EVT_VAR_TYPE_FILETIME, "FileTimeVal", _filetime(dt, 7))
+    ) == WindowsFileTime(_filetime(dt, 7))
     with pytest.raises(EventMetadataContractError, match="array_variant_unsupported"):
         decode_evt_variant(_variant(EVT_VAR_TYPE_BYTE | EVT_VARIANT_TYPE_ARRAY, "ByteVal", 3))
     with pytest.raises(EventMetadataContractError, match="unsupported_variant_type"):
@@ -114,7 +123,7 @@ def _eight_property_variants(**overrides) -> tuple[ctypes.Array, datetime]:
         _variant(EVT_VAR_TYPE_STRING, "StringVal", ctypes.cast(provider, ctypes.c_wchar_p)),
         _variant(EVT_VAR_TYPE_UINT16, "UInt16Val", overrides.get("event_id", 153)),
         _variant(EVT_VAR_TYPE_BYTE, "ByteVal", overrides.get("level", 3)),
-        _variant(EVT_VAR_TYPE_FILETIME, "FileTimeVal", _filetime(dt)),
+        _variant(EVT_VAR_TYPE_FILETIME, "FileTimeVal", _filetime(dt, 7)),
         _variant(EVT_VAR_TYPE_UINT64, "UInt64Val", overrides.get("record_id", 53672)),
         _variant(EVT_VAR_TYPE_UINT16, "UInt16Val", overrides.get("task", 7)),
         _variant(EVT_VAR_TYPE_BYTE, "ByteVal", overrides.get("opcode", 0)),
@@ -131,7 +140,9 @@ def _eight_property_variants(**overrides) -> tuple[ctypes.Array, datetime]:
 def test_full_eight_property_dirty_storage_fixture_decodes_and_normalizes() -> None:
     variants, dt = _eight_property_variants()
     raw = decode_selected_event_metadata(variants, 8)
-    assert raw == RawEventMetadata("disk", 153, 3, dt, 53672, 7, 0, 0x80000000000000)
+    assert raw == RawEventMetadata(
+        "disk", 153, 3, WindowsFileTime(_filetime(dt, 7)), 53672, 7, 0, 0x80000000000000
+    )
 
     class Native:
         def query(self, query_text):
@@ -159,7 +170,7 @@ def test_full_eight_property_dirty_storage_fixture_decodes_and_normalizes() -> N
             "provider": "disk",
             "event_id": 153,
             "level": "warning",
-            "time_created_utc": "2026-07-15T05:30:00Z",
+            "time_created_utc": "2026-07-15T05:30:00.0000007Z",
             "record_id": 53672,
             "task": 7,
             "opcode": 0,
@@ -189,11 +200,11 @@ def test_wrong_native_type_for_required_selected_properties_is_invalid(index: in
 @pytest.mark.parametrize(
     "raw",
     [
-        RawEventMetadata("disk", -1, 3, "2026-07-15T05:30:00Z", 1),
-        RawEventMetadata("disk", 65536, 3, "2026-07-15T05:30:00Z", 1),
-        RawEventMetadata("disk", 153, 4, "2026-07-15T05:30:00Z", 1),
+        RawEventMetadata("disk", -1, 3, "2026-07-15T05:30:00.0000000Z", 1),
+        RawEventMetadata("disk", 65536, 3, "2026-07-15T05:30:00.0000000Z", 1),
+        RawEventMetadata("disk", 153, 4, "2026-07-15T05:30:00.0000000Z", 1),
         RawEventMetadata("disk", 153, 3, None, 1),
-        RawEventMetadata("disk", 153, 3, "2026-07-15T05:30:00Z", 0),
+        RawEventMetadata("disk", 153, 3, "2026-07-15T05:30:00.0000000Z", 0),
     ],
 )
 def test_required_property_out_of_range_or_missing_omits_event(raw: RawEventMetadata) -> None:
@@ -242,7 +253,7 @@ def test_optional_property_wrong_type_or_out_of_range_is_omitted_with_bounded_wa
 
         def render_metadata(self, render_context, event_handle):
             return RawEventMetadata(
-                "disk", 153, 3, "2026-07-15T05:30:00Z", 53672, task="bad", opcode=999
+                "disk", 153, 3, "2026-07-15T05:30:00.0000000Z", 53672, task="bad", opcode=999
             )
 
         def close(self, handle):
@@ -254,7 +265,7 @@ def test_optional_property_wrong_type_or_out_of_range_is_omitted_with_bounded_wa
         "provider": "disk",
         "event_id": 153,
         "level": "warning",
-        "time_created_utc": "2026-07-15T05:30:00Z",
+        "time_created_utc": "2026-07-15T05:30:00.0000000Z",
         "record_id": 53672,
     }
     assert {w["category"] for w in payload["warnings"]} == {
@@ -297,7 +308,7 @@ def test_acceptance_rejects_live_corruption_artifact() -> None:
                 "provider": "disk",
                 "event_id": 737179140249,
                 "level": "unknown",
-                "time_created_utc": "2026-07-15T05:30:00Z",
+                "time_created_utc": "2026-07-15T05:30:00.0000000Z",
                 "record_id": 53672,
                 "task": 737179140096,
                 "opcode": 737179185408,

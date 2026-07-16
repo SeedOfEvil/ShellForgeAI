@@ -63,7 +63,8 @@ EVT_VAR_TYPE_HEX_INT32 = 20
 EVT_VAR_TYPE_HEX_INT64 = 21
 EVT_VARIANT_TYPE_ARRAY = 0x80
 EVT_VARIANT_TYPE_MASK = 0x7F
-_WINDOWS_FILETIME_EPOCH_OFFSET = 116444736000000000
+WINDOWS_FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=UTC)
+_FILETIME_TICKS_PER_SECOND = 10_000_000
 
 
 class EvtVariantValue(ctypes.Union):
@@ -142,6 +143,17 @@ _LIMITATIONS = [
 
 
 @dataclass(frozen=True)
+class WindowsFileTime:
+    ticks_100ns: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.ticks_100ns, int) or isinstance(self.ticks_100ns, bool):
+            raise EventMetadataContractError("invalid_filetime")
+        if self.ticks_100ns < 0:
+            raise EventMetadataContractError("invalid_filetime")
+
+
+@dataclass(frozen=True)
 class RawEventMetadata:
     provider: Any = None
     event_id: Any = None
@@ -215,20 +227,54 @@ def normalize_level(value: Any) -> str:
     return {1: "critical", 2: "error", 3: "warning"}.get(_int_or_none(value), "unknown")
 
 
+def format_windows_filetime(value: WindowsFileTime) -> str:
+    whole_seconds, fractional_ticks = divmod(value.ticks_100ns, _FILETIME_TICKS_PER_SECOND)
+    try:
+        calendar_time = WINDOWS_FILETIME_EPOCH + timedelta(seconds=whole_seconds)
+    except OverflowError as exc:
+        raise EventMetadataContractError("invalid_filetime") from exc
+    return calendar_time.strftime("%Y-%m-%dT%H:%M:%S") + f".{fractional_ticks:07d}Z"
+
+
+def _canonicalize_datetime(value: datetime) -> str:
+    dt = value if value.tzinfo else value.replace(tzinfo=UTC)
+    dt = dt.astimezone(UTC)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") + f".{dt.microsecond:06d}0Z"
+
+
+def _canonicalize_timestamp_string(value: str) -> str | None:
+    text = value.strip()
+    if not text.endswith("Z"):
+        return None
+    body = text[:-1]
+    if "." in body:
+        whole, fraction = body.split(".", 1)
+        if not fraction.isdigit() or len(fraction) > 7:
+            return None
+        fraction = fraction.ljust(7, "0")
+    else:
+        whole = body
+        fraction = "0000000"
+    try:
+        datetime.strptime(whole, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return f"{whole}.{fraction}Z"
+
+
 def normalize_timestamp(value: Any) -> str | None:
     if value in (None, ""):
         return None
-    if isinstance(value, datetime):
-        dt = value if value.tzinfo else value.replace(tzinfo=UTC)
-    else:
-        text = str(value).strip().replace("Z", "+00:00")
+    if isinstance(value, WindowsFileTime):
         try:
-            dt = datetime.fromisoformat(text)
-        except ValueError:
+            return format_windows_filetime(value)
+        except EventMetadataContractError:
             return None
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    if isinstance(value, datetime):
+        return _canonicalize_datetime(value)
+    if isinstance(value, str):
+        return _canonicalize_timestamp_string(value)
+    return None
 
 
 def _require_int_range(value: Any, *, field: str, minimum: int, maximum: int) -> int:
@@ -507,12 +553,7 @@ def decode_evt_variant(variant: EVT_VARIANT) -> Any:
     if base_type == EVT_VAR_TYPE_SIZE_T:
         return int(value.SizeTVal)
     if base_type == EVT_VAR_TYPE_FILETIME:
-        filetime = int(value.FileTimeVal)
-        try:
-            seconds = (filetime - _WINDOWS_FILETIME_EPOCH_OFFSET) / 10_000_000
-            return datetime.fromtimestamp(seconds, UTC)
-        except (OSError, OverflowError, ValueError) as exc:
-            raise EventMetadataContractError("invalid_filetime") from exc
+        return WindowsFileTime(int(value.FileTimeVal))
     if base_type == EVT_VAR_TYPE_HEX_INT32:
         return int(value.HexInt32Val)
     if base_type == EVT_VAR_TYPE_HEX_INT64:
