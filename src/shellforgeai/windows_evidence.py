@@ -53,6 +53,23 @@ from shellforgeai.windows_network import (
 from shellforgeai.windows_processes import MAX_PROCESSES_LIMIT, windows_processes_payload
 from shellforgeai.windows_services import DEFAULT_MAX_SERVICES, windows_services_payload
 from shellforgeai.windows_status import windows_status_payload
+from shellforgeai.windows_volumes import (
+    _SAFETY as WINDOWS_VOLUMES_SAFETY,
+)
+from shellforgeai.windows_volumes import (
+    DEFAULT_VOLUMES_LIMIT,
+    MAX_VOLUMES_LIMIT,
+    windows_volumes_payload,
+)
+from shellforgeai.windows_volumes import (
+    LIMITATIONS as WINDOWS_VOLUMES_LIMITATIONS,
+)
+from shellforgeai.windows_volumes import (
+    METHOD as WINDOWS_VOLUMES_METHOD,
+)
+from shellforgeai.windows_volumes import (
+    MODE as WINDOWS_VOLUMES_MODE,
+)
 
 WINDOWS_EVIDENCE_NEXT_SAFE_COMMAND = "shellforgeai windows status --json"
 WINDOWS_EVIDENCE_DISKS_NEXT_SAFE_COMMAND = "shellforgeai windows disks --json"
@@ -61,6 +78,7 @@ WINDOWS_EVIDENCE_EVENTS_NEXT_SAFE_COMMAND = (
     "shellforgeai windows events --json --limit {limit} --since-hours {since_hours}"
 )
 WINDOWS_EVIDENCE_NETWORK_NEXT_SAFE_COMMAND = "shellforgeai windows network --json"
+WINDOWS_EVIDENCE_VOLUMES_NEXT_SAFE_COMMAND = "shellforgeai windows volumes --json"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
 
 EVIDENCE_SERVICES_DEFAULT_LIMIT = 25
@@ -71,6 +89,8 @@ EVIDENCE_PROCESSES_DEFAULT_LIMIT = 25
 EVIDENCE_PROCESSES_MAX_LIMIT = MAX_PROCESSES_LIMIT
 EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT = MAX_INTERFACES
 EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT = MAX_ADDRESSES_PER_INTERFACE
+EVIDENCE_VOLUMES_DEFAULT_LIMIT = DEFAULT_VOLUMES_LIMIT
+EVIDENCE_VOLUMES_MAX_LIMIT = MAX_VOLUMES_LIMIT
 
 _NOT_COLLECTED_PR264 = {
     "powershell_version": "not collected because PR264 does not execute PowerShell",
@@ -165,6 +185,7 @@ DisksBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 ProcessesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 EventsBuilder = Callable[[PlatformInfo, int, int], dict[str, Any]]
 NetworkBuilder = Callable[[PlatformInfo, int, int], dict[str, Any]]
+VolumesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 
 
 def validate_evidence_services_limit(value: Any) -> int:
@@ -225,6 +246,17 @@ def validate_evidence_network_address_limit(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(message)
     if value < 1 or value > MAX_ADDRESSES_PER_INTERFACE:
+        raise ValueError(message)
+    return value
+
+
+def validate_evidence_volumes_limit(value: Any) -> int:
+    """Validate the opt-in bundled Windows volumes limit."""
+
+    message = f"volumes limit must be a positive integer between 1 and {EVIDENCE_VOLUMES_MAX_LIMIT}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(message)
+    if value < 1 or value > EVIDENCE_VOLUMES_MAX_LIMIT:
         raise ValueError(message)
     return value
 
@@ -464,6 +496,108 @@ def _is_healthy_network_component(component: Any) -> bool:
     return isinstance(component.get("interfaces"), list)
 
 
+def _volumes_zero_summary() -> dict[str, int]:
+    return {
+        "partitions_observed": 0,
+        "local_drive_roots": 0,
+        "returned_volumes": 0,
+        "available_volumes": 0,
+        "unavailable_volumes": 0,
+        "fixed_volumes": 0,
+        "removable_volumes": 0,
+        "cdrom_volumes": 0,
+        "read_only_volumes": 0,
+        "skipped_remote": 0,
+        "skipped_non_drive_root": 0,
+        "skipped_unsafe_identifier": 0,
+    }
+
+
+def _volumes_component_error(info: PlatformInfo, limit: int) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "mode": WINDOWS_VOLUMES_MODE,
+        "status": "error",
+        "platform": {"system": info.system},
+        "read_only": True,
+        "mutation_performed": False,
+        "collection": {
+            "method": WINDOWS_VOLUMES_METHOD,
+            "limit": limit,
+            "truncated": False,
+            "directory_scan_performed": False,
+            "file_scan_performed": False,
+            "remote_volume_probe_performed": False,
+        },
+        "summary": _volumes_zero_summary(),
+        "volumes": [],
+        "limitations": list(WINDOWS_VOLUMES_LIMITATIONS),
+        "warnings": [],
+        "errors": [
+            {
+                "type": "volumes_component_failed",
+                "message": "Windows volume/filesystem metadata component failed.",
+            }
+        ],
+        "safety": dict(WINDOWS_VOLUMES_SAFETY),
+    }
+
+
+def _is_healthy_volumes_component(component: Any, info: PlatformInfo, limit: int) -> bool:
+    if not isinstance(component, dict):
+        return False
+    if component.get("status") != "ok" or component.get("mode") != WINDOWS_VOLUMES_MODE:
+        return False
+    if component.get("platform", {}).get("system") != info.system:
+        return False
+    if component.get("read_only") is not True or component.get("mutation_performed") is not False:
+        return False
+    collection = component.get("collection")
+    summary = component.get("summary")
+    if not isinstance(collection, dict) or not isinstance(summary, dict):
+        return False
+    if collection.get("method") != WINDOWS_VOLUMES_METHOD or collection.get("limit") != limit:
+        return False
+    if not isinstance(collection.get("truncated"), bool):
+        return False
+    required_counts = _volumes_zero_summary().keys()
+    if any(
+        isinstance(summary.get(key), bool) or not isinstance(summary.get(key), int)
+        for key in required_counts
+    ):
+        return False
+    return isinstance(component.get("volumes"), list) and isinstance(component.get("safety"), dict)
+
+
+def _embedded_volumes_summary(component: dict[str, Any]) -> dict[str, Any]:
+    collection = (
+        component.get("collection") if isinstance(component.get("collection"), dict) else {}
+    )
+    summary = component.get("summary") if isinstance(component.get("summary"), dict) else {}
+    return {
+        "included": True,
+        "status": component.get("status", "unknown"),
+        "limit": int(collection.get("limit", 0) or 0),
+        "partitions_observed": int(summary.get("partitions_observed", 0) or 0),
+        "local_drive_roots": int(summary.get("local_drive_roots", 0) or 0),
+        "returned_volumes": int(summary.get("returned_volumes", 0) or 0),
+        "available_volumes": int(summary.get("available_volumes", 0) or 0),
+        "unavailable_volumes": int(summary.get("unavailable_volumes", 0) or 0),
+        "fixed_volumes": int(summary.get("fixed_volumes", 0) or 0),
+        "removable_volumes": int(summary.get("removable_volumes", 0) or 0),
+        "cdrom_volumes": int(summary.get("cdrom_volumes", 0) or 0),
+        "read_only_volumes": int(summary.get("read_only_volumes", 0) or 0),
+        "skipped_remote": int(summary.get("skipped_remote", 0) or 0),
+        "skipped_non_drive_root": int(summary.get("skipped_non_drive_root", 0) or 0),
+        "skipped_unsafe_identifier": int(summary.get("skipped_unsafe_identifier", 0) or 0),
+        "truncated": bool(collection.get("truncated", False)),
+    }
+
+
+def _default_volumes_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
+    return windows_volumes_payload(info, limit=limit)
+
+
 def _embedded_network_summary(component: dict[str, Any]) -> dict[str, Any]:
     caps = component.get("caps") if isinstance(component.get("caps"), dict) else {}
     summary = component.get("summary") if isinstance(component.get("summary"), dict) else {}
@@ -517,6 +651,9 @@ def windows_evidence_payload(
     network_interface_limit: int | None = None,
     network_address_limit: int | None = None,
     network_builder: NetworkBuilder = _default_network_builder,
+    include_volumes: bool = False,
+    volumes_limit: int | None = None,
+    volumes_builder: VolumesBuilder = _default_volumes_builder,
 ) -> dict[str, Any]:
     """Build the Windows evidence bundle payload.
 
@@ -538,6 +675,8 @@ def windows_evidence_payload(
         raise ValueError("network interface limit requires include_network=True")
     if not include_network and network_address_limit is not None:
         raise ValueError("network address limit requires include_network=True")
+    if not include_volumes and volumes_limit is not None:
+        raise ValueError("volumes limit requires include_volumes=True")
 
     info = info or detect_platform()
     if info.system != "windows":
@@ -649,6 +788,20 @@ def windows_evidence_payload(
         components["network"] = network_component
         embedded_network = _embedded_network_summary(network_component)
         next_safe_command = WINDOWS_EVIDENCE_NETWORK_NEXT_SAFE_COMMAND
+    embedded_volumes: dict[str, Any] | None = None
+    if include_volumes:
+        bounded_volumes_limit = validate_evidence_volumes_limit(
+            EVIDENCE_VOLUMES_DEFAULT_LIMIT if volumes_limit is None else volumes_limit
+        )
+        try:
+            volumes_component = volumes_builder(info, bounded_volumes_limit)
+        except Exception:
+            volumes_component = _volumes_component_error(info, bounded_volumes_limit)
+        if not _is_healthy_volumes_component(volumes_component, info, bounded_volumes_limit):
+            volumes_component = _volumes_component_error(info, bounded_volumes_limit)
+        components["volumes"] = volumes_component
+        embedded_volumes = _embedded_volumes_summary(volumes_component)
+        next_safe_command = WINDOWS_EVIDENCE_VOLUMES_NEXT_SAFE_COMMAND
     summary = _component_summary(components)
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -680,6 +833,8 @@ def windows_evidence_payload(
         payload["embedded_events"] = embedded_events
     if embedded_network is not None:
         payload["embedded_network"] = embedded_network
+    if embedded_volumes is not None:
+        payload["embedded_volumes"] = embedded_volumes
     return payload
 
 
@@ -791,6 +946,22 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
             f"interface_limit={network_summary.get('max_interfaces', 0)}; "
             f"address_limit={network_summary.get('max_addresses_per_interface', 0)}; "
             f"truncated={str(network_summary.get('truncated', False)).lower()}"
+        )
+    volumes_summary = payload.get("embedded_volumes")
+    if isinstance(volumes_summary, dict):
+        lines.append(
+            "Volumes component: "
+            f"status={volumes_summary.get('status', 'unknown')}; "
+            f"returned={volumes_summary.get('returned_volumes', 0)}/"
+            f"{volumes_summary.get('local_drive_roots', 0)}; "
+            f"available={volumes_summary.get('available_volumes', 0)}; "
+            f"unavailable={volumes_summary.get('unavailable_volumes', 0)}; "
+            f"fixed={volumes_summary.get('fixed_volumes', 0)}; "
+            f"removable={volumes_summary.get('removable_volumes', 0)}; "
+            f"cdrom={volumes_summary.get('cdrom_volumes', 0)}; "
+            f"read_only={volumes_summary.get('read_only_volumes', 0)}; "
+            f"limit={volumes_summary.get('limit', 0)}; "
+            f"truncated={str(volumes_summary.get('truncated', False)).lower()}"
         )
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows evidence bundle is unavailable.")))

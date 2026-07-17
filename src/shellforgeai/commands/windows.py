@@ -29,6 +29,7 @@ from shellforgeai.windows_evidence import (
     EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT,
     EVIDENCE_PROCESSES_DEFAULT_LIMIT,
     EVIDENCE_SERVICES_DEFAULT_LIMIT,
+    EVIDENCE_VOLUMES_DEFAULT_LIMIT,
     render_windows_evidence_text,
     validate_evidence_disks_limit,
     validate_evidence_events_limit,
@@ -37,6 +38,7 @@ from shellforgeai.windows_evidence import (
     validate_evidence_network_interface_limit,
     validate_evidence_processes_limit,
     validate_evidence_services_limit,
+    validate_evidence_volumes_limit,
     windows_evidence_payload,
 )
 from shellforgeai.windows_memory import render_windows_memory_text, windows_memory_payload
@@ -160,6 +162,26 @@ def register(windows_app: typer.Typer) -> None:
                 ),
             ),
         ] = None,
+        include_volumes: Annotated[
+            bool,
+            typer.Option(
+                "--include-volumes",
+                help=(
+                    "Explicitly opt in to bounded read-only local drive-root volumes only "
+                    "in the evidence bundle (default off)."
+                ),
+            ),
+        ] = False,
+        volumes_limit: Annotated[
+            int | None,
+            typer.Option(
+                "--volumes-limit",
+                help=(
+                    "Bounded max local drive-root volumes in opt-in volumes component "
+                    "(range 1-64; default 32; requires --include-volumes)."
+                ),
+            ),
+        ] = None,
     ) -> None:
         kwargs: dict[str, Any] = {}
         if include_services:
@@ -253,6 +275,19 @@ def register(windows_app: typer.Typer) -> None:
                     "--network-address-limit requires --include-network",
                     param_hint="--network-address-limit",
                 )
+        if include_volumes:
+            try:
+                kwargs["volumes_limit"] = validate_evidence_volumes_limit(
+                    EVIDENCE_VOLUMES_DEFAULT_LIMIT if volumes_limit is None else volumes_limit
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--volumes-limit") from exc
+            kwargs["include_volumes"] = True
+        elif volumes_limit is not None:
+            raise typer.BadParameter(
+                "--volumes-limit requires --include-volumes",
+                param_hint="--volumes-limit",
+            )
         payload = windows_evidence_payload(**kwargs)
         if json_output:
             typer.echo(json.dumps(payload, sort_keys=True))

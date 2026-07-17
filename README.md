@@ -1012,3 +1012,16 @@ shellforgeai windows evidence \
 ```
 
 The interface default/range is 32 / 1-32; the per-interface address default/range is 16 / 1-16. The bundle reuses the standalone local collector (`shellforgeai windows network`) unchanged. JSON may include bounded local interface/IP metadata only when explicitly requested; text output includes summary counts only and does not print interface names, IP addresses, counters, netmasks, or broadcasts. Counters are cumulative snapshots when available. The component performs no packet capture, socket inventory, DNS lookup, route lookup, remote probe, MAC/GUID/PNP collection, or network mutation. Network component failures are isolated and sanitized so doctor/status and other selected healthy components remain present.
+
+### Windows evidence opt-in volumes component
+
+`shellforgeai windows evidence --include-volumes [--json]` explicitly opts the evidence bundle into bounded local Windows drive-root volume/filesystem metadata. Volumes are not included by default: default evidence remains doctor/status only and has no `components.volumes` or `embedded_volumes` fields. A custom bound is available only with the opt-in flag:
+
+```console
+shellforgeai windows evidence \
+  --include-volumes \
+  --volumes-limit N \
+  --json
+```
+
+The default limit is 32 and the allowed range is 1-64. Supplying `--volumes-limit` without `--include-volumes` fails clearly and does not silently enable or ignore the component. The bundle reuses the existing standalone `windows_volumes_payload()` collector unchanged; it does not add a second volume, disk, partition, filesystem, or storage-health collector. JSON preserves the standalone `components.volumes` schema and may include detailed bounded drive-root rows only when explicitly requested. Evidence text is summary-only and prints no drive letters, mount points, filesystem names, capacity values, labels, serials, GUIDs, warning rows, error rows, diagnosis, or remediation. Component failures are isolated into a bounded `volumes_component_failed` envelope, while doctor/status and other selected healthy components remain present. Healthy empty results with zero local drive roots stay healthy. Only local drive roots are considered; no files, directories, network shares, GUID paths, labels, serials, encryption state, physical disks, SMART/storage health, remote probes, PowerShell/WinRM/shell/subprocess fallback, mount/unmount/eject/format/repair, cleanup, remediation, rollback, recovery, network call, model call, secret read, auth-cache read, or mutation is performed.
