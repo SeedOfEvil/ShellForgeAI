@@ -120,3 +120,33 @@ The bundle reuses the existing standalone `windows_volumes_payload()` collector 
 Healthy JSON adds `components.volumes` with the standalone schema (`schema_version`, `mode`, `status`, `platform`, `read_only`, `mutation_performed`, `collection`, `summary`, `volumes`, `limitations`, `warnings`, `errors`, and `safety`). The `embedded_volumes` summary contains exactly aggregate fields: `included`, `status`, `limit`, `partitions_observed`, `local_drive_roots`, `returned_volumes`, `available_volumes`, `unavailable_volumes`, `fixed_volumes`, `removable_volumes`, `cdrom_volumes`, `read_only_volumes`, `skipped_remote`, `skipped_non_drive_root`, `skipped_unsafe_identifier`, and `truncated`. It does not duplicate drive letters, mount points, filesystem names, capacity values, warnings, errors, labels, serials, or identifiers. Evidence text adds one concise summary line only.
 
 A healthy empty result with zero local roots and `volumes=[]` remains `status=ok`. If the builder raises, returns error/unsupported on a Windows evidence path, or returns malformed data, only the volumes component is normalized to a stable bounded failure envelope; doctor/status and other selected healthy components remain present and top-level status becomes `component_failure`. The component is local, read-only, and drive-root-only: no files, directories, network shares, GUID paths, labels, serials, BitLocker/encryption state, physical disks, SMART/storage health, remote probes, PowerShell, WinRM, QGA, subprocess/shell fallback, registry/model/auth-cache/secret access, mount/unmount/eject/format/repair, cleanup, remediation, rollback, recovery, network call, or mutation is performed. Unsupported non-Windows evidence output remains structured unsupported and does not substitute Linux storage collection.
+
+### Windows evidence standard profile
+
+`shellforgeai windows evidence --profile standard [--json]` selects one optional deterministic profile. No profile is selected by default: default evidence remains doctor/status only, default text is unchanged, and the default next safe command remains `shellforgeai windows status --json`. Manual composition with `--include-services`, `--include-disks`, `--include-processes`, `--include-events`, `--include-network`, and `--include-volumes` remains available and unchanged when `--profile` is omitted.
+
+The only supported profile name is exactly `standard`. It selects existing bounded read-only components in this exact order: `doctor`, `status`, `services`, `processes`, `events`, `network`, `volumes`. It uses the established bounds: `services_limit=25`, `processes_limit=25`, `events_limit=50`, `events_since_hours=24`, `network_interface_limit=32`, `network_address_limit=16`, and `volumes_limit=32`. The profile deliberately excludes `disks` because the volumes component already provides bounded local drive-root capacity and filesystem classification. There is no separate memory component because physical memory is already included in the existing status component.
+
+Profile mode is mutually exclusive with every manual component-selection or component-bound option. Combining `--profile standard` with any manual `--include-*` option or component limit option exits with a controlled usage error before collection. Unknown, empty, whitespace-altered, or case-altered profile names also fail as usage errors. Programmatic calls to `windows_evidence_payload(profile="standard", ...)` enforce the same validation and conflict behavior before platform detection or builder invocation.
+
+On Windows, the JSON payload includes exactly this profile metadata block during successful collection and component-failure collection:
+
+```json
+"profile": {
+  "name": "standard",
+  "components": ["doctor", "status", "services", "processes", "events", "network", "volumes"],
+  "bounds": {
+    "services_limit": 25,
+    "processes_limit": 25,
+    "events_limit": 50,
+    "events_since_hours": 24,
+    "network_interface_limit": 32,
+    "network_address_limit": 16,
+    "volumes_limit": 32
+  }
+}
+```
+
+Text output adds exactly one aggregate profile line after `Components included:` and before `Component summary:`: `Evidence profile: standard; components=doctor,status,services,processes,events,network,volumes`. Bounds and detailed rows are not printed. The profile resolves into the existing evidence composition path, so removing only the top-level `profile` block from a standard-profile payload is structurally equivalent to the matching manual composition. The next safe command is the manual-equivalent final selected component command: `shellforgeai windows volumes --json`.
+
+Component failures remain isolated at component level: healthy components remain present, the failed component remains in order, `summary.failed_components` is ordered by component order, top-level status becomes `component_failure`, and the profile block remains unchanged. Healthy empty selected components remain healthy. Unsupported non-Windows platforms return the existing structured unsupported Windows evidence payload with no `profile`, no components, no embedded component blocks, and no selected builder invocation. The profile adds no collector, execution, mutation, PowerShell, WinRM, QGA, subprocess/shell, registry, network, model, auth-cache, secret, diagnostic, or remediation path; it exposes only the profile name, fixed component names, and fixed numeric bounds.

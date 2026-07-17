@@ -39,6 +39,7 @@ from shellforgeai.windows_evidence import (
     validate_evidence_processes_limit,
     validate_evidence_services_limit,
     validate_evidence_volumes_limit,
+    validate_windows_evidence_profile,
     windows_evidence_payload,
 )
 from shellforgeai.windows_memory import render_windows_memory_text, windows_memory_payload
@@ -71,6 +72,18 @@ def register(windows_app: typer.Typer) -> None:
     @windows_app.command("evidence")
     def windows_evidence(
         json_output: Annotated[bool, typer.Option("--json")] = False,
+        profile: Annotated[
+            str | None,
+            typer.Option(
+                "--profile",
+                help=(
+                    "Select a deterministic evidence profile. Supported: standard. "
+                    "No profile is selected by default. Selects the bounded standard "
+                    "component set. Mutually exclusive with manual --include-* and "
+                    "component limit options."
+                ),
+            ),
+        ] = None,
         include_services: Annotated[
             bool,
             typer.Option(
@@ -184,6 +197,33 @@ def register(windows_app: typer.Typer) -> None:
         ] = None,
     ) -> None:
         kwargs: dict[str, Any] = {}
+        if profile is not None:
+            try:
+                kwargs["profile"] = validate_windows_evidence_profile(profile)
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--profile") from exc
+            conflicts = (
+                (include_services, "--include-services"),
+                (services_limit is not None, "--services-limit"),
+                (include_disks, "--include-disks"),
+                (disks_limit is not None, "--disks-limit"),
+                (include_processes, "--include-processes"),
+                (processes_limit is not None, "--processes-limit"),
+                (include_events, "--include-events"),
+                (events_limit is not None, "--events-limit"),
+                (events_since_hours is not None, "--events-since-hours"),
+                (include_network, "--include-network"),
+                (network_interface_limit is not None, "--network-interface-limit"),
+                (network_address_limit is not None, "--network-address-limit"),
+                (include_volumes, "--include-volumes"),
+                (volumes_limit is not None, "--volumes-limit"),
+            )
+            for present, option in conflicts:
+                if present:
+                    raise typer.BadParameter(
+                        f"--profile standard is mutually exclusive with {option}",
+                        param_hint="--profile",
+                    )
         if include_services:
             try:
                 kwargs["services_limit"] = validate_evidence_services_limit(
