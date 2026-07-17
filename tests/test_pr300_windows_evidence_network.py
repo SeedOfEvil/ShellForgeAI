@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -425,35 +426,126 @@ def test_acceptance_network_fixtures_and_rejections(tmp_path):
     assert not all(c.passed for c in mod._validate_evidence(bad, None, None))
 
 
-def test_pr300_source_guardrails():
-    import subprocess
+_FORBIDDEN_EXECUTION_PATTERNS = (
+    (
+        "subprocess import",
+        re.compile(r"(?m)^\s*(?:import\s+subprocess\b|from\s+subprocess\s+import\b)"),
+    ),
+    (
+        "subprocess execution",
+        re.compile(r"\bsubprocess\.(?:run|Popen|call|check_call|check_output)\s*\("),
+    ),
+    ("os shell execution", re.compile(r"\bos\.(?:system|popen)\s*\(")),
+    ("shell=True", re.compile(r"\bshell\s*=\s*True\b")),
+    (
+        "socket or DNS API",
+        re.compile(
+            r"\bsocket\.(?:socket|create_connection|getaddrinfo|gethostbyname"
+            r"|gethostbyname_ex)\s*\("
+        ),
+    ),
+    (
+        "HTTP client call",
+        re.compile(r"\b(?:requests|httpx)\.(?:get|post|put|patch|delete|request)\s*\("),
+    ),
+    ("urllib network call", re.compile(r"\burllib\.request\.")),
+    ("registry access", re.compile(r"\bwinreg\.")),
+    (
+        "unsafe Windows network command literal",
+        re.compile(
+            r"""(?ix)
+            ["']
+            (?:powershell(?:\.exe)?|pwsh(?:\.exe)?|get-netadapter|
+            get-netipaddress|enable-netadapter|disable-netadapter|
+            set-netipinterface|new-netipaddress|remove-netipaddress|
+            set-dnsclientserveraddress|ipconfig(?:\.exe)?|netsh(?:\.exe)?|
+            route(?:\.exe)?)
+            ["']
+            """
+        ),
+    ),
+)
 
-    added = subprocess.check_output(
-        [
-            "git",
-            "diff",
-            "--",
-            "src/shellforgeai/windows_evidence.py",
-            "src/shellforgeai/commands/windows.py",
-        ],
-        text=True,
-    ).lower()
-    for forbidden in (
-        "get-netadapter",
-        "get-netipaddress",
-        "ipconfig",
-        "netsh",
-        "winrm",
-        "qga",
-        "subprocess.",
-        "shell=true",
-        "packet_capture = true",
-        "socket_inventory = true",
-        "route_table_lookup = true",
-        "dns_lookup = true",
-        "network_mutation = true",
-        "registry_modified = true",
-        "model_called = true",
-        "network_call = true",
-    ):
-        assert forbidden not in added
+_FORBIDDEN_TRUE_SAFETY_FLAG = re.compile(
+    r"""(?x)
+    ["']
+    (?P<flag>
+        mutation_performed|
+        powershell_executed|
+        winrm_used|
+        remote_execution|
+        packet_capture|
+        socket_inventory|
+        dns_lookup|
+        route_table_lookup|
+        network_mutation|
+        shell_true|
+        arbitrary_command_execution|
+        registry_modified|
+        service_restart_executed|
+        service_control_executed|
+        service_config_modified|
+        process_termination_executed|
+        cleanup_executed|
+        remediation_executed|
+        rollback_executed|
+        recovery_executed|
+        secret_read|
+        auth_cache_read|
+        model_called|
+        network_call
+    )
+    ["']\s*:\s*True\b
+    """
+)
+
+_READ_ONLY_FALSE = re.compile(r"""["']read_only["']\s*:\s*False\b""")
+
+
+def _source_guardrail_violations(source: str) -> list[str]:
+    violations = [
+        label for label, pattern in _FORBIDDEN_EXECUTION_PATTERNS if pattern.search(source)
+    ]
+    violations.extend(
+        f"{match.group('flag')}=True" for match in _FORBIDDEN_TRUE_SAFETY_FLAG.finditer(source)
+    )
+    if _READ_ONLY_FALSE.search(source):
+        violations.append("read_only=False")
+    return sorted(set(violations))
+
+
+def test_pr300_source_guardrails():
+    repo_root = Path(__file__).resolve().parents[1]
+    source_paths = (
+        repo_root / "src" / "shellforgeai" / "windows_evidence.py",
+        repo_root / "src" / "shellforgeai" / "commands" / "windows.py",
+    )
+    failures = {
+        str(path.relative_to(repo_root)): violations
+        for path in source_paths
+        if (violations := _source_guardrail_violations(path.read_text(encoding="utf-8")))
+    }
+    assert not failures, json.dumps(failures, indent=2, sort_keys=True)
+
+
+def test_pr300_source_guardrails_positive_control():
+    unsafe_source = """
+import subprocess
+
+subprocess.run(["netsh"], shell=True)
+SAFETY = {
+    "read_only": False,
+    "network_call": True,
+    "winrm_used": False,
+}
+"""
+    violations = set(_source_guardrail_violations(unsafe_source))
+    assert {
+        "subprocess import",
+        "subprocess execution",
+        "shell=True",
+        "unsafe Windows network command literal",
+        "read_only=False",
+        "network_call=True",
+    }.issubset(violations)
+    assert "winrm_used=True" not in violations
