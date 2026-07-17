@@ -129,6 +129,40 @@ PROCESSES_SAFETY_FALSE_KEYS = (
     "model_called",
     "network_call",
 )
+VOLUMES_SAFETY_FALSE_KEYS = (
+    "directory_scan_performed",
+    "file_scan_performed",
+    "remote_execution",
+    "network_call",
+    "powershell_executed",
+    "winrm_used",
+    "shell_true",
+    "arbitrary_command_execution",
+    "registry_modified",
+    "disk_mutation_performed",
+    "cleanup_executed",
+    "remediation_executed",
+    "rollback_executed",
+    "recovery_executed",
+    "secret_read",
+    "auth_cache_read",
+    "model_called",
+)
+VOLUMES_SUMMARY_KEYS = (
+    "partitions_observed",
+    "local_drive_roots",
+    "returned_volumes",
+    "available_volumes",
+    "unavailable_volumes",
+    "fixed_volumes",
+    "removable_volumes",
+    "cdrom_volumes",
+    "read_only_volumes",
+    "skipped_remote",
+    "skipped_non_drive_root",
+    "skipped_unsafe_identifier",
+)
+
 NETWORK_SAFETY_FALSE_KEYS = (
     "powershell_executed",
     "winrm_used",
@@ -529,6 +563,42 @@ def _validate_evidence(
             _check("evidence.default_no_embedded_network", "embedded_network" not in payload)
         )
 
+    volumes = _nested(payload, "components", "volumes")
+    has_volumes = isinstance(components, dict) and "volumes" in components
+    if has_volumes and isinstance(volumes, dict):
+        checks.extend(_validate_volumes(volumes, label="evidence.components.volumes"))
+        checks.extend(_validate_embedded_volumes_block(payload, volumes))
+        if volumes.get("status") == "error":
+            checks.extend(
+                [
+                    _check(
+                        "evidence.volumes_failure.summary_zero",
+                        volumes.get("summary") == {key: 0 for key in VOLUMES_SUMMARY_KEYS},
+                    ),
+                    _check("evidence.volumes_failure.volumes_empty", volumes.get("volumes") == []),
+                    _check(
+                        "evidence.volumes_failure.error_envelope",
+                        volumes.get("errors")
+                        == [
+                            {
+                                "type": "volumes_component_failed",
+                                "message": "Windows volume/filesystem metadata component failed.",
+                            }
+                        ],
+                    ),
+                ]
+            )
+    else:
+        checks.append(
+            _check(
+                "evidence.default_no_volumes_component",
+                isinstance(components, dict) and "volumes" not in components,
+            )
+        )
+        checks.append(
+            _check("evidence.default_no_embedded_volumes", "embedded_volumes" not in payload)
+        )
+
     events = _nested(payload, "components", "events")
     has_events = isinstance(components, dict) and "events" in components
     if has_events and isinstance(events, dict):
@@ -644,6 +714,7 @@ def _validate_evidence(
         + int(has_processes)
         + int(has_events)
         + int(has_network)
+        + int(has_volumes)
     )
     expected_ok = {"doctor", "status"}
     if has_services:
@@ -656,6 +727,8 @@ def _validate_evidence(
         expected_ok.add("events")
     if has_network and isinstance(network, dict) and network.get("status") == "ok":
         expected_ok.add("network")
+    if has_volumes and isinstance(volumes, dict) and volumes.get("status") == "ok":
+        expected_ok.add("volumes")
     ok_components = _nested(payload, "summary", "ok_components")
     failed_components = _nested(payload, "summary", "failed_components")
     checks.extend(
@@ -670,7 +743,7 @@ def _validate_evidence(
                 failed_components
                 == [
                     name
-                    for name in ("services", "disks", "processes", "events", "network")
+                    for name in ("services", "disks", "processes", "events", "network", "volumes")
                     if isinstance(components, dict)
                     and isinstance(components.get(name), dict)
                     and components[name].get("status") != "ok"
@@ -743,6 +816,41 @@ def _validate_embedded_network_block(
             _check(
                 f"evidence.embedded_network.{embedded_key}",
                 isinstance(embedded, dict) and embedded.get(embedded_key) == source,
+            )
+        )
+    return checks
+
+
+def _validate_embedded_volumes_block(
+    payload: dict[str, Any], volumes: dict[str, Any]
+) -> list[Check]:
+    embedded = payload.get("embedded_volumes")
+    summary = volumes.get("summary") if isinstance(volumes.get("summary"), dict) else {}
+    collection = volumes.get("collection") if isinstance(volumes.get("collection"), dict) else {}
+    checks = [
+        _check("evidence.embedded_volumes.object", isinstance(embedded, dict)),
+        _check(
+            "evidence.embedded_volumes.included",
+            isinstance(embedded, dict) and embedded.get("included") is True,
+        ),
+        _check(
+            "evidence.embedded_volumes.status",
+            isinstance(embedded, dict) and embedded.get("status") == volumes.get("status"),
+        ),
+        _check(
+            "evidence.embedded_volumes.limit",
+            isinstance(embedded, dict) and embedded.get("limit") == collection.get("limit"),
+        ),
+        _check(
+            "evidence.embedded_volumes.truncated",
+            isinstance(embedded, dict) and embedded.get("truncated") == collection.get("truncated"),
+        ),
+    ]
+    for key in VOLUMES_SUMMARY_KEYS:
+        checks.append(
+            _check(
+                f"evidence.embedded_volumes.{key}",
+                isinstance(embedded, dict) and embedded.get(key) == summary.get(key),
             )
         )
     return checks
@@ -1634,8 +1742,48 @@ def _validate_volumes(payload: Any, *, label: str = "volumes") -> list[Check]:
         ]
     )
     volumes = payload.get("volumes")
-    checks.append(_check(f"{label}.volumes.list", isinstance(volumes, list)))
     limit = _nested(payload, "collection", "limit")
+    checks.append(_check(f"{label}.status", payload.get("status") in {"ok", "error"}))
+    checks.append(
+        _check(
+            f"{label}.method",
+            _nested(payload, "collection", "method") == "psutil_local_drive_roots",
+        )
+    )
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    for key in VOLUMES_SUMMARY_KEYS:
+        checks.append(
+            _check(
+                f"{label}.summary.{key}",
+                isinstance(summary.get(key), int)
+                and not isinstance(summary.get(key), bool)
+                and summary.get(key) >= 0,
+            )
+        )
+    checks.append(
+        _check(
+            f"{label}.summary.arithmetic",
+            summary.get("available_volumes", 0) + summary.get("unavailable_volumes", 0)
+            == summary.get("returned_volumes", 0),
+        )
+    )
+    checks.append(
+        _check(
+            f"{label}.summary.returned_within_roots",
+            summary.get("returned_volumes", 0) <= summary.get("local_drive_roots", 0),
+        )
+    )
+    if isinstance(limit, int):
+        checks.append(_check(f"{label}.limit.range", 1 <= limit <= 64))
+    checks.append(
+        _check(
+            f"{label}.collection.truncated",
+            isinstance(_nested(payload, "collection", "truncated"), bool),
+        )
+    )
+    for key in VOLUMES_SAFETY_FALSE_KEYS:
+        checks.append(_check(f"{label}.safety.{key}", _nested(payload, "safety", key) is False))
+    checks.append(_check(f"{label}.volumes.list", isinstance(volumes, list)))
     if isinstance(volumes, list):
         if isinstance(limit, int):
             checks.append(_check(f"{label}.volumes.bounded", len(volumes) <= limit))
