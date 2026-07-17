@@ -25,12 +25,16 @@ from shellforgeai.windows_events import (
 )
 from shellforgeai.windows_evidence import (
     EVIDENCE_DISKS_DEFAULT_LIMIT,
+    EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT,
+    EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT,
     EVIDENCE_PROCESSES_DEFAULT_LIMIT,
     EVIDENCE_SERVICES_DEFAULT_LIMIT,
     render_windows_evidence_text,
     validate_evidence_disks_limit,
     validate_evidence_events_limit,
     validate_evidence_events_since_hours,
+    validate_evidence_network_address_limit,
+    validate_evidence_network_interface_limit,
     validate_evidence_processes_limit,
     validate_evidence_services_limit,
     windows_evidence_payload,
@@ -130,6 +134,32 @@ def register(windows_app: typer.Typer) -> None:
                 help="Bounded System events lookback in hours (1-168; default 24).",
             ),
         ] = None,
+        include_network: Annotated[
+            bool,
+            typer.Option(
+                "--include-network",
+                help="Opt in to bounded read-only local Windows network-interface metadata.",
+            ),
+        ] = False,
+        network_interface_limit: Annotated[
+            int | None,
+            typer.Option(
+                "--network-interface-limit",
+                help=(
+                    "Bounded max network interfaces in opt-in network component (1-32; default 32)."
+                ),
+            ),
+        ] = None,
+        network_address_limit: Annotated[
+            int | None,
+            typer.Option(
+                "--network-address-limit",
+                help=(
+                    "Bounded max addresses per interface in opt-in network component "
+                    "(1-16; default 16)."
+                ),
+            ),
+        ] = None,
     ) -> None:
         kwargs: dict[str, Any] = {}
         if include_services:
@@ -194,6 +224,34 @@ def register(windows_app: typer.Typer) -> None:
                 raise typer.BadParameter(
                     "--events-since-hours requires --include-events",
                     param_hint="--events-since-hours",
+                )
+        if include_network:
+            try:
+                kwargs["network_interface_limit"] = validate_evidence_network_interface_limit(
+                    EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT
+                    if network_interface_limit is None
+                    else network_interface_limit
+                )
+                kwargs["network_address_limit"] = validate_evidence_network_address_limit(
+                    EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT
+                    if network_address_limit is None
+                    else network_address_limit
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(
+                    str(exc), param_hint="--network-interface-limit/--network-address-limit"
+                ) from exc
+            kwargs["include_network"] = True
+        else:
+            if network_interface_limit is not None:
+                raise typer.BadParameter(
+                    "--network-interface-limit requires --include-network",
+                    param_hint="--network-interface-limit",
+                )
+            if network_address_limit is not None:
+                raise typer.BadParameter(
+                    "--network-address-limit requires --include-network",
+                    param_hint="--network-address-limit",
                 )
         payload = windows_evidence_payload(**kwargs)
         if json_output:
