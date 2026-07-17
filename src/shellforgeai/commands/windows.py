@@ -29,6 +29,8 @@ from shellforgeai.windows_evidence import (
     EVIDENCE_SERVICES_DEFAULT_LIMIT,
     render_windows_evidence_text,
     validate_evidence_disks_limit,
+    validate_evidence_events_limit,
+    validate_evidence_events_since_hours,
     validate_evidence_processes_limit,
     validate_evidence_services_limit,
     windows_evidence_payload,
@@ -105,6 +107,29 @@ def register(windows_app: typer.Typer) -> None:
                 help="Bounded max processes in the opt-in processes component (1-200).",
             ),
         ] = None,
+        include_events: Annotated[
+            bool,
+            typer.Option(
+                "--include-events",
+                help="Opt in to bounded read-only local Windows System Event metadata.",
+            ),
+        ] = False,
+        events_limit: Annotated[
+            int | None,
+            typer.Option(
+                "--events-limit",
+                help=(
+                    "Bounded max System events in the opt-in events component (1-200; default 50)."
+                ),
+            ),
+        ] = None,
+        events_since_hours: Annotated[
+            int | None,
+            typer.Option(
+                "--events-since-hours",
+                help="Bounded System events lookback in hours (1-168; default 24).",
+            ),
+        ] = None,
     ) -> None:
         kwargs: dict[str, Any] = {}
         if include_services:
@@ -146,6 +171,30 @@ def register(windows_app: typer.Typer) -> None:
                 "--processes-limit requires --include-processes",
                 param_hint="--processes-limit",
             )
+        if include_events:
+            try:
+                kwargs["events_limit"] = validate_evidence_events_limit(
+                    DEFAULT_EVENTS_LIMIT if events_limit is None else events_limit
+                )
+                kwargs["events_since_hours"] = validate_evidence_events_since_hours(
+                    DEFAULT_SINCE_HOURS if events_since_hours is None else events_since_hours
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(
+                    str(exc), param_hint="--events-limit/--events-since-hours"
+                ) from exc
+            kwargs["include_events"] = True
+        else:
+            if events_limit is not None:
+                raise typer.BadParameter(
+                    "--events-limit requires --include-events",
+                    param_hint="--events-limit",
+                )
+            if events_since_hours is not None:
+                raise typer.BadParameter(
+                    "--events-since-hours requires --include-events",
+                    param_hint="--events-since-hours",
+                )
         payload = windows_evidence_payload(**kwargs)
         if json_output:
             typer.echo(json.dumps(payload, sort_keys=True))

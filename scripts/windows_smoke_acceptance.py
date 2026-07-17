@@ -254,6 +254,7 @@ def _validate_common(
     expected_host: str | None,
     expected_python: str | None,
     require_details: bool = True,
+    expected_statuses: frozenset[str] = frozenset({"ok"}),
 ) -> list[Check]:
     checks: list[Check] = []
     checks.append(
@@ -269,7 +270,11 @@ def _validate_common(
                 payload.get("mode") == expected_mode,
                 f"expected mode {expected_mode!r}",
             ),
-            _check(f"{label}.status", payload.get("status") == "ok", "expected status 'ok'"),
+            _check(
+                f"{label}.status",
+                payload.get("status") in expected_statuses,
+                f"expected status in {sorted(expected_statuses)!r}",
+            ),
             _check(
                 f"{label}.platform.system",
                 _nested(payload, "platform", "system") == "windows",
@@ -380,6 +385,7 @@ def _validate_evidence(
         expected_host=expected_host,
         expected_python=expected_python,
         require_details=False,
+        expected_statuses=frozenset({"ok", "component_failure"}),
     )
     if not isinstance(payload, dict):
         return checks
@@ -475,7 +481,117 @@ def _validate_evidence(
         )
         checks.extend(_validate_embedded_processes_block(payload, processes))
 
-    expected_component_count = 2 + int(has_services) + int(has_disks) + int(has_processes)
+    events = _nested(payload, "components", "events")
+    has_events = isinstance(components, dict) and "events" in components
+    if has_events and isinstance(events, dict):
+        checks.extend(_validate_events_artifact(events))
+        embedded_events = payload.get("embedded_events")
+        summary = events.get("summary", {}) if isinstance(events.get("summary"), dict) else {}
+        collection = (
+            events.get("collection", {}) if isinstance(events.get("collection"), dict) else {}
+        )
+        checks.append(
+            _check(
+                "evidence.components.events.platform",
+                events.get("platform", {}).get("system") == "windows",
+            )
+        )
+        checks.extend(
+            [
+                _check("evidence.embedded_events.object", isinstance(embedded_events, dict)),
+                _check(
+                    "evidence.embedded_events.included",
+                    isinstance(embedded_events, dict) and embedded_events.get("included") is True,
+                ),
+                _check(
+                    "evidence.embedded_events.status",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("status") == events.get("status"),
+                ),
+                _check(
+                    "evidence.embedded_events.limit",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("limit")
+                    == summary.get("limit", collection.get("limit")),
+                ),
+                _check(
+                    "evidence.embedded_events.since_hours",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("since_hours")
+                    == summary.get("since_hours", collection.get("since_hours")),
+                ),
+                _check(
+                    "evidence.embedded_events.returned_count",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("returned_count") == summary.get("events_returned"),
+                ),
+                _check(
+                    "evidence.embedded_events.truncated",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("truncated")
+                    == summary.get("truncated", collection.get("truncated")),
+                ),
+                _check(
+                    "evidence.embedded_events.critical",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("critical") == summary.get("critical"),
+                ),
+                _check(
+                    "evidence.embedded_events.error",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("error") == summary.get("error"),
+                ),
+                _check(
+                    "evidence.embedded_events.warning",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("warning") == summary.get("warning"),
+                ),
+                _check(
+                    "evidence.embedded_events.unknown",
+                    isinstance(embedded_events, dict)
+                    and embedded_events.get("unknown") == summary.get("unknown"),
+                ),
+            ]
+        )
+        if events.get("status") == "error":
+            checks.extend(
+                [
+                    _check(
+                        "evidence.events_failure.bounds.limit",
+                        isinstance(collection.get("limit"), int),
+                    ),
+                    _check(
+                        "evidence.events_failure.bounds.since_hours",
+                        isinstance(collection.get("since_hours"), int),
+                    ),
+                    _check(
+                        "evidence.events_failure.summary_zero", summary.get("events_returned") == 0
+                    ),
+                    _check("evidence.events_failure.critical_zero", summary.get("critical") == 0),
+                    _check("evidence.events_failure.error_zero", summary.get("error") == 0),
+                    _check("evidence.events_failure.warning_zero", summary.get("warning") == 0),
+                    _check("evidence.events_failure.unknown_zero", summary.get("unknown") == 0),
+                    _check("evidence.events_failure.events_empty", events.get("events") == []),
+                    _check(
+                        "evidence.events_failure.sanitized",
+                        _event_error_values_are_sanitized(events.get("errors")),
+                    ),
+                ]
+            )
+    else:
+        checks.append(
+            _check(
+                "evidence.default_no_events_component",
+                isinstance(components, dict) and "events" not in components,
+            )
+        )
+        checks.append(
+            _check("evidence.default_no_embedded_events", "embedded_events" not in payload)
+        )
+
+    expected_component_count = (
+        2 + int(has_services) + int(has_disks) + int(has_processes) + int(has_events)
+    )
     expected_ok = {"doctor", "status"}
     if has_services:
         expected_ok.add("services")
@@ -483,6 +599,8 @@ def _validate_evidence(
         expected_ok.add("disks")
     if has_processes:
         expected_ok.add("processes")
+    if has_events and isinstance(events, dict) and events.get("status") == "ok":
+        expected_ok.add("events")
     ok_components = _nested(payload, "summary", "ok_components")
     failed_components = _nested(payload, "summary", "failed_components")
     checks.extend(
@@ -494,8 +612,15 @@ def _validate_evidence(
             ),
             _check(
                 "evidence.summary.failed_components",
-                failed_components == [],
-                "expected no failed components",
+                failed_components
+                == [
+                    name
+                    for name in ("services", "disks", "processes", "events")
+                    if isinstance(components, dict)
+                    and isinstance(components.get(name), dict)
+                    and components[name].get("status") != "ok"
+                ],
+                "expected failed components to match unhealthy optional components",
             ),
             _check(
                 "evidence.summary.ok_components",
@@ -503,6 +628,16 @@ def _validate_evidence(
                 f"expected {', '.join(sorted(expected_ok))} ok components",
             ),
         ]
+    )
+    expected_evidence_status = (
+        "component_failure" if isinstance(failed_components, list) and failed_components else "ok"
+    )
+    checks.append(
+        _check(
+            "evidence.status_matches_component_health",
+            payload.get("status") == expected_evidence_status,
+            f"expected evidence status {expected_evidence_status!r}",
+        )
     )
     not_collected = payload.get("not_collected_in_pr264")
     for key in NOT_COLLECTED_PR264_KEYS:
@@ -1990,6 +2125,80 @@ def _render_text(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+EVENTS_FALLBACK_ERROR = {
+    "type": "events_component_failed",
+    "message": "Windows Event Log metadata component failed.",
+}
+EVENTS_COLLECTION_ERROR_MESSAGE = "Windows Event Log metadata collection failed."
+_EVENTS_ERROR_VALUE_FORBIDDEN_RE = re.compile(
+    r"(Traceback|OSError|RuntimeError|C:\\|secret-marker|raw query|"
+    r"System\[\(Level=|0x[0-9a-fA-F]{6,})"
+)
+
+
+def _event_error_values_are_sanitized(errors: Any) -> bool:
+    if not isinstance(errors, list) or len(errors) > 1:
+        return False
+    for entry in errors:
+        if not isinstance(entry, dict):
+            return False
+        for key, value in entry.items():
+            if key == "type":
+                continue
+            if isinstance(value, str) and _EVENTS_ERROR_VALUE_FORBIDDEN_RE.search(value):
+                return False
+    return True
+
+
+def _validate_events_errors(payload: dict[str, Any]) -> list[Check]:
+    errors = payload.get("errors", [])
+    checks = [_check("events.errors.list", isinstance(errors, list))]
+    if not isinstance(errors, list):
+        return checks
+    checks.append(_check("events.errors.bounded", len(errors) <= 1))
+    for idx, entry in enumerate(errors):
+        checks.append(_check(f"events.errors.{idx}.object", isinstance(entry, dict)))
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") == "events_component_failed":
+            checks.extend(
+                [
+                    _check(
+                        f"events.errors.{idx}.fallback_keys",
+                        set(entry) == set(EVENTS_FALLBACK_ERROR),
+                    ),
+                    _check(
+                        f"events.errors.{idx}.fallback_exact",
+                        entry == EVENTS_FALLBACK_ERROR,
+                    ),
+                ]
+            )
+        else:
+            checks.extend(
+                [
+                    _check(
+                        f"events.errors.{idx}.collection_keys",
+                        set(entry) <= {"type", "message", "winerror"},
+                    ),
+                    _check(
+                        f"events.errors.{idx}.collection_type",
+                        isinstance(entry.get("type"), str) and bool(entry.get("type")),
+                    ),
+                    _check(
+                        f"events.errors.{idx}.collection_message",
+                        entry.get("message") == EVENTS_COLLECTION_ERROR_MESSAGE,
+                    ),
+                ]
+            )
+        checks.append(
+            _check(
+                f"events.errors.{idx}.sanitized_values",
+                _event_error_values_are_sanitized([entry]),
+            )
+        )
+    return checks
+
+
 def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
     checks: list[Check] = []
     checks.append(_check("events.mode", payload.get("mode") == "windows_events"))
@@ -2086,27 +2295,6 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
             if last_key is not None:
                 checks.append(_check(f"events.item_{idx}.newest_first", key <= last_key))
             last_key = key
-    forbidden = {
-        "message",
-        "xml",
-        "event_data",
-        "user_data",
-        "sid",
-        "username",
-        "computer",
-        "activity_id",
-        "process_id",
-        "thread_id",
-        "command_line",
-        "file_path",
-        "registry_path",
-    }
-    checks.append(
-        _check(
-            "events.privacy_keys",
-            not (forbidden & set(json.dumps(payload).lower().replace('"', '"').split('"'))),
-        )
-    )
     summary = payload.get("summary", {})
     if payload.get("status") == "ok":
         checks.append(_check("events.summary_unknown_zero", summary.get("unknown", 0) == 0))
@@ -2115,7 +2303,18 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
         for event in events
         if isinstance(event, dict)
     }
-    for idx, pair in enumerate(payload.get("top_provider_event_pairs", [])):
+    top_pairs = payload.get("top_provider_event_pairs", [])
+    checks.append(_check("events.top_provider_event_pairs.array", isinstance(top_pairs, list)))
+    for idx, pair in enumerate(top_pairs if isinstance(top_pairs, list) else []):
+        if not isinstance(pair, dict):
+            checks.append(_check(f"events.aggregation_{idx}.object", False))
+            continue
+        checks.append(
+            _check(
+                f"events.aggregation_{idx}.keys",
+                set(pair) <= {"provider", "event_id", "level", "count", "most_recent_utc"},
+            )
+        )
         most_recent = pair.get("most_recent_utc")
         if most_recent is not None:
             checks.append(
@@ -2139,6 +2338,8 @@ def _validate_events_artifact(payload: dict[str, Any]) -> list[Check]:
             and str(warning.get("category", "")).startswith("invalid_required_")
         ]
         checks.append(_check("events.no_hidden_all_invalid_success", not invalid_warnings))
+
+    checks.extend(_validate_events_errors(payload))
 
     safety = payload.get("safety", {})
     for key in (
