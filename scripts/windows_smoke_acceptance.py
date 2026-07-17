@@ -481,6 +481,54 @@ def _validate_evidence(
         )
         checks.extend(_validate_embedded_processes_block(payload, processes))
 
+    network = _nested(payload, "components", "network")
+    has_network = isinstance(components, dict) and "network" in components
+    if has_network and isinstance(network, dict):
+        checks.extend(_validate_network(network, label="evidence.components.network"))
+        checks.extend(_validate_embedded_network_block(payload, network))
+        if network.get("status") == "error":
+            checks.extend(
+                [
+                    _check(
+                        "evidence.network_failure.summary_zero",
+                        network.get("summary")
+                        == {
+                            "interfaces_total": 0,
+                            "interfaces_returned": 0,
+                            "interfaces_up": 0,
+                            "interfaces_down": 0,
+                            "ipv4_addresses": 0,
+                            "ipv6_addresses": 0,
+                            "interfaces_with_errors": 0,
+                            "truncated": False,
+                        },
+                    ),
+                    _check(
+                        "evidence.network_failure.interfaces_empty", network.get("interfaces") == []
+                    ),
+                    _check(
+                        "evidence.network_failure.error_envelope",
+                        network.get("errors")
+                        == [
+                            {
+                                "type": "network_component_failed",
+                                "message": "Windows network interface metadata component failed.",
+                            }
+                        ],
+                    ),
+                ]
+            )
+    else:
+        checks.append(
+            _check(
+                "evidence.default_no_network_component",
+                isinstance(components, dict) and "network" not in components,
+            )
+        )
+        checks.append(
+            _check("evidence.default_no_embedded_network", "embedded_network" not in payload)
+        )
+
     events = _nested(payload, "components", "events")
     has_events = isinstance(components, dict) and "events" in components
     if has_events and isinstance(events, dict):
@@ -590,7 +638,12 @@ def _validate_evidence(
         )
 
     expected_component_count = (
-        2 + int(has_services) + int(has_disks) + int(has_processes) + int(has_events)
+        2
+        + int(has_services)
+        + int(has_disks)
+        + int(has_processes)
+        + int(has_events)
+        + int(has_network)
     )
     expected_ok = {"doctor", "status"}
     if has_services:
@@ -601,6 +654,8 @@ def _validate_evidence(
         expected_ok.add("processes")
     if has_events and isinstance(events, dict) and events.get("status") == "ok":
         expected_ok.add("events")
+    if has_network and isinstance(network, dict) and network.get("status") == "ok":
+        expected_ok.add("network")
     ok_components = _nested(payload, "summary", "ok_components")
     failed_components = _nested(payload, "summary", "failed_components")
     checks.extend(
@@ -615,7 +670,7 @@ def _validate_evidence(
                 failed_components
                 == [
                     name
-                    for name in ("services", "disks", "processes", "events")
+                    for name in ("services", "disks", "processes", "events", "network")
                     if isinstance(components, dict)
                     and isinstance(components.get(name), dict)
                     and components[name].get("status") != "ok"
@@ -653,6 +708,44 @@ def _validate_evidence(
 
 def _non_negative_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _validate_embedded_network_block(
+    payload: dict[str, Any], network: dict[str, Any]
+) -> list[Check]:
+    embedded = payload.get("embedded_network")
+    summary = network.get("summary") if isinstance(network.get("summary"), dict) else {}
+    caps = network.get("caps") if isinstance(network.get("caps"), dict) else {}
+    checks = [
+        _check("evidence.embedded_network.object", isinstance(embedded, dict)),
+        _check(
+            "evidence.embedded_network.included",
+            isinstance(embedded, dict) and embedded.get("included") is True,
+        ),
+        _check(
+            "evidence.embedded_network.status",
+            isinstance(embedded, dict) and embedded.get("status") == network.get("status"),
+        ),
+    ]
+    for embedded_key, source in (
+        ("max_interfaces", caps.get("max_interfaces")),
+        ("max_addresses_per_interface", caps.get("max_addresses_per_interface")),
+        ("interfaces_total", summary.get("interfaces_total")),
+        ("interfaces_returned", summary.get("interfaces_returned")),
+        ("interfaces_up", summary.get("interfaces_up")),
+        ("interfaces_down", summary.get("interfaces_down")),
+        ("ipv4_addresses", summary.get("ipv4_addresses")),
+        ("ipv6_addresses", summary.get("ipv6_addresses")),
+        ("interfaces_with_errors", summary.get("interfaces_with_errors")),
+        ("truncated", summary.get("truncated")),
+    ):
+        checks.append(
+            _check(
+                f"evidence.embedded_network.{embedded_key}",
+                isinstance(embedded, dict) and embedded.get(embedded_key) == source,
+            )
+        )
+    return checks
 
 
 def _validate_services(
@@ -1423,7 +1516,7 @@ def _validate_network(payload: Any, *, label: str = "network") -> list[Check]:
         [
             _check(f"{label}.schema_version", payload.get("schema_version") == 1),
             _check(f"{label}.mode", payload.get("mode") == "windows_network"),
-            _check(f"{label}.status", payload.get("status") == "ok"),
+            _check(f"{label}.status", payload.get("status") in {"ok", "error"}),
             _check(f"{label}.platform.system", _nested(payload, "platform", "system") == "windows"),
             _check(f"{label}.read_only", payload.get("read_only") is True),
             _check(f"{label}.mutation_performed", payload.get("mutation_performed") is False),
@@ -1449,6 +1542,16 @@ def _validate_network(payload: Any, *, label: str = "network") -> list[Check]:
         returned = summary.get("interfaces_returned")
         total = summary.get("interfaces_total")
         cap = _nested(payload, "caps", "max_interfaces")
+        address_cap = _nested(payload, "caps", "max_addresses_per_interface")
+        checks.append(
+            _check(f"{label}.caps.max_interfaces", isinstance(cap, int) and 1 <= cap <= 32)
+        )
+        checks.append(
+            _check(
+                f"{label}.caps.max_addresses_per_interface",
+                isinstance(address_cap, int) and 1 <= address_cap <= 16,
+            )
+        )
         if _non_negative_int(returned) and _non_negative_int(total):
             checks.append(_check(f"{label}.summary.returned_lte_total", returned <= total))
         if _non_negative_int(returned) and _non_negative_int(cap):
@@ -1470,6 +1573,16 @@ def _validate_network(payload: Any, *, label: str = "network") -> list[Check]:
                 )
                 addresses = iface.get("addresses")
                 checks.append(_check(f"{prefix}.addresses.list", isinstance(addresses, list)))
+                if isinstance(addresses, list) and _non_negative_int(
+                    _nested(payload, "caps", "max_addresses_per_interface")
+                ):
+                    checks.append(
+                        _check(
+                            f"{prefix}.addresses.bounded",
+                            len(addresses)
+                            <= _nested(payload, "caps", "max_addresses_per_interface"),
+                        )
+                    )
                 if isinstance(addresses, list):
                     for a_index, address in enumerate(addresses):
                         family = address.get("family") if isinstance(address, dict) else None

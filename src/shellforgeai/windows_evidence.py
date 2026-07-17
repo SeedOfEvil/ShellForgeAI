@@ -33,6 +33,23 @@ from shellforgeai.windows_events import (
     validate_since_hours,
     windows_events_payload,
 )
+from shellforgeai.windows_network import (
+    _SAFETY as WINDOWS_NETWORK_SAFETY,
+)
+from shellforgeai.windows_network import (
+    LIMITATION as WINDOWS_NETWORK_LIMITATION,
+)
+from shellforgeai.windows_network import (
+    MAX_ADDRESSES_PER_INTERFACE,
+    MAX_INTERFACES,
+    windows_network_payload,
+)
+from shellforgeai.windows_network import (
+    METHOD as WINDOWS_NETWORK_METHOD,
+)
+from shellforgeai.windows_network import (
+    MODE as WINDOWS_NETWORK_MODE,
+)
 from shellforgeai.windows_processes import MAX_PROCESSES_LIMIT, windows_processes_payload
 from shellforgeai.windows_services import DEFAULT_MAX_SERVICES, windows_services_payload
 from shellforgeai.windows_status import windows_status_payload
@@ -43,6 +60,7 @@ WINDOWS_EVIDENCE_PROCESSES_NEXT_SAFE_COMMAND = "shellforgeai windows processes -
 WINDOWS_EVIDENCE_EVENTS_NEXT_SAFE_COMMAND = (
     "shellforgeai windows events --json --limit {limit} --since-hours {since_hours}"
 )
+WINDOWS_EVIDENCE_NETWORK_NEXT_SAFE_COMMAND = "shellforgeai windows network --json"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
 
 EVIDENCE_SERVICES_DEFAULT_LIMIT = 25
@@ -51,6 +69,8 @@ EVIDENCE_DISKS_DEFAULT_LIMIT = DEFAULT_DISKS_LIMIT
 EVIDENCE_DISKS_MAX_LIMIT = MAX_DISKS_LIMIT
 EVIDENCE_PROCESSES_DEFAULT_LIMIT = 25
 EVIDENCE_PROCESSES_MAX_LIMIT = MAX_PROCESSES_LIMIT
+EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT = MAX_INTERFACES
+EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT = MAX_ADDRESSES_PER_INTERFACE
 
 _NOT_COLLECTED_PR264 = {
     "powershell_version": "not collected because PR264 does not execute PowerShell",
@@ -144,6 +164,7 @@ ServicesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 DisksBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 ProcessesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 EventsBuilder = Callable[[PlatformInfo, int, int], dict[str, Any]]
+NetworkBuilder = Callable[[PlatformInfo, int, int], dict[str, Any]]
 
 
 def validate_evidence_services_limit(value: Any) -> int:
@@ -183,6 +204,31 @@ def validate_evidence_processes_limit(value: Any) -> int:
     return value
 
 
+def validate_evidence_network_interface_limit(value: Any) -> int:
+    """Validate the opt-in bundled Windows network interface limit."""
+
+    message = f"network interface limit must be a positive integer between 1 and {MAX_INTERFACES}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(message)
+    if value < 1 or value > MAX_INTERFACES:
+        raise ValueError(message)
+    return value
+
+
+def validate_evidence_network_address_limit(value: Any) -> int:
+    """Validate the opt-in bundled Windows network per-interface address limit."""
+
+    message = (
+        "network address limit must be a positive integer between "
+        f"1 and {MAX_ADDRESSES_PER_INTERFACE}"
+    )
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(message)
+    if value < 1 or value > MAX_ADDRESSES_PER_INTERFACE:
+        raise ValueError(message)
+    return value
+
+
 def _default_services_builder(info: PlatformInfo, limit: int) -> dict[str, Any]:
     return windows_services_payload(info, max_services=limit)
 
@@ -197,6 +243,16 @@ def _default_processes_builder(info: PlatformInfo, limit: int) -> dict[str, Any]
 
 def _default_events_builder(info: PlatformInfo, limit: int, since_hours: int) -> dict[str, Any]:
     return windows_events_payload(info, limit=limit, since_hours=since_hours)
+
+
+def _default_network_builder(
+    info: PlatformInfo, interface_limit: int, address_limit: int
+) -> dict[str, Any]:
+    return windows_network_payload(
+        info,
+        max_interfaces=interface_limit,
+        max_addresses_per_interface=address_limit,
+    )
 
 
 def _embedded_services_component(payload: dict[str, Any], limit: int) -> dict[str, Any]:
@@ -350,6 +406,83 @@ def _events_component_error(info: PlatformInfo, limit: int, since_hours: int) ->
     }
 
 
+def _network_zero_summary() -> dict[str, Any]:
+    return {
+        "interfaces_total": 0,
+        "interfaces_returned": 0,
+        "interfaces_up": 0,
+        "interfaces_down": 0,
+        "ipv4_addresses": 0,
+        "ipv6_addresses": 0,
+        "interfaces_with_errors": 0,
+        "truncated": False,
+    }
+
+
+def _network_component_error(
+    info: PlatformInfo, interface_limit: int, address_limit: int
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "mode": WINDOWS_NETWORK_MODE,
+        "status": "error",
+        "platform": {"system": info.system},
+        "read_only": True,
+        "mutation_performed": False,
+        "method": WINDOWS_NETWORK_METHOD,
+        "caps": {
+            "max_interfaces": interface_limit,
+            "max_addresses_per_interface": address_limit,
+        },
+        "summary": _network_zero_summary(),
+        "interfaces": [],
+        "limitations": [WINDOWS_NETWORK_LIMITATION],
+        "warnings": [],
+        "errors": [
+            {
+                "type": "network_component_failed",
+                "message": "Windows network interface metadata component failed.",
+            }
+        ],
+        "safety": dict(WINDOWS_NETWORK_SAFETY),
+    }
+
+
+def _is_healthy_network_component(component: Any) -> bool:
+    if not isinstance(component, dict):
+        return False
+    if component.get("status") != "ok":
+        return False
+    if component.get("mode") != WINDOWS_NETWORK_MODE:
+        return False
+    if component.get("method") != WINDOWS_NETWORK_METHOD:
+        return False
+    if not isinstance(component.get("caps"), dict):
+        return False
+    if not isinstance(component.get("summary"), dict):
+        return False
+    return isinstance(component.get("interfaces"), list)
+
+
+def _embedded_network_summary(component: dict[str, Any]) -> dict[str, Any]:
+    caps = component.get("caps") if isinstance(component.get("caps"), dict) else {}
+    summary = component.get("summary") if isinstance(component.get("summary"), dict) else {}
+    return {
+        "included": True,
+        "status": component.get("status", "unknown"),
+        "max_interfaces": int(caps.get("max_interfaces", 0) or 0),
+        "max_addresses_per_interface": int(caps.get("max_addresses_per_interface", 0) or 0),
+        "interfaces_total": int(summary.get("interfaces_total", 0) or 0),
+        "interfaces_returned": int(summary.get("interfaces_returned", 0) or 0),
+        "interfaces_up": int(summary.get("interfaces_up", 0) or 0),
+        "interfaces_down": int(summary.get("interfaces_down", 0) or 0),
+        "ipv4_addresses": int(summary.get("ipv4_addresses", 0) or 0),
+        "ipv6_addresses": int(summary.get("ipv6_addresses", 0) or 0),
+        "interfaces_with_errors": int(summary.get("interfaces_with_errors", 0) or 0),
+        "truncated": bool(summary.get("truncated", False)),
+    }
+
+
 def _component_summary(components: dict[str, dict[str, Any]]) -> dict[str, Any]:
     ok_components = [name for name, payload in components.items() if payload.get("status") == "ok"]
     failed_components = [
@@ -380,6 +513,10 @@ def windows_evidence_payload(
     events_limit: int | None = None,
     events_since_hours: int | None = None,
     events_builder: EventsBuilder = _default_events_builder,
+    include_network: bool = False,
+    network_interface_limit: int | None = None,
+    network_address_limit: int | None = None,
+    network_builder: NetworkBuilder = _default_network_builder,
 ) -> dict[str, Any]:
     """Build the Windows evidence bundle payload.
 
@@ -397,6 +534,10 @@ def windows_evidence_payload(
         raise ValueError("events limit requires include_events=True")
     if not include_events and events_since_hours is not None:
         raise ValueError("events since-hours requires include_events=True")
+    if not include_network and network_interface_limit is not None:
+        raise ValueError("network interface limit requires include_network=True")
+    if not include_network and network_address_limit is not None:
+        raise ValueError("network address limit requires include_network=True")
 
     info = info or detect_platform()
     if info.system != "windows":
@@ -481,6 +622,33 @@ def windows_evidence_payload(
         next_safe_command = WINDOWS_EVIDENCE_EVENTS_NEXT_SAFE_COMMAND.format(
             limit=bounded_events_limit, since_hours=bounded_events_since_hours
         )
+    embedded_network: dict[str, Any] | None = None
+    if include_network:
+        bounded_network_interface_limit = validate_evidence_network_interface_limit(
+            EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT
+            if network_interface_limit is None
+            else network_interface_limit
+        )
+        bounded_network_address_limit = validate_evidence_network_address_limit(
+            EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT
+            if network_address_limit is None
+            else network_address_limit
+        )
+        try:
+            network_component = network_builder(
+                info, bounded_network_interface_limit, bounded_network_address_limit
+            )
+        except Exception:
+            network_component = _network_component_error(
+                info, bounded_network_interface_limit, bounded_network_address_limit
+            )
+        if not _is_healthy_network_component(network_component):
+            network_component = _network_component_error(
+                info, bounded_network_interface_limit, bounded_network_address_limit
+            )
+        components["network"] = network_component
+        embedded_network = _embedded_network_summary(network_component)
+        next_safe_command = WINDOWS_EVIDENCE_NETWORK_NEXT_SAFE_COMMAND
     summary = _component_summary(components)
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -510,6 +678,8 @@ def windows_evidence_payload(
         payload["not_collected_in_pr276"] = dict(_NOT_COLLECTED_PR276)
     if embedded_events is not None:
         payload["embedded_events"] = embedded_events
+    if embedded_network is not None:
+        payload["embedded_network"] = embedded_network
     return payload
 
 
@@ -605,6 +775,22 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
             f"error={events_summary.get('error', 0)}; "
             f"warning={events_summary.get('warning', 0)}; "
             f"unknown={events_summary.get('unknown', 0)}"
+        )
+    network_summary = payload.get("embedded_network")
+    if isinstance(network_summary, dict):
+        lines.append(
+            "Network component: "
+            f"status={network_summary.get('status', 'unknown')}; "
+            f"returned={network_summary.get('interfaces_returned', 0)}/"
+            f"{network_summary.get('interfaces_total', 0)}; "
+            f"up={network_summary.get('interfaces_up', 0)}; "
+            f"down={network_summary.get('interfaces_down', 0)}; "
+            f"ipv4={network_summary.get('ipv4_addresses', 0)}; "
+            f"ipv6={network_summary.get('ipv6_addresses', 0)}; "
+            f"errors={network_summary.get('interfaces_with_errors', 0)}; "
+            f"interface_limit={network_summary.get('max_interfaces', 0)}; "
+            f"address_limit={network_summary.get('max_addresses_per_interface', 0)}; "
+            f"truncated={str(network_summary.get('truncated', False)).lower()}"
         )
     if payload.get("status") == "unsupported":
         lines.append(str(payload.get("reason", "Windows evidence bundle is unavailable.")))
