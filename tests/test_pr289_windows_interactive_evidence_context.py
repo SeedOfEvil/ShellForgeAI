@@ -452,7 +452,7 @@ def test_what_is_running_bad_preamble_is_gated_to_evidence_answer(
     assert "read-only" in out.lower()
     assert "sfai.cmd windows processes --json --limit 10" in out
     assert "sfai.cmd windows services --json" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     assert "No command was executed" in out
 
     # Raw bad output stays in the existing model-response audit artifact only.
@@ -578,7 +578,7 @@ def test_mutation_request_is_refused_without_execution(windows_interactive: Any)
     assert "No command was executed" in out
     assert "No action was taken" in out
     assert "Safe Windows read-only alternatives:" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     for forbidden in (
         "cleanup executed",
         "remediation executed",

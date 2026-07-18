@@ -1033,3 +1033,13 @@ The default limit is 32 and the allowed range is 1-64. Supplying `--volumes-limi
 The standard profile selects existing bounded read-only components in this exact order: doctor, status, services, processes, events, network, volumes. It uses fixed established bounds: services 25, processes 25, System events 50, events since-hours 24, network interfaces 32, network addresses per interface 16, and volumes 32. It excludes disks because volumes already provides bounded local drive-root capacity plus filesystem classification. Memory is not a separate profile component because physical memory is already part of status.
 
 Profile mode is mutually exclusive with all manual include and limit options. Manual composition remains available when `--profile` is omitted. The profile adds no collector, no execution path, no mutation path, no PowerShell/WinRM/QGA/subprocess/shell behavior, no network/model/auth-cache/secret access, and no diagnostic/remediation automation. Unsupported platforms continue to return structured safe unsupported output.
+
+### Unified Windows operator guidance
+
+`shellforgeai ask` and interactive mode use the same pure Windows operator UX router for scoped Windows status, check-first/check-next, slow or latency first-pass triage, CPU/memory/disk/process strongest-signal comparison, current-host handoff, and mutation-refusal prompts. The shared route renders the standard bounded read-only profile as the first safe check:
+
+```bash
+shellforgeai windows evidence --profile standard --json
+```
+
+Additional drill-downs use canonical `shellforgeai windows ...` commands. The `sfai.cmd` wrapper remains supported on Windows, but rendered operator guidance does not require it. Generic Linux/Docker status prompts on non-Windows hosts stay on the existing Linux/Docker route; explicitly Windows-scoped prompts from Linux render guidance only and say that no Windows probing was performed. No recommended command is automatically executed. Natural-language cleanup, restart, service control, process termination, remediation, rollback, or recovery requests are refused and require any future mutation capability to use an explicit named, reviewed, confirmed recipe. This adds no collector, dependency, mutation path, model path, wrapper behavior, or packaging change.

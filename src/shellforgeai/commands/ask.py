@@ -89,75 +89,59 @@ def register(app: typer.Typer) -> None:
         from shellforgeai.core.command_suggestions import filter_unsupported_command_suggestions
         from shellforgeai.core.diagnose import findings_summary_line
         from shellforgeai.core.runbook import build_runbook, render_runbook_md
+        from shellforgeai.core.windows_operator_ux import (
+            WINDOWS_OPERATOR_INTENT_HANDOFF,
+            WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
+            WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
+            WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+            WINDOWS_OPERATOR_INTENT_STATUS,
+            WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
+            classify_windows_operator_intent,
+            render_windows_operator_guidance,
+        )
         from shellforgeai.llm.prompts import build_contextual_prompt
         from shellforgeai.llm.schemas import ModelRequest
 
         cli = _cli()
+        windows_route = None
+        if not no_evidence:
+            windows_route = classify_windows_operator_intent(
+                question, host_system=platform.system()
+            )
+            if windows_route is not None and (
+                windows_route.intent
+                in {
+                    WINDOWS_OPERATOR_INTENT_STATUS,
+                    WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
+                    WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
+                }
+                or not windows_route.host_is_windows
+            ):
+                limitation_lines = ()
+                if windows_route.intent == WINDOWS_OPERATOR_INTENT_NEXT_CHECK:
+                    limitation_lines = (
+                        "Windows metric limitations:",
+                        "- Load average is not available on Windows.",
+                        "- Memory summary unavailable from this collector on Windows.",
+                        "- Linux-only collectors skipped on Windows.",
+                    )
+                cli.console.print(
+                    render_windows_operator_guidance(
+                        windows_route, limitation_lines=limitation_lines
+                    )
+                )
+                return
         runtime = cli._ctx(ctx)
+        if windows_route is not None and windows_route.intent in {
+            WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+            WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
+            WINDOWS_OPERATOR_INTENT_HANDOFF,
+        }:
+            from shellforgeai.interactive.repl import _render_windows_parity_prompt
 
-        def _windows_prompt_hint(text: str) -> bool:
-            normalized = " ".join(text.lower().replace("-", " ").split())
-            return (
-                "windows" in normalized
-                or "win2025" in normalized
-                or platform.system().lower() == "windows"
-            )
-
-        def _windows_next_check_prompt(text: str) -> bool:
-            normalized = " ".join(text.lower().replace("-", " ").split())
-            return (
-                _windows_prompt_hint(text)
-                and ("what should" in normalized or "what do" in normalized)
-                and ("check first" in normalized or "check next" in normalized)
-            )
-
-        def _windows_operator_prompt(text: str) -> bool:
-            normalized = " ".join(text.lower().replace("-", " ").split())
-            has_latency = "latency" in normalized and (
-                "diagnosis" in normalized or "diagnose" in normalized or "first pass" in normalized
-            )
-            has_slow = any(
-                phrase in normalized
-                for phrase in ("system feels slow", "system feels a bit slow", "system feels sloww")
-            )
-            has_strongest = (
-                _windows_prompt_hint(text)
-                and "strongest" in normalized
-                and all(term in normalized for term in ("cpu", "memory", "disk", "process"))
-            )
-            has_handoff = _windows_prompt_hint(text) and "handoff" in normalized
-            return has_latency or has_slow or has_strongest or has_handoff
-
-        def _windows_status_prompt(text: str) -> bool:
-            normalized = " ".join(text.lower().replace("-", " ").split())
-            return _windows_prompt_hint(text) and (
-                "status" in normalized
-                or "health" in normalized
-                or "what is happening" in normalized
-            )
-
-        if not no_evidence and _windows_prompt_hint(question):
-            from shellforgeai.interactive.repl import (
-                _interactive_windows_mutation_refusal,
-                _is_windows_service_mutation_phrase,
-                _render_windows_next_check_guidance,
-                _render_windows_parity_prompt,
-                _render_windows_read_only_intent,
-            )
-
-            if _is_windows_service_mutation_phrase(question):
-                cli.console.print(_interactive_windows_mutation_refusal(question))
-                return
-            if _windows_next_check_prompt(question):
-                cli.console.print(_render_windows_next_check_guidance())
-                return
-            if _windows_operator_prompt(question):
-                rendered, _latest_context = _render_windows_parity_prompt(runtime, question)
-                cli.console.print(rendered)
-                return
-            if _windows_status_prompt(question) or cli._is_status_ask(question):
-                cli.console.print(_render_windows_read_only_intent(intent="windows_status"))
-                return
+            rendered, _latest_context = _render_windows_parity_prompt(runtime, question)
+            cli.console.print(rendered)
+            return
         if not no_evidence:
             if cli._handle_receipt_recovery_ask(question):
                 return

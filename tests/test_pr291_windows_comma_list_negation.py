@@ -74,7 +74,7 @@ def test_wrapped_sentence_inside_full_transcript_passes() -> None:
         "Windows read-only performance summary.\n"
         "- processes: 74 visible (10 shown)\n"
         + textwrap.fill(OBSERVED_SENTENCE, width=72)
-        + "\nSafe follow-up: sfai.cmd windows status --json\n"
+        + "\nSafe follow-up: shellforgeai windows status --json\n"
     )
     assert _flagged(transcript) == []
 

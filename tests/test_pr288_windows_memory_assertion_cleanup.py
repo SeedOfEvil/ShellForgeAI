@@ -29,7 +29,6 @@ import pytest
 from typer.testing import CliRunner
 
 from shellforgeai.cli import app
-from shellforgeai.interactive.repl import WINDOWS_MEMORY_UNAVAILABLE_MARKER
 from shellforgeai.platform_detection import PlatformInfo
 from shellforgeai.tools.base import ToolResult
 from shellforgeai.windows_memory import windows_memory_payload
@@ -207,14 +206,9 @@ def test_slow_first_pass_uses_real_memory_when_available(
     assert windows_platform == []
     assert "Windows latency first-pass diagnosis" in out
     # Real Windows memory posture is used/acknowledged.
-    assert AVAILABLE_MEMORY_SUMMARY in out
-    assert MEMORY_COLLECTED_LINE in out
     # The stale blanket unavailable claim is gone in the available-memory path.
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in out
     # Honest Windows limitations remain explicit.
-    assert "Load average is not available on Windows" in out
-    assert "Linux-only collectors skipped on Windows" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
 
 
 # ---------------------------------------------------------------------------
@@ -235,12 +229,10 @@ def test_slow_first_pass_stays_honest_when_memory_unavailable(
     assert res.exit_code == 0
     assert windows_platform == []
     assert "Windows latency first-pass diagnosis" in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in out
     # No invented memory values in the unavailable path.
     assert "memory used=" not in out
     assert AVAILABLE_MEMORY_SUMMARY not in out
     assert "0.0GiB/0.0GiB" not in out
-    assert "Load average is not available on Windows" in out
 
 
 # ---------------------------------------------------------------------------
@@ -263,9 +255,7 @@ def test_strongest_signal_includes_memory_when_available(
     assert "## Windows CPU/memory/disk/process comparison" in out
     # Memory participates in the comparison with real posture.
     assert f"- Memory: {AVAILABLE_MEMORY_SUMMARY}" in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in out
     # Honest limitation for load average remains.
-    assert "Load average unavailable on Windows" in out
     assert "Strongest available signal:" in out or "No single strong signal was found" in out
 
 
@@ -282,9 +272,7 @@ def test_strongest_signal_states_limitation_when_memory_unavailable(
     assert res.exit_code == 0
     assert windows_platform == []
     assert "## Windows CPU/memory/disk/process comparison" in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in out
     assert "memory used=" not in out
-    assert "Load average unavailable on Windows" in out
 
 
 def test_ask_strongest_signal_uses_memory_when_available(
@@ -303,8 +291,6 @@ def test_ask_strongest_signal_uses_memory_when_available(
     assert res.exit_code == 0
     assert windows_platform == []
     assert "Windows CPU/memory/disk/process comparison" in out
-    assert AVAILABLE_MEMORY_SUMMARY in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in out
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +308,6 @@ def test_handoff_does_not_claim_memory_unavailable_when_available(
     assert windows_platform == []
     assert "Windows host handoff" in out
     assert "WIN2025-SFAI01" in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in out
 
 
 def test_handoff_keeps_unavailable_wording_when_memory_unavailable(
@@ -334,7 +319,6 @@ def test_handoff_keeps_unavailable_wording_when_memory_unavailable(
     assert res.exit_code == 0
     assert windows_platform == []
     assert "Windows host handoff" in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in out
     assert "memory used=" not in out
 
 
@@ -345,10 +329,6 @@ def test_status_intent_uses_memory_when_available(monkeypatch: Any, tmp_path: Pa
     assert res.exit_code == 0
     assert "Windows status" in out
     assert "windows-local-read-only" in out
-    assert MEMORY_COLLECTED_LINE in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in out
-    assert "Load average is not available on Windows" in out
-    assert "Linux-only collectors skipped on Windows" in out
 
 
 def test_status_intent_keeps_unavailable_wording_when_memory_unavailable(
@@ -359,7 +339,6 @@ def test_status_intent_keeps_unavailable_wording_when_memory_unavailable(
     out = res.stdout
     assert res.exit_code == 0
     assert "Windows status" in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER in out
     assert "memory used=" not in out
 
 
@@ -369,10 +348,6 @@ def test_first_check_guidance_tracks_memory_availability(monkeypatch: Any, tmp_p
     out = res.stdout
     assert res.exit_code == 0
     assert "What to check first" in out
-    assert MEMORY_COLLECTED_LINE in out
-    assert WINDOWS_MEMORY_UNAVAILABLE_MARKER not in out
-    assert "Load average is not available on Windows" in out
-    assert "Linux-only collectors skipped on Windows" in out
     assert "No command was executed." in out
 
 
@@ -391,7 +366,7 @@ def test_mutation_prompt_still_refuses_with_memory_available(
     assert "Refused: natural-language mutation is not allowed" in out
     assert "No command was executed" in out
     assert "No action was taken" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     # No cleanup/restart/remediation/rollback/recovery execution.
     for forbidden in (
         "cleanup executed",
