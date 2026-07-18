@@ -1043,3 +1043,7 @@ shellforgeai windows evidence --profile standard --json
 ```
 
 Additional drill-downs use canonical `shellforgeai windows ...` commands. The `sfai.cmd` wrapper remains supported on Windows, but rendered operator guidance does not require it. Generic Linux/Docker status prompts on non-Windows hosts stay on the existing Linux/Docker route; explicitly Windows-scoped prompts from Linux render guidance only and say that no Windows probing was performed. No recommended command is automatically executed. Natural-language cleanup, restart, service control, process termination, remediation, rollback, or recovery requests are refused and require any future mutation capability to use an explicit named, reviewed, confirmed recipe. This adds no collector, dependency, mutation path, model path, wrapper behavior, or packaging change.
+
+## Windows runtime integrity
+
+- [Windows runtime integrity preflight](docs/runbooks/WINDOWS_RUNTIME_INTEGRITY.md) documents the standalone PR304 read-only runtime packet and saved-artifact validator.

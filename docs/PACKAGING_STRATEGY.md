@@ -8,6 +8,11 @@ Operators should eventually be able to run ShellForgeAI without manually prepari
 
 Python setup is friction for operators, especially outside a prepared developer container. Windows Server 2025 test VM support needs predictable install and run behavior so a local operator can start ShellForgeAI consistently. Packaging must not weaken safety boundaries or add hidden mutation paths.
 
+
+### Read-only install/runtime preflight (implemented by PR304)
+
+PR304 implements the observation-only Windows runtime-integrity preflight stage with `scripts/windows_runtime_integrity.py` and saved-artifact validation with `scripts/windows_runtime_integrity_acceptance.py`. This stage checks a staged source root, explicit runtime/profile root, durable versus canonical wrapper content, embedded Python existence, explicit Scripts entry point existence, and bounded `~hellforgeai*` site-package residue without installing, repairing, cleaning, deleting, or executing the wrapper/entry point. Packaging, installer, updater, frozen executable, and cleanup decisions remain deferred.
+
 ## Options considered
 
 ### Installer/bootstrap script
