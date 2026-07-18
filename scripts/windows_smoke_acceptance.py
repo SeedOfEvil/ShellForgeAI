@@ -217,6 +217,24 @@ PROCESSES_NOT_COLLECTED_PR274_KEYS = (
 )
 WINDOWS_V1_FALSE_KEYS = ("powershell_executed", "winrm_used", "remote_execution")
 EVENTS_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$")
+STANDARD_PROFILE_COMPONENTS = (
+    "doctor",
+    "status",
+    "services",
+    "processes",
+    "events",
+    "network",
+    "volumes",
+)
+STANDARD_PROFILE_BOUNDS = {
+    "services_limit": 25,
+    "processes_limit": 25,
+    "events_limit": 50,
+    "events_since_hours": 24,
+    "network_interface_limit": 32,
+    "network_address_limit": 16,
+    "volumes_limit": 32,
+}
 
 NOT_COLLECTED_PR264_KEYS = (
     "powershell_version",
@@ -419,7 +437,7 @@ def _validate_evidence(
         expected_host=expected_host,
         expected_python=expected_python,
         require_details=False,
-        expected_statuses=frozenset({"ok", "component_failure"}),
+        expected_statuses=frozenset({"ok", "component_failure", "unsupported"}),
     )
     if not isinstance(payload, dict):
         return checks
@@ -432,7 +450,92 @@ def _validate_evidence(
         ),
     )
 
+    if payload.get("status") == "unsupported":
+        checks.extend(
+            [
+                _check("evidence.unsupported_no_profile", "profile" not in payload),
+                _check("evidence.unsupported_no_components", "components" not in payload),
+                _check("evidence.unsupported_no_embedded_disks", "embedded_disks" not in payload),
+                _check(
+                    "evidence.unsupported_no_embedded_volumes", "embedded_volumes" not in payload
+                ),
+            ]
+        )
+        return checks
+
     components = payload.get("components")
+    profile = payload.get("profile")
+    has_profile = "profile" in payload
+    if has_profile:
+        profile_components = profile.get("components") if isinstance(profile, dict) else None
+        bounds = profile.get("bounds") if isinstance(profile, dict) else None
+        component_keys = list(components) if isinstance(components, dict) else []
+        failed_components = _nested(payload, "summary", "failed_components")
+        ok_components = _nested(payload, "summary", "ok_components")
+        represented = (ok_components if isinstance(ok_components, list) else []) + (
+            failed_components if isinstance(failed_components, list) else []
+        )
+        checks.extend(
+            [
+                _check("evidence.profile.object", isinstance(profile, dict)),
+                _check(
+                    "evidence.profile.keys",
+                    isinstance(profile, dict) and set(profile) == {"name", "components", "bounds"},
+                ),
+                _check(
+                    "evidence.profile.name",
+                    isinstance(profile, dict) and profile.get("name") == "standard",
+                ),
+                _check(
+                    "evidence.profile.components",
+                    profile_components == list(STANDARD_PROFILE_COMPONENTS),
+                ),
+                _check(
+                    "evidence.profile.components_unique",
+                    isinstance(profile_components, list)
+                    and len(profile_components) == len(set(profile_components)),
+                ),
+                _check("evidence.profile.bounds", bounds == STANDARD_PROFILE_BOUNDS),
+                _check(
+                    "evidence.profile.bounds_int",
+                    isinstance(bounds, dict)
+                    and all(
+                        isinstance(v, int) and not isinstance(v, bool) for v in bounds.values()
+                    ),
+                ),
+                _check(
+                    "evidence.profile.actual_components",
+                    component_keys == list(STANDARD_PROFILE_COMPONENTS),
+                ),
+                _check(
+                    "evidence.profile.no_disks",
+                    isinstance(components, dict)
+                    and "disks" not in components
+                    and "embedded_disks" not in payload,
+                ),
+                _check(
+                    "evidence.profile.component_count",
+                    _nested(payload, "summary", "component_count") == 7,
+                ),
+                _check(
+                    "evidence.profile.health_lists_ordered",
+                    all(name in STANDARD_PROFILE_COMPONENTS for name in represented)
+                    and represented
+                    == [name for name in STANDARD_PROFILE_COMPONENTS if name in represented],
+                ),
+                _check(
+                    "evidence.profile.health_lists_cover_components",
+                    sorted(represented) == sorted(STANDARD_PROFILE_COMPONENTS),
+                ),
+                _check(
+                    "evidence.profile.next_safe_command",
+                    payload.get("next_safe_command") == "shellforgeai windows volumes --json",
+                ),
+            ]
+        )
+    else:
+        checks.append(_check("evidence.no_profile_by_default_or_manual", "profile" not in payload))
+
     doctor = _nested(payload, "components", "doctor")
     status = _nested(payload, "components", "status")
     checks.extend(
@@ -743,7 +846,7 @@ def _validate_evidence(
                 failed_components
                 == [
                     name
-                    for name in ("services", "disks", "processes", "events", "network", "volumes")
+                    for name in ("events", "network", "volumes")
                     if isinstance(components, dict)
                     and isinstance(components.get(name), dict)
                     and components[name].get("status") != "ok"

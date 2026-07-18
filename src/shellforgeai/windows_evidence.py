@@ -91,6 +91,17 @@ EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT = MAX_INTERFACES
 EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT = MAX_ADDRESSES_PER_INTERFACE
 EVIDENCE_VOLUMES_DEFAULT_LIMIT = DEFAULT_VOLUMES_LIMIT
 EVIDENCE_VOLUMES_MAX_LIMIT = MAX_VOLUMES_LIMIT
+WINDOWS_EVIDENCE_STANDARD_PROFILE_NAME = "standard"
+WINDOWS_EVIDENCE_STANDARD_PROFILE_COMPONENTS = (
+    "doctor",
+    "status",
+    "services",
+    "processes",
+    "events",
+    "network",
+    "volumes",
+)
+
 
 _NOT_COLLECTED_PR264 = {
     "powershell_version": "not collected because PR264 does not execute PowerShell",
@@ -186,6 +197,82 @@ ProcessesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
 EventsBuilder = Callable[[PlatformInfo, int, int], dict[str, Any]]
 NetworkBuilder = Callable[[PlatformInfo, int, int], dict[str, Any]]
 VolumesBuilder = Callable[[PlatformInfo, int], dict[str, Any]]
+
+
+def validate_windows_evidence_profile(value: Any) -> str:
+    """Validate a deterministic Windows evidence profile name."""
+
+    message = "windows evidence profile must be exactly 'standard'"
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ValueError(message)
+    if value != WINDOWS_EVIDENCE_STANDARD_PROFILE_NAME:
+        raise ValueError(message)
+    return WINDOWS_EVIDENCE_STANDARD_PROFILE_NAME
+
+
+def resolve_windows_evidence_profile(name: str) -> dict[str, Any]:
+    """Resolve a validated Windows evidence profile to existing component options."""
+
+    validate_windows_evidence_profile(name)
+    return {
+        "include_services": True,
+        "services_limit": EVIDENCE_SERVICES_DEFAULT_LIMIT,
+        "include_disks": False,
+        "include_processes": True,
+        "processes_limit": EVIDENCE_PROCESSES_DEFAULT_LIMIT,
+        "include_events": True,
+        "events_limit": DEFAULT_EVENTS_LIMIT,
+        "events_since_hours": DEFAULT_SINCE_HOURS,
+        "include_network": True,
+        "network_interface_limit": EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT,
+        "network_address_limit": EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT,
+        "include_volumes": True,
+        "volumes_limit": EVIDENCE_VOLUMES_DEFAULT_LIMIT,
+    }
+
+
+def _windows_evidence_profile_block(name: str) -> dict[str, Any]:
+    validate_windows_evidence_profile(name)
+    return {
+        "name": WINDOWS_EVIDENCE_STANDARD_PROFILE_NAME,
+        "components": list(WINDOWS_EVIDENCE_STANDARD_PROFILE_COMPONENTS),
+        "bounds": {
+            "services_limit": EVIDENCE_SERVICES_DEFAULT_LIMIT,
+            "processes_limit": EVIDENCE_PROCESSES_DEFAULT_LIMIT,
+            "events_limit": DEFAULT_EVENTS_LIMIT,
+            "events_since_hours": DEFAULT_SINCE_HOURS,
+            "network_interface_limit": EVIDENCE_NETWORK_DEFAULT_INTERFACE_LIMIT,
+            "network_address_limit": EVIDENCE_NETWORK_DEFAULT_ADDRESS_LIMIT,
+            "volumes_limit": EVIDENCE_VOLUMES_DEFAULT_LIMIT,
+        },
+    }
+
+
+def _reject_profile_manual_conflicts(profile_name: str, values: dict[str, Any]) -> None:
+    option_names = {
+        "include_services": "--include-services",
+        "services_limit": "--services-limit",
+        "include_disks": "--include-disks",
+        "disks_limit": "--disks-limit",
+        "include_processes": "--include-processes",
+        "processes_limit": "--processes-limit",
+        "include_events": "--include-events",
+        "events_limit": "--events-limit",
+        "events_since_hours": "--events-since-hours",
+        "include_network": "--include-network",
+        "network_interface_limit": "--network-interface-limit",
+        "network_address_limit": "--network-address-limit",
+        "include_volumes": "--include-volumes",
+        "volumes_limit": "--volumes-limit",
+    }
+    for key, option in option_names.items():
+        value = values[key]
+        if (
+            value is True
+            or (key.endswith("_limit") or key == "events_since_hours")
+            and value is not None
+        ):
+            raise ValueError(f"--profile {profile_name} is mutually exclusive with {option}")
 
 
 def validate_evidence_services_limit(value: Any) -> int:
@@ -654,6 +741,7 @@ def windows_evidence_payload(
     include_volumes: bool = False,
     volumes_limit: int | None = None,
     volumes_builder: VolumesBuilder = _default_volumes_builder,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Build the Windows evidence bundle payload.
 
@@ -666,6 +754,41 @@ def windows_evidence_payload(
     ``include_processes`` is explicitly requested, bounded by a validated
     limit, and built by reusing the existing PR274 read-only processes payload.
     """
+
+    profile_name: str | None = None
+    if profile is not None:
+        profile_name = validate_windows_evidence_profile(profile)
+        manual_values = {
+            "include_services": include_services,
+            "services_limit": services_limit,
+            "include_disks": include_disks,
+            "disks_limit": disks_limit,
+            "include_processes": include_processes,
+            "processes_limit": processes_limit,
+            "include_events": include_events,
+            "events_limit": events_limit,
+            "events_since_hours": events_since_hours,
+            "include_network": include_network,
+            "network_interface_limit": network_interface_limit,
+            "network_address_limit": network_address_limit,
+            "include_volumes": include_volumes,
+            "volumes_limit": volumes_limit,
+        }
+        _reject_profile_manual_conflicts(profile_name, manual_values)
+        resolved = resolve_windows_evidence_profile(profile_name)
+        include_services = resolved["include_services"]
+        services_limit = resolved["services_limit"]
+        include_disks = resolved["include_disks"]
+        include_processes = resolved["include_processes"]
+        processes_limit = resolved["processes_limit"]
+        include_events = resolved["include_events"]
+        events_limit = resolved["events_limit"]
+        events_since_hours = resolved["events_since_hours"]
+        include_network = resolved["include_network"]
+        network_interface_limit = resolved["network_interface_limit"]
+        network_address_limit = resolved["network_address_limit"]
+        include_volumes = resolved["include_volumes"]
+        volumes_limit = resolved["volumes_limit"]
 
     if not include_events and events_limit is not None:
         raise ValueError("events limit requires include_events=True")
@@ -823,6 +946,8 @@ def windows_evidence_payload(
         "not_collected_in_pr264": not_collected,
         "next_safe_command": next_safe_command,
     }
+    if profile_name is not None:
+        payload["profile"] = _windows_evidence_profile_block(profile_name)
     if embedded_disks is not None:
         payload["embedded_disks"] = embedded_disks
         payload["not_collected_in_pr272"] = dict(_NOT_COLLECTED_PR272)
@@ -878,6 +1003,14 @@ def render_windows_evidence_text(payload: dict[str, Any]) -> str:
         f"Mutation performed: {str(payload.get('mutation_performed', True)).lower()}",
         f"Components included: {component_names}",
     ]
+    profile = payload.get("profile")
+    if isinstance(profile, dict):
+        profile_components = profile.get("components", [])
+        if isinstance(profile_components, list):
+            lines.append(
+                "Evidence profile: "
+                f"{profile.get('name', 'unknown')}; components={','.join(profile_components)}"
+            )
     if summary:
         lines.append(
             "Component summary: "
