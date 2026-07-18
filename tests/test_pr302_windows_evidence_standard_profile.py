@@ -83,6 +83,15 @@ def common(mode: str) -> dict[str, Any]:
                 "auth_cache_read",
                 "model_called",
                 "network_call",
+                "packet_capture",
+                "socket_inventory",
+                "dns_lookup",
+                "route_table_lookup",
+                "network_mutation",
+                "event_log_write_performed",
+                "event_log_clear_performed",
+                "event_log_export_performed",
+                "event_subscription_created",
                 "process_control_executed",
                 "process_config_modified",
                 "process_memory_read",
@@ -117,6 +126,7 @@ def status(info: PlatformInfo) -> dict[str, Any]:
 def services(info: PlatformInfo, limit: int) -> dict[str, Any]:
     assert info.system == "windows" and limit == 25
     p = common("windows_services")
+    p["windows_v1"]["scope"] = "local_read_only_services"
     p["services"] = {
         "items": [],
         "collection_limits": {"truncated": False},
@@ -129,14 +139,25 @@ def services(info: PlatformInfo, limit: int) -> dict[str, Any]:
 def processes(info: PlatformInfo, limit: int) -> dict[str, Any]:
     assert info.system == "windows" and limit == 25
     p = common("windows_processes")
+    p["windows_v1"]["scope"] = "local_read_only_processes_preview"
     p.update(
         {
+            "method": "ctypes_toolhelp32_snapshot",
             "limit": limit,
             "returned_count": 0,
             "total_count": 0,
             "truncated": False,
             "processes": [],
             "state": {"enumeration_failed": False},
+            "not_collected_in_pr274": {
+                "command_line": "not collected",
+                "environment": "not collected",
+                "memory": "not collected",
+                "handles": "not collected",
+                "modules": "not collected",
+                "owner_user": "not collected",
+                "network_connections": "not collected",
+            },
         }
     )
     return p
@@ -262,6 +283,91 @@ def payload(**kwargs: Any) -> dict[str, Any]:
         volumes_builder=volumes,
         **kwargs,
     )
+
+
+def _patch_cli_payload(
+    monkeypatch: pytest.MonkeyPatch, profile_info: PlatformInfo = WINDOWS
+) -> None:
+    import shellforgeai.commands.windows as windows_commands
+
+    def fake_windows_evidence_payload(**kwargs: Any) -> dict[str, Any]:
+        return windows_evidence_payload(
+            profile_info,
+            doctor_builder=doctor,
+            status_builder=status,
+            services_builder=services,
+            disks_builder=forbidden,
+            processes_builder=processes,
+            events_builder=events,
+            network_builder=network,
+            volumes_builder=volumes,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(windows_commands, "windows_evidence_payload", fake_windows_evidence_payload)
+
+
+def test_cli_json_serializer_preserves_only_profile_component_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_cli_payload(monkeypatch)
+    runner = CliRunner()
+
+    profile_result = runner.invoke(app, ["windows", "evidence", "--profile", "standard", "--json"])
+    assert profile_result.exit_code == 0
+    assert profile_result.stderr == ""
+    assert "Traceback" not in profile_result.output
+    profile_raw = profile_result.output.rstrip("\n")
+    profile_payload = json.loads(profile_raw)
+    assert list(profile_payload["components"]) == PROFILE_COMPONENTS
+    assert profile_payload["profile"]["components"] == PROFILE_COMPONENTS
+    assert profile_payload["summary"]["ok_components"] == PROFILE_COMPONENTS
+    assert profile_payload["summary"]["component_count"] == 7
+    assert "disks" not in profile_payload["components"]
+    assert "embedded_disks" not in profile_payload
+    assert profile_payload["next_safe_command"] == "shellforgeai windows volumes --json"
+    assert profile_raw != json.dumps(profile_payload, sort_keys=True)
+
+    spec = importlib.util.spec_from_file_location(
+        "acceptance_pr302_cli_serializer", Path("scripts/windows_smoke_acceptance.py")
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    profile_checks = module._validate_evidence(profile_payload, None, None)
+    assert all(c.passed for c in profile_checks), [c.name for c in profile_checks if not c.passed]
+    assert any(c.name == "evidence.profile.actual_components" and c.passed for c in profile_checks)
+
+    default_result = runner.invoke(app, ["windows", "evidence", "--json"])
+    assert default_result.exit_code == 0
+    default_raw = default_result.output.rstrip("\n")
+    default_payload = json.loads(default_raw)
+    assert "profile" not in default_payload
+    assert list(default_payload["components"]) == ["doctor", "status"]
+    assert default_payload["next_safe_command"] == "shellforgeai windows status --json"
+    assert default_raw == json.dumps(default_payload, sort_keys=True)
+
+    manual_result = runner.invoke(app, ["windows", "evidence", "--include-volumes", "--json"])
+    assert manual_result.exit_code == 0
+    manual_raw = manual_result.output.rstrip("\n")
+    manual_payload = json.loads(manual_raw)
+    assert "profile" not in manual_payload
+    assert list(manual_payload["components"]) == ["doctor", "status", "volumes"]
+    assert manual_payload["next_safe_command"] == "shellforgeai windows volumes --json"
+    assert manual_raw == json.dumps(manual_payload, sort_keys=True)
+
+    _patch_cli_payload(monkeypatch, LINUX)
+    unsupported_result = runner.invoke(
+        app, ["windows", "evidence", "--profile", "standard", "--json"]
+    )
+    assert unsupported_result.exit_code == 0
+    unsupported_raw = unsupported_result.output.rstrip("\n")
+    unsupported_payload = json.loads(unsupported_raw)
+    assert unsupported_payload["status"] == "unsupported"
+    assert "profile" not in unsupported_payload
+    assert "components" not in unsupported_payload
+    assert unsupported_raw == json.dumps(unsupported_payload, sort_keys=True)
 
 
 def test_cli_registration_and_validation() -> None:
@@ -468,7 +574,7 @@ def test_acceptance_profile_fixtures(tmp_path: Path) -> None:
     spec.loader.exec_module(module)
     good = payload(profile="standard")
     checks = module._validate_evidence(good, None, None)
-    assert not [c.name for c in checks if c.name.startswith("evidence.profile") and not c.passed]
+    assert all(c.passed for c in checks), [c.name for c in checks if not c.passed]
     bad = dict(good)
     bad["profile"] = {**good["profile"], "extra": True}
     assert not all(c.passed for c in module._validate_evidence(bad, None, None))

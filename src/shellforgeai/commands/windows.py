@@ -330,7 +330,8 @@ def register(windows_app: typer.Typer) -> None:
             )
         payload = windows_evidence_payload(**kwargs)
         if json_output:
-            typer.echo(json.dumps(payload, sort_keys=True))
+            preserve_profile_order = isinstance(payload.get("profile"), dict)
+            typer.echo(json.dumps(payload, sort_keys=not preserve_profile_order))
             return
 
         console.print(render_windows_evidence_text(payload))
