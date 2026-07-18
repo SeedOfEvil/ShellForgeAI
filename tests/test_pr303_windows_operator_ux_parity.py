@@ -157,10 +157,8 @@ def test_rendering_contract_windows_and_non_windows_and_refusal() -> None:
         ux.WindowsOperatorRoute(ux.WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, True, True)
     )
     assert refusal.startswith(
-        
-            "Refused: natural-language mutation is not allowed.\n"
-            "No command was executed. No action was taken."
-        
+        "Refused: natural-language mutation is not allowed.\n"
+        "No command was executed. No action was taken."
     )
     assert "This request did not select, approve, prepare, or execute a recipe." in refusal
 
@@ -211,3 +209,87 @@ def test_source_guardrails_positive_control() -> None:
     assert "classify_windows_operator_intent" in repl
     unsafe = helper + "\nsubprocess.run(['x'])\n"
     assert "subprocess" in unsafe
+
+
+def test_actual_windows_performance_preserves_pr289_body_and_layers_safe_next(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import importlib.util
+
+    from shellforgeai.cli import app
+
+    pr289_path = Path("tests/test_pr289_windows_interactive_evidence_context.py")
+    spec = importlib.util.spec_from_file_location("pr289_windows_fixtures", pr289_path)
+    assert spec is not None and spec.loader is not None
+    pr289 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pr289)
+
+    runner = CliRunner()
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shellforgeai.interactive.repl.platform.system", lambda: "Windows")
+    monkeypatch.setattr("shellforgeai.core.diagnose.detect_platform", lambda: pr289.WINDOWS_INFO)
+    monkeypatch.setattr("shellforgeai.core.collectors.detect_platform", lambda: pr289.WINDOWS_INFO)
+    monkeypatch.setattr(
+        "shellforgeai.core.collectors.windows_status_payload", pr289._fake_status_payload
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.collectors.windows_disks_payload", pr289._fake_disks_payload
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.collectors.windows_memory_payload", pr289._fake_memory_payload
+    )
+    monkeypatch.setattr(
+        "shellforgeai.interactive.repl.windows_memory_payload", pr289._fake_memory_payload
+    )
+
+    def _fail_provider(*_: object) -> object:
+        raise AssertionError("Windows performance route must not call the model provider")
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
+    result = runner.invoke(
+        app,
+        ["interactive", "--yes-trust", "--no-trust-cache"],
+        input=(
+            "I am seeing weird latency in the app. "
+            "Give me a practical first-pass diagnosis.\n/exit\n"
+        ),
+    )
+    out = result.stdout
+    assert result.exit_code == 0, out
+    assert "## Windows latency first-pass diagnosis" in out
+    assert "## Assessment" in out
+    assert "memory used=20.0%" in out
+    assert "available=6.4GiB/8.0GiB" in out
+    assert "Memory summary unavailable" not in out
+    assert "root_free=156.0GiB/256.0GiB" in out
+    assert "Load average is not available on Windows" in out
+    section = out.split("Start with this bounded read-only check:", 1)[1]
+    command_lines = [line.strip() for line in section.splitlines() if line.strip().startswith("-")]
+    assert command_lines[0] == "- shellforgeai windows evidence --profile standard --json"
+    assert command_lines[1:6] == [
+        "- shellforgeai windows processes --json --limit 10",
+        "- shellforgeai windows events --json --limit 50 --since-hours 24",
+        "- shellforgeai windows network --json",
+        "- shellforgeai windows volumes --json --limit 32",
+        "- shellforgeai windows status --json",
+    ]
+    assert "No command was executed. No action was taken." in out
+    normalized = " ".join(out.split())
+    assert (
+        "No cleanup, restart, service control, process termination, remediation, "
+        "rollback, or recovery was performed."
+    ) in normalized
+    assert "sfai.cmd" not in out
+    assert "Traceback" not in out
+
+
+def test_mutation_refusal_uses_maintained_safe_windows_heading() -> None:
+    refusal = ux.render_windows_operator_guidance(
+        ux.WindowsOperatorRoute(ux.WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, True, True)
+    )
+    assert "Safe Windows read-only alternatives:" in refusal
+    assert "Canonical read-only alternatives:" not in refusal
+    section = refusal.split("Safe Windows read-only alternatives:", 1)[1]
+    command_lines = [line.strip() for line in section.splitlines() if line.strip().startswith("-")]
+    assert command_lines[0] == "- shellforgeai windows evidence --profile standard --json"
+    assert "sfai.cmd" not in refusal

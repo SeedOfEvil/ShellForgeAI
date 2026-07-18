@@ -70,6 +70,7 @@ from shellforgeai.core.windows_operator_ux import (
     WindowsOperatorRoute,
     classify_windows_operator_intent,
     render_windows_operator_guidance,
+    render_windows_operator_safe_next_section,
     windows_operator_safe_commands,
 )
 from shellforgeai.interactive.banner import build_banner
@@ -1302,51 +1303,18 @@ def _render_windows_parity_prompt(
             model_assessment_status="not_called",
         )
     )
-    memory_available, memory_summary = _windows_memory_signal(checks)
-    assessment = tuple(_windows_evidence_highlights(checks))
-    limitations = ["- Load average is not available on Windows."]
-    if memory_available:
-        assessment = assessment + (
-            f"- Memory summary collected from Windows local read-only evidence: {memory_summary}.",
-        )
-    else:
-        limitations.append(f"- {WINDOWS_MEMORY_UNAVAILABLE_MARKER}.")
-    limitations.extend(
-        f"- {c.get('summary', 'metric unavailable on Windows')}."
-        for c in checks
-        if c.get("status") in {WINDOWS_METRIC_UNAVAILABLE_STATUS, LINUX_ONLY_COLLECTOR_SKIP_STATUS}
-    )
     route = _windows_route(user_input, host_system="Windows") or WindowsOperatorRoute(
         WINDOWS_OPERATOR_INTENT_PERFORMANCE, True, False
     )
-    rendered = render_windows_operator_guidance(
-        WindowsOperatorRoute(route.intent, True, route.explicit_windows),
-        assessment_lines=assessment,
-        limitation_lines=tuple(dict.fromkeys(limitations)),
-    )
-    if route.intent == WINDOWS_OPERATOR_INTENT_PERFORMANCE:
-        rendered = rendered.replace(
-            "## Windows performance first pass", "## Windows latency first-pass diagnosis"
-        )
-    elif route.intent == WINDOWS_OPERATOR_INTENT_HANDOFF:
-        rendered = rendered.replace("## Windows current-host handoff", "## Windows host handoff")
+    if route.intent == WINDOWS_OPERATOR_INTENT_HANDOFF:
+        assessment_body = _windows_host_handoff_summary(checks)
     elif route.intent == WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL:
-        by_tool = {c.get("tool", ""): c.get("summary", "unavailable") for c in checks}
-        load_text = by_tool.get("host.resources", "Load average unavailable on Windows")
-        memory_text = memory_summary if memory_available else WINDOWS_MEMORY_UNAVAILABLE_MARKER
-        status_text = by_tool.get("windows.status", "Windows status/root-free summary unavailable")
-        disk_text = by_tool.get("windows.disks", "Windows disk-root summary unavailable")
-        process_text = by_tool.get(
-            "process.top", "Process health unavailable from this Windows route"
-        )
-        comparison = (
-            f"- CPU/load: {load_text}.\n"
-            f"- Memory: {memory_text}.\n"
-            f"- Disk: {status_text}; {disk_text}.\n"
-            f"- Process health: {process_text}.\n"
-            f"Strongest available signal: {status_text}."
-        )
-        rendered = rendered.replace("Assessment:\n", "Assessment:\n" + comparison + "\n")
+        assessment_body = _windows_strongest_signal_summary(checks)
+    else:
+        assessment_body = _windows_latency_fallback_summary(checks)
+    rendered = (
+        assessment_body.rstrip() + "\n\n" + render_windows_operator_safe_next_section(route.intent)
+    )
     return rendered, latest_context
 
 

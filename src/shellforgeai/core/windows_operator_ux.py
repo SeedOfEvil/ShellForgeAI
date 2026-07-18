@@ -242,6 +242,28 @@ def windows_operator_safe_commands(intent: str) -> tuple[str, ...]:
     return tuple(_COMMANDS_BY_INTENT.get(intent, (WINDOWS_STANDARD_EVIDENCE_COMMAND,)))
 
 
+def render_windows_operator_safe_next_section(intent: str) -> str:
+    """Render only canonical safe-next commands and no-action markers."""
+    commands = windows_operator_safe_commands(intent)
+    first, rest = commands[0], commands[1:]
+    lines = ["Start with this bounded read-only check:", f"- {first}"]
+    if rest:
+        lines.extend(("", "Relevant read-only drill-downs:"))
+        lines.extend(f"- {cmd}" for cmd in rest)
+        lines.append("These commands are optional drill-downs after the standard profile.")
+    lines.extend(
+        [
+            "",
+            "No command was executed. No action was taken.",
+            (
+                "No cleanup, restart, service control, process termination, remediation, "
+                "rollback, or recovery was performed."
+            ),
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_windows_operator_guidance(
     route: WindowsOperatorRoute,
     *,
@@ -266,7 +288,7 @@ def render_windows_operator_guidance(
             ),
             "This request did not select, approve, prepare, or execute a recipe.",
             "",
-            "Canonical read-only alternatives:",
+            "Safe Windows read-only alternatives:",
         ]
         lines.extend(f"- {cmd}" for cmd in commands)
         lines.extend(
@@ -300,24 +322,5 @@ def render_windows_operator_guidance(
     if limitation_lines:
         lines.extend(("", "Limitations:"))
         lines.extend(limitation_lines)
-    first, rest = commands[0], commands[1:]
-    lines.extend(("", "Start with this bounded read-only check:", f"- {first}"))
-    if rest:
-        lines.extend(("", "Relevant read-only drill-downs:"))
-        lines.extend(f"- {cmd}" for cmd in rest)
-        lines.append("These commands are optional drill-downs after the standard profile.")
-    lines.extend(
-        [
-            "",
-            "No command was executed. No action was taken.",
-            "No cleanup was performed.",
-            "No restart or service control was performed.",
-            "No remediation was performed.",
-            "No rollback or recovery was performed.",
-            (
-                "No cleanup, restart, service control, process termination, remediation, "
-                "rollback, or recovery was performed."
-            ),
-        ]
-    )
+    lines.extend(("", render_windows_operator_safe_next_section(route.intent)))
     return "\n".join(lines)
