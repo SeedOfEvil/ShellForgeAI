@@ -46,10 +46,10 @@ def test_windows_processes_limit_10_routes_with_limit() -> None:
 def test_windows_status_response_is_deterministic_read_only_guidance() -> None:
     rendered = _render_windows_read_only_intent(intent="windows_status", is_windows=True)
     assert "windows-local-read-only" in rendered
-    assert "sfai.cmd windows status --json" in rendered
-    assert "sfai.cmd windows doctor --json" in rendered
-    assert "sfai.cmd windows evidence --json" in rendered
-    assert "sfai.cmd windows processes --json --limit 10" in rendered
+    assert "shellforgeai windows status --json" in rendered
+    assert "shellforgeai windows doctor --json" in rendered
+    assert "shellforgeai windows evidence --profile standard --json" in rendered
+    assert "shellforgeai windows processes --json --limit 10" in rendered
     assert "read-only" in rendered
     assert "No shell" in rendered or "no shell" in rendered
     assert "AGENTS.md" not in rendered
@@ -60,15 +60,15 @@ def test_pending_after_windows_status_prefers_windows_safe_next_commands() -> No
     ctx = _windows_interactive_pending_context(
         session_id="test-session",
         intent="windows_status",
-        source_command="sfai.cmd windows status --json",
+        source_command="shellforgeai windows status --json",
     )
     rendered = render_latest_context_pending(ctx)
     assert "windows-local-read-only" in rendered
     assert "windows_status" in rendered
-    assert "sfai.cmd windows status --json" in rendered
-    assert "sfai.cmd windows doctor --json" in rendered
-    assert "sfai.cmd windows evidence --json" in rendered
-    assert "sfai.cmd windows processes --json --limit 10" in rendered
+    assert "shellforgeai windows status --json" in rendered
+    assert "shellforgeai windows doctor --json" in rendered
+    assert "shellforgeai windows evidence --profile standard --json" in rendered
+    assert "shellforgeai windows processes --json --limit 10" in rendered
     stale = (
         "shellforgeai triage docker",
         "shellforgeai triage docker detail performance",
@@ -83,7 +83,7 @@ def test_non_windows_response_is_unsupported_without_windows_probe() -> None:
     assert "not Windows" in rendered
     assert "no Windows probing was performed" in rendered
     assert "shellforgeai platform doctor --json" in rendered
-    assert "sfai.cmd windows status --json" in rendered
+    assert "shellforgeai windows status --json" in rendered
     assert "PowerShell" in rendered
     assert "WinRM" in rendered
 
@@ -169,10 +169,9 @@ def test_windows_generic_system_status_prompt_is_deterministic(
     out = res.stdout
     assert res.exit_code == 0
     assert "windows-local-read-only" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows doctor --json" in out
-    assert "sfai.cmd windows evidence --json" in out
-    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows doctor --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "AGENTS.md" not in out
     assert "treat this repo as ShellForgeAI" not in out
     assert "operate within the ShellForgeAI constraints" not in out
@@ -192,10 +191,9 @@ def test_windows_next_check_uses_active_windows_context_without_model_or_docker_
     assert res.exit_code == 0
     assert "What to check first" in out
     assert "windows-local-read-only" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows doctor --json" in out
-    assert "sfai.cmd windows evidence --json" in out
-    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows doctor --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     forbidden = (
         "shellforgeai triage docker",
         "shellforgeai triage docker detail performance",
@@ -219,8 +217,8 @@ def test_windows_cleanup_restart_services_refusal_is_explicit_and_windows_read_o
     assert "Cleanup, restart, and service control are mutating/service-impacting" in out
     assert "No command was executed" in out
     assert "No action was taken" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows evidence --json" in out
+    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "cleanup executed" not in out
     assert "remediation executed" not in out
     assert "rollback executed" not in out
@@ -263,4 +261,4 @@ def test_linux_generic_prompts_are_not_rerouted_to_windows(monkeypatch: Any, tmp
         input="Show me the system status\n/exit\n",
     )
     assert res.exit_code == 0
-    assert "sfai.cmd windows status --json" not in res.stdout
+    assert "shellforgeai windows status --json" not in res.stdout

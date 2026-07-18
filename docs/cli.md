@@ -1922,3 +1922,18 @@ Inside `shellforgeai interactive`, explicit Windows read-only phrases such as `s
 ### Windows interactive operator prompts
 
 `sfai.cmd interactive --yes-trust` remains not-a-shell on Windows. In a Windows local read-only context, latency, CPU/memory/disk/process strongest-signal, next-check, and current-host handoff prompts render Windows-native summaries with safe next commands (`sfai.cmd windows status --json`, `sfai.cmd windows doctor --json`, `sfai.cmd windows evidence --json`, `sfai.cmd windows processes --json --limit 10`, `sfai.cmd windows disks --json`, and `sfai.cmd windows services --json --limit 25`). Cleanup, restart, and service-control requests are refused as mutating/service-impacting; no command/action is executed. These interactive routes do not execute shell commands, PowerShell, WinRM/PSRemoting, subprocesses, cleanup, remediation, rollback, recovery, service restart, or process termination.
+
+## Windows operator ask routing
+
+`shellforgeai ask` shares Windows operator routing with interactive mode. Examples include:
+
+```bash
+shellforgeai ask "Show me the Windows status"
+shellforgeai ask "What should I check first on Windows?"
+shellforgeai ask "The Windows system feels slow"
+shellforgeai ask "Compare CPU memory disk and processes for the strongest signal on Windows"
+shellforgeai ask "Write a concise operator handoff for this Windows host"
+shellforgeai ask "Clean up Windows and restart services to fix it"
+```
+
+For read-only Windows guidance, the standard profile is shown first as `shellforgeai windows evidence --profile standard --json`, followed by canonical optional drill-down commands. The user-facing guidance does not depend on `sfai.cmd`; that wrapper remains optional and supported where installed. Explicit Windows prompts on Linux/non-Windows hosts return guidance-only text and state that no Windows probing was performed. Natural-language mutation requests are refused: no cleanup, restart, service control, process termination, remediation, rollback, or recovery is selected, prepared, or executed.

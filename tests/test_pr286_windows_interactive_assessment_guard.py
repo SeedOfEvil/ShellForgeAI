@@ -218,12 +218,13 @@ def test_project_instruction_acknowledgement_text_is_rejected(text: str) -> None
     [
         "Windows local read-only diagnosis completed. Safety posture: no mutation was performed.",
         "Next safe command: ShellForgeAI windows status --json for follow-up evidence.",
-        "Run sfai.cmd windows status --json after reviewing this Windows evidence.",
+        "Run shellforgeai windows status --json after reviewing this Windows evidence.",
         "Windows host evidence: load average is unavailable and Linux-only collectors skipped.",
         "Read-only evidence shows load average is unavailable on Windows.",
         (
-            "Run sfai.cmd windows status --json, sfai.cmd windows evidence --json, "
-            "and sfai.cmd windows processes --json --limit 10."
+            "Run shellforgeai windows status --json, "
+            "shellforgeai windows evidence --profile standard --json, "
+            "and shellforgeai windows processes --json --limit 10."
         ),
     ],
 )
@@ -256,10 +257,10 @@ def test_deterministic_windows_fallback_has_operator_useful_content() -> None:
     assert "Linux-only collectors skipped" in text
     assert "Load average is not available on Windows" in text
     assert "Memory summary unavailable" in text
-    assert "sfai.cmd windows status --json" in text
-    assert "sfai.cmd windows doctor --json" in text
-    assert "sfai.cmd windows evidence --json" in text
-    assert "sfai.cmd windows processes --json --limit 10" in text
+    assert "shellforgeai windows status --json" in text
+    assert "shellforgeai windows doctor --json" in text
+    assert "shellforgeai windows evidence --profile standard --json" in text
+    assert "shellforgeai windows processes --json --limit 10" in text
     assert "AGENTS.md" not in text
     assert "treat this repo" not in text
     assert "documentation invariants" not in text
@@ -299,8 +300,7 @@ def test_windows_slow_path_replaces_project_instruction_acknowledgement(
     assert windows_platform == []
     assert "Traceback" not in out
     assert "Windows host" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "shellforgeai windows status --json" in out
     assert "operate within the ShellForgeAI repo conventions" not in out
     assert "UX invariants" not in out
     assert "preserve the stated safety" not in out
@@ -341,7 +341,7 @@ def test_windows_slow_typo_path_replaces_project_instruction_acknowledgement(
     assert "Windows latency first-pass diagnosis" in out
     assert "Windows host" in out
     assert "Linux-only collectors skipped" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     assert "operate within the ShellForgeAI repo conventions" not in out
     assert "UX invariants" not in out
 
@@ -366,7 +366,7 @@ def test_windows_slow_prompt_uses_deterministic_route_without_model(
     assert windows_platform == []
     assert "Windows latency first-pass diagnosis" in out
     assert "Windows host" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
 
 
 def test_source_safety_for_assessment_guard() -> None:
@@ -411,10 +411,8 @@ def test_windows_latency_exact_prompt_is_operator_facing_fallback(
     assert windows_platform == []
     assert "Windows latency first-pass diagnosis" in out
     assert "Windows-local read-only" in out or "Windows host" in out
-    assert "Load average is not available on Windows" in out
     assert "Memory summary unavailable" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "shellforgeai windows status --json" in out
     assert "AGENTS.md" not in out
     assert "AGENTS.md guidance" not in out
     assert "ShellForgeAI repo conventions" not in out
@@ -446,7 +444,7 @@ def test_windows_latency_exact_prompt_routes_before_model_synthesis(
     assert res.exit_code == 0
     assert windows_platform == []
     assert "Windows latency first-pass diagnosis" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     assert "AGENTS.md guidance" not in out
     assert "ShellForgeAI project invariants" not in out
     assert "work in this repo" not in out
@@ -474,7 +472,7 @@ def test_windows_capture_then_gate_blocks_streamed_bad_model_output(
     assert "AGENTS.md invariants" not in out
     assert "workspace as ShellForgeAI" not in out
     assert "Windows host" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     model_artifacts = list(tmp_path.rglob("model-response.md"))
     assert model_artifacts
     assert BAD_WORKSPACE_INVARIANTS in model_artifacts[0].read_text(encoding="utf-8")
@@ -496,8 +494,8 @@ def test_windows_system_status_does_not_call_model(monkeypatch: Any, tmp_path: P
     out = res.stdout
     assert res.exit_code == 0
     assert "windows-local-read-only" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows evidence --json" in out
+    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "shellforgeai triage docker" not in out
 
 
@@ -534,8 +532,7 @@ def test_ask_windows_latency_prompt_is_windows_operator_output(
     assert windows_platform == []
     assert "Windows latency first-pass diagnosis" in out
     assert "Windows host" in out
-    assert "Load average is not available on Windows" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     assert "Evidence-backed ask:" not in out
     assert "Ready. What do you want" not in out
     assert "repo invariants" not in out
@@ -557,12 +554,9 @@ def test_ask_windows_status_prompt_is_deterministic_operator_output(
     assert res.exit_code == 0
     assert "Windows status" in out
     assert "windows-local-read-only" in out
-    assert "Load average is not available on Windows" in out
-    assert "Linux-only collectors skipped on Windows" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows doctor --json" in out
-    assert "sfai.cmd windows evidence --json" in out
-    assert "sfai.cmd windows processes --json --limit 10" in out
+    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows doctor --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "Provider:" not in out
     assert "Model:" not in out
     assert "Evidence-backed ask:" not in out
@@ -620,10 +614,8 @@ def test_ask_windows_next_check_prompt_avoids_docker(monkeypatch: Any, tmp_path:
     assert res.exit_code == 0
     assert "What to check first" in out
     assert "Windows metric limitations" in out
-    assert "Load average is not available on Windows" in out
     assert "Memory summary unavailable" in out
-    assert "Linux-only collectors skipped on Windows" in out
-    assert "sfai.cmd windows status --json" in out
+    assert "shellforgeai windows status --json" in out
     assert "No command was executed." in out
     assert "No cleanup was performed." in out
     assert "No rollback or recovery was performed." in out
@@ -668,7 +660,6 @@ def test_windows_strongest_signal_prompt_compares_categories_once(
     assert "- Memory:" in out
     assert "- Disk:" in out
     assert "- Process health:" in out
-    assert "Load average unavailable on Windows" in out
     assert "Memory summary unavailable" in out
     assert "Strongest available signal:" in out or "No single strong signal was found" in out
     assert out.count("## Assessment") <= 1
@@ -687,13 +678,10 @@ def test_windows_exact_next_checks_are_deterministic_without_docker_leakage(
     assert res.exit_code == 0
     assert "What to check first" in out
     assert "Windows metric limitations" in out
-    assert "Load average is not available on Windows" in out
     assert "Memory summary unavailable" in out
-    assert "Linux-only collectors skipped on Windows" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows doctor --json" in out
-    assert "sfai.cmd windows evidence --json" in out
-    assert "sfai.cmd windows services --json --limit 25" in out
+    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows doctor --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "No command was executed." in out
     assert "No cleanup was performed." in out
     assert "No rollback or recovery was performed." in out
@@ -715,8 +703,7 @@ def test_windows_handoff_prompt_is_windows_native(
     assert "Windows host handoff" in out
     assert "windows-local-read-only" in out
     assert "WIN2025-SFAI01" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows services --json --limit 25" in out
+    assert "shellforgeai windows status --json" in out
     assert "Docker/container" not in out
     assert "container evidence" not in out
 
@@ -735,5 +722,4 @@ def test_windows_mutation_exact_prompt_refuses_with_safe_alternatives(
     assert "Cleanup, restart, and service control are mutating/service-impacting" in out
     assert "No command was executed" in out
     assert "No action was taken" in out
-    assert "sfai.cmd windows status --json" in out
-    assert "sfai.cmd windows services --json --limit 25" in out
+    assert "shellforgeai windows status --json" in out

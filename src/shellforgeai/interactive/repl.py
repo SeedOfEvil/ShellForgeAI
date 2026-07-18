@@ -59,6 +59,19 @@ from shellforgeai.core.windows_evidence_context import (
     render_windows_evidence_answer,
     windows_evidence_prompt_facts,
 )
+from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_OPERATOR_INTENT_HANDOFF,
+    WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
+    WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
+    WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+    WINDOWS_OPERATOR_INTENT_STATUS,
+    WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
+    WINDOWS_STANDARD_EVIDENCE_COMMAND,
+    WindowsOperatorRoute,
+    classify_windows_operator_intent,
+    render_windows_operator_guidance,
+    windows_operator_safe_commands,
+)
 from shellforgeai.interactive.banner import build_banner
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.codex import CodexProvider, classify_model_failure
@@ -86,14 +99,10 @@ _WINDOWS_REMOTE_SHELL_LABEL = "Power" + "Shell"
 _WINDOWS_REMOTE_MGMT_LABEL = "Win" + "RM"
 _WINDOWS_PROCESS_LAUNCH_LABEL = "sub" + "process"
 
-WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS: tuple[str, ...] = (
-    "sfai.cmd windows status --json",
-    "sfai.cmd windows doctor --json",
-    "sfai.cmd windows evidence --json",
-    "sfai.cmd windows processes --json --limit 10",
-    "sfai.cmd windows disks --json",
-    "sfai.cmd windows services --json --limit 25",
+WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS: tuple[str, ...] = windows_operator_safe_commands(
+    WINDOWS_OPERATOR_INTENT_NEXT_CHECK
 )
+
 
 _WINDOWS_INTENT_LABELS = {
     "windows_status": "Windows status",
@@ -108,109 +117,51 @@ def _is_windows_host() -> bool:
 
 
 def _normalized_interactive_phrase(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    from shellforgeai.core.windows_operator_ux import normalize_windows_operator_text
+
+    return normalize_windows_operator_text(text)
+
+
+def _windows_route(text: str, *, host_system: str | None = None) -> WindowsOperatorRoute | None:
+    return classify_windows_operator_intent(text, host_system=host_system or platform.system())
 
 
 def _is_generic_system_status_phrase(text: str) -> bool:
-    return _normalized_interactive_phrase(text) in {
-        "show me the system status",
-        "show me system status",
-        "show the system status",
-        "show system status",
-        "system status",
-    }
+    route = _windows_route(text, host_system="Windows")
+    return route is not None and route.intent == WINDOWS_OPERATOR_INTENT_STATUS
 
 
 def _is_next_check_phrase(text: str) -> bool:
-    normalized = _normalized_interactive_phrase(text)
-    exact = normalized in {
-        "what should i check first",
-        "what should we check first",
-        "what should i check next",
-        "what should we check next",
-        "what exactly should i check next if this is a windows host",
-        "what do i check first",
-        "what do we check first",
-        "next check",
-        "next checks",
-        "what next",
-    }
-    windows_host_hint = "windows" in normalized or "win2025" in normalized
-    embedded_next_check = ("what should" in normalized or "what do" in normalized) and (
-        "check first" in normalized or "check next" in normalized
-    )
-    return exact or (windows_host_hint and embedded_next_check)
+    route = _windows_route(text, host_system="Windows")
+    return route is not None and route.intent == WINDOWS_OPERATOR_INTENT_NEXT_CHECK
 
 
 def _is_windows_strongest_signal_phrase(text: str) -> bool:
-    normalized = _normalized_interactive_phrase(text)
-    return all(term in normalized for term in ("cpu", "memory", "disk", "process")) and (
-        "strongest signal" in normalized or "strongest" in normalized
-    )
+    route = _windows_route(text, host_system="Windows")
+    return route is not None and route.intent == WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL
 
 
 def _is_current_host_handoff_phrase(text: str) -> bool:
-    normalized = _normalized_interactive_phrase(text)
-    return "handoff" in normalized and ("current host" in normalized or "host" in normalized)
+    route = _windows_route(text, host_system="Windows")
+    return route is not None and route.intent == WINDOWS_OPERATOR_INTENT_HANDOFF
 
 
 def _is_latency_diagnosis_phrase(text: str) -> bool:
-    normalized = _normalized_interactive_phrase(text)
-    has_latency = any(
-        phrase in normalized
-        for phrase in ("latency", "weird latency", "latency in the app", "lag", "laggy")
-    )
-    has_diagnosis = any(
-        phrase in normalized
-        for phrase in (
-            "diagnosis",
-            "diagnose",
-            "first pass",
-            "first pass diagnosis",
-            "practical first pass",
-            "practical first pass diagnosis",
-        )
-    )
-    return has_latency and has_diagnosis
+    route = _windows_route(text, host_system="Windows")
+    return route is not None and route.intent == WINDOWS_OPERATOR_INTENT_PERFORMANCE
 
 
 def _is_slow_diagnosis_phrase(text: str) -> bool:
-    normalized = _normalized_interactive_phrase(text)
-    return any(
-        phrase in normalized
-        for phrase in (
-            "system feels slow",
-            "system feels a bit slow",
-            "system feels sloww",
-            "feels slow",
-            "feels sloww",
-            "performance issue",
-        )
-    )
+    return _is_latency_diagnosis_phrase(text)
 
 
 def _is_windows_latency_or_slow_diagnosis_phrase(text: str) -> bool:
-    return _is_latency_diagnosis_phrase(text) or _is_slow_diagnosis_phrase(text)
+    return _is_latency_diagnosis_phrase(text)
 
 
 def _is_windows_service_mutation_phrase(text: str) -> bool:
-    normalized = _normalized_interactive_phrase(text)
-    has_mutation = any(
-        term in normalized
-        for term in (
-            "clean up",
-            "cleanup",
-            "restart",
-            "service restart",
-            "restart services",
-            "fix it",
-            "remediate",
-        )
-    )
-    has_service_or_cleanup = any(
-        term in normalized for term in ("service", "services", "cleanup", "clean up")
-    )
-    return has_mutation and has_service_or_cleanup
+    route = _windows_route(text, host_system="Windows")
+    return route is not None and route.intent == WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL
 
 
 def _latest_context_is_windows_local(ctx: LatestDiagnosisContext | None) -> bool:
@@ -274,54 +225,39 @@ def _windows_memory_limitation_line(memory_payload: dict[str, Any] | None = None
 
 
 def _render_windows_next_check_guidance(memory_payload: dict[str, Any] | None = None) -> str:
-    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
-    return (
-        "## What to check first\n"
-        "Context/visibility: windows-local-read-only.\n"
-        "Start with bounded Windows read-only evidence before considering any change.\n\n"
-        "Recommended order:\n"
-        "1. Windows status for host/runtime basics.\n"
-        "2. Windows doctor for local read-only health posture.\n"
-        "3. Windows evidence for a bundled read-only view.\n"
-        "4. Windows processes/disks only if status or evidence points that way.\n\n"
-        "Windows metric limitations:\n"
-        "- Load average is not available on Windows.\n"
-        f"{_windows_memory_limitation_line(memory_payload)}\n"
-        "- Linux-only collectors skipped on Windows.\n\n"
-        "Safe next commands:\n"
-        f"{commands}\n\n"
-        "No command was executed.\n"
-        "No cleanup was performed.\n"
-        "No restart or service control was performed.\n"
-        "No remediation was performed.\n"
-        "No rollback or recovery was performed."
+    lines = (
+        "- Load average is not available on Windows.",
+        _windows_memory_limitation_line(memory_payload),
+        "- Linux-only collectors skipped on Windows.",
+    )
+    return render_windows_operator_guidance(
+        WindowsOperatorRoute(WINDOWS_OPERATOR_INTENT_NEXT_CHECK, True, False),
+        limitation_lines=lines,
     )
 
 
 def _interactive_windows_mutation_refusal(text: str) -> str:
-    commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
-    return (
-        "Refused: natural-language mutation is not allowed.\n"
-        "Cleanup, restart, and service control are mutating/service-impacting actions.\n"
-        "If such behavior is ever supported, it must use an explicit named recipe "
-        "with review and confirmation; this interactive request cannot do it.\n"
-        "No command was executed. No action was taken.\n\n"
-        "Safe Windows read-only alternatives:\n"
-        f"{commands}"
+    route = _windows_route(text) or WindowsOperatorRoute(
+        WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, _is_windows_host(), "windows" in text.lower()
+    )
+    return render_windows_operator_guidance(
+        WindowsOperatorRoute(
+            WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, route.host_is_windows, route.explicit_windows
+        )
     )
 
 
 def _windows_interactive_command(intent: str, limit: str | None = None) -> str:
     if intent == "windows_status":
-        return "sfai.cmd windows status --json"
+        return "shellforgeai windows status --json"
     if intent == "windows_doctor":
-        return "sfai.cmd windows doctor --json"
+        return "shellforgeai windows doctor --json"
     if intent == "windows_evidence":
-        return "sfai.cmd windows evidence --json"
+        return WINDOWS_STANDARD_EVIDENCE_COMMAND
     if intent == "windows_processes":
         safe_limit = limit if limit and limit.isdigit() else "10"
-        return f"sfai.cmd windows processes --json --limit {safe_limit}"
-    return "sfai.cmd windows status --json"
+        return f"shellforgeai windows processes --json --limit {safe_limit}"
+    return windows_operator_safe_commands(intent)[0]
 
 
 def _windows_interactive_pending_context(
@@ -1361,16 +1297,57 @@ def _render_windows_parity_prompt(
             checks=checks,
             facts=_summarize_facts(checks),
             evidence_highlights=_windows_evidence_highlights(checks),
-            source_command="sfai.cmd windows evidence --json",
+            source_command=WINDOWS_STANDARD_EVIDENCE_COMMAND,
             deterministic_only=True,
             model_assessment_status="not_called",
         )
     )
-    if _is_current_host_handoff_phrase(user_input):
-        return _windows_host_handoff_summary(checks), latest_context
-    if _is_windows_strongest_signal_phrase(user_input):
-        return _windows_strongest_signal_summary(checks), latest_context
-    return _windows_latency_fallback_summary(checks), latest_context
+    memory_available, memory_summary = _windows_memory_signal(checks)
+    assessment = tuple(_windows_evidence_highlights(checks))
+    limitations = ["- Load average is not available on Windows."]
+    if memory_available:
+        assessment = assessment + (
+            f"- Memory summary collected from Windows local read-only evidence: {memory_summary}.",
+        )
+    else:
+        limitations.append(f"- {WINDOWS_MEMORY_UNAVAILABLE_MARKER}.")
+    limitations.extend(
+        f"- {c.get('summary', 'metric unavailable on Windows')}."
+        for c in checks
+        if c.get("status") in {WINDOWS_METRIC_UNAVAILABLE_STATUS, LINUX_ONLY_COLLECTOR_SKIP_STATUS}
+    )
+    route = _windows_route(user_input, host_system="Windows") or WindowsOperatorRoute(
+        WINDOWS_OPERATOR_INTENT_PERFORMANCE, True, False
+    )
+    rendered = render_windows_operator_guidance(
+        WindowsOperatorRoute(route.intent, True, route.explicit_windows),
+        assessment_lines=assessment,
+        limitation_lines=tuple(dict.fromkeys(limitations)),
+    )
+    if route.intent == WINDOWS_OPERATOR_INTENT_PERFORMANCE:
+        rendered = rendered.replace(
+            "## Windows performance first pass", "## Windows latency first-pass diagnosis"
+        )
+    elif route.intent == WINDOWS_OPERATOR_INTENT_HANDOFF:
+        rendered = rendered.replace("## Windows current-host handoff", "## Windows host handoff")
+    elif route.intent == WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL:
+        by_tool = {c.get("tool", ""): c.get("summary", "unavailable") for c in checks}
+        load_text = by_tool.get("host.resources", "Load average unavailable on Windows")
+        memory_text = memory_summary if memory_available else WINDOWS_MEMORY_UNAVAILABLE_MARKER
+        status_text = by_tool.get("windows.status", "Windows status/root-free summary unavailable")
+        disk_text = by_tool.get("windows.disks", "Windows disk-root summary unavailable")
+        process_text = by_tool.get(
+            "process.top", "Process health unavailable from this Windows route"
+        )
+        comparison = (
+            f"- CPU/load: {load_text}.\n"
+            f"- Memory: {memory_text}.\n"
+            f"- Disk: {status_text}; {disk_text}.\n"
+            f"- Process health: {process_text}.\n"
+            f"Strongest available signal: {status_text}."
+        )
+        rendered = rendered.replace("Assessment:\n", "Assessment:\n" + comparison + "\n")
+    return rendered, latest_context
 
 
 def _deterministic_operator_summary(
@@ -2844,12 +2821,64 @@ def start_interactive(
             CodexProvider.cleanup_active_processes()
             console.print("\nInterrupted safely. REPL is still healthy.")
             continue
-        if _is_windows_host() and _is_windows_latency_or_slow_diagnosis_phrase(user_input):
-            with console.status("Collecting Windows read-only evidence..."):
-                rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
-            pending_followup = None
-            console.print(rendered)
-            continue
+        shared_windows_route = _windows_route(user_input)
+        if shared_windows_route is not None and not (
+            is_shell_fragment_line(user_input) or looks_like_shell_command(user_input)
+        ):
+            if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL:
+                session_summary.note_refusal("windows mutation request refused")
+                limitation_lines = ()
+                if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_NEXT_CHECK:
+                    limitation_lines = (
+                        "Windows metric limitations:",
+                        "- Load average is not available on Windows.",
+                        _windows_memory_limitation_line(),
+                        "- Linux-only collectors skipped on Windows.",
+                    )
+                console.print(
+                    render_windows_operator_guidance(
+                        shared_windows_route, limitation_lines=limitation_lines
+                    )
+                )
+                continue
+            if (
+                shared_windows_route.intent
+                in {
+                    WINDOWS_OPERATOR_INTENT_STATUS,
+                    WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
+                }
+                or not shared_windows_route.host_is_windows
+            ):
+                latest_context = _windows_interactive_pending_context(
+                    session_id=runtime.session.session_id,
+                    intent=shared_windows_route.intent,
+                    source_command=WINDOWS_STANDARD_EVIDENCE_COMMAND,
+                )
+                pending_followup = None
+                limitation_lines = ()
+                if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_NEXT_CHECK:
+                    limitation_lines = (
+                        "Windows metric limitations:",
+                        "- Load average is not available on Windows.",
+                        _windows_memory_limitation_line(),
+                        "- Linux-only collectors skipped on Windows.",
+                    )
+                console.print(
+                    render_windows_operator_guidance(
+                        shared_windows_route, limitation_lines=limitation_lines
+                    )
+                )
+                continue
+            if shared_windows_route.intent in {
+                WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+                WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
+                WINDOWS_OPERATOR_INTENT_HANDOFF,
+            }:
+                with console.status("Collecting Windows read-only evidence..."):
+                    rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
+                pending_followup = None
+                console.print(rendered)
+                continue
         routed = route_input(user_input)
         if routed.name == "noop":
             continue

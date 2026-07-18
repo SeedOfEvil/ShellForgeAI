@@ -249,10 +249,10 @@ Load average is not available on Windows.
 Memory summary unavailable from this collector on Windows.
 Linux-only collectors skipped on Windows.
 Safe next commands:
-- sfai.cmd windows status --json
-- sfai.cmd windows doctor --json
-- sfai.cmd windows evidence --json
-- sfai.cmd windows processes --json --limit 10
+- shellforgeai windows status --json
+- shellforgeai windows doctor --json
+- shellforgeai windows evidence --profile standard --json
+- shellforgeai windows processes --json --limit 10
 No shell or remoting execution, no service restart, no process termination, no cleanup,
 and no file changes were performed.
 """
@@ -271,8 +271,8 @@ Memory summary collected from Windows local read-only evidence:
 memory used=20.0% available=6.4GiB/8.0GiB (Windows local read-only).
 Linux-only collectors skipped on Windows.
 Safe next commands:
-- sfai.cmd windows status --json
-- sfai.cmd windows evidence --json
+- shellforgeai windows status --json
+- shellforgeai windows evidence --profile standard --json
 No shell or remoting execution, no service restart, no process termination, no cleanup,
 and no file changes were performed.
 """
