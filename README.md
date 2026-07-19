@@ -96,6 +96,12 @@ ShellForgeAI treats safety as a product capability:
 
 ShellForgeAI is not production-autonomous. Detailed boundaries live in [Safety](docs/safety.md).
 
+## Product direction
+
+ShellForgeAI's final-state lifecycle is: Understand → Investigate → Diagnose → Propose → Obtain approval → Implement → Verify → Report.
+
+Implementation remains bounded to supported, explicitly approved solutions; natural-language approval is not arbitrary execution. See [North Star](docs/north-star.md) and [Roadmap](docs/roadmap.md).
+
 ## Install
 
 ShellForgeAI currently installs from the repository source.
@@ -137,12 +143,16 @@ Run `shellforgeai --help` for the full command surface.
 ## Documentation map
 
 - [Product status](docs/PRODUCT_STATUS.md)
+- [North Star](docs/north-star.md)
 - [V1 scope and release contract](docs/v1-scope.md)
 - [Demo and quick start](docs/demo.md)
 - [V1 validation guide](docs/V1_VALIDATION.md)
+- [V1 release candidate checklist](docs/V1_RELEASE_CANDIDATE.md)
+- [V1 command surface](docs/V1_COMMAND_SURFACE.md)
 - [CLI reference](docs/cli.md)
 - [Safety](docs/safety.md)
 - [Architecture](docs/architecture.md)
+- [Command surface audit](docs/COMMAND_SURFACE_AUDIT.md)
 - [Windows support](docs/WINDOWS_POWERSHELL_V1.md)
 - [Validation matrix](docs/VALIDATION_MATRIX.md)
 - [V1 release notes](docs/V1_RELEASE_NOTES.md)

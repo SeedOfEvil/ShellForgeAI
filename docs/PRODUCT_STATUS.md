@@ -15,8 +15,13 @@ This is the canonical active maturity source for ShellForgeAI.
 
 **Not production-autonomous** means ShellForgeAI does not independently repair production infrastructure, run arbitrary shell from prompts, or improvise broad cleanup/restart/remediation. This boundary does not mean V1 is unreleased or Alpha: V1 is released, early beta-quality, guarded, and operator-controlled.
 
+## Current status and final-state direction
+
+Current maturity describes the product available today. The [North Star](north-star.md) defines the intended final-state lifecycle; it is not a claim that every approved solution is currently executable.
+
 ## Where to go next
 
+- [North Star](north-star.md) defines the intended final-state lifecycle and permanent product boundaries.
 - [Safety](safety.md) details refusal, approval, verification, and receipt boundaries.
 - [V1 scope](v1-scope.md) defines the release contract and core Linux/Docker lane.
 - [Windows/PowerShell V1](WINDOWS_POWERSHELL_V1.md) describes preview Windows evidence support.

@@ -38,6 +38,10 @@ rollback previews, closure reports, exports, or cleanup plans.
 
 Current product maturity is defined in [Product status](PRODUCT_STATUS.md): V1 released; early beta-quality; guarded and not production-autonomous. Safety boundaries are part of that guarded product model, not an Alpha classification. Linux/Docker remains the primary V1 lane; Windows preview maturity is tracked separately.
 
+## North Star implementation boundary
+
+Future approved implementation remains subject to the [North Star](north-star.md) contract: supported, typed, bounded implementation of the exact approved solution, not raw natural-language or arbitrary command execution.
+
 ## Boundaries
 
 - **No arbitrary shell.** Tools are typed wrappers around specific binaries

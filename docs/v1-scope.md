@@ -4,7 +4,7 @@
 
 Authoritative release promotion checklist: [`docs/V1_RELEASE_CANDIDATE.md`](V1_RELEASE_CANDIDATE.md).
 
-ShellForgeAI V1 is released, early beta-quality, guarded, and not production-autonomous. Linux/Docker is the primary supported V1 lane.
+ShellForgeAI V1 is released, early beta-quality, guarded, and not production-autonomous. Linux/Docker is the primary supported V1 lane. V1 is the released foundation, not the complete final-state lifecycle. The permanent final-state contract is defined in [`docs/north-star.md`](north-star.md).
 
 ShellForgeAI V1 is a CLI-first Linux/Docker operator knife. It safely inspects
 Linux/Docker scenes, ranks suspects, creates evidence-backed operator reports,
