@@ -931,7 +931,7 @@ explicitly `false`.
 - PR98 (May 23, 2026): Read-only remediation eligibility explain/report polish (`remediation eligibility --target <name> --explain [--json]`) with gate-by-gate blocker reasoning, labels found/missing, executor readiness, safe eligibility hints, strict JSON mode, and explicit no-mutation safety flags.
 
 - PR99 (May 23, 2026): added `remediation self-test` readiness doctor with quick/standard/full profiles, strict JSON mode, fail-on-warn CI behavior, remediation-lane contract checks, and explicit default read-only/non-mutation safety invariants.
-- 
+-
 - PR102 (May 24, 2026): upgraded `remediation self-test --profile full` from fixture-only checks to a deterministic non-mutating lifecycle readiness probe (temp lane plan/validate/preflight/refusal/proof execute/receipt/report/bundle/bundle-validate/audit), with live docker-disposable execute explicitly skipped by default.
 - PR103 (May 24, 2026): added optional lab-only live disposable remediation proof gate to `remediation self-test --profile full` behind explicit `--include-live-disposable-execute --target <exact> --confirm-live-disposable`; default quick/standard/full remain non-mutating and live mutation remains off by default.
 PR100 (May 23, 2026): normalized canonical safe-next command suggestions across triage, triage detail, remediation eligibility/explain, remediation self-test, and ask refusal/broad-triage output to remove stale `diagnose ... --target` forms and prefer read-only triage detail + eligibility explain guidance.

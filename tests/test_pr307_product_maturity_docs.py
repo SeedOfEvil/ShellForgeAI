@@ -23,7 +23,9 @@ ACTIVE_DOCS = [
 
 README_LINKED_DOCS = [
     Path("docs/PRODUCT_STATUS.md"),
+    Path("docs/v1-scope.md"),
     Path("docs/demo.md"),
+    Path("docs/V1_VALIDATION.md"),
     Path("docs/cli.md"),
     Path("docs/safety.md"),
     Path("docs/architecture.md"),

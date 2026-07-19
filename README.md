@@ -137,7 +137,9 @@ Run `shellforgeai --help` for the full command surface.
 ## Documentation map
 
 - [Product status](docs/PRODUCT_STATUS.md)
+- [V1 scope and release contract](docs/v1-scope.md)
 - [Demo and quick start](docs/demo.md)
+- [V1 validation guide](docs/V1_VALIDATION.md)
 - [CLI reference](docs/cli.md)
 - [Safety](docs/safety.md)
 - [Architecture](docs/architecture.md)
