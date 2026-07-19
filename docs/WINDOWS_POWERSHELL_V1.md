@@ -1,18 +1,23 @@
 # Windows/PowerShell V1
 
+## Status
+
+Windows support is preview/early support. It provides local, read-only evidence commands, deterministic operator guidance, and validated Windows Server 2025 workflows without changing ShellForgeAI's overall product maturity: V1 released; early beta-quality; guarded and not production-autonomous. Linux/Docker remains the primary V1 lane.
+
 ## Goal
 
-Windows/PowerShell V1 is a planned local, read-only evidence lane for Windows operators. It extends ShellForgeAI's evidence-first posture to a Windows host without turning the product into a PowerShell executor, remote administration tool, or autonomous repair agent.
+Windows/PowerShell V1 extends ShellForgeAI's evidence-first posture to a local Windows host without turning the product into a PowerShell executor, remote administration tool, fleet manager, or autonomous repair agent.
 
-The V1 lane should help answer:
+Implemented preview capabilities include local read-only doctor/status/evidence bundles plus bounded services, disks, processes, memory, network, volumes, and System event metadata slices where the host supports them. These commands collect local evidence or return structured unsupported output; they do not perform Windows mutation.
+
+The preview lane helps answer:
 
 - What Windows host am I on?
-- What PowerShell version is available?
-- What is the current execution policy?
-- What OS build, edition, and OS info are present?
-- What services, processes, disks, filesystems, network adapters, IP settings, and DNS basics are visible?
-- What recent critical, error, or warning event-log signals exist?
-- What should I inspect first from local host evidence first?
+- What PowerShell/runtime context is visible?
+- What OS, service, process, disk, memory, network, volume, and event metadata is available through bounded collectors?
+- What should I inspect first from local host evidence?
+
+Future candidate capabilities include additional bounded evidence slices and packaging/runtime reconciliation decisions after validation. Unsupported capabilities include remote/fleet administration, WinRM/PSRemoting lanes, arbitrary PowerShell execution, service/process control, registry/PATH mutation, cleanup, remediation, rollback, recovery, and production Windows mutation.
 
 ## Target test environment
 

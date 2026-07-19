@@ -33,6 +33,11 @@ treats model output as advisory.
 artifacts/metadata and does not approve, apply, execute, restart, or generate
 rollback previews, closure reports, exports, or cleanup plans.
 
+
+## Product maturity context
+
+Current product maturity is defined in [Product status](PRODUCT_STATUS.md): V1 released; early beta-quality; guarded and not production-autonomous. Safety boundaries are part of that guarded product model, not an Alpha classification. Linux/Docker remains the primary V1 lane; Windows preview maturity is tracked separately.
+
 ## Boundaries
 
 - **No arbitrary shell.** Tools are typed wrappers around specific binaries
@@ -168,7 +173,7 @@ operator-run command, with an explicit "ShellForgeAI did not execute
 this script." banner. Pending, rejected, or canceled proposals fail
 preflight and no operator-run scripts are written. `approved` is
 strictly a paper trail; it does not enable execution. ShellForgeAI's
-apply remains validation-only in this alpha.
+apply remains validation-only in this guarded V1 boundary.
 
 `shellforgeai approvals create|list|show|approve|reject|cancel|archive|validate`
 manages mutation proposal objects on disk only. Proposals are derived

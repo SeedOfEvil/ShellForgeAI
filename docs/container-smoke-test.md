@@ -79,7 +79,7 @@ Run `shellforgeai`, then `/doctor`, `/model`, `/tools`, `diagnose disk`, and `/e
 - Runtime context bundles are the immediate solution; optional MCP exposure of read-only tools is a future path.
 - Arbitrary shell remains blocked in interactive mode.
 - Mutating/service-impacting actions remain blocked or approval-required/operator-run.
-- apply remains validation-only in this alpha.
+- apply remains validation-only under the current guarded V1 boundary.
 ## Update: streaming synthesis and service-discovery routing\n- Interactive diagnostics now show a post-collection synthesis status and stream model answers when supported.\n- Service-discovery questions (services/listening/ports/nginx/ssh/docker) route to read-only evidence collection before synthesis.\n- Safety boundaries are unchanged: no arbitrary shell execution, no destructive execution, and apply remains validation-only.\n
 
 ## PR8 adaptive follow-ups
