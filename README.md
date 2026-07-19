@@ -1,1053 +1,160 @@
 # ShellForgeAI
 
-ShellForgeAI is a **CLI-first Linux/Docker operator knife** for evidence-backed
-triage, guarded operational workflows, and auditable handoffs.
+ShellForgeAI is a guarded operator assistant for Linux and Docker.
 
-It helps an operator inspect messy Docker/Linux state, rank likely suspects,
-produce structured reports, and decide what to check next without turning every
-prompt into a command executor. The product center is practical operator help:
-"it is 2AM, Docker feels broken, what should I check first?" ShellForgeAI
-answers with read-only evidence, likely suspects, validation context, and a safe
-next report or command surface the operator can review.
+ShellForgeAI turns messy Linux and Docker incidents into ranked evidence, reviewable next steps, and auditable handoffs—without surrendering operator control.
 
-ShellForgeAI is strongest at evidence-backed Docker/Linux triage, guarded operator workflows, audit-friendly receipts and manifests, and deterministic refusal of unsafe broad mutation. It is designed to help operators collect
-proof, compare validation evidence, stage governed handoffs, and prepare
-reviewed decisions without presenting itself as self-healing
-infrastructure. The archive/source-action review chain is documented as an
-operator runbook in [`docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md`](docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md),
-where readiness means reviewable evidence rather than executable source action.
+It helps on-call operators, platform owners, and maintainers answer practical questions such as "what looks unhealthy?", "what should I inspect first?", and "what evidence should I hand to the next reviewer?" The product is CLI-first Linux/Docker operator tooling and evidence-first: it collects evidence-backed typed read-only signals, ranks likely suspects, explains what it found, and keeps action behind named guarded workflows.
 
-> Status: alpha. Read-only reporting is the default. Mutation is gated to named,
-> narrow, auditable recipes that require explicit confirmation and every prior
-> gate green. Broad cleanup, restart, remediation, rollback, recovery, or
-> "run whatever command is needed" prompts are refused and redirected to safe
-> read-only evidence or proposal surfaces.
+**Maturity:** [V1 released and early beta-quality](docs/PRODUCT_STATUS.md). ShellForgeAI is guarded, operator-controlled, and not production-autonomous. Linux/Docker is the primary V1 lane; Windows support is preview/early support.
 
-## Future platform support
+## What this is
 
-Linux/Docker is the current core. Windows/PowerShell V1 has a narrow read-only doctor/status foundation plus a bundle-only `shellforgeai windows evidence` preview for a Windows Server 2025 test VM first, with packaging strategy work tracking easier operator installs. Windows interactive performance QA also uses a saved-transcript acceptance helper that validates captured text only and does not launch interactive mode. The safety model remains unchanged: no natural-language command execution, no arbitrary PowerShell execution, no WinRM lane in V1, and no broad mutation. See [`docs/WINDOWS_POWERSHELL_V1.md`](docs/WINDOWS_POWERSHELL_V1.md) and [`docs/PACKAGING_STRATEGY.md`](docs/PACKAGING_STRATEGY.md).
+ShellForgeAI is a guarded operator assistant for Linux and Docker.
 
 ## What it helps with
 
-- Docker/container state review: status snapshots, Compose context, logs/errors,
-  network symptoms, and exact-container diagnostic evidence.
-- Linux host/operator evidence gathering for health, disk, performance,
-  packages, config, and change-review questions.
-- Suspect ranking and "likely first checks" for safe 2AM triage style asks.
-- Read-only status, triage, validation-lane, and ops reports that are suitable
-  for review before action.
-- Auditable receipts, manifests, checksums, exports, comparisons, and handoff
-  packets for change review and incident follow-up.
-- Governed artifact/archive/source-action runway: status reports, readiness
-  packets, validation evidence, and reviewable source-action decisions.
-- Docker01 build-path runway: diagnostic, proposal, preview, and validation
-  reports without broad production remediation.
-- Refusal and redirection for dangerous mutation requests, with safe read-only
-  next steps instead of unguarded cleanup or restart.
+## What ShellForgeAI helps you accomplish
 
-## Operating model
+- Understand unhealthy Linux/Docker state from real local evidence and validation lane context.
+- Rank likely Docker, host, service, disk, network, and health suspects.
+- Answer 2AM operator questions without guessing or hiding evidence.
+- Produce reviewable reports, manifests, receipts, and shift handoffs.
+- Save, validate, export, and compare evidence over time.
+- Use grounded model assistance when a configured provider is available.
+- Preview and govern actions with operator approval instead of autonomous repair.
 
-- Observe and report first: collect typed, read-only evidence before advice or
-  proposals.
-- Read-only by default: asks, previews, proposals, approvals, rollback previews,
-  reports, exports, status views, and validation surfaces do not execute fixes.
-- Refuse unsafe broad mutation deterministically: ShellForgeAI treats requests
-  such as "clean up Docker and restart Compose" as a safety signal, not an
-  instruction to improvise.
-- Allow mutation only through named, narrow, auditable recipes with explicit
-  confirmation, matching gates, and receipts.
-- Keep the SeedOfEvil/operator role central: ShellForgeAI prepares evidence and
-  reviewed decisions; the operator remains the final change and merge owner.
-- No broad autonomy, no command execution from natural-language prompts, no
-  unguarded cleanup/restart/remediation/rollback/recovery, and no secret or
-  auth-cache reading.
+## What this is not
 
-## Good operator requests
+ShellForgeAI is not self-healing infrastructure, not a natural-language mutation agent, and not production-autonomous.
 
-- "What should I check first if Docker feels broken?"
-- "Show me a read-only Docker status report."
-- "Generate an archive/source-action status report from this evidence chain."
-- "Validate this receipt or readiness packet."
-- "Show the Docker01 build-path diagnostic/proposal report."
+## Core workflows
 
-## Unsafe requests ShellForgeAI refuses or redirects
-
-ShellForgeAI refuses unsafe broad mutation as a product behavior and offers a
-safe read-only next command, status report, proposal, or validation packet the
-operator can review instead.
-
-- "Clean up Docker and restart Compose."
-- "Fix it automatically."
-- "Delete old artifacts."
-- "Run whatever command is needed."
-
-## What it is
-
-- An evidence collector for Linux/Docker/Compose hosts (read-only).
-- A runbook / proposal generator from collected evidence.
-- An approval / mission / apply workflow helper with deterministic gates.
-- An audit, export, receipt, and redaction tool.
-- A guarded exact-container restart tool (allowlisted / disposable targets).
-- A Compose-aware diagnostic, preview, and proposal tool.
-- A metadata cleanup tool with archive + fingerprint + confirm gates.
-
-## What it is not
-
-- Not an autopilot.
-- Not a platform.
-- Not a generic shell or remote-execution agent.
-- Not a production Compose orchestrator.
-- Not a natural-language mutation agent.
-- Not a package / config / firewall / DNS / route mutator.
-- Not self-healing infrastructure.
-
-## Workflow spine
-
-```
-Evidence
-  → Runbook
-  → Proposal
-  → Approval
-  → Rollback / recovery preview
-  → Mission checklist + readiness
-  → Explicit execute / apply gate (--execute --confirm)
-  → Verification
-  → Receipt / closure report
-  → Export / audit / cleanup
-```
-
-Every mutation passes every gate. Asks never execute. Previews never execute.
-Proposals never execute. Approvals never execute. Rollback previews never
-execute. Status, checklist, report, and export never execute.
-
-## Capabilities (current)
-
-- `diagnose` for docker / logs / errors / network / nginx / performance /
-  disk / packages / package / config / changes (read-only).
-- Runbooks (`runbook`, `validate-runbook`).
-- Approvals queue (`approvals create|list|show|approve|reject|cancel|
-  archive|validate|propose-restart|restart-plan`).
-- Exact-container restart lane via `apply <approved-proposal> --execute
-  --confirm` (allowlisted lab / disposable targets only).
-- Mission workflow for restart and Compose-restart (`mission restart …`,
-  `mission compose-restart …`).
-- Closure reports and mission exports (`mission … report|export|
-  validate-export`).
-- Audit timeline, validate, index, search (`audit …`).
-- Audit-aware incident index and ops status board (`ops status`).
-- Export packs and redaction (`export`, `validate-export`).
-- Metadata retention and cleanup (`audit retention`, `audit cleanup
-  plan|archive|validate|execute|report`) — PR71-hardened archive +
-  fingerprint + `--confirm` gate.
-- Compose context (`compose inspect|list`).
-- Compose service restart preview / proposal / mission lanes
-  (`compose restart-preview|propose-restart`, `mission compose-restart …`).
-- Compose env-check and env-contract diagnostics (`compose env-check`,
-  `compose env-contract`).
-- Disposable Compose harness and optional proof orchestrator
-  (`scripts/pr67_disposable_compose_harness.sh`,
-  `scripts/pr68_disposable_compose_restart_proof.sh`) — external operator
-  helpers, not ShellForgeAI execution paths.
-
-## Safety summary
-
-- Asks do not execute. Previews do not execute. Proposals do not execute.
-  Approvals do not execute. Rollback previews do not execute. Status,
-  checklist, report, export do not execute.
-- Mutation requires the explicit CLI workflow with `--execute --confirm`,
-  the matching env vars (for Docker restart), and every prior gate green.
-- Cleanup execution additionally requires a valid archive whose fingerprint
-  matches the plan, plus `--confirm`.
-- Compose service restart execution remains disposable / allowlisted only and
-  is blocked unless the environment satisfies the env-contract (Compose CLI
-  inside the runtime, readable compose file, populated snapshot hash,
-  disposable+allow_restart labels).
-- Strict JSON for `--json` modes. Failures are clean operator errors, never
-  tracebacks for expected failures. Every mutation path writes a receipt.
-
-See [`docs/safety.md`](docs/safety.md) for the full mutation boundary.
-
-V1 release validation can produce a validated readiness packet artifact:
-`./scripts/v1_validate.sh --full --packet`.
-
-## V1 hardening lane: Keep It a Knife, Not a Toolbox
-
-ShellForgeAI V1 is a **CLI-first Linux/Docker operator knife**. It safely
-inspects Linux/Docker scenes, ranks suspects, builds evidence-backed operator
-reports, preserves/exports/compares report artifacts, routes common operator
-asks deterministically, and refuses or gates mutation.
-
-- Final V1 release notes: [`docs/V1_RELEASE_NOTES.md`](docs/V1_RELEASE_NOTES.md)
-- Release-candidate checklist/evidence gate: [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md)
-- Command surface audit: [`docs/COMMAND_SURFACE_AUDIT.md`](docs/COMMAND_SURFACE_AUDIT.md)
-- V2 command contract: [`docs/V2_COMMAND_CONTRACT.md`](docs/V2_COMMAND_CONTRACT.md)
-- CLI internals: `cli.py` is the root Typer entrypoint; commands are being
-  split into `src/shellforgeai/commands/` one domain at a time
-  (PR182: `status`, `doctor`; PR183: `ops report`/`ops status`, `triage`;
-  PR185-PR200: `verify`, `handoff`, `propose`, `apply-preview`, governed
-  receipt history/audit/export/compare reporting, read-only receipt
-  verify/validate/rollback-preview safety surfaces, read-only recovery receipt
-  status/validate, the confirm-gated receipt recovery-execute lane (surface
-  and gates unchanged), read-only recipe registry/preflight, deterministic
-  `ask`, the read-only `v1 check` readiness handler, the `model` command
-  group — `model doctor` stays read-only and still makes no model call — the
-  `remediation self-test` readiness handler, which stays testing-only with
-  live disposable execute skipped by default, and the top-level `interactive`
-  launcher, which stays Typer wiring that hands off to the existing REPL with
-  the command surface, deterministic read-only routing, and mutation refusal
-  unchanged — interactive mode remains not-a-shell). PR198
-  adds the read-only CLI refactor inventory and remaining-handler map at
-  [`docs/CLI_REFACTOR_MAP.md`](docs/CLI_REFACTOR_MAP.md), and PR202 turns that
-  inventory into a regression guardrail
-  (`tests/test_pr202_cli_refactor_inventory_enforcement.py`) that fails if a
-  large new inline handler is reintroduced into `cli.py` without extracting it
-  or updating the documented debt thresholds. PR203 adds a refactor-closure
-  view: the inventory emits a `closure` block and the map documents `cli.py`'s
-  Typer-wiring role, the intentional inline glue (Typer callbacks) allowed to
-  stay, what is not allowed inline, and a `closure_status` that never reports a
-  false OK when an unexpected inline handler appears
-  (`tests/test_pr203_cli_refactor_closure.py`). PR204 adds a strict wiring-only
-  enforcement mode (`python scripts/cli_refactor_inventory.py --check`) that
-  fails if an unapproved inline command handler appears in `cli.py`, backed by a
-  tiny reasoned allowlist of intentional root/bootstrap callables
-  (`tests/test_pr204_cli_wiring_only_enforcement.py`). PR205 adds an import
-  side-effect guardrail proving that importing `shellforgeai.cli` and every
-  `shellforgeai.commands.*` module is import-safe — no subprocess/Docker/Compose/
-  model/network/cleanup/remediation/rollback/recovery execution and no artifact
-  write/delete at import time — via a static AST scan plus a runtime reimport
-  check and a read-only `python scripts/cli_import_audit.py` helper
-  (`tests/test_pr205_command_module_import_side_effects.py`). The PR184
-  command-surface golden guardrail protects these moves; `v1 check`
-  quick/standard readiness behavior and JSON/human output remain unchanged
-  after the module split (`tests/test_pr184_cli_command_surface_golden.py`) —
-  see [`docs/cli.md`](docs/cli.md). PR201 adds a focused interactive
-  "not-a-shell" guardrail and wording polish: shell-shaped input (arbitrary
-  shell commands, filesystem mutation, arbitrary file reads, Docker/Compose
-  mutation, network/package/cloud commands, shell metacharacters) is refused
-  with clear wording and safe read-only alternatives — interactive mode is not
-  a shell and `uname -a` is refused rather than answered — while safe read-only
-  command routing is unchanged
-  (`tests/test_pr201_interactive_not_a_shell_policy.py`).
-
-### What this is (V1)
-
-- Read-only runtime health checks (`doctor`, `model doctor`, self-tests).
-- V2 read-only status, triage, propose, apply-preview, verify, and handoff
-  entrypoints (`status`, `triage`, `triage --target <target>`, `propose`,
-  `propose --target <target>`, `apply-preview`, `apply-preview --target
-  <target>`, `verify`, `verify --target <target>`, `handoff`, `handoff --save`)
-  backed by deterministic Docker triage compatibility commands (`triage docker`,
-  `triage docker detail <target>`). `propose` is preview-only: no plan artifact
-  and no action executed. `apply-preview` is an execution-boundary preview only:
-  no apply, mission, remediation, rollback, cleanup, Docker, or Compose action
-  executes. `verify` checks current observed state by default; `verify --receipt
-  <receipt_id>` performs read-only governed execution receipt verification for
-  an existing recipe receipt without retrying, rolling back, restarting, or
-  running Docker/Compose. The top-level `verify` surface is unchanged while its
-  handler lives in the CLI command-module split; future CLI refactors should run
-  the PR184 command-surface golden guardrail. `handoff` is a read-only
-  operator handoff packet whose unchanged surface now lives in the CLI
-  command-module split. It summarizes the golden-path posture and first safe
-  command; it does not execute fixes or imply remediation happened, and
-  `handoff --save` writes only a ShellForgeAI-owned artifact under
-  `<data_dir>/v2_handoffs/`. Governed receipt history/audit/export/compare surfaces
-  (`recipes receipt history`, `inspect`, `export`, `export-validate`, `compare`,
-  `audit`, `integrity`, `explain`, `audit-bundle`, and `audit-bundle-validate`)
-  and the read-only receipt safety surfaces (`recipes receipt verify`,
-  `validate`, `rollback-preview`, and the top-level `rollback-preview
-  --receipt` alias) are also split into command modules with unchanged
-  behavior: read-only surfaces remain read-only, export/audit-bundle remain
-  bounded ShellForgeAI-owned artifact-only writes, and rollback-preview still
-  never executes rollback or recovery.
-- Read-only handoff artifact lifecycle (`handoff --save`, `handoff validate
-  <handoff_ref>`, `handoff export <handoff_ref>`, `handoff export-validate
-  <export_ref>`, each with `--json`). Save/export write only ShellForgeAI-owned
-  artifacts (`<data_dir>/v2_handoffs/...`, `<data_dir>/exports/export_...`);
-  validate/export-validate are strictly read-only. No collector rerun, model
-  call, Docker/Compose mutation, restart, shell, or arbitrary command.
-- Read-only handoff history/compare (`handoff history`, `handoff compare
-  <before_ref> <after_ref>`, `handoff compare-latest`, each with `--json`;
-  compare accepts `--only-changed`/`--include-stable`) to list recent saved
-  handoffs and report status/risk/golden-path/safety drift over time. These
-  never write artifacts, rerun collectors, call the model, execute shell, or
-  mutate Docker/Compose/host state.
-- Deterministic operator report lifecycle (`ops report`, `ops report --brief`,
-  `--save`, `history`, `compare`, `compare-latest`, `export`,
-  `export-validate`, `validate`).
-- Deterministic ask routing for common 2AM/operator prompts, including
-  mutation refusal.
-- Interactive mode accepts selected safe ShellForgeAI command flag forms (for example
-  `v1 check --profile quick --json`, `ops report --brief`, `triage --json`,
-  and `triage --target <target> --json`) while refusing shell/mutation input.
-- Governed remediation **preview/testing** lanes with explicit gates,
-  disposable-only proofs, and no casual production mutation.
-
-### What this is not (V1)
-
-- Not an autonomous infrastructure repair agent.
-- Not a production remediation bot.
-- Not a web UI, secrets manager, SIEM replacement, or monitoring platform.
-- Not a tool that runs arbitrary shell from natural language.
-- Not a system that casually restarts/deletes/prunes broad infrastructure.
-
-### 5-minute V1 quickstart
+### 2AM Docker triage
 
 ```bash
-shellforgeai doctor
-shellforgeai remediation self-test --profile quick
-shellforgeai ops report
-shellforgeai ops report --brief
+shellforgeai status
+shellforgeai triage --brief
+shellforgeai triage docker detail <target>
+```
+
+Use this path when Docker feels broken and you need the first ranked suspects plus safe next inspection commands.
+
+### Evidence-grounded ask
+
+```bash
+shellforgeai ask "what is on fire in Docker right now?"
+shellforgeai ask "what should I inspect first?" --explain-evidence
+```
+
+Recognized operator questions route through deterministic read-only evidence before any synthesis. Mutation-shaped asks are refused and redirected to a safe read-only next command or review surface.
+
+### Report, history, and compare
+
+```bash
 shellforgeai ops report --save
-shellforgeai ops report history --limit 5
+shellforgeai ops report history
 shellforgeai ops report compare-latest
-shellforgeai triage
-shellforgeai propose
-shellforgeai propose --target <target>
-shellforgeai apply-preview
-shellforgeai apply-preview --target <target>
-shellforgeai verify
-shellforgeai handoff
+```
+
+Use saved reports for incident follow-up, review packets, and drift comparison.
+
+### Propose, preview, verify, and hand off
+
+```bash
+shellforgeai propose --from-triage
+shellforgeai apply-preview --from-propose
+shellforgeai verify --from-apply-preview
 shellforgeai handoff --save
-shellforgeai triage --target <target>
-shellforgeai triage docker detail <target>  # compatibility detail path
 shellforgeai remediation eligibility --target <target> --explain
 ```
 
-Optional governed/disposable testing only:
+This is the guarded review path: propose a next step, preview the execution boundary, verify current state, and produce an auditable handoff. The preview path does not execute a fix.
 
-```bash
-shellforgeai remediation self-test --profile full
-```
+## Operating model
 
-### Canonical 2AM operator flow
+## How it works
 
-1. `shellforgeai doctor`
-2. `shellforgeai remediation self-test --profile quick`
-3. `shellforgeai ops report`
-4. `shellforgeai ops report --save`
-5. `shellforgeai ops report history --limit 5`
-6. `shellforgeai ops report compare-latest`
-7. `shellforgeai triage`
-8. `shellforgeai propose`
-9. `shellforgeai apply-preview`
-10. `shellforgeai verify`
-11. `shellforgeai handoff` (read-only operator handoff; `--save` writes a ShellForgeAI-owned packet)
-12. `shellforgeai triage --target <target>` (compatibility: `shellforgeai triage docker detail <target>`)
-13. `shellforgeai remediation eligibility --target <target> --explain`
-14. Only for intentional disposable-lane testing: `shellforgeai remediation self-test --profile full`
+**Observe → Rank → Explain → Report → Review → Governed action → Verify → Receipt**
 
-V2 golden path: `status -> triage -> propose -> apply-preview -> verify -> handoff`.
+- **Typed evidence:** collectors gather bounded host, Docker, platform, and artifact data.
+- **Deterministic triage:** known operations intents route to read-only collectors and ranking before model assistance.
+- **Grounded model assistance:** model output is advisory and based on collected evidence when the provider is configured.
+- **Auditable artifacts:** reports, exports, manifests, checksums, receipts, and handoffs preserve review context.
+- **Approval-aware workflows:** named recipes, explicit confirmation, and current-state gates protect mutation paths.
+- **Verification and receipts:** post-checks and receipt validation make outcomes reviewable.
 
-Safety promise: V1 is read-only by default, deterministic ask routes do not
-require model availability for safety/refusal paths, and production mutation is
-out of scope.
+## Guarded by design
+
+ShellForgeAI treats safety as a product capability:
+
+- Evidence-first routing for recognized disk, performance, health, firewall, service, Docker, and operator intents.
+- Read-only by default for status, triage, ask, reports, previews, verification, and handoffs.
+- Deterministic mutation refusal/routing: ShellForgeAI refuses unsafe broad mutation and unknown slash commands.
+- Named, narrow, auditable recipes and bounded mutation workflows only where the command surface explicitly supports them.
+- Explicit confirmation, approval metadata, current-state gates, verification, receipts, and audit trails.
+
+ShellForgeAI is not production-autonomous. Detailed boundaries live in [Safety](docs/safety.md).
 
 ## Install
 
-Requires Python 3.12+.
+ShellForgeAI currently installs from the repository source.
 
 ```bash
-git clone https://github.com/SeedOfEvil/ShellForceAI.git
-cd ShellForceAI
-make dev          # creates .venv and installs in editable mode with dev extras
-# or:
-pip install -e .
+git clone https://github.com/SeedOfEvil/ShellForgeAI.git
+cd ShellForgeAI
+python -m pip install -e .
 ```
 
-The CLI is exposed as both `shellforgeai` and `sfai`.
+For contributor tools:
+
+```bash
+python -m pip install -e ".[dev]"
+# or, equivalently:
+make dev
+```
+
+The project requires Python `>=3.12` and installs the console scripts `shellforgeai` and `sfai`.
 
 ## Quick start
 
 ```bash
-shellforgeai status
-shellforgeai triage
-shellforgeai triage --target <target>
-shellforgeai status --json
 shellforgeai doctor
-shellforgeai model doctor
-shellforgeai ops status
-shellforgeai diagnose docker --save-plan --with-runbook
-shellforgeai runbook --latest
-shellforgeai approvals list --all
-shellforgeai compose inspect shellforgeai
-shellforgeai compose env-check --target shellforgeai
-shellforgeai compose env-contract --target shellforgeai
-shellforgeai audit retention
-shellforgeai audit cleanup plan --category exports --max-age-days 7 --keep-latest 5
+shellforgeai status
+shellforgeai triage --brief
+shellforgeai ops report --save
+shellforgeai handoff --save
 ```
 
-Read-only `ask` examples:
+Run `shellforgeai --help` for the full command surface.
+
+## Where it runs
+
+- **Linux/Docker:** primary supported V1 operating lane and release-validation basis.
+- **Windows:** preview/early support for local read-only evidence, deterministic operator guidance, and validated Windows Server 2025 workflows. See [Windows/PowerShell V1](docs/WINDOWS_POWERSHELL_V1.md).
+- **Other platforms:** no supported operational lane is currently promised.
+
+## Documentation map
+
+- [Product status](docs/PRODUCT_STATUS.md)
+- [Demo and quick start](docs/demo.md)
+- [CLI reference](docs/cli.md)
+- [Safety](docs/safety.md)
+- [Architecture](docs/architecture.md)
+- [Windows support](docs/WINDOWS_POWERSHELL_V1.md)
+- [Validation matrix](docs/VALIDATION_MATRIX.md)
+- [V1 release notes](docs/V1_RELEASE_NOTES.md)
+- [Roadmap](docs/roadmap.md)
+- [Project history archive](docs/archive/PROJECT_HISTORY.md)
+
+## Development and validation
+
+Common local checks:
 
 ```bash
-shellforgeai ask "what is this machine doing?"
-shellforgeai ask "find failed containers and explain likely cause"
-shellforgeai ask "show compose context for this restart proposal"
-shellforgeai ask "did the restart work?"
-shellforgeai ask "audit retention status"
-shellforgeai ask "why is beszel-agent suspicious?"
-shellforgeai ask "what is wrong with docker?" --explain-evidence
+ruff format .
+ruff check .
+pytest -q
 ```
 
-`ask` collects evidence for ops-shaped questions and refuses mutation
-phrasing with a safety boundary. It never executes; mutation requires the
-explicit CLI lane.
-
-For Docker/operator questions, model-backed `ask` is grounded in deterministic
-ShellForgeAI Docker triage evidence: deterministic CLI evidence is the source of
-truth, and model assistance may only explain and route from it. When a top
-suspect exists the answer names the real suspect, severity, confidence, and
-evidence themes and offers a real supported read-only safe next command
-(`shellforgeai triage docker detail <suspect> --json`); when evidence is missing
-it points to a real evidence-gathering command (`shellforgeai triage docker
---json`) instead of guessing. The model cannot invent commands — unsupported
-suggestions (`shellforgeai diagnose <container>`, `shellforgeai fix docker`,
-bare `docker prune`/`docker image rm`) are stripped and replaced with the safe
-next command. Add `--explain-evidence` to Docker/operator asks to append a concise evidence section showing deterministic sources used or missing, the top suspect/severity/confidence/themes when available, a registry-backed safe next command, and explicit grounding boundaries. If evidence is missing, the explanation suggests only a real read-only evidence-gathering command. No cleanup, prune, restart, remediation, rollback, or Docker mutation is performed by `ask`.
-
-## Deeper documentation
-
-- [`docs/v1-scope.md`](docs/v1-scope.md) — V1 scope, release contract, non-goals, and acceptance checklist.
-- [`docs/V1_COMMAND_SURFACE.md`](docs/V1_COMMAND_SURFACE.md) — V1 command surface and safety classes.
-- [`docs/demo.md`](docs/demo.md) — 5-minute Linux/Docker operator demo with deterministic refusal path.
-- [`docs/V1_VALIDATION.md`](docs/V1_VALIDATION.md) — repeatable V1 validation workflow for local and disposable environments.
-- [`docs/V1_RELEASE_CANDIDATE.md`](docs/V1_RELEASE_CANDIDATE.md) — V1 release-candidate gate, required checks, artifacts, and Docker01 handoff template.
-- [`docs/release-baseline.md`](docs/release-baseline.md) — PR78
-  release/handoff baseline after the PR56–PR77 capability arc
-  (capabilities, mutation boundary, safety invariants, operator
-  workflows, next tracks).
-- [`docs/cli.md`](docs/cli.md) — CLI reference, organized by operator workflow.
-- [`docs/safety.md`](docs/safety.md) — mutation boundaries and refusal rules.
-- [`docs/architecture.md`](docs/architecture.md) — runtime, workflow spine,
-  trust and mutation boundaries.
-- [`docs/data-layout.md`](docs/data-layout.md) — `/data` layout, artifact
-  lifecycle, and retention.
-- [`docs/mission-workflow.md`](docs/mission-workflow.md) — exact-container
-  restart and Compose service restart missions.
-- [`docs/compose-ops.md`](docs/compose-ops.md) — Compose context, preview,
-  proposal, env-check / env-contract, and disposable harness.
-- [`docs/audit-and-cleanup.md`](docs/audit-and-cleanup.md) — audit timeline,
-  exports, retention reporting, and the hardened cleanup gate.
-- [`OPS.md`](OPS.md) — operator field guide.
-- [`HOMELAB.md`](HOMELAB.md) — Docker01 / homelab state and caveats.
-- [`docs/roadmap.md`](docs/roadmap.md) — milestone history and next tracks.
-- [`docs/VALIDATION_LANES.md`](docs/VALIDATION_LANES.md) — PR validation lanes
-  (fast / targeted / full), the `scripts/validate_pr.py` lane optimizer, the
-  Lane C `scripts/run_full_pytest.py` full-validation runner, optional
-  `scripts/track_pytest_durations.py` slow-test duration tracking, and the
-  `scripts/validation_heartbeat.py` heartbeat that flags interrupted/incomplete
-  runs as `rerun_required` instead of a false pass, the read-only
-  `scripts/validation_status.py` viewer that classifies a run as
-  passed/failed/incomplete/unknown and reports `pass_eligible`/`rerun_required`
-  from existing evidence (its `--latest` deterministically prefers recent
-  PR-specific run dirs over older persisted manifests, with `--pr`/`--commit`
-  filters and `--explain-selection`), and the read-only
-  `scripts/validation_env_preflight.py` environment preflight that detects
-  missing host dev tools (ruff/pytest/etc.) before validation phases run and
-  classifies that as `setup_failure`, never as product test failure, plus the
-  `scripts/validation_container_fallback.py` packet generator that turns a
-  setup failure into a copy-pasteable disposable validation-container command
-  (packet files only — it never runs Docker or installs host packages), and the
-  read-only `scripts/docker01_operator_qa_bundle.py` helper that is run from the
-  Docker01 host (no host `shellforgeai` on PATH required — product smoke commands
-  run inside the container via a narrow `docker exec shellforgeai shellforgeai …`
-  allowlist while host checks stay host-side) and writes a bounded, pasteable
-  evidence bundle (`qa-summary.md` + JSON) for the PR handoff — evidence
-  collection only, with a fixed command allowlist, no `shell=True`, and no
-  mutation/restart/cleanup. The same helper adds artifact-only lifecycle modes
-  (`--validate-bundle`, `--history`, `--compare`, `--compare-latest`) that prove
-  bundles are complete, discoverable, and comparable without re-running smoke QA
-  or touching Docker01 (they only read files, parse JSON, and check
-  `bundle-manifest.json` sha256 integrity); see
-  [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) for the impact map.
-
-## Using OpenAI Codex / ChatGPT sign-in
-
-ShellForgeAI does not read or manage ChatGPT credentials; authentication is
-handled entirely by the Codex CLI.
-
-1. Install Codex CLI: `npm install -g @openai/codex` (or `brew install --cask codex`).
-2. Sign in: `codex login` (or `codex login --device-auth` for headless hosts).
-3. Configure ShellForgeAI:
-   ```bash
-   export SHELLFORGEAI_MODEL_PROVIDER=openai-codex
-   export SHELLFORGEAI_MODEL_NAME=gpt-5.5
-   export SHELLFORGEAI_MODEL_FALLBACK=gpt-5.4
-   export SHELLFORGEAI_CODEX_TIMEOUT_SECONDS=180
-   ```
-4. Verify: `shellforgeai model doctor`
-5. Test: `shellforgeai ask "what is this machine doing?"`
-
-See `docs/model-providers.md` for other providers.
-
-## Interactive mode
-
-Run `shellforgeai` (no subcommand) to start the operator loop:
-
-```text
-$ shellforgeai
-sfai> /help
-sfai> diagnose disk
-sfai> ask what services are listening on this host?
-sfai> /pending
-sfai> /summary
-sfai> /exit
-```
-
-Type `help`, `/help`, `?`, `commands`, or `what can I do?` in the REPL for a
-concise list of supported safe commands, follow-ups, report/history helpers,
-session handoff summaries, and refused mutation examples. Run `/summary` before
-exiting to get a local read-only summary of checks, findings, refusals, artifact
-pointers, and the first safe next command; it does not rerun collectors or call
-the model. Use `/summary --save` for a portable handoff artifact, then validate,
-export, list, or compare it with `shellforgeai session summary validate <id>`,
-`shellforgeai session summary export <id>`, `shellforgeai session summary history --limit 5`,
-`shellforgeai session summary compare-latest`, and
-`shellforgeai session summary compare-export <before-export> <after-export>` for exported
-handoff bundles. These summary history/compare commands read existing artifacts
-only; they do not rerun collectors, call the model, execute shell, or mutate
-Docker/Compose state.
-Interactive mode is *not* a shell:
-pasted shell-looking input is blocked unless explicitly prefixed with
-`ask explain ...` or `ask review ...`.
-See [`docs/interactive-mode.md`](docs/interactive-mode.md).
-
-## Project layout
-
-```
-src/shellforgeai/
-  cli.py              root Typer app wiring; command handlers are split into commands/
-  commands/           behavior-preserving Typer command modules
-  core/               session, config, profiles, diagnose, evidence, plans,
-                      approvals, mission, compose_context, rollback_preview,
-                      retention, metadata_hygiene, reference_resolver
-  tools/              typed read-only tools
-  llm/                provider abstraction (codex, ollama, vllm, …)
-  interactive/        REPL, slash commands, workspace trust, streaming
-  policy/             risk classes, rules, approvals
-  knowledge/          local docs and audit search
-  audit/              JSONL audit logger and artifact storage
-  render/             rich console rendering
-config/               default.yaml, profiles/, tools/
-docs/                 architecture, cli, safety, data-layout, mission-workflow,
-                      compose-ops, audit-and-cleanup, interactive-mode, …
-scripts/              dev / lint / test helpers, disposable Compose harness,
-                      disposable Compose restart proof orchestrator
-tests/                pytest suite
-```
-
-## Configuration
-
-Defaults live in `config/default.yaml`. Override with a YAML file via
-`shellforgeai --config path/to/config.yaml`, or with `SHELLFORGEAI_*`
-environment variables (see `docs/model-providers.md`).
-
-Profiles in `config/profiles/` decide which risk classes are allowed, asked,
-or denied. The active profile is selected with `--profile` or via
-`app.default_profile` in config.
-
-## Development
-
-```bash
-make dev      # editable install with dev extras
-make lint     # ruff + mypy
-make test     # pytest
-make check    # format + lint + type + tests
-```
-
-## License
-
-MIT. See `LICENSE`.
-
-- Run `shellforgeai v1 check` to verify the V1 knife surface.
-
-## V2 governed recipes
-
-`shellforgeai recipes list` exposes the read-only locked toolbox map for future governed actions. The governed restart frontier now stops at a read-only preflight packet for one exact disposable target:
-
-```bash
-shellforgeai recipes eligibility --recipe docker.disposable_restart --target <target> --json
-shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save
-shellforgeai recipes preflight validate <preflight_id>
-```
-
-Disposable preflight packets may preview `docker restart <target>` as bounded argv only, but they report `execution_available=false`, `command_preview_only=true`, and `command_executed=false`; no container is restarted and no recipe execution lane is enabled.
-
-### Governed disposable recipe execution
-
-ShellForgeAI's first V2 governed execution lane is intentionally narrow: `docker.disposable_restart` may restart exactly one Docker container only when it is labeled `shellforgeai.disposable=true` and `shellforgeai.allow_restart=true`, has a saved valid preflight packet, and the operator passes `--confirm`. The workflow is:
-
-```bash
-shellforgeai recipes preflight --recipe docker.disposable_restart --target <target> --save
-shellforgeai recipes preflight validate <preflight_id>
-shellforgeai recipes execute <preflight_id> --confirm
-shellforgeai recipes receipt validate <receipt_id>
-shellforgeai verify --receipt <receipt_id>
-shellforgeai recipes receipt rollback-preview <receipt_id>
-shellforgeai recipes receipt audit --json
-shellforgeai recipes receipt integrity --json
-shellforgeai recipes receipt integrity --include-exports --include-audit-bundles
-shellforgeai recipes receipt audit-bundle --json
-shellforgeai recipes receipt audit-bundle-validate <bundle_id> --json
-shellforgeai recipes receipt recovery-execute <receipt_id> --confirm
-shellforgeai recipes receipt recovery-status <recovery_receipt_id> --json
-shellforgeai recipes receipt recovery-validate <recovery_receipt_id> --json
-shellforgeai verify --receipt <recovery_receipt_id> --json
-```
-
-Natural-language asks still refuse execution. Production targets, broad targets, unlabeled targets, Docker Compose mutation, cleanup, rollback execution, remediation execution, arbitrary shell, and model-driven execution remain out of scope. Receipt audit, rollback-preview, recovery-status, and recovery-validate are read-only: audit summarizes local execution/recovery receipt chains and flags malformed receipts, missing originals, failed verification, and safety drift without executing anything; rollback-preview explains that `docker.disposable_restart` has no true rollback; recovery-status and recovery-validate read recorded recovery receipt evidence/artifacts only and do not rerun recovery, repair, or delete artifacts. Recovery execution is a separate confirm-gated bounded repeat restart of the exact disposable allowlisted target from a valid receipt; it never runs from natural language and never uses Docker Compose.
-
-
-`shellforgeai recipes receipt explain` converts governed receipt integrity/audit findings into deterministic local guidance with safe read-only next commands. It supports `--json`, `--source integrity|audit|audit-bundle|compare`, `--finding <code>`, `--target`, `--recipe`, and `--limit`; it never repairs/deletes artifacts, executes recipes, restarts containers, calls Docker/Compose, or calls a model.
-
-`shellforgeai recipes receipt integrity` scans existing ShellForgeAI-owned receipt artifacts for integrity drift without executing anything. It checks required files, JSON parsing, manifest/checksum consistency, recovery original links, unsupported shapes, unsafe safety flags, and production restart records; optional `--include-exports` and `--include-audit-bundles` scan existing owned export/support-packet artifacts without creating or repairing them.
-
-For support handoff, `shellforgeai recipes receipt audit-bundle` packages existing local receipt audit/history evidence into a bounded ShellForgeAI-owned artifact under `<data_dir>/exports/receipt-audit-bundles/`. Bundles include JSON, Markdown, manifest, checksums, receipt audit, and receipt history files; validation uses `shellforgeai recipes receipt audit-bundle-validate <bundle_id>`. Bundle create/validate do not execute recipes, rerun receipts, recover, rollback, restart containers, call Docker/Compose, call a model, or perform cleanup/remediation.
-
-### Docker01 hygiene report
-
-Operators can create a read-only Docker01 disk/image/artifact hygiene inventory with:
-
-```bash
-python scripts/docker01_hygiene_report.py --out /tmp/sfai-docker01-hygiene-report
-```
-
-Use `--dry-run` to list the fixed read-only checks without executing commands or writing the full report. The output includes `hygiene-summary.md`, `hygiene-report.json`, `candidate-cleanup-plan.md`, `commands-run.json`, and raw captures. The cleanup plan is proposal-only: no files are deleted, no Docker prune/image removal runs, and no containers or services are restarted.
-
-Validate an existing report before operator review with:
-
-```bash
-python scripts/docker01_hygiene_report.py --validate /tmp/sfai-docker01-hygiene-report --json
-```
-
-Validation reads existing files only with bounded caps sized for realistic Docker01 report JSON while keeping raw captures separately bounded. It emits `mode=docker01_hygiene_report_validate`, exits non-zero on malformed/missing/oversized/unsafe artifacts, checks proposal-only/no-cleanup language, and rejects executable cleanup/prune/delete/restart/network/package/cloud/Codex command patterns. It does not run Docker, mutate Docker/Compose, delete files, call a model, call Codex, or make cleanup safe to execute automatically.
-
-### Docker01 hygiene review bundle
-
-For operator review of an existing Docker01 hygiene report, package the report evidence without rerunning Docker collectors or cleanup:
-
-```bash
-python scripts/docker01_hygiene_report.py --review-bundle <report_dir> --json
-python scripts/docker01_hygiene_report.py --review-bundle-latest --root /tmp --json
-```
-
-The bundle writes a bounded review directory with summary, strict JSON rollup, source copies, validation, optional history/compare snapshots, safety notes, manifest, and checksums. It does not run Docker, generate a new report, delete files, prune/remove images, restart containers, or authorize cleanup.
-
-Hygiene discovery treats only directories containing `hygiene-report.json`, `hygiene-summary.md`, `candidate-cleanup-plan.md`, and `commands-run.json` as report directories. Old or malformed review-bundle-shaped directories are reported as bounded ignored candidates instead of cleanup work, and they do not authorize deletion, repair, moves, prune, or restart. `--compare-latest` and `--review-bundle-latest` select valid hygiene reports only.
-
-### Docker01 storage health report
-
-After PR229 observed a slow Docker build chown layer and pre-existing EXT4/dm-10 kernel warnings on Docker01, this read-only helper collects bounded storage/filesystem health evidence:
-
-```bash
-python scripts/docker01_storage_health_report.py --json
-python scripts/docker01_storage_health_report.py --out /tmp/sfai-docker01-storage-health --json
-```
-
-It reports root filesystem capacity, mounted filesystems and device mapping, disk-pressure level, Docker data-path pressure when safely readable, and bounded/sanitized kernel storage warning lines (EXT4, dm/device-mapper, and I/O/journal/inode patterns) from `dmesg` or `journalctl -k` when permitted. Optional flags `--max-dmesg-lines` and `--max-warning-lines` bound the kernel-log scan.
-
-It is evidence-only. It does not repair filesystems, run `fsck`/`e2fsck`/`xfs_repair`, mount/remount, prune Docker, remove images, delete files, restart containers, or mutate Docker/Compose. It uses a fixed read-only command allowlist with `shell=False`. If `dmesg`/`journalctl` access is denied the report returns `partial` with a warning rather than crashing; if optional tools such as `findmnt` are missing it falls back to `/proc/mounts`. With `--out` it writes `storage-health-report.json`, `storage-health-summary.md`, `commands-run.json`, `manifest.json`, and `checksums.json` (SHA256 + sizes). Persistent host storage warnings should be investigated outside ShellForgeAI mutation lanes.
-
-
-### Docker01 build lane health report
-
-PR282 adds a read-only Docker01 build-lane health report for operators to run before PR lanes when Docker01 disk, I/O, or BuildKit health is uncertain. It was added after PR281 deploy validation reached Docker01 host I/O/BuildKit stalls before product validation could complete, so the report helps separate infrastructure/build-lane blockers from ShellForgeAI product or test failures.
-
-```bash
-python scripts/docker01_build_health_report.py --json
-python scripts/docker01_build_health_report.py --markdown
-python scripts/docker01_build_health_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
-python scripts/docker01_build_health_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --markdown
-python scripts/docker01_build_health_report.py --out-json docker01-build-health.json --out-markdown DOCKER01-BUILD-HEALTH.md
-```
-
-PR283 improves Dockerfile discovery for this helper. The active Docker01 compose Dockerfile is expected at `/srv/compose/shellforgeai/Dockerfile`; operators can pass that path explicitly with `--dockerfile /srv/compose/shellforgeai/Dockerfile`. Without an explicit path, the helper checks a small deterministic allowlist only: the current working directory `Dockerfile`, `/srv/compose/shellforgeai/Dockerfile`, the repository-root `Dockerfile`, `/srv/data/shellforgeai/src/Dockerfile`, and the legacy default `Dockerfile` path when distinct. JSON and Markdown report the selected path, selection source, every candidate checked, discovery status (`found`, `not_found`, `unreadable`, or `ambiguous`), and whether the known broad recursive ownership/chown pattern was detected read-only.
-
-The report emits deterministic JSON/Markdown with root, Docker-root, and workspace disk usage; build-related process summaries; possible Linux `D`-state/uninterruptible I/O indicators; Docker CLI read-only availability checks (`docker info`, `docker system df`, `docker ps`, and `docker buildx ls` when the CLI is present); and detection of the known broad recursive ownership layer pattern `chown -R appuser:appuser /data /home/appuser/.codex /opt/shellforgeai` in the selected Dockerfile. Readiness is reported as `ok`, `attention`, `blocked`, or `unknown`; report generation exits 0 when collection succeeds even if readiness needs attention.
-
-The helper is diagnostic-only. It does not repair, cleanup, prune, kill, restart, rebuild, run a PR lane, run `pip install`, run tests, mutate Docker/Compose, mutate filesystems, mutate snapshots, or perform remediation/rollback/recovery. Cleanup, snapshot retirement, and BuildKit repair remain approval-gated operator work outside this helper.
-
-
-### Docker01 ownership-fix readiness packet
-
-PR284 adds a read-only Docker01 ownership-fix readiness packet helper for the future operator-reviewed fix path for the broad recursive Dockerfile ownership layer. It prepares evidence only; it does not apply the fix, execute any recipe, modify `/srv/compose/shellforgeai/Dockerfile`, run Docker build, run Docker Compose, run Docker prune, cleanup, remediation, rollback, process kill, or service restart. Recipe execution remains a separate explicit operator action after SeedOfEvil approval.
-
-```bash
-python scripts/docker01_ownership_fix_readiness.py --dockerfile /srv/compose/shellforgeai/Dockerfile --json
-python scripts/docker01_ownership_fix_readiness.py --dockerfile /srv/compose/shellforgeai/Dockerfile --markdown
-python scripts/docker01_build_health_report.py --dockerfile /srv/compose/shellforgeai/Dockerfile --out-json docker01-build-health.json
-python scripts/docker01_ownership_fix_readiness.py --dockerfile /srv/compose/shellforgeai/Dockerfile --health-json docker01-build-health.json --out-json docker01-ownership-readiness.json --out-markdown DOCKER01-OWNERSHIP-READINESS.md
-```
-
-The helper reads local files only and statically checks for the known broad chown risk, recipe existence, confirmation/apply gate markers, backup or receipt indicators, and absence of obvious unsafe commands such as Docker build/Compose mutation/prune/remove, service restart, process kill, `shell=True`, and broad subprocess shell construction. JSON and Markdown output are deterministic readiness signals, not a formal security proof.
-
-### Docker01 PR-lane validation evidence
-
-Docker01 PR-lane validation writes discoverable PR/commit-scoped evidence under `/tmp/sfai-pr<PR>-<shortsha>-validation-<timestamp>/`, including `validation-status.json`, `validation-manifest.json`, `validation-summary.md`, `commands-run.json`, and `logs/`. Use `python scripts/validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection` to find current evidence; stale PR/commit packets are ignored.
-
-### Docker01 PR-lane status/resume helper
-
-For interrupted Docker01 guarded PR-lane runs, use the read-only status helper before rerunning work:
-
-```bash
-python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status --json
-python scripts/sfai_docker01_pr_lane.py --pr <PR> --commit <sha> --status
-```
-
-It reports source/container/validation/QA evidence and a deterministic safe next command. It does not deploy, build, write Compose, restart, validate, run QA, clean up, prune, delete, or auto-declare mergeability.
-
-Status image checks use the configured Compose `image:` tag and container `Config.Image`; Docker-resolved `sha256:` digests do not trigger a false deploy mismatch. The helper prefers later exact PR/commit pass-eligible validation evidence over older setup failures and discovers exact operator QA bundle directories before suggesting another QA run.
-
-### Docker01 merge-readiness evidence
-
-Operators can consolidate existing Docker01 evidence for an exact PR/commit without rerunning validation or QA:
-
-```bash
-python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --json
-python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --comment
-python scripts/docker01_merge_readiness.py --pr <PR> --commit <sha> --out /tmp/sfai-pr<PR>-<short>-merge-readiness --comment
-```
-
-`--comment` renders a concise paste-ready Markdown review comment from the same evidence. With `--out --comment`, the packet also includes `merge-comment.md`. It does not post to GitHub, approve, merge, or replace reviewer judgment. Status wording is `pass_candidate` → `PASS / mergeable`, `hold_candidate` → `HOLD / needs follow-up`, and `unknown` → `NEEDS EVIDENCE / cannot determine`. The helper is read-only reviewer evidence and does not deploy, build, validate, run QA, clean, prune, delete, restart, mutate Docker/Compose, or replace SeedOfEvil's final merge judgment; SeedOfEvil remains final merge owner.
-
-
-Docker01 validation evidence is finalized automatically after PR-lane validation
-attempts. The evidence-only helper `scripts/docker01_validation_evidence.py` can
-also write PR/commit-scoped evidence from an already-completed log; it does not
-run validation or QA. Use `python scripts/validation_status.py --latest --pr
-<PR> --commit <sha> --json --explain-selection` to select exact current
-evidence. Pass evidence is selected ahead of older setup/interrupted attempts;
-failed, setup-failure, interrupted, and unknown evidence is never pass eligible.
-
-The guarded Docker01 PR lane uses the requested PR head commit when it finalizes
-validation evidence automatically, so exact `validation_status.py --latest --pr
-<PR> --commit <sha>` checks should find successful, failed, setup-failure, or
-interrupted lane evidence without a manual finalizer step. Full-validation
-metadata is preserved through downstream status and merge-readiness views.
-
-The disposable Docker01 fallback command finalizes its completed validation
-result into the mounted lane run directory, so successful fallback validation is
-immediately discoverable by exact PR/commit validation-status checks without a
-manual finalizer step.
-
-Default Docker01 PR-lane validation packets are written under
-`/tmp/shellforgeai-validation-runs/`, a writable discovery root used by
-`validation_status.py --latest`, so standard validation completion does not need
-a manual sudo finalizer.
-
-
-### Docker01 PR lane validation evidence self-check
-
-After the guarded Docker01 PR lane writes/finalizes validation evidence, it now performs a read-only validation evidence self-check for the exact PR/commit through `validation_status.py --latest --pr <PR> --commit <sha> --json --explain-selection`. The lane writes `validation-evidence-check.json` and `validation-evidence-check.md` in the validation run directory and references the check from the lane manifest and summary.
-
-The self-check proves whether exact PR/commit evidence was selected, whether it is pass-eligible, whether a rerun is required, whether full validation ran, and whether duplicate full pytest evidence was detected. If host setup fails but a later disposable fallback validation passes, the fallback pass can supersede the earlier setup failure while preserving the earlier setup failure as a warning/process note. If evidence is not discoverable after validation, the lane reports a validation evidence lifecycle failure/needs-followup rather than silently treating the run as merge-ready.
-
-The self-check does not run validation, pytest, the operator QA bundle, cleanup, Docker prune, Docker image removal, Docker/Compose mutation, restarts, remediation, rollback, recovery, GitHub posting/approval/merge, model calls, or cloud apply/merge/push. Merge-readiness and merge-comment tools remain separate read-only post-QA checks. SeedOfEvil remains final merge owner.
-
-### Docker01 V2 readiness evidence
-
-Use `python scripts/docker01_v2_readiness.py --pr <PR> --commit <sha> --json` or `--out /tmp/sfai-pr<PR>-<short>-v2-readiness` to create a read-only V2 readiness evidence snapshot. It consumes existing Docker01 PR-lane, validation, QA, merge-readiness, and hygiene evidence only; it never deploys, builds, validates, runs QA/pytest, cleans, restarts, mutates Docker/Compose, posts to GitHub, or replaces SeedOfEvil's final merge-owner judgment. Missing exact validation/QA evidence is reported as `v2_unknown`, while explicit failed evidence remains `v2_not_ready`; the QA read-only Docker ask uses deterministic local triage and does not require Codex auth.
-
-Targeted Docker01 validation lanes now finalize exact PR/commit validation evidence automatically, so `validation_status.py --latest --pr <PR> --commit <sha>` can discover targeted passes without a manual finalizer; the self-check fails clearly if persistence is missing.
-
-Completed guarded lane logs named `sfai-pr<PR>-<short>-validation-<timestamp>.log` are bounded read-only validation evidence for `validation_status.py --latest`, so completed full lanes can be discovered without manual normalization. Exact legacy Docker01 validation logs are pass-eligible only when trusted terminal markers are present (for example ruff and compileall passed plus full pytest 100%/exit 0 for full lanes); ambiguous, truncated, failed, setup-failure, or interrupted logs remain non-pass-eligible. Read-only status/readiness tools never run validation, pytest, QA, deploy, cleanup, or restart.
-
-`shellforgeai model doctor --json` is part of Docker01 live QA and emits strict read-only model readiness JSON; unavailable or unknown model auth is reported structurally instead of as a CLI option failure.
-
-### Model doctor auth readiness
-
-`shellforgeai model doctor` and `shellforgeai model doctor --json` are local,
-read-only diagnostics. By default they inspect the configured Codex binary,
-version, and whether local auth material appears present; they do not call the
-model, perform a network probe, write credentials, or mutate the host. The
-default no-probe state reports `live_probe_requested=false`,
-`live_probe_performed=false`, and `auth_readiness=not_verified` with
-`auth_reason=auth_cache_present_live_probe_not_run`, meaning live readiness was
-not requested or performed.
-
-Operators can explicitly request one bounded auth/readiness check with
-`shellforgeai model doctor --live-probe --json` or human output with
-`shellforgeai model doctor --live-probe`. The probe uses a fixed internal
-readiness ping through the configured model client, does not accept operator
-prompt text, does not execute tools, and performs no mutation. Tests use fake
-clients only; no real model or network calls are required in tests.
-
-A bounded, pasteable receipt can be written with
-`shellforgeai model doctor --live-probe --receipt-out /tmp/sfai-model-probe`.
-The directory contains `model-doctor-live-probe.json`,
-`model-doctor-live-probe-summary.md`, `manifest.json`, and `checksums.json`
-with SHA256, size, and read-only/no-mutation safety metadata. Receipt files
-omit secrets, tokens, auth headers, and raw credential material. SeedOfEvil remains the final merge owner.
-
-Existing live-probe receipt bundles can be validated without running another
-probe or calling a model:
-
-```bash
-shellforgeai model doctor --validate-receipt /tmp/sfai-model-probe --json
-shellforgeai model doctor --validate-receipt /tmp/sfai-model-probe --validation-out /tmp/sfai-model-probe-validation --json
-```
-
-The validator reads the receipt directory, checks required files, JSON parsing,
-manifest and checksum consistency, bounded summary Markdown, known secret
-markers, historical probe metadata, and read-only/no-mutation safety posture.
-It is validation-only: no live probe, model/Codex/network call, Docker/Compose
-operation, cleanup, deletion, restart, remediation, rollback, or recovery is
-performed. `--validation-out` writes only validator JSON/Markdown plus its own
-manifest and checksums, leaving the original receipt unchanged.
-
-For exact PR/commit lane runs, a later successful disposable validation fallback supersedes earlier host setup_failure evidence in `validation_status.py --latest`; the setup failure remains in warnings/process notes, while failed or interrupted evidence without a later exact pass stays non-pass-eligible.
-## Safe ask command suggestions
-
-Model-backed `ask` may explain deterministic evidence and suggest a next operator command, but those suggestions are now validated through a static safe-command registry. Registry entries are real ShellForgeAI commands, marked `read_only=true` and `mutation=false`, and are suggestion-only: `ask` never executes them. Unknown `shellforgeai ...` suggestions and mutation-shaped commands such as cleanup, prune, image removal, Compose restart, shell pipes, redirects, or shell passthrough are removed or replaced with a registry command such as `shellforgeai triage docker --json`, `shellforgeai triage docker detail <suspect> --json`, or `shellforgeai ops report --json` when appropriate.
-
-Natural-language requests still cannot execute commands. Future mutation recipes must remain named, narrow, auditable, and confirmation-gated outside model-backed ask.
-
-### Model Doctor receipt history and compare
-
-Existing Model Doctor live-probe receipts can be inspected without a new probe or model call:
-
-```bash
-shellforgeai model receipt history --root /tmp --json
-shellforgeai model receipt compare /tmp/old-receipt /tmp/new-receipt --json
-```
-
-History scans only a bounded root for known Model Doctor receipt-shaped directories, validates each candidate with the same required-file, JSON, manifest, checksum, secret-marker, and safety checks used by receipt validation, and reports valid, invalid, and ignored candidates. Compare validates both receipt directories before reporting status, auth-readiness, latency, timeout, provider, and model drift. These commands are read-only: they do not run a live probe, call a model, call network/Codex, clean/prune/delete, repair/move artifacts, mutate Docker/Compose, restart containers, remediate, roll back, or recover. Default `shellforgeai model doctor` still performs no model call; explicit `--live-probe` remains opt-in and bounded. SeedOfEvil remains final merge owner.
-
-The Docker01 operator QA bundle surfaces this model receipt evidence in the reviewer handoff by default (`python scripts/docker01_operator_qa_bundle.py --pr <PR> --commit <sha> --json`; opt out with `--skip-model-receipts`). It runs only the read-only `model receipt history` reader and records the `model_receipts` block — receipt history status, latest receipt path/validation, latest probe status, latest auth readiness, valid/invalid counts, warnings, and the operator's safe next command — plus `raw/model-receipt-history.json` and `raw/model-receipt-evidence.json`. The QA bundle performs no live probe and no model call (its own `model_receipts.safety` reports `model_called=false`/`live_probe_performed=false`); a historical receipt's `model_called=true` is accepted as evidence of an earlier explicit probe. Empty or unavailable history is a warning, not a QA failure; a secret marker or historical safety drift is surfaced as a blocking safety failure.
-## Docker01 artifact archive plan
-
-`scripts/docker01_artifact_archive_plan.py` is the first governed mutation-runway step for ShellForgeAI-owned historical evidence artifacts. It starts with read-only planning/validation/readiness for bounded `/tmp/sfai-*` evidence artifacts, then exposes one named governed mutation lane for copy-only archive bundle creation. The bundle lane requires exact prior evidence, exact plan id, exact confirmation phrase, and an explicit output directory; cleanup and source deletion remain out of scope.
-
-Examples:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --root /tmp --json
-python3 scripts/docker01_artifact_archive_plan.py --root /tmp
-python3 scripts/docker01_artifact_archive_plan.py --root /tmp --out /tmp/sfai-pr231-artifact-archive-plan
-```
-
-`--out` writes plan metadata files only (`artifact-archive-plan.json`, summary, candidate/excluded manifests, safety notes, manifest, checksums). It does not create an archive and does not copy, move, modify, or delete source candidates. Candidate scope is limited to known ShellForgeAI evidence artifact patterns such as QA bundles, validation artifacts, merge/v2 readiness artifacts, hygiene reports, model receipts, receipt validation, and storage-health reports. Docker volumes/images/containers, Compose/source/runtime paths, `/var/lib/docker`, `/srv/compose`, home directories, system logs, package caches, unmatched arbitrary files, and symlinks remain out of scope.
-
-The helper can validate an existing plan directory read-only with `--validate <plan_dir>` (add `--json` for strict JSON, `--out <dir>` to write validator artifacts):
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan --json
-python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr231-artifact-archive-plan --out /tmp/sfai-pr232-validation --json
-```
-
-Validation checks the required files, manifest, checksums (SHA256 + size), `plan_id`, the `read_only`/`mutation_performed`/`execution_available` flags, candidate scope (bounded, known patterns only, symlink and out-of-scope candidates rejected and never followed), the `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` confirmation phrase, the future contract, and the safety flags, reporting `status=passed|failed|partial`. It does not create an archive, does not copy/move/delete sources, does not modify the source plan directory, and does not authorize execution.
-
-The helper can also emit a dry-run receipt for a validated plan. The receipt requires the exact plan id and first runs the same read-only validation checks; missing or mismatched `--plan-id` fails clearly and never reports `ready_for_review`.
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --json
-python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id>
-python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr231-artifact-archive-plan --plan-id sha256:<plan-id> --out /tmp/sfai-pr233-artifact-archive-dry-run --json
-```
-
-The dry-run receipt summarizes the future archive preview (candidate counts/classes/bytes and explicit exclusions), repeats the future confirmation phrase, and records receipt/manifest/checksum/rollback/source-preservation requirements. `--out` writes receipt metadata only (`artifact-archive-dry-run-receipt.json`, `artifact-archive-dry-run-summary.md`, candidate/excluded manifests, future checklist, safety notes, manifest, checksums). It never creates an archive, never copies/moves/modifies/deletes source artifacts, never touches the source plan directory, and never runs cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, network/model/Codex, GitHub, or cloud apply/merge/push behavior. `execution_available=false` remains explicit; future execution is a separate PR/lane only and would require the exact plan id plus `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`.
-
-The helper can validate a PR233 dry-run receipt directory with `--validate-dry-run-receipt <receipt_dir>`. Standalone validation checks the receipt required files, JSON parseability, manifest, checksums, safety flags, candidate scope, and future execution contract while recording `plan_cross_check_status=not_requested`. Supplying `--plan-dir <plan_dir>` first validates the original PR231/PR232 plan and cross-checks plan id, candidate counts/classes/bytes, exclusions, confirmation phrase, and future execution contract consistency. `--out <dir>` writes validator artifacts only (`artifact-archive-dry-run-receipt-validation.json`, `artifact-archive-dry-run-receipt-validation-summary.md`, `manifest.json`, `checksums.json`).
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --json
-python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --plan-dir /tmp/sfai-pr231-artifact-archive-plan --json
-python3 scripts/docker01_artifact_archive_plan.py --validate-dry-run-receipt /tmp/sfai-pr233-artifact-archive-dry-run --plan-dir /tmp/sfai-pr231-artifact-archive-plan --out /tmp/sfai-pr234-artifact-archive-dry-run-validation --json
-```
-
-Dry-run receipt validation is read-only and never creates an archive, copies/moves/modifies/deletes source artifacts, modifies the source receipt or plan directories, runs cleanup/prune/delete/restart/remediation/rollback/recovery, executes Docker/Compose mutation, invokes validation/pytest/QA from the helper, uses natural-language execution or `shell=True`, or authorizes future execution. `future_execution_available=false` remains explicit; future archive execution remains a separate PR/lane.
-
-The helper also provides a final read-only execution-readiness gate that combines the validated plan, dry-run receipt, and optionally a prior receipt-validation directory. It validates the plan, validates (or reads) the dry-run receipt validation, then cross-checks the exact plan id, candidate paths/counts/classes/bytes, exclusions, confirmation phrase, future source-delete/source-move defaults, and safety contract. `ready_for_execution_review` means only that the evidence chain is internally consistent for human review of a future separate PR/lane; it does not authorize execution and `execution_available=false` remains explicit.
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --json
-python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run
-python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --receipt-validation /tmp/sfai-pr235-artifact-archive-dry-run-validation --json
-python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr235-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr235-artifact-archive-dry-run --out /tmp/sfai-pr235-artifact-archive-readiness --json
-```
-
-With `--out`, readiness writes report artifacts only (`artifact-archive-execution-readiness.json`, `artifact-archive-execution-readiness-summary.md`, `future-execution-checklist.md`, `safety-notes.md`, `manifest.json`, `checksums.json`). It never creates an archive, never copies/moves/modifies/deletes source artifacts, never modifies the source plan or receipt directories, never runs cleanup/prune/delete/restart/remediation/rollback/recovery, never performs Docker/Compose mutation, never runs validation/pytest/QA from the helper, never uses natural-language execution or `shell=True`, and never performs network/model/Codex/package/GitHub/cloud actions. Future execution remains unavailable and would require a separate PR/lane with the exact plan id and `CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE`; SeedOfEvil remains final merge owner.
-
-
-Any future cleanup or source-deletion lane would be separate and must require a new contract, review, exact confirmation, and fresh safety gates. Cleanup/deletion work must still never allow Docker prune, image/volume removal, container restart, Compose mutation, remediation, rollback, recovery, wildcard/arbitrary deletion, natural-language command execution, or `shell=True`. SeedOfEvil remains final merge owner.
-
-The archive helper now has one controlled mutation lane: `--create-archive-bundle <plan_dir>`. It creates a directory bundle by copying only validated ShellForgeAI-owned evidence candidates into `payload/`; it requires the exact `--plan-id`, the exact `--confirm CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE` phrase, and an explicit `--archive-out <archive_bundle_dir>`. Before copying, it validates the plan, validates the dry-run receipt with plan cross-check, runs the execution-readiness checks in-process, verifies candidate scope/path safety, and refuses broad archive outputs such as `/`, `/tmp`, `/srv`, or `/data` and non-empty output directories.
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --root /tmp --out /tmp/sfai-pr236-artifact-archive-plan
-python3 scripts/docker01_artifact_archive_plan.py --validate /tmp/sfai-pr236-artifact-archive-plan --json
-PLAN_ID=$(python3 -c 'import json; print(json.load(open("/tmp/sfai-pr236-artifact-archive-plan/artifact-archive-plan.json"))["plan_id"])')
-python3 scripts/docker01_artifact_archive_plan.py --dry-run-receipt /tmp/sfai-pr236-artifact-archive-plan --plan-id "$PLAN_ID" --out /tmp/sfai-pr236-artifact-archive-dry-run --json
-python3 scripts/docker01_artifact_archive_plan.py --execution-readiness /tmp/sfai-pr236-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr236-artifact-archive-dry-run --json
-python3 scripts/docker01_artifact_archive_plan.py --create-archive-bundle /tmp/sfai-pr236-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr236-artifact-archive-dry-run --plan-id "$PLAN_ID" --confirm CONFIRM_SHELLFORGEAI_ARTIFACT_ARCHIVE --archive-out /tmp/sfai-pr236-artifact-archive-bundle --json
-```
-
-The bundle writes `archive-receipt.json`, `archive-summary.md`, `archive-manifest.json`, `archive-checksums.json`, `source-candidate-manifest.json`, `source-exclusions.json`, `source-preservation.json`, `future-cleanup-notes.md`, `safety-notes.md`, and `payload/`. This lane is copy-only: it does not delete, move, or modify sources; does not clean/prune/restart/remediate/rollback/recover; does not mutate Docker/Compose; does not run validation/pytest/QA from the helper; and does not use natural-language execution or `shell=True`. Source deletion remains out of scope and would require a separate lane and confirmation.
-
-
-### Docker01 artifact archive bundle validation
-
-ShellForgeAI can validate a governed PR236 copy-only artifact archive bundle without mutating sources:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --json
-python3 scripts/docker01_artifact_archive_plan.py --validate-archive-bundle /tmp/sfai-pr237-artifact-archive-bundle --plan-dir /tmp/sfai-pr237-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr237-artifact-archive-dry-run --json
-```
-
-The validator checks receipt JSON, manifest, checksums, payload files, source-preservation metadata, and optional plan/dry-run cross-checks. It writes validation artifacts only with `--out`. It does not create an archive, copy/move/delete sources, authorize cleanup/deletion, run cleanup/prune/delete/restart/remediation/rollback/recovery, or mutate Docker/Compose state. Source deletion/move remains out of scope and would require a separate reviewed lane. SeedOfEvil remains final merge owner.
-
-### Docker01 artifact archive eligibility review
-
-ShellForgeAI can perform a read-only archive eligibility review after a governed archive bundle has been created and validated:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --archive-eligibility-review /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run --json
-python3 scripts/docker01_artifact_archive_plan.py --archive-eligibility-review /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run
-python3 scripts/docker01_artifact_archive_plan.py --archive-eligibility-review /tmp/sfai-pr238-artifact-archive-bundle --plan-dir /tmp/sfai-pr238-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr238-artifact-archive-dry-run --out /tmp/sfai-pr238-archive-eligibility-review --json
-```
-
-The review validates the archive bundle, source-preservation metadata, source plan, and dry-run receipt, then cross-checks the plan id, candidate manifest, source paths, classes, bytes, exclusions, confirmation phrase, archive receipt, payload checksums, and safety flags. It performs read-only source rechecks with filesystem stat checks only and classifies candidates as `eligible`, `blocked`, `warning`, or `unknown` for future human review. `eligible_for_review` means only that a future separate source-action PR/lane could be reviewed; it does not authorize cleanup and `cleanup_available=false` remains explicit.
-
-With `--out`, the helper writes report artifacts only: `artifact-archive-eligibility-review.json`, `artifact-archive-eligibility-review-summary.md`, `candidate-archive-eligibility-review.json`, `future-source-action-review-checklist.md`, `safety-notes.md`, `manifest.json`, and `checksums.json`. It does not modify the archive bundle, plan, dry-run receipt, or source artifacts; does not create archives; does not copy/move/delete/modify sources; and does not run cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, model/Codex, network, GitHub, package install, or cloud apply/merge/push behavior. Future source action remains a separate PR/lane requiring a new exact confirmation phrase, dry-run deletion manifest, source recheck, operator review, and SeedOfEvil final merge ownership.
-
-### Docker01 archive-backed source-action dry run
-
-The artifact archive runway includes a read-only source-action dry-run manifest command:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-dry-run /tmp/sfai-pr239-artifact-archive-bundle --plan-dir /tmp/sfai-pr239-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr239-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr239-artifact-eligibility-review --plan-id sha256:<plan-id> --json
-```
-
-It is archive-backed, eligibility-backed, exact-plan-id-bound, and non-executable. It validates the archive bundle, source-preservation metadata, plan, dry-run receipt, eligibility review, payload checksums, candidate consistency, and read-only source stats, then classifies candidates for future human review only. It does not create archives, copy/move/delete/modify sources, authorize cleanup, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, or call model/Codex/network/GitHub/cloud services. `ready_for_source_action_review` means reviewable by a human in a separate future PR/lane; SeedOfEvil remains final merge owner.
-
-### Docker01 archive source-action dry-run validation
-
-The archive helper can validate a previously written source-action dry-run packet without making it executable:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --validate-archive-source-action-dry-run /tmp/sfai-pr240-source-action-dry-run --json
-python3 scripts/docker01_artifact_archive_plan.py --validate-archive-source-action-dry-run /tmp/sfai-pr240-source-action-dry-run --archive-bundle /tmp/sfai-pr240-artifact-archive-bundle --plan-dir /tmp/sfai-pr240-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr240-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr240-artifact-eligibility-review --out /tmp/sfai-pr240-source-action-dry-run-validation --json
-```
-
-The validator checks the PR239 dry-run JSON, candidate manifest, manifest, checksums, read-only/source-action-unavailable contract, safety flags, source stats, and optional archive bundle, plan, dry-run receipt, and eligibility review evidence chain. `passed` means the packet is human-reviewable for a future separate lane only; it does not authorize source action and `source_action_available=false` remains explicit. With `--out`, it writes `archive-source-action-dry-run-validation.json`, `archive-source-action-dry-run-validation-summary.md`, `candidate-source-action-validation.json`, `future-source-action-review-checklist.md`, `safety-notes.md`, `manifest.json`, and `checksums.json` only. The validator does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes. Future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`; SeedOfEvil remains final merge owner.
-
-
-### Docker01 archive source-action human review packet
-
-The archive helper can now create a read-only human review packet from the PR239 source-action dry run, PR240 source-action validation, archive bundle, plan, dry-run receipt, and archive eligibility review evidence chain:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-review-packet /tmp/sfai-pr241-source-action-dry-run --source-action-validation /tmp/sfai-pr241-source-action-validation --archive-bundle /tmp/sfai-pr241-artifact-archive-bundle --plan-dir /tmp/sfai-pr241-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr241-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr241-archive-eligibility-review --plan-id sha256:<plan-id> --json
-python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-review-packet /tmp/sfai-pr241-source-action-dry-run --source-action-validation /tmp/sfai-pr241-source-action-validation --archive-bundle /tmp/sfai-pr241-artifact-archive-bundle --plan-dir /tmp/sfai-pr241-artifact-archive-plan --dry-run-receipt /tmp/sfai-pr241-artifact-archive-dry-run --archive-eligibility-review /tmp/sfai-pr241-archive-eligibility-review --plan-id sha256:<plan-id> --out /tmp/sfai-pr241-source-action-review-packet --json
-```
-
-The packet cross-checks exact plan id, candidate manifests, archive payload checksums, source-preservation metadata, eligibility status, dry-run status, and validation status. `ready_for_human_review` means only that a human has a complete pasteable review packet; it is not approval, not execution, and not authorization. `source_action_available=false` remains explicit. With `--out`, it writes `archive-source-action-review-packet.json`, `archive-source-action-human-review.md`, `candidate-review-summary.json`, `operator-review-checklist.md`, `future-source-action-signoff-template.md`, `safety-notes.md`, `manifest.json`, and `checksums.json` only. The review-packet command does not create archives, copy/move/delete/modify sources, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes. Future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`; SeedOfEvil remains final merge owner.
-### Docker01 archive source-action operator decision receipt
-
-The archive helper can record a read-only operator decision receipt from the source-action human review packet:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-decision-receipt /tmp/sfai-pr242-source-action-review-packet --plan-id sha256:<plan-id> --decision ready_for_future_pr_review --json
-python3 scripts/docker01_artifact_archive_plan.py --archive-source-action-decision-receipt /tmp/sfai-pr242-source-action-review-packet --plan-id sha256:<plan-id> --decision defer --out /tmp/sfai-pr242-source-action-decision-receipt --json
-```
-
-`--decision` accepts only `ready_for_future_pr_review`, `defer`, `reject`, or `needs_more_evidence`; free-form decisions are rejected. The command validates the review packet structure, manifest, checksums, exact plan id, safety contract, candidate summary, and operator review contract, and can optionally cross-check source-action dry-run, validation, archive bundle, plan, dry-run receipt, and eligibility-review evidence directories. `decision_recorded` means evidence was recorded only: it is not approval, not execution, and does not authorize cleanup or source action. `source_action_available=false` remains explicit, and any future source action remains a separate PR/lane requiring `CONFIRM_SHELLFORGEAI_SOURCE_ACTION_AFTER_ARCHIVE`, exact evidence, source recheck, archive validation, operator review, and SeedOfEvil final merge ownership.
-
-With `--out`, the helper writes report artifacts only: `archive-source-action-decision-receipt.json`, `archive-source-action-decision-receipt-summary.md`, `candidate-decision-summary.json`, `future-source-action-requirements.md`, `safety-notes.md`, `manifest.json`, and `checksums.json`. It does not modify the review packet or optional evidence directories; does not create archives; does not copy/move/delete/modify sources; and does not run cleanup/prune/delete/restart/remediation/rollback/recovery, Docker/Compose mutation, validation, pytest, QA, model/Codex, network, GitHub, package install, or cloud apply/merge/push behavior.
-
-### Docker01 archive source-action readiness gate
-
-The archive helper now provides a final read-only source-action readiness gate for the PR239–PR242 evidence chain. It consumes the operator decision receipt, human review packet, source-action dry run, source-action validation, archive bundle, original plan, dry-run receipt, and archive eligibility review with an exact plan id, then reports whether a future separate source-action PR/lane would be reviewable by SeedOfEvil. `ready_for_future_pr_review` is not approval, not execution, and does not authorize cleanup or source action; `source_action_available=false` remains explicit. With `--out`, it writes only readiness/report artifacts (`archive-source-action-readiness-gate.json`, summary, candidate readiness summary, future PR checklist, non-execution contract, safety notes, manifest, and checksums). The gate does not create archives, copy/move/delete/modify sources, add a source-action command, run cleanup/prune/delete/restart/remediation/rollback/recovery, mutate Docker/Compose, invoke validation/pytest/QA, use natural-language execution or `shell=True`, call model/Codex/network/GitHub, install packages, or apply cloud changes.
-
-### Archive source-action operator status
-
-The Docker01 archive helper includes a read-only `--archive-source-action-status-report <readiness_gate_dir>` report that consumes final readiness evidence and, when supplied with an exact `--plan-id`, cross-checks the source-action dry run, validation, review packet, decision receipt, archive bundle, plan, dry-run receipt, and eligibility review. The report may write status artifacts only with `--out`; it is not approval, not execution, does not authorize cleanup or source action, does not create a source-action command or archive, and does not copy/move/modify/delete sources or mutate Docker/Compose. `ready_for_operator_review` means operator-inspectable for a future separate PR/lane, with SeedOfEvil as final merge owner.
-
-### Docker01 fixture-only source-action rehearsal
-
-ShellForgeAI includes a narrow `--archive-source-action-fixture-rehearsal` helper mode for synthetic fixtures only. It requires `--fixture-root`, an exact `--plan-id`, `--out`, and `--confirm CONFIRM_SHELLFORGEAI_FIXTURE_SOURCE_ACTION_REHEARSAL`; `--restore-before-exit` can restore synthetic fixture sources before the command exits. The fixture root must be a safe absolute `/tmp/sfai-fixture-source-action-*` path, outside the repository and outside `/srv`, `/data`, `/var`, `/etc`, `/home`, `/root`, `/opt`, Docker, Compose, and runtime paths, with no symlinks and no non-fixture content.
-
-The lane may create synthetic fixture files, archive those fixture files, rehearse a reversible fixture-only hold state, and write `fixture-source-action-rehearsal.json`, summary, fixture candidate and archive manifests, rollback proof, safety notes, manifest, and checksums under `--out`. `mutation_performed=true` applies only to these helper-owned fixture files. It is not production cleanup, not production source action, does not target real artifact evidence, and does not copy, move, delete, or modify production sources. Future production source action remains a separate PR/lane with SeedOfEvil as final merge owner.
-
-### Fixture source-action rehearsal audit
-
-ShellForgeAI includes a read-only auditor for fixture-only source-action rehearsal evidence. The auditor inspects an existing PR246-style fixture rehearsal output directory with:
-
-```bash
-python3 scripts/docker01_artifact_archive_plan.py \
-  --archive-source-action-fixture-audit <fixture_rehearsal_dir> \
-  --json
-```
-
-The audit validates required evidence files, JSON parsing, manifest/checksum integrity, fixture-only flags, rollback/restore proof, path guards, and the non-execution safety contract. It does not repeat rehearsal, create fixture files, archive files, restore files, or touch production paths. It can write audit artifacts only when `--out <fixture_audit_dir>` is supplied, and it can compare two fixture rehearsal evidence directories with `--compare-to <previous_fixture_rehearsal_dir>`.
-
-A passing fixture audit is evidence quality control only. It is not production readiness, does not enable production source action, and does not enable production cleanup. Future production source action still requires a separate reviewed lane and PR. SeedOfEvil remains final merge owner.
-### Windows installed runtime context
-
-On Windows, the supported `sfai.cmd` wrapper supplies `SHELLFORGEAI_RUNTIME_ROOT` from its own installation path so `ask`, `interactive`, and `model doctor` can resolve the ShellForgeAI profile when launched from operator directories such as `C:\Windows\System32`. Codex authentication remains tester-scoped and external via `CODEX_HOME`; ShellForgeAI verifies readiness with `codex login status` and does not read token/cache contents.
-
-### Windows network snapshot
-
-`shellforgeai windows network [--json]` provides a bounded local Windows network interface view. It reports interface names, up/down state, MTU, reported link speed, IPv4/IPv6 addresses, cumulative counters when available, and truncation metadata. It is read-only and local-only: it does not capture packets, inspect sockets, resolve DNS, enumerate routes, probe remote hosts, expose MAC/link-layer identifiers or adapter GUIDs, or change network settings. On non-Windows hosts it returns structured unsupported output rather than substituting Linux collection.
-
-### Windows volumes snapshot
-
-`shellforgeai windows volumes [--json] [--limit N]` provides a bounded local Windows drive-root volume/filesystem snapshot using the already-declared `psutil>=5.9` runtime dependency. The default limit is 32 volumes and valid limits are 1 through 64; invalid limits fail clearly, and returned local drive roots are deduplicated and sorted deterministically by drive and mountpoint. The command reports safe drive-letter metadata (`C:` and `C:\`), filesystem type when the in-process API reports it, conservative kind (`fixed`, `removable`, `cdrom`, `ramdisk`, or `unknown`), access (`read_write`, `read_only`, or `unknown`), and total/used/free bytes plus used percentage when `disk_usage` succeeds. Optical or disappearing volumes with unavailable usage are retained as sanitized unavailable entries. The command inspects local drive roots only and skips UNC paths, remote/mapped-network partitions, volume GUID paths, and folder-mounted volumes before usage lookup; it does not expose GUIDs, labels, serials, raw device identifiers, BitLocker state, physical disks, SMART/health, files, directories, remote shares, or model/provider metadata. It does not change drive letters, mount/unmount, format, repair, resize, clean, recover, use PowerShell/WinRM/shell/subprocess fallback, or mutate storage. On non-Windows hosts it returns structured unsupported output rather than substituting Linux storage collectors. `windows disks` remains the separate stdlib-only root/capacity command; `windows volumes` is the psutil-backed filesystem/kind/access parity slice.
-
-`shellforgeai windows events [--json] [--limit N] [--since-hours N]` provides a bounded local Windows System Event Log metadata slice. It queries only the local `System` channel for Critical, Error, and Warning records in a bounded UTC lookback (default 24 hours, valid 1-168) and returns at most the bounded limit (default 50, valid 1-200); invalid bounds fail clearly. JSON contains provider, nonnegative Event ID, normalized level, UTC `time_created_utc`, record ID, optional numeric task/opcode/keywords, truncation state, counts, and at most ten deterministic provider/Event-ID aggregation rows. Text mode shows at most ten recent rows and ten aggregation rows. Empty results are `status=ok`. The command is read-only and local-only: it does not retrieve rendered messages, XML, EventData, UserData, identities, computer names, process/thread context, arbitrary parameters, Security/Application/custom/remote channels, subscriptions, exports, clears, retention changes, generated events, model assistance, PowerShell, WinRM, shell, subprocess fallback, or host mutation. Non-Windows hosts return structured unsupported output and do not substitute Linux logs. Native handles are closed on success, empty results, truncation, and errors.
-
-`shellforgeai windows evidence --include-events [--events-limit N] [--events-since-hours N] [--json]` explicitly opts the evidence bundle into the same local `System` Event metadata component. Events are not included by default; default evidence remains doctor/status only. The component defaults to limit 50 and lookback 24 hours, enforces limit 1-200 and lookback 1-168, preserves seven-digit UTC FILETIME timestamps (`YYYY-MM-DDTHH:MM:SS.fffffffZ`), and remains bounded, read-only, and metadata-only. JSON adds `components.events` plus an `embedded_events` summary; text renders only a concise events summary line. Component failures are isolated and do not erase doctor/status or selected services/disks/processes. The embedded path does not collect messages, XML, EventData, UserData, identities, computer fields, Security/Application/custom/remote channels, PowerShell, WinRM, subprocess/shell fallback, network/model calls, Event Log writes/clears/exports/subscriptions, service/process control, cleanup, remediation, rollback, or recovery.
-
-PR297 enriches `shellforgeai windows services [--json] [--limit N]` without adding a new command or collection path. The existing local read-only Service Control Manager enumeration (`OpenSCManagerW` enumerate rights, `EnumServicesStatusExW`, `CloseServiceHandle`) now preserves bounded runtime-state fields already present in `SERVICE_STATUS_PROCESS`: process ID, accepted-controls bitmask, Win32 and service-specific exit codes, checkpoint, wait hint, and service flags. JSON service items add `process_id`, `controls_accepted`, `controls_accepted_unknown_mask`, `win32_exit_code`, `service_specific_exit_code`, `checkpoint`, `wait_hint_ms`, `runs_in_system_process`, and ordered `runtime_signals`; `services.runtime_summary` counts these observations across the full enumerated set before item truncation. Text mode stays concise with one runtime summary line and at most ten deterministic pending/nonzero-exit-code preview rows. These are point-in-time observations only: accepted controls are reported, never executed; nonzero exit codes are not automatic failure diagnoses; a PID is reported without opening or inspecting the process; checkpoint and wait hint do not prove progress or a hang. The command still does not collect service binary paths, executable command lines, accounts, descriptions, dependencies, delayed-auto-start or trigger configuration, recovery/failure actions, security descriptors/ACLs, registry configuration, process owner/command line/environment/modules/handles, event logs, restart history, or remote service state, and it does not start, stop, restart, pause, continue, configure, or modify services. Unsupported platforms keep the structured unsupported response and do not substitute Linux collectors.
-
-### Windows evidence opt-in network component
-
-`shellforgeai windows evidence --include-network [--json]` explicitly opts the evidence bundle into the existing bounded local Windows network collector. Network evidence is not included by default: default evidence remains doctor/status only and has no `components.network` or `embedded_network` fields. Custom caps are available only with the opt-in flag:
-
-```console
-shellforgeai windows evidence \
-  --include-network \
-  --network-interface-limit N \
-  --network-address-limit N \
-  --json
-```
-
-The interface default/range is 32 / 1-32; the per-interface address default/range is 16 / 1-16. The bundle reuses the standalone local collector (`shellforgeai windows network`) unchanged. JSON may include bounded local interface/IP metadata only when explicitly requested; text output includes summary counts only and does not print interface names, IP addresses, counters, netmasks, or broadcasts. Counters are cumulative snapshots when available. The component performs no packet capture, socket inventory, DNS lookup, route lookup, remote probe, MAC/GUID/PNP collection, or network mutation. Network component failures are isolated and sanitized so doctor/status and other selected healthy components remain present.
-
-### Windows evidence opt-in volumes component
-
-`shellforgeai windows evidence --include-volumes [--json]` explicitly opts the evidence bundle into bounded local Windows drive-root volume/filesystem metadata. Volumes are not included by default: default evidence remains doctor/status only and has no `components.volumes` or `embedded_volumes` fields. A custom bound is available only with the opt-in flag:
-
-```console
-shellforgeai windows evidence \
-  --include-volumes \
-  --volumes-limit N \
-  --json
-```
-
-The default limit is 32 and the allowed range is 1-64. Supplying `--volumes-limit` without `--include-volumes` fails clearly and does not silently enable or ignore the component. The bundle reuses the existing standalone `windows_volumes_payload()` collector unchanged; it does not add a second volume, disk, partition, filesystem, or storage-health collector. JSON preserves the standalone `components.volumes` schema and may include detailed bounded drive-root rows only when explicitly requested. Evidence text is summary-only and prints no drive letters, mount points, filesystem names, capacity values, labels, serials, GUIDs, warning rows, error rows, diagnosis, or remediation. Component failures are isolated into a bounded `volumes_component_failed` envelope, while doctor/status and other selected healthy components remain present. Healthy empty results with zero local drive roots stay healthy. Only local drive roots are considered; no files, directories, network shares, GUID paths, labels, serials, encryption state, physical disks, SMART/storage health, remote probes, PowerShell/WinRM/shell/subprocess fallback, mount/unmount/eject/format/repair, cleanup, remediation, rollback, recovery, network call, model call, secret read, auth-cache read, or mutation is performed.
-
-### Windows evidence standard profile
-
-`shellforgeai windows evidence --profile standard` and `shellforgeai windows evidence --profile standard --json` provide an optional deterministic Windows evidence profile. No profile is selected by default, so default evidence remains doctor/status only. The supported profile name is exactly `standard`.
-
-The standard profile selects existing bounded read-only components in this exact order: doctor, status, services, processes, events, network, volumes. It uses fixed established bounds: services 25, processes 25, System events 50, events since-hours 24, network interfaces 32, network addresses per interface 16, and volumes 32. It excludes disks because volumes already provides bounded local drive-root capacity plus filesystem classification. Memory is not a separate profile component because physical memory is already part of status.
-
-Profile mode is mutually exclusive with all manual include and limit options. Manual composition remains available when `--profile` is omitted. The profile adds no collector, no execution path, no mutation path, no PowerShell/WinRM/QGA/subprocess/shell behavior, no network/model/auth-cache/secret access, and no diagnostic/remediation automation. Unsupported platforms continue to return structured safe unsupported output.
-
-### Unified Windows operator guidance
-
-`shellforgeai ask` and interactive mode use the same pure Windows operator UX router for scoped Windows status, check-first/check-next, slow or latency first-pass triage, CPU/memory/disk/process strongest-signal comparison, current-host handoff, and mutation-refusal prompts. The shared route renders the standard bounded read-only profile as the first safe check:
-
-```bash
-shellforgeai windows evidence --profile standard --json
-```
-
-Additional drill-downs use canonical `shellforgeai windows ...` commands. The `sfai.cmd` wrapper remains supported on Windows, but rendered operator guidance does not require it. Generic Linux/Docker status prompts on non-Windows hosts stay on the existing Linux/Docker route; explicitly Windows-scoped prompts from Linux render guidance only and say that no Windows probing was performed. No recommended command is automatically executed. Natural-language cleanup, restart, service control, process termination, remediation, rollback, or recovery requests are refused and require any future mutation capability to use an explicit named, reviewed, confirmed recipe. This adds no collector, dependency, mutation path, model path, wrapper behavior, or packaging change.
-
-## Windows runtime integrity
-
-- [Windows runtime integrity preflight](docs/runbooks/WINDOWS_RUNTIME_INTEGRITY.md) documents the standalone PR304 read-only runtime packet and saved-artifact validator.
-
-### Windows durable runtime reconcile preflight
-
-ShellForgeAI includes a standalone PR305 preview helper, `scripts/windows_runtime_reconcile_preflight.py`, plus saved-packet validator `scripts/windows_runtime_reconcile_acceptance.py`. The helper consumes validated PR304 `windows_runtime_integrity` artifacts and previews only the exact allowlisted Windows durable runtime files `config/profiles/inspect.yaml` and `bin/sfai.cmd` from explicit staged and durable roots. It is not a product CLI command and execution is not implemented: no copy, replace, backup, cleanup, install, wrapper invocation, PowerShell/CMD/WinRM/QGA/WMI/CIM/subprocess/shell, service/process control, registry/PATH/environment mutation, network/model call, or secret/auth-cache read occurs. Status is `unsupported`, `blocked`, `ready`, or `no_change`; future execution gates are reported as future gates only.
+For command-surface changes, run the focused command-surface tests documented in [CLI reference](docs/cli.md). This README is product-facing; deeper safety catalogues, platform notes, and historical PR chronology live in the linked reference documents.

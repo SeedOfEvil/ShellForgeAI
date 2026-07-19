@@ -22,7 +22,7 @@ model cannot reliably execute those collectors.
 - Already-collected evidence is included in the prompt.
 - Arbitrary shell stays blocked.
 - Mutation stays blocked or approval-required.
-- `apply` is validation-only in this alpha.
+- `apply` is validation-only under the current guarded V1 boundary.
 - Model subprocesses must use bounded timeouts and explicit cleanup/reaping;
   failures/timeouts should return safely without hanging the REPL.
 

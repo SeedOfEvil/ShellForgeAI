@@ -54,6 +54,8 @@ the final merge owner.
 
 ## CLI implementation note
 
+ShellForgeAI is V1 released, early beta-quality, guarded, and not production-autonomous; Linux/Docker is the primary V1 lane, while Windows support is preview/early support.
+
 `src/shellforgeai/cli.py` remains the root Typer app wiring. The staged
 command-module split keeps behavior unchanged while moving handlers into
 `src/shellforgeai/commands/`: PR182 extracted `status`/`doctor`, PR183 extracted
@@ -596,7 +598,7 @@ The human-feel regression suite (`tests/test_pr134_human_feel_regression.py`) ke
 shellforgeai apply <valid-plan-file>
 ```
 
-Expected outcome: apply execution is intentionally disabled in this alpha
+Expected outcome: apply execution is intentionally disabled by this guarded V1 boundary
 (validation-only parse/validate path).
 
 For approved proposal objects:
