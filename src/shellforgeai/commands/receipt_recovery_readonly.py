@@ -34,7 +34,11 @@ def register(recipes_receipt_app: typer.Typer) -> None:
     def recipes_receipt_recovery_status(
         ctx: typer.Context,
         recovery_receipt_ref: Annotated[
-            str, typer.Argument(help="Recovery receipt id or ShellForgeAI-owned path.")
+            str,
+            typer.Argument(
+                help="Recovery receipt id or ShellForgeAI-owned path.",
+                metavar="RECOVERY_RECEIPT_REF",
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
@@ -53,7 +57,11 @@ def register(recipes_receipt_app: typer.Typer) -> None:
     def recipes_receipt_recovery_validate(
         ctx: typer.Context,
         recovery_receipt_ref: Annotated[
-            str, typer.Argument(help="Recovery receipt id or ShellForgeAI-owned path.")
+            str,
+            typer.Argument(
+                help="Recovery receipt id or ShellForgeAI-owned path.",
+                metavar="RECOVERY_RECEIPT_REF",
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:

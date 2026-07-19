@@ -269,7 +269,9 @@ def register(recipes_app: typer.Typer, recipes_preflight_app: typer.Typer) -> No
 
     @recipes_app.command("inspect")
     def recipes_inspect(
-        recipe_id: Annotated[str, typer.Argument(help="Recipe id to inspect.")],
+        recipe_id: Annotated[
+            str, typer.Argument(help="Recipe id to inspect.", metavar="RECIPE_ID")
+        ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
         """Inspect one governed recipe. No action is taken."""
@@ -364,7 +366,10 @@ def register(recipes_app: typer.Typer, recipes_preflight_app: typer.Typer) -> No
     def recipes_preflight_validate(
         ctx: typer.Context,
         preflight_ref: Annotated[
-            str, typer.Argument(help="Saved preflight id or ShellForgeAI-owned path.")
+            str,
+            typer.Argument(
+                help="Saved preflight id or ShellForgeAI-owned path.", metavar="PREFLIGHT_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:

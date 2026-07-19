@@ -38,7 +38,10 @@ def register(recipes_receipt_app: typer.Typer, app: typer.Typer | None = None) -
     def recipes_receipt_verify(
         ctx: typer.Context,
         receipt_ref: Annotated[
-            str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
+            str,
+            typer.Argument(
+                help="Saved receipt id or ShellForgeAI-owned path.", metavar="RECEIPT_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
@@ -57,7 +60,10 @@ def register(recipes_receipt_app: typer.Typer, app: typer.Typer | None = None) -
     def recipes_receipt_validate(
         ctx: typer.Context,
         receipt_ref: Annotated[
-            str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
+            str,
+            typer.Argument(
+                help="Saved receipt id or ShellForgeAI-owned path.", metavar="RECEIPT_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
@@ -76,7 +82,10 @@ def register(recipes_receipt_app: typer.Typer, app: typer.Typer | None = None) -
     def recipes_receipt_rollback_preview(
         ctx: typer.Context,
         receipt_ref: Annotated[
-            str, typer.Argument(help="Saved receipt id or ShellForgeAI-owned path.")
+            str,
+            typer.Argument(
+                help="Saved receipt id or ShellForgeAI-owned path.", metavar="RECEIPT_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:

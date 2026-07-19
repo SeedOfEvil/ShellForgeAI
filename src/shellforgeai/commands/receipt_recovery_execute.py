@@ -95,7 +95,10 @@ def register(recipes_receipt_app: typer.Typer) -> None:
         ctx: typer.Context,
         receipt_ref: Annotated[
             str,
-            typer.Argument(help="Saved disposable restart receipt id or ShellForgeAI-owned path."),
+            typer.Argument(
+                help="Saved disposable restart receipt id or ShellForgeAI-owned path.",
+                metavar="RECEIPT_REF",
+            ),
         ],
         confirm: Annotated[
             bool,
