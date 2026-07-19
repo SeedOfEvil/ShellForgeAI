@@ -1047,3 +1047,7 @@ Additional drill-downs use canonical `shellforgeai windows ...` commands. The `s
 ## Windows runtime integrity
 
 - [Windows runtime integrity preflight](docs/runbooks/WINDOWS_RUNTIME_INTEGRITY.md) documents the standalone PR304 read-only runtime packet and saved-artifact validator.
+
+### Windows durable runtime reconcile preflight
+
+ShellForgeAI includes a standalone PR305 preview helper, `scripts/windows_runtime_reconcile_preflight.py`, plus saved-packet validator `scripts/windows_runtime_reconcile_acceptance.py`. The helper consumes validated PR304 `windows_runtime_integrity` artifacts and previews only the exact allowlisted Windows durable runtime files `config/profiles/inspect.yaml` and `bin/sfai.cmd` from explicit staged and durable roots. It is not a product CLI command and execution is not implemented: no copy, replace, backup, cleanup, install, wrapper invocation, PowerShell/CMD/WinRM/QGA/WMI/CIM/subprocess/shell, service/process control, registry/PATH/environment mutation, network/model call, or secret/auth-cache read occurs. Status is `unsupported`, `blocked`, `ready`, or `no_change`; future execution gates are reported as future gates only.
