@@ -87,7 +87,9 @@ class Recipe:
             "rollback_available": self.rollback_available,
             "receipt_required": self.receipt_required,
             "first_safe_command": self.first_safe_command,
-            "safe_next_commands": list(self.safe_next_commands or (self.first_safe_command,)),
+            "safe_next_commands": list(
+                self.safe_next_commands or (self.first_safe_command,)
+            ),
             "blocked_reason": self.blocked_reason,
             "safety_notes": list(self.safety_notes),
             "executable": False,
@@ -167,7 +169,9 @@ _RECIPES: tuple[Recipe, ...] = (
         first_safe_command="shellforgeai handoff --json",
         safe_next_commands=("shellforgeai handoff history --limit 5",),
         required_evidence=("status/triage/propose/apply-preview/verify context",),
-        safety_notes=("Handoff writes ShellForgeAI metadata only when explicitly saved/exported.",),
+        safety_notes=(
+            "Handoff writes ShellForgeAI metadata only when explicitly saved/exported.",
+        ),
     ),
     Recipe(
         recipe_id="docker.disposable_restart",
@@ -244,6 +248,66 @@ _RECIPES: tuple[Recipe, ...] = (
         safety_notes=("Review only; no cleanup execution.",),
     ),
     Recipe(
+        recipe_id="windows.runtime_reconcile",
+        title="Preview Windows durable runtime reconciliation",
+        category="windows",
+        status=STATUS_PREVIEW_ONLY,
+        mutation_class=MUTATION_NONE,
+        description=(
+            "Preview-only governed reconciliation for exactly the inspect profile and "
+            "Windows sfai.cmd wrapper from validated PR304 runtime-integrity artifacts. "
+            "Execution is not implemented."
+        ),
+        required_evidence=(
+            "one or two saved PR304 windows_runtime_integrity packets",
+            "explicit staged source root",
+            "explicit durable runtime root",
+        ),
+        preflight_gates=(
+            "Windows platform",
+            "PR304 artifact validation and stable identity",
+            "exact two-file allowlist",
+            "source/destination containment and safety",
+            "hash availability",
+        ),
+        approval_gates=(
+            "future explicit operator confirmation",
+            "future saved-preflight validation",
+            "future unchanged evidence/source/destination rechecks",
+            "future same-directory backup before replacement",
+            "future atomic replacement",
+            "future post-copy hash verification",
+            "future receipt",
+            "future post-change PR304 verification from staged root and System32",
+        ),
+        verification_required=True,
+        rollback_available=False,
+        receipt_required=True,
+        first_safe_command=(
+            "python scripts/windows_runtime_reconcile_preflight.py <pr304.json> "
+            "--staged-source-root <source> --durable-runtime-root <runtime> --json"
+        ),
+        safe_next_commands=(
+            (
+                "python scripts/windows_runtime_reconcile_preflight.py <pr304-a.json> "
+                "<pr304-b.json> --staged-source-root <source> "
+                "--durable-runtime-root <runtime> --out-json <packet.json> --json"
+            ),
+            "python scripts/windows_runtime_reconcile_acceptance.py <packet.json> --json",
+        ),
+        blocked_reason="Preview-only: execution requires a future approved implementation.",
+        safety_notes=(
+            (
+                "This recipe has no execute lane and cannot create, replace, back up, "
+                "clean, or repair files."
+            ),
+            (
+                "The standalone helper may save only a deterministic ShellForgeAI "
+                "metadata packet when explicitly requested and refuses overwrite."
+            ),
+        ),
+    ),
+    Recipe(
         recipe_id="metadata.cleanup_execute",
         title="Execute ShellForgeAI-owned metadata cleanup",
         category="metadata",
@@ -316,14 +380,22 @@ def detail_payload(recipe_id: str) -> dict[str, Any]:
             "safe_next_commands": ["shellforgeai recipes list"],
             "warnings": ["recipe not found"],
         }
-    return {**base, "status": "ok", "recipe_id": recipe_id, "recipe": recipe, "warnings": []}
+    return {
+        **base,
+        "status": "ok",
+        "recipe_id": recipe_id,
+        "recipe": recipe,
+        "warnings": [],
+    }
 
 
 def _normalize_labels(labels: dict[str, Any] | None) -> dict[str, str]:
     return {str(k): str(v) for k, v in (labels or {}).items()}
 
 
-def _target_row_from_scene(target: str, scene: dict[str, Any] | None) -> dict[str, Any] | None:
+def _target_row_from_scene(
+    target: str, scene: dict[str, Any] | None
+) -> dict[str, Any] | None:
     for row in (scene or {}).get("containers") or []:
         if isinstance(row, dict) and str(row.get("name") or "") == target:
             return row
@@ -379,7 +451,9 @@ def eligibility_payload(
     metadata = _target_metadata(target, scene)
     labels = dict(metadata["labels"])
     required_labels = dict(recipe.get("required_target_labels") or {})
-    missing_labels = [f"{k}={v}" for k, v in required_labels.items() if labels.get(k) != v]
+    missing_labels = [
+        f"{k}={v}" for k, v in required_labels.items() if labels.get(k) != v
+    ]
     blockers: list[str] = []
     if metadata["production_target"]:
         blockers.append("production target refused")
@@ -390,7 +464,10 @@ def eligibility_payload(
     if missing_labels:
         blockers.extend(f"missing required label: {label}" for label in missing_labels)
 
-    disabled = recipe["status"].startswith("disabled_until") or recipe["status"] == STATUS_FUTURE
+    disabled = (
+        recipe["status"].startswith("disabled_until")
+        or recipe["status"] == STATUS_FUTURE
+    )
     if disabled and recipe["mutation_class"] != MUTATION_NONE:
         blockers.append(recipe.get("blocked_reason") or "execution disabled")
 
@@ -420,12 +497,20 @@ def eligibility_payload(
     ]
     for gate in recipe.get("preflight_gates") or []:
         gates.append(
-            {"name": gate, "status": "pending_or_failed", "reason": "future preflight gate"}
+            {
+                "name": gate,
+                "status": "pending_or_failed",
+                "reason": "future preflight gate",
+            }
         )
     for gate in recipe.get("approval_gates") or []:
-        gates.append({"name": gate, "status": "required", "reason": "future approval gate"})
+        gates.append(
+            {"name": gate, "status": "required", "reason": "future approval gate"}
+        )
 
-    first_safe_command = str(recipe.get("first_safe_command") or "shellforgeai recipes list")
+    first_safe_command = str(
+        recipe.get("first_safe_command") or "shellforgeai recipes list"
+    )
     if recipe_id == "docker.disposable_restart" and metadata["production_target"]:
         first_safe_command = "shellforgeai status --json"
     elif recipe_id == "docker.disposable_restart" and blockers:
