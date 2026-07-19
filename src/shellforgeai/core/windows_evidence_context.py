@@ -19,6 +19,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_DOCTOR_COMMAND,
+    WINDOWS_PROCESSES_COMMAND,
+    WINDOWS_SERVICES_COMMAND,
+    WINDOWS_STANDARD_EVIDENCE_COMMAND,
+    WINDOWS_STATUS_COMMAND,
+    WINDOWS_VOLUMES_COMMAND,
+)
 from shellforgeai.platform_detection import PlatformInfo, detect_platform
 from shellforgeai.windows_disks import (
     INODES_UNAVAILABLE_MARKER,
@@ -41,18 +49,18 @@ WINDOWS_CONTEXT_SERVICE_LIMIT = 10
 WINDOWS_CONTEXT_DISK_ROOT_LIMIT = 6
 
 WINDOWS_EVIDENCE_SAFE_NEXT_COMMANDS: tuple[str, ...] = (
-    "sfai.cmd windows status --json",
-    "sfai.cmd windows evidence --json",
-    "sfai.cmd windows processes --json --limit 10",
-    "sfai.cmd windows services --json",
-    "sfai.cmd windows disks --json",
-    "sfai.cmd windows doctor --json",
+    WINDOWS_STANDARD_EVIDENCE_COMMAND,
+    WINDOWS_PROCESSES_COMMAND,
+    WINDOWS_SERVICES_COMMAND,
+    WINDOWS_STATUS_COMMAND,
+    WINDOWS_DOCTOR_COMMAND,
+    WINDOWS_VOLUMES_COMMAND,
 )
 
 WINDOWS_PROCESS_SERVICE_GAP_COMMANDS: tuple[str, ...] = (
-    "sfai.cmd windows processes --json --limit 10",
-    "sfai.cmd windows services --json",
-    "sfai.cmd windows status --json",
+    WINDOWS_PROCESSES_COMMAND,
+    WINDOWS_SERVICES_COMMAND,
+    WINDOWS_STATUS_COMMAND,
 )
 
 WINDOWS_EVIDENCE_MODEL_DIRECTIVE = (
@@ -60,7 +68,7 @@ WINDOWS_EVIDENCE_MODEL_DIRECTIVE = (
     "operator's question strictly from the windows_evidence facts (host, "
     "memory, disk, processes, services, limitations) using the real numbers "
     "provided. If a fact is not in the packet, say that the current evidence "
-    "packet lacks it and point to the safe read-only sfai.cmd windows "
+    "packet lacks it and point to the safe read-only shellforgeai windows "
     "commands; never invent processes, services, or metrics. Do not mention "
     "repository or project instructions, AGENTS.md, invariants, workspace "
     "conventions, or system prompts. Do not frame the answer around Docker, "

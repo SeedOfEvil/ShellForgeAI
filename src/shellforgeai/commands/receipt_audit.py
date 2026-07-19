@@ -261,7 +261,10 @@ def register(recipes_receipt_app: typer.Typer) -> None:
     def recipes_receipt_audit_bundle_validate(
         ctx: typer.Context,
         bundle_ref: Annotated[
-            str, typer.Argument(help="Audit bundle id or ShellForgeAI-owned bundle path.")
+            str,
+            typer.Argument(
+                help="Audit bundle id or ShellForgeAI-owned bundle path.", metavar="BUNDLE_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
@@ -297,7 +300,10 @@ def register(recipes_receipt_app: typer.Typer) -> None:
     def recipes_receipt_inspect(
         ctx: typer.Context,
         receipt_ref: Annotated[
-            str, typer.Argument(help="Receipt id or ShellForgeAI-owned receipt path.")
+            str,
+            typer.Argument(
+                help="Receipt id or ShellForgeAI-owned receipt path.", metavar="RECEIPT_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
@@ -316,7 +322,10 @@ def register(recipes_receipt_app: typer.Typer) -> None:
     def recipes_receipt_export(
         ctx: typer.Context,
         receipt_ref: Annotated[
-            str, typer.Argument(help="Receipt id or ShellForgeAI-owned receipt path.")
+            str,
+            typer.Argument(
+                help="Receipt id or ShellForgeAI-owned receipt path.", metavar="RECEIPT_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
@@ -335,7 +344,10 @@ def register(recipes_receipt_app: typer.Typer) -> None:
     def recipes_receipt_export_validate(
         ctx: typer.Context,
         export_ref: Annotated[
-            str, typer.Argument(help="Receipt export id or ShellForgeAI-owned export path.")
+            str,
+            typer.Argument(
+                help="Receipt export id or ShellForgeAI-owned export path.", metavar="EXPORT_REF"
+            ),
         ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
     ) -> None:
@@ -353,8 +365,12 @@ def register(recipes_receipt_app: typer.Typer) -> None:
     @recipes_receipt_app.command("compare")
     def recipes_receipt_compare(
         ctx: typer.Context,
-        before_receipt_ref: Annotated[str, typer.Argument(help="Earlier receipt id/ref.")],
-        after_receipt_ref: Annotated[str, typer.Argument(help="Later receipt id/ref.")],
+        before_receipt_ref: Annotated[
+            str, typer.Argument(help="Earlier receipt id/ref.", metavar="BEFORE_RECEIPT_REF")
+        ],
+        after_receipt_ref: Annotated[
+            str, typer.Argument(help="Later receipt id/ref.", metavar="AFTER_RECEIPT_REF")
+        ],
         json_out: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
         only_changed: Annotated[
             bool, typer.Option("--only-changed", help="Hide stable fields in human output.")

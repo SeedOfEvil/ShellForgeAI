@@ -617,8 +617,8 @@ def test_ask_windows_next_check_prompt_avoids_docker(monkeypatch: Any, tmp_path:
     assert "Memory summary unavailable" in out
     assert "shellforgeai windows status --json" in out
     assert "No command was executed." in out
-    assert "No cleanup was performed." in out
-    assert "No rollback or recovery was performed." in out
+    assert "No cleanup, restart, service control, process termination, remediation, " in out
+    assert "rollback, or recovery was performed." in out
     assert "Read-only Docker triage ranking" not in out
     assert "containers_seen=0" not in out
     assert "shellforgeai triage docker --json" not in out
@@ -683,8 +683,8 @@ def test_windows_exact_next_checks_are_deterministic_without_docker_leakage(
     assert "shellforgeai windows doctor --json" in out
     assert "shellforgeai windows evidence --profile standard --json" in out
     assert "No command was executed." in out
-    assert "No cleanup was performed." in out
-    assert "No rollback or recovery was performed." in out
+    assert "No cleanup, restart, service control, process termination, remediation, " in out
+    assert "rollback, or recovery was performed." in out
     assert "shellforgeai triage docker" not in out
     assert "docker compose" not in out.lower()
 

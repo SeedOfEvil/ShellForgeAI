@@ -70,8 +70,8 @@ GOOD_EVIDENCE_ANSWER = (
     "On this Windows host the read-only evidence packet shows 182 visible "
     "processes (bounded preview of 10, including System and svchost.exe) and "
     "98 services with 61 running. Process/service evidence is read-only. "
-    "For more detail run sfai.cmd windows processes --json --limit 10 or "
-    "sfai.cmd windows services --json."
+    "For more detail run shellforgeai windows processes --json --limit 10 or "
+    "shellforgeai windows services --json --limit 25."
 )
 
 
@@ -373,7 +373,7 @@ def test_windows_answer_guard_rejects_bad_output(text: str) -> None:
         (
             "From the evidence currently loaded, I can see host and memory facts. "
             "I do not have process/service detail in this evidence packet. "
-            "Run sfai.cmd windows services --json to fill the gap."
+            "Run shellforgeai windows services --json --limit 25 to fill the gap."
         ),
     ],
 )
@@ -450,9 +450,15 @@ def test_what_is_running_bad_preamble_is_gated_to_evidence_answer(
     assert "processes total=182" in out.lower() or "Processes total=182" in out
     assert "services total=98 running=61" in out.lower() or "Services total=98" in out
     assert "read-only" in out.lower()
-    assert "sfai.cmd windows processes --json --limit 10" in out
-    assert "sfai.cmd windows services --json" in out
+    safe_section = out.split("Safe next read-only commands:", 1)[1]
+    safe_lines = [
+        line.strip(" -") for line in safe_section.splitlines() if line.strip().startswith("-")
+    ]
+    assert safe_lines[0] == "shellforgeai windows evidence --profile standard --json"
+    assert "shellforgeai windows processes --json --limit 10" in out
+    assert "shellforgeai windows services --json --limit 25" in out
     assert "shellforgeai windows status --json" in out
+    assert "sfai.cmd" not in out
     assert "No command was executed" in out
 
     # Raw bad output stays in the existing model-response audit artifact only.
@@ -483,8 +489,8 @@ def test_thin_evidence_states_gap_and_suggests_safe_commands(
     assert "I do not have process detail in this evidence packet." in out
     assert "I do not have service detail in this evidence packet." in out
     assert "Run these read-only commands to fill the gap:" in out
-    assert "sfai.cmd windows processes --json --limit 10" in out
-    assert "sfai.cmd windows services --json" in out
+    assert "shellforgeai windows processes --json --limit 10" in out
+    assert "shellforgeai windows services --json --limit 25" in out
     # No invented process/service facts.
     assert "svchost" not in out
     assert "System" not in out.replace("this system", "").replace("Safety:", "")
@@ -630,8 +636,8 @@ def test_ask_bad_preamble_is_gated_to_evidence_answer(monkeypatch: Any, tmp_path
     assert "Understood" not in out
     assert "operate within the ShellForgeAI invariants" not in out
     assert "From the evidence currently loaded" in out
-    assert "sfai.cmd windows processes --json --limit 10" in out
-    assert "sfai.cmd windows services --json" in out
+    assert "shellforgeai windows processes --json --limit 10" in out
+    assert "shellforgeai windows services --json --limit 25" in out
     # Provider metadata is not the primary answer for gated Windows output.
     assert "Provider:" not in out
     assert "Model:" not in out
