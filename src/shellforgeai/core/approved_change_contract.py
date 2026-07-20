@@ -35,11 +35,15 @@ def _clean_text(value: str) -> str:
     return " ".join(value.strip().split())
 
 
+def _is_wildcard(value: str) -> bool:
+    return value.casefold() in _WILDCARDS
+
+
 def _require_text(value: str) -> str:
     value = _clean_text(value)
     if not value:
         raise ValueError("must be non-empty")
-    if value in _WILDCARDS:
+    if _is_wildcard(value):
         raise ValueError("wildcard values are not allowed")
     return value
 
@@ -58,7 +62,9 @@ def _require_aware(value: datetime) -> datetime:
 
 
 def _canonical_datetime(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    normalized = value.astimezone(timezone.utc)
+    timespec = "microseconds" if normalized.microsecond else "seconds"
+    return normalized.isoformat(timespec=timespec).replace("+00:00", "Z")
 
 
 class _FrozenModel(BaseModel):
@@ -201,7 +207,7 @@ class ApprovedChangeSubject(_FrozenModel):
     @classmethod
     def _validate_capability_id(cls, value: str) -> str:
         value = _require_text(value)
-        if value in _WILDCARDS or not _CAPABILITY_RE.fullmatch(value):
+        if _is_wildcard(value) or not _CAPABILITY_RE.fullmatch(value):
             raise ValueError("capability_id must be a bounded exact identifier")
         return value
 
@@ -345,7 +351,7 @@ def _validate_supported_capabilities(
             errors.append("supported capability IDs must be strings")
             continue
         capability = item.strip()
-        if capability in _WILDCARDS or not _CAPABILITY_RE.fullmatch(capability):
+        if _is_wildcard(capability) or not _CAPABILITY_RE.fullmatch(capability):
             errors.append(f"invalid supported capability ID: {item}")
         else:
             normalized.append(capability)

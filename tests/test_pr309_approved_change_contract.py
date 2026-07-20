@@ -157,6 +157,73 @@ def test_canonical_hash_stability_unordered_identity_and_evidence_and_timezone_n
     )
 
 
+def test_canonical_hash_preserves_microsecond_precision_and_invalidates_attestation():
+    observed_100ms = datetime(2026, 7, 20, 12, 0, 0, 100000, tzinfo=timezone.utc)
+    observed_200ms = datetime(2026, 7, 20, 12, 0, 0, 200000, tzinfo=timezone.utc)
+    baseline = subject(
+        evidence_references=(
+            EvidenceReference(
+                reference_id="ev-1",
+                source="logs-report",
+                sha256=SHA_A,
+                observed_at=observed_100ms,
+            ),
+        )
+    )
+    mutated = subject(
+        evidence_references=(
+            EvidenceReference(
+                reference_id="ev-1",
+                source="logs-report",
+                sha256=SHA_A,
+                observed_at=observed_200ms,
+            ),
+        )
+    )
+    assert "2026-07-20T12:00:00.100000Z" in canonical_subject_json(baseline)
+    assert "2026-07-20T12:00:00.200000Z" in canonical_subject_json(mutated)
+    assert canonical_subject_json(baseline) != canonical_subject_json(mutated)
+    assert compute_subject_sha256(baseline) != compute_subject_sha256(mutated)
+
+    approved = contract(baseline)
+    assert verify_approval_binding(approved).approval_binding_valid is True
+    mismatch = ApprovedChangeContract(subject=mutated, approval=approved.approval)
+    binding = verify_approval_binding(mismatch)
+    validation = validate_approved_change_contract(mismatch, {CAP})
+    assert binding.status == "approval_mismatch"
+    assert validation.status == "approval_mismatch"
+    assert validation.execution_allowed is False
+    assert validation.execution_available is False
+    assert validation.execution_status == "not_executed"
+
+
+def test_canonical_hash_keeps_timezone_equivalence_with_equal_microseconds():
+    utc_subject = subject(
+        evidence_references=(
+            EvidenceReference(
+                reference_id="ev-1",
+                source="logs-report",
+                sha256=SHA_A,
+                observed_at=datetime(2026, 7, 20, 12, 0, 0, 100000, tzinfo=timezone.utc),
+            ),
+        )
+    )
+    offset_subject = subject(
+        evidence_references=(
+            EvidenceReference(
+                reference_id="ev-1",
+                source="logs-report",
+                sha256=SHA_A,
+                observed_at=datetime(
+                    2026, 7, 20, 8, 0, 0, 100000, tzinfo=timezone(timedelta(hours=-4))
+                ),
+            ),
+        )
+    )
+    assert canonical_subject_json(utc_subject) == canonical_subject_json(offset_subject)
+    assert compute_subject_sha256(utc_subject) == compute_subject_sha256(offset_subject)
+
+
 def test_procedure_order_and_contents_are_hash_significant():
     baseline = subject()
     swapped = subject(procedure=tuple(reversed(baseline.procedure)))
@@ -409,6 +476,51 @@ def test_capability_validation_requires_explicit_exact_safe_set():
     assert validate_approved_change_contract(c, None).status == "invalid_validation_input"
     with pytest.raises(ValidationError):
         subject(capability_id="*")
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("ALL", "exact"),
+        ("All", "exact"),
+        ("aNy", "exact"),
+        ("exact", "ANY"),
+        ("exact", "Any"),
+        ("exact", "aLl"),
+        ("  Any  ", "exact"),
+        ("exact", "  aLl  "),
+    ],
+)
+def test_case_variant_wildcard_identity_claims_are_rejected(key, value):
+    with pytest.raises(ValidationError):
+        TargetIdentityClaim(key=key, value=value)
+
+
+@pytest.mark.parametrize("field", ["kind", "name"])
+def test_case_variant_wildcard_target_kind_and_name_are_rejected(field):
+    kwargs = {
+        "kind": "container",
+        "name": "demo",
+        "identity_claims": (TargetIdentityClaim(key="Exact", value="Value"),),
+    }
+    kwargs[field] = "  Any  "
+    with pytest.raises(ValidationError):
+        ApprovedChangeTarget(**kwargs)
+
+
+def test_case_variant_wildcard_capability_and_supported_inputs_are_rejected_but_casing_retained():
+    claim = TargetIdentityClaim(key="ExactKey", value="ExactValue")
+    assert claim.key == "ExactKey"
+    assert claim.value == "ExactValue"
+    with pytest.raises(ValidationError):
+        subject(capability_id="ALL")
+    assert (
+        validate_approved_change_contract(contract(), {"ANY"}).status == "invalid_validation_input"
+    )
+    assert (
+        validate_approved_change_contract(contract(), {"  aLl  "}).status
+        == "invalid_validation_input"
+    )
 
 
 @pytest.mark.parametrize(
