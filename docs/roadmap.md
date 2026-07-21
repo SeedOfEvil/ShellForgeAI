@@ -9,6 +9,9 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 - Windows is preview/early support for local read-only evidence, deterministic operator guidance, and validated Windows Server 2025 workflows.
 - Current capabilities include evidence collection, deterministic triage, reports, previews, approval metadata, verification, receipts, and narrow governed proof/testing lanes.
 - The maintained PR143 command surface audit remains the active command-surface classification reference for current interface hygiene.
+- PR157 remains the validation lane optimizer reference for Lane A/B/C planning.
+- The archive source action runbook remains documented in [Archive Source Action Runbook](ARCHIVE_SOURCE_ACTION_RUNBOOK.md); it is non-executable and adds no execution command.
+- Windows/PowerShell V1 remains planned as read-only local evidence / Windows read-only doctor prototype support; Linux/Docker remains primary and the safety model remains unchanged.
 - The complete final-state lifecycle is not yet implemented across arbitrary operator-developed solutions.
 
 ## Stage A — Product contract
@@ -17,13 +20,13 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 - Keep document ownership clear: Product Status owns current maturity, V1 Scope owns the released V1 contract, Safety owns current safety and mutation rules, and this Roadmap owns staged delivery.
 - Add a documentation drift guard without changing runtime behavior.
 
-## Future Stage B — Approved change contract
+## Stage B — Approved-change contract: in progress
 
-- Define an exact, reviewable approved-solution representation.
-- Capture target, scope, impact, ordered procedure, precondition/current-state gates, verification criteria, rollback or recovery awareness, audit requirements, and unsupported aspects.
-- Preserve stable identity after approval so approval applies to that exact solution only.
+- PR309 provides an immutable approval subject, deterministic subject identity, exact attestation binding, and inert structural/capability validation.
+- The PR309 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
+- Future Stage B work remains explicit: legacy proposal compatibility decision, persistence format, approval workflow integration, current-state execution preflight, capability binding, and receipt linkage.
 
-This stage describes the desired outcome only; it does not design schemas, files, classes, commands, receipts, executors, or a mutation engine.
+Stage B is not complete. The PR309 foundation defines a schema module only for the inert contract; it does not design schemas for persistence, files, commands, receipts, executors, adapters, or a mutation engine.
 
 ## Future Stage C — First narrow end-to-end implementation lane
 

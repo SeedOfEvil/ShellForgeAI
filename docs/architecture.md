@@ -67,6 +67,7 @@ synthesis** (LLM providers).
 | Path | Purpose |
 | --- | --- |
 | `core/config.py` | YAML + env settings (`pydantic-settings`). |
+| `core/approved_change_contract.py` | Inert Stage B immutable approved-change subject, attestation binding, canonical hash, and read-only validation; not wired into CLI, proposals, approvals, recipes, persistence, preflight, or execution. |
 | `core/profiles.py` | Risk-class allow/ask/deny profiles. |
 | `core/session.py` | Session id, data dir, artifact dir. |
 | `core/context.py` | `RuntimeContext` carried through CLI handlers. |
@@ -137,6 +138,10 @@ operator's behalf.
   logs, and its own artifacts.
 - Workspace trust grants doc reads and artifact writes under the data
   dir. It never lifts policy, enables mutation, or bypasses gates.
+
+## Approved-change contract boundary
+
+`core/approved_change_contract.py` is an isolated Stage B domain module. It grants no execution eligibility and exists only to provide a stable approval-bound identity for later reviewed integration. It is not connected to current proposal objects, approval transitions, action compilation, recipes, persistence, receipts, CLI commands, preflight, or execution lanes.
 
 ## Mutation boundary
 
