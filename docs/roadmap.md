@@ -23,10 +23,11 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 ## Stage B — Approved-change contract: in progress
 
 - PR309 provides an immutable approval subject, deterministic subject identity, exact attestation binding, and inert structural/capability validation.
-- The PR309 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
-- Future Stage B work remains explicit: legacy proposal compatibility decision, persistence format, approval workflow integration, current-state execution preflight, capability binding, and receipt linkage.
+- PR310 establishes the strict legacy compatibility decision: automatic conversion from legacy Proposal schema v1 is prohibited, approval is not portable, and separately reviewed context is required for any future conversion.
+- The PR309/PR310 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
+- Future Stage B work remains explicit: supplemental-context contract decision, persistence format, approval workflow integration, capability binding, current-state execution preflight, and receipt linkage.
 
-Stage B is not complete. The PR309 foundation defines a schema module only for the inert contract; it does not design schemas for persistence, files, commands, receipts, executors, adapters, or a mutation engine.
+Stage B is not complete. The PR309/PR310 foundation defines inert contract and compatibility-assessment modules only; it does not design schemas for supplemental context, persistence, files, commands, receipts, executors, adapters, or a mutation engine.
 
 ## Future Stage C — First narrow end-to-end implementation lane
 
