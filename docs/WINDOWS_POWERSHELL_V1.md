@@ -267,3 +267,95 @@ Manual validation examples:
 python scripts/windows_runtime_reconcile_preflight.py pr304-source.json pr304-system32.json --staged-source-root C:/ShellForgeAI --durable-runtime-root C:/ShellForgeAI-Runtime --out-json pr305-reconcile.json --json
 python scripts/windows_runtime_reconcile_acceptance.py pr305-reconcile.json --json
 ```
+
+## Windows durable runtime reconciliation execute lane (PR313)
+
+`scripts/windows_runtime_reconcile_execute.py` completes the deliberately deferred PR305 apply lane for exactly one named capability, `windows.runtime_reconcile`. It is the authoritative direct entry point and is invoked with a known exact Python interpreter and an exact source checkout, so repairing the durable wrapper never depends on the durable wrapper. The testable core lives in `src/shellforgeai/core/windows_runtime_reconcile_execution.py`; no product CLI command, `copy`, `repair`, or `apply-files` surface is added, and natural language never reaches this lane.
+
+### Exact scope
+
+Only these two fixed mappings are reachable, in this order:
+
+| Staged source | Durable destination |
+| --- | --- |
+| `config/profiles/inspect.yaml` | `config/profiles/inspect.yaml` |
+| `scripts/windows/sfai.cmd` | `bin/sfai.cmd` |
+
+The left side is relative to the explicit staged source root and the right side is relative to the explicit durable runtime root. There is no user-defined mapping, prefix match, glob, directory recursion, alias, `shellforgeai.cmd` reconciliation, package file, residue file, or backup cleanup. This is a local Windows file-integrity repair lane, not a generic file copier, launcher generator, release activator, package installer, cleanup lane, remote-administration facility, or autonomous remediation system.
+
+### Required input
+
+1. One saved PR305 `windows_runtime_reconcile` packet that passes `scripts/windows_runtime_reconcile_acceptance.py`, with status `ready` or `no_change`.
+2. One or two freshly generated PR304 `windows_runtime_integrity` artifacts that pass `scripts/windows_runtime_integrity_acceptance.py`, compared for stable identity when two are supplied.
+3. Explicit `--staged-source-root` and `--durable-runtime-root`, both absolute and both normalizing to the roots recorded in the accepted plan.
+4. `--confirm-plan-sha256` matching the accepted plan exactly.
+5. `--data-dir` naming a ShellForgeAI-owned receipt/data root.
+6. A local Windows host.
+
+```bash
+python scripts/windows_runtime_reconcile_execute.py pr305-reconcile.json pr304-staged.json pr304-system32.json --staged-source-root C:/ShellForgeAI --durable-runtime-root C:/ShellForgeAI-Runtime --confirm-plan-sha256 <64-lowercase-hex> --data-dir C:/ShellForgeAI-Data --json
+```
+
+### Canonical plan-hash confirmation
+
+The confirmation identity is the SHA-256 of the deterministic canonical JSON of the loaded packet object (`json.dumps(packet, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` encoded as UTF-8). It must be exactly 64 lowercase hexadecimal characters and is compared in constant time. Changing any packet field changes the required confirmation. The raw packet file SHA-256 is also recorded in the receipt, but confirmation binds the canonical packet hash.
+
+This confirmation is recipe-specific authorization only. It is not a PR309 `ApprovalAttestation`, not portable approval, not authenticated enterprise identity, not approval of any other plan, and not approval of future drift. Natural-language confirmation, `--yes`, bare booleans, arbitrary mapping/destination/operation arguments, and wildcard paths are all refused. A missing or mismatched confirmation causes zero destination mutation, zero backup creation, zero temporary files, no execution receipt, and deterministic blocked output.
+
+### Fresh revalidation and safe narrowing
+
+The saved plan is an authorization ceiling and a historical claim, never an instruction to overwrite blindly. Before any preparation the executor revalidates the saved packet, revalidates each fresh PR304 artifact, requires the explicit roots to match the accepted plan, re-evaluates both files through the maintained PR305 planner, and rehashes every source and destination.
+
+- A saved `create_required` or `replace_required` narrows safely to `no_change` when the current destination is a safe regular file whose SHA-256 already equals the current validated source.
+- A saved `create_required` executes when the destination is still absent, and blocks the whole transaction when a conflicting destination appeared.
+- A saved `replace_required` executes when the destination still carries the recorded `existing_destination_sha256`, and blocks when it disappeared or changed to a third hash.
+- A saved `no_change` stays a no-op and never becomes a mutation; it blocks if the destination drifted or disappeared.
+- Any staged source hash drift from the accepted plan blocks the whole transaction.
+
+If either allowlisted operation is blocked or stale, the entire execution is blocked: the other file is not mutated, no backup or temporary replacement file is created, and the deterministic reason requires fresh PR304 evidence and a new PR305 plan.
+
+### Source and containment gates
+
+`inspect.yaml` must be the exact allowlisted path, a regular file with no reparse point, symlink, or junction anywhere in its path chain, contained under the staged source root, matching the accepted plan's source SHA-256, at most 1 MiB, readable as UTF-8 or UTF-8 with BOM, safe-parsable YAML with no custom object construction, and valid against the maintained inspect profile contract. `sfai.cmd` must meet the same path, containment, reparse, and hash rules, be at most 256 KiB, and carry every maintained PR304 canonical-wrapper semantic marker. Source bytes are never normalized or rewritten; only exact validated bytes are copied.
+
+Each destination must resolve beneath the durable runtime root, have an already-existing exact parent directory, and be either absent or a regular file. No directory is created outside the existing exact parent. Windows path comparison is case-insensitive, and there is no recursive glob, `rglob`, parent-tree search, home search, drive enumeration, PATH search, or arbitrary root discovery.
+
+### All-prepared-before-commit, backups, and atomic replacement
+
+No destination mutation begins until every gate for both files has passed. Each eligible replacement first gets one verified same-directory backup created exclusively (`O_CREAT | O_EXCL`), flushed and `fsync`ed, hash-verified against the pre-change destination, and named from the destination file name plus a stable ShellForgeAI marker, a UTC timestamp, the short canonical plan hash, and a collision suffix when required. Each eligible create or replace then gets a same-directory temporary file created exclusively, written with the exact validated source bytes, flushed, `fsync`ed, and hash-verified. Only after every required backup and temporary file is verified are operations committed in exact allowlist order with `os.replace()`, and each committed destination is hash-verified immediately.
+
+There is no direct destination write, append, in-place edit, shell copy, PowerShell, `cmd.exe`, `robocopy`, `xcopy`, or subprocess anywhere in this lane. A create is refused if its destination appeared between preparation and commit; only the execution-owned temporary file is removed.
+
+### Bounded same-run compensation
+
+If a failure occurs after one or more commits, PR313 runs transaction-local compensation only. A committed replacement is restored only from the verified backup created by this execution, using a same-directory temporary restore, atomic replacement, and post-restore hash verification. A committed create is removed only when it did not exist at validated pre-state, its current hash still equals the expected source hash, and it is the exact allowlisted destination; a drifted created file is never deleted and the incomplete recovery is reported honestly. Compensation may touch only files committed by this exact execution. It is not a general rollback command, and a successful commit followed later by a post-verification failure never triggers automatic restoration: backups are retained and the verification failure is reported.
+
+Execution statuses are `executed`, `partial_executed`, `no_change`, `verification_failed`, `failed_compensated`, `failed_compensation_incomplete`, `blocked`, and `unsupported`.
+
+### Receipts, verification, and idempotence
+
+Every confirmed execution that reaches current-state evaluation writes a ShellForgeAI-owned, non-overwriting receipt bundle (`windows-runtime-reconcile-receipt.json`, `windows-runtime-reconcile-receipt.md`, `manifest.json`) under `<data-dir>/windows_runtime_reconcile_receipts/<receipt-id>/`. Blocked-before-confirmation paths and non-Windows hosts write no receipt at all. Validate a saved bundle with:
+
+```bash
+python scripts/windows_runtime_reconcile_receipt_acceptance.py <receipt-id> --data-dir C:/ShellForgeAI-Data --json
+```
+
+Post-change verification is read-only and performs no repair or rollback:
+
+```bash
+python scripts/windows_runtime_reconcile_verify.py <receipt-id> --staged-pr304 pr304-post-staged.json --system32-pr304 pr304-post-system32.json --staged-source-root C:/ShellForgeAI --durable-runtime-root C:/ShellForgeAI-Runtime --data-dir C:/ShellForgeAI-Data --json
+```
+
+The verifier validates the receipt bundle, validates both fresh PR304 artifacts, compares stable identity, requires the staged artifact to come from the staged source context and the System32 artifact to report a `C:\Windows\System32` invocation context, requires runtime/profile resolution, durable wrapper existence, semantic markers, canonical match, and exact source/import identity, rehashes both durable destinations, and requires them to equal the receipt's expected post-change hashes. Statuses are `verified`, `verification_failed`, `blocked`, and `unsupported`. It saves an artifact only with an explicit `--out-json` and refuses to overwrite.
+
+The PR312 V1 quick and standard checks from real `C:\Windows\System32` remain required host acceptance and are run separately by the operator through the exact installed executable. The executor never invokes V1 through an internal shell or subprocess.
+
+After a successful execution, a second run with a newly generated and confirmed compliant plan produces status `no_change`, zero mutation, no backup, no temporary replacement, `mutation_performed=false`, and a valid no-op receipt. A stale plan is never silently replayed.
+
+### Privacy posture
+
+Receipts and logs record only fixed relative paths, hashes, counts, stable classifications, root fingerprints, bounded sanitized error class/message strings, and backup paths relative to the durable runtime root. They never record file contents, wrapper text, YAML contents, environment dumps, process environment, credentials, secrets, tokens, auth-cache data, or sensitive absolute staged/durable paths. The receipt validator rejects any receipt that carries content, environment, credential, or absolute-path fields.
+
+### Deferred
+
+Packaging the five V1 resources into wheel/install artifacts, installed-release activation and current-release lifecycle, durable launcher lifecycle beyond exact `sfai.cmd` reconciliation, `shellforgeai.cmd` reconciliation, post-success operator-triggered rollback, backup retention/pruning, metadata or package-residue cleanup, package install/update/uninstall, service restart or reboot, registry/policy changes, remote execution, additional Windows files, broader mutation recipes, and PR309 approval-workflow integration all remain out of scope for later PRs.
