@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
+
+from shellforgeai.core.v1_resource_resolution import resolve_v1_contract_resource_root
 
 SCHEMA_VERSION = 1
 MODE = "v1_readiness_check"
@@ -73,14 +74,13 @@ def run_v1_readiness_check(app: Any, profile: str = "standard") -> dict[str, Any
         )
     )
 
-    required_docs = ["README.md", "docs/v1-scope.md", "docs/safety.md", "docs/cli.md", "OPS.md"]
-    missing = [p for p in required_docs if not Path(p).exists()]
+    resource_resolution = resolve_v1_contract_resource_root()
     checks.append(
         _check(
             "docs_v1_contract_present",
-            "passed" if not missing else "failed",
+            "passed" if resource_resolution.resolved else "failed",
             "V1 docs presence",
-            {"missing": missing},
+            resource_resolution.evidence(),
         )
     )
     checks.append(
