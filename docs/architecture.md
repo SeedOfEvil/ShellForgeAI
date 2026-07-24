@@ -68,6 +68,7 @@ synthesis** (LLM providers).
 | --- | --- |
 | `core/config.py` | YAML + env settings (`pydantic-settings`). |
 | `core/approved_change_contract.py` | Inert Stage B immutable approved-change subject, attestation binding, canonical hash, and read-only validation; not wired into CLI, proposals, approvals, recipes, persistence, preflight, or execution. |
+| `core/approved_change_compatibility.py` | In-memory findings-only PR310 assessment of legacy Proposal schema v1 against PR309 contract requirements; creates no contract, loads no files, and is not wired into CLI, approval flow, persistence, recipes, preflight, or execution. |
 | `core/profiles.py` | Risk-class allow/ask/deny profiles. |
 | `core/session.py` | Session id, data dir, artifact dir. |
 | `core/context.py` | `RuntimeContext` carried through CLI handlers. |
@@ -142,6 +143,8 @@ operator's behalf.
 ## Approved-change contract boundary
 
 `core/approved_change_contract.py` is an isolated Stage B domain module. It grants no execution eligibility and exists only to provide a stable approval-bound identity for later reviewed integration. It is not connected to current proposal objects, approval transitions, action compilation, recipes, persistence, receipts, CLI commands, preflight, or execution lanes.
+
+`core/approved_change_compatibility.py` is a separate compatibility-boundary module. It performs only in-memory findings assessment of legacy Proposal schema v1; it does not create an approved-change subject, attestation, contract, proposal mutation, adapter, migration, file loader, persistence record, recipe/preflight hook, receipt, CLI command, or execution path. Current Proposal behavior and mutation lanes are unchanged.
 
 ## Mutation boundary
 
