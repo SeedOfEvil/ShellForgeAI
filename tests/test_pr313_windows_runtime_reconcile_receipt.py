@@ -7,13 +7,15 @@ from pathlib import Path
 
 import pytest
 from test_pr313_windows_runtime_reconcile_execute import (  # noqa: E402
-    PROFILE,
+    CANONICAL_INSPECT_PROFILE_BYTES,
+    CANONICAL_WRAPPER_BYTES,
     SCRIPTS,
-    STALE_PROFILE,
-    THIRD_PROFILE,
+    STALE_PROFILE_BYTES,
+    THIRD_PROFILE_BYTES,
     load_script,
     make_lab,
     run_execute,
+    write_exact,
 )
 
 from shellforgeai.core import recipe_execution, recipe_registry
@@ -35,7 +37,9 @@ def read_manifest(result: dict) -> dict:
 
 
 def rewrite(directory: Path, name: str, payload: dict) -> None:
-    (directory / name).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    # Byte-exact: tamper fixtures feed manifest checksum validation.
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    (directory / name).write_bytes(text.encode("utf-8"))
 
 
 def refresh_manifest(directory: Path) -> None:
@@ -89,15 +93,10 @@ def test_receipt_records_the_required_execution_facts(tmp_path, monkeypatch):
     assert receipt["plan"]["canonical_packet_sha256"] == lab.confirm
     assert wrre.is_plan_sha256(receipt["plan"]["artifact_file_sha256"])
     assert receipt["plan"]["confirmation_matched"] is True
-    assert (
-        receipt["plan"]["confirmation_scope"]
-        == "recipe_specific_plan_hash_authorization_only"
-    )
+    assert receipt["plan"]["confirmation_scope"] == "recipe_specific_plan_hash_authorization_only"
     assert receipt["evidence"]["pr304_artifact_count"] == 1
     assert all(wrre.is_plan_sha256(v) for v in receipt["evidence"]["pr304_artifact_sha256"])
-    assert receipt["allowlist"] == [
-        {"source": a, "destination": b} for a, b in wrre.ALLOWLIST
-    ]
+    assert receipt["allowlist"] == [{"source": a, "destination": b} for a, b in wrre.ALLOWLIST]
     assert receipt["transaction"]["all_prepared_before_commit"] is True
     assert receipt["recovery_posture"]["automatic_rollback_after_success"] is False
     assert receipt["recovery_posture"]["backups_retained"] is True
@@ -167,7 +166,7 @@ def _fail_post_verify(phase, target):
 def _drift_then_fail(lab):
     def hook(phase, target):
         if phase == "commit" and target == "bin/sfai.cmd":
-            lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+            write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
             return "injected failure"
         return None
 
@@ -185,9 +184,7 @@ def _drift_then_fail(lab):
 def test_receipts_validate_for_each_terminal_status(
     tmp_path, monkeypatch, profile_state, wrapper_state, expected
 ):
-    lab = make_lab(
-        tmp_path, monkeypatch, profile_state=profile_state, wrapper_state=wrapper_state
-    )
+    lab = make_lab(tmp_path, monkeypatch, profile_state=profile_state, wrapper_state=wrapper_state)
     result = run_execute(lab)
     assert result["status"] == expected
     validation = validate(result, lab)
@@ -200,7 +197,7 @@ def test_receipts_validate_for_each_terminal_status(
 
 def test_blocked_receipt_validates(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
-    lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     validation = validate(result, lab)
@@ -353,8 +350,9 @@ def test_receipt_contains_no_file_contents_or_environment_dump(tmp_path, monkeyp
         "allow_risks",
         "deny_risks",
         "description: inspect",
-        STALE_PROFILE.strip(),
-        PROFILE.strip(),
+        STALE_PROFILE_BYTES.decode("utf-8").strip(),
+        CANONICAL_INSPECT_PROFILE_BYTES.decode("utf-8").strip(),
+        CANONICAL_WRAPPER_BYTES.decode("utf-8").strip(),
     ):
         assert fragment not in blob
     receipt = read_receipt(result)
@@ -383,7 +381,7 @@ def test_sensitive_absolute_paths_are_absent_from_receipt_and_result(tmp_path, m
 
 def test_blocked_receipt_sanitizes_blockers(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
-    lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
     result = run_execute(lab)
     receipt = read_receipt(result)
     assert receipt["blockers"]
@@ -514,10 +512,7 @@ def test_no_broad_copy_repair_or_apply_files_command_is_introduced():
         str(entry.name or getattr(entry.callback, "__name__", "")).casefold()
         for entry in cli.app.registered_commands
     }
-    names |= {
-        str(group.name or "").casefold()
-        for group in cli.app.registered_groups
-    }
+    names |= {str(group.name or "").casefold() for group in cli.app.registered_groups}
     for forbidden in ("copy", "repair", "apply-files", "apply_files", "reconcile"):
         assert forbidden not in names
 
@@ -532,9 +527,7 @@ def test_no_command_module_reaches_the_execute_lane():
     assert offenders == []
 
 
-def test_natural_language_and_boolean_confirmation_are_not_execution_sources(
-    tmp_path, monkeypatch
-):
+def test_natural_language_and_boolean_confirmation_are_not_execution_sources(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
     for phrase in ("yes", "true", "please fix the windows runtime", "confirm", "1"):
         result = run_execute(lab, confirm_plan_sha256=phrase)

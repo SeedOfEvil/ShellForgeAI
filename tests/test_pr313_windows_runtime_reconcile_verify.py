@@ -7,14 +7,17 @@ from pathlib import Path
 
 import pytest
 from test_pr313_windows_runtime_reconcile_execute import (  # noqa: E402
-    PROFILE,
+    CANONICAL_INSPECT_PROFILE_BYTES,
+    CANONICAL_WRAPPER_BYTES,
+    MARKERLESS_WRAPPER_BYTES,
     SCRIPTS,
-    THIRD_PROFILE,
-    WRAPPER,
+    THIRD_PROFILE_BYTES,
     build_pr304,
+    force_linux,
     load_script,
     make_lab,
     run_execute,
+    write_exact,
 )
 
 from shellforgeai.core import windows_runtime_reconcile_execution as wrre
@@ -32,7 +35,10 @@ def reconciled_lab(tmp_path, monkeypatch):
 
 def fresh_artifacts(tmp_path, monkeypatch, lab, *, suffix="post"):
     staged = build_pr304(
-        tmp_path, monkeypatch, lab.runtime, name=f"pr304-{suffix}-staged.json",
+        tmp_path,
+        monkeypatch,
+        lab.runtime,
+        name=f"pr304-{suffix}-staged.json",
         cwd=str(lab.staged),
     )
     system32 = build_pr304(
@@ -57,9 +63,7 @@ def run_verify(lab, result, staged, system32, **overrides):
 
 def snapshot(root: Path) -> dict[str, bytes]:
     return {
-        str(p.relative_to(root)): p.read_bytes()
-        for p in sorted(root.rglob("*"))
-        if p.is_file()
+        str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
     }
 
 
@@ -161,7 +165,7 @@ def test_verifier_rejects_stale_or_malformed_pr304_artifacts(tmp_path, monkeypat
 
 def test_verifier_rejects_destination_hash_drift(tmp_path, monkeypatch):
     lab, result = reconciled_lab(tmp_path, monkeypatch)
-    lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
     staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab)
     verification = run_verify(lab, result, staged, system32)
     assert verification["status"] == wrre.VERIFY_STATUS_FAILED
@@ -175,7 +179,7 @@ def test_verifier_rejects_destination_hash_drift(tmp_path, monkeypatch):
         if item["relative_destination"] == "config/profiles/inspect.yaml"
     )
     assert drifted["result"] == "failed"
-    assert lab.profile_destination.read_bytes().decode("utf-8") == THIRD_PROFILE
+    assert lab.profile_destination.read_bytes() == THIRD_PROFILE_BYTES
 
 
 def test_verifier_rejects_a_missing_durable_destination(tmp_path, monkeypatch):
@@ -234,7 +238,7 @@ def test_verifier_rejects_an_invalid_or_missing_receipt(tmp_path, monkeypatch):
 
 def test_verifier_rejects_a_wrapper_that_lost_its_semantic_markers(tmp_path, monkeypatch):
     lab, result = reconciled_lab(tmp_path, monkeypatch)
-    lab.wrapper_destination.write_text(WRAPPER.replace("%ERRORLEVEL%", "0"), encoding="utf-8")
+    write_exact(lab.wrapper_destination, MARKERLESS_WRAPPER_BYTES)
     staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab)
     verification = run_verify(lab, result, staged, system32)
     assert verification["status"] == wrre.VERIFY_STATUS_FAILED
@@ -255,7 +259,8 @@ def test_verifier_rejects_a_missing_durable_profile_resolution(tmp_path, monkeyp
 # --------------------------------------------------------------------------- #
 
 
-def test_verify_helper_is_unsupported_on_linux(tmp_path, capsys):
+def test_verify_helper_is_unsupported_on_linux(tmp_path, capsys, monkeypatch):
+    force_linux(monkeypatch)
     helper = load_script(VERIFY_HELPER)
     code = helper.main(
         [
@@ -276,6 +281,7 @@ def test_verify_helper_is_unsupported_on_linux(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out.strip())
     assert code == 0
     assert payload["status"] == "unsupported"
+    assert payload["platform"]["system"] == "linux"
     assert payload["repair_executed"] is False
     assert payload["rollback_executed"] is False
     assert payload["operations"] == []
@@ -331,5 +337,5 @@ def test_verify_helper_rejects_arbitrary_paths_and_repair_flags(tmp_path):
 
 def test_reconciled_profile_matches_the_staged_source(tmp_path, monkeypatch):
     lab, _ = reconciled_lab(tmp_path, monkeypatch)
-    assert lab.profile_destination.read_bytes().decode("utf-8") == PROFILE
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == WRAPPER
+    assert lab.profile_destination.read_bytes() == CANONICAL_INSPECT_PROFILE_BYTES
+    assert lab.wrapper_destination.read_bytes() == CANONICAL_WRAPPER_BYTES

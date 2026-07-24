@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -24,26 +25,82 @@ EXECUTE_HELPER = SCRIPTS / "windows_runtime_reconcile_execute.py"
 
 FIXED_CLOCK = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
 
-WRAPPER = (
-    "@echo off\r\n"
-    "setlocal\r\n"
-    "set SHELLFORGEAI_RUNTIME_ROOT=%~dp0..\r\n"
-    '"%~dp0..\\Python314\\python.exe" -m shellforgeai %*\r\n'
-    "exit /b %ERRORLEVEL%\r\n"
+# Byte-exact synthetic fixtures.
+#
+# Every fixture below whose raw bytes participate in a product decision (planning,
+# execution, backup, atomic replacement, compensation, receipt, verification, or
+# tamper detection) is declared as an exact ``bytes`` constant and written with
+# ``Path.write_bytes``. ``Path.write_text`` applies platform newline translation,
+# which on Windows rewrites "\r\n" as "\r\r\n" and bare "\n" as "\r\n"; that changes
+# the fixture bytes and therefore every SHA-256 the product compares. Byte constants
+# plus ``write_bytes`` keep the same fixture identical on Linux and Windows.
+#
+# The wrapper deliberately keeps the maintained PR304 semantic markers: "%~dp0",
+# "SHELLFORGEAI_RUNTIME_ROOT", "Python314\\python.exe", "-m shellforgeai %*", and
+# "%ERRORLEVEL%". CRLF is intentional for a .cmd wrapper; the profile stays LF.
+CANONICAL_WRAPPER_BYTES = (
+    b"@echo off\r\n"
+    b'set "SHELLFORGEAI_RUNTIME_ROOT=%~dp0.."\r\n'
+    b'"%SHELLFORGEAI_RUNTIME_ROOT%\\Python314\\python.exe" -m shellforgeai %*\r\n'
+    b"exit /b %ERRORLEVEL%\r\n"
 )
-PROFILE = (
-    "name: inspect\n"
-    "description: inspect\n"
-    "allow_risks: [read]\n"
-    "ask_risks: [change]\n"
-    "deny_risks: [service, system, danger]\n"
-    "allow_shell_raw: false\n"
-    "online_allowed: false\n"
+STALE_WRAPPER_BYTES = CANONICAL_WRAPPER_BYTES.replace(
+    b"@echo off\r\n", b"@echo off\r\nrem stale\r\n"
 )
-STALE_PROFILE = PROFILE.replace("description: inspect", "description: stale")
-THIRD_PROFILE = PROFILE.replace("description: inspect", "description: third")
-STALE_WRAPPER = WRAPPER.replace("setlocal\r\n", "setlocal\r\nrem stale\r\n")
-THIRD_WRAPPER = WRAPPER.replace("setlocal\r\n", "setlocal\r\nrem third\r\n")
+THIRD_WRAPPER_BYTES = CANONICAL_WRAPPER_BYTES.replace(
+    b"@echo off\r\n", b"@echo off\r\nrem third\r\n"
+)
+MARKERLESS_WRAPPER_BYTES = CANONICAL_WRAPPER_BYTES.replace(b"%ERRORLEVEL%", b"0")
+OVERSIZED_WRAPPER_BYTES = CANONICAL_WRAPPER_BYTES + (b"rem padding\r\n" * 25000)
+
+CANONICAL_INSPECT_PROFILE_BYTES = (
+    b"name: inspect\n"
+    b"description: inspect\n"
+    b"allow_risks: [read]\n"
+    b"ask_risks: [change]\n"
+    b"deny_risks: [service, system, danger]\n"
+    b"allow_shell_raw: false\n"
+    b"online_allowed: false\n"
+)
+STALE_PROFILE_BYTES = CANONICAL_INSPECT_PROFILE_BYTES.replace(
+    b"description: inspect", b"description: stale"
+)
+THIRD_PROFILE_BYTES = CANONICAL_INSPECT_PROFILE_BYTES.replace(
+    b"description: inspect", b"description: third"
+)
+
+
+def write_exact(path: Path, payload: bytes) -> str:
+    """Write byte-exact fixture content and return its SHA-256 hexdigest.
+
+    The returned digest is computed from the bytes actually written, never from a
+    separate string that could undergo different newline or encoding handling.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def force_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deterministically exercise the Linux unsupported path on any host."""
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "release", lambda: "6.8.0")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(platform, "platform", lambda: "Linux-6.8.0")
+
+
+def symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    """Create a symlink, or skip when the host refuses the privilege.
+
+    Windows only permits symlink creation with Developer Mode or
+    SeCreateSymbolicLinkPrivilege. Skipping on OSError keeps the reparse-refusal
+    coverage on every host that can express it, without reporting a host privilege
+    limitation as a product failure.
+    """
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - host dependent
+        pytest.skip(f"host cannot create symlinks for reparse coverage: {exc.__class__.__name__}")
 
 
 def load_script(path: Path):
@@ -80,10 +137,10 @@ class Lab:
         return self.runtime / "bin/sfai.cmd"
 
 
-def _write_state(path: Path, state: str, staged_text: str, stale_text: str) -> None:
+def _write_state(path: Path, state: str, staged_bytes: bytes, stale_bytes: bytes) -> None:
     if state == "missing":
         return
-    path.write_text(staged_text if state == "match" else stale_text, encoding="utf-8")
+    write_exact(path, staged_bytes if state == "match" else stale_bytes)
 
 
 def build_pr304(
@@ -126,27 +183,28 @@ def make_lab(
     *,
     profile_state: str = "missing",
     wrapper_state: str = "stale",
-    staged_profile: str = PROFILE,
-    staged_wrapper: str = WRAPPER,
+    staged_profile: bytes = CANONICAL_INSPECT_PROFILE_BYTES,
+    staged_wrapper: bytes = CANONICAL_WRAPPER_BYTES,
     artifact_count: int = 1,
 ) -> Lab:
     force_windows(monkeypatch)
     staged = tmp_path / "staged"
-    (staged / "config/profiles").mkdir(parents=True)
-    (staged / "config/profiles/inspect.yaml").write_text(staged_profile, encoding="utf-8")
-    (staged / "scripts/windows").mkdir(parents=True)
-    (staged / "scripts/windows/sfai.cmd").write_text(staged_wrapper, encoding="utf-8")
+    write_exact(staged / "config/profiles/inspect.yaml", staged_profile)
+    write_exact(staged / "scripts/windows/sfai.cmd", staged_wrapper)
 
     runtime = tmp_path / "runtime"
     (runtime / "config/profiles").mkdir(parents=True)
     (runtime / "bin").mkdir(parents=True)
     (runtime / "Python314/Scripts").mkdir(parents=True)
-    (runtime / "Python314/python.exe").write_text("", encoding="utf-8")
-    (runtime / "Python314/Scripts/shellforgeai.exe").write_text("", encoding="utf-8")
+    write_exact(runtime / "Python314/python.exe", b"")
+    write_exact(runtime / "Python314/Scripts/shellforgeai.exe", b"")
     _write_state(
-        runtime / "config/profiles/inspect.yaml", profile_state, staged_profile, STALE_PROFILE
+        runtime / "config/profiles/inspect.yaml",
+        profile_state,
+        staged_profile,
+        STALE_PROFILE_BYTES,
     )
-    _write_state(runtime / "bin/sfai.cmd", wrapper_state, staged_wrapper, STALE_WRAPPER)
+    _write_state(runtime / "bin/sfai.cmd", wrapper_state, staged_wrapper, STALE_WRAPPER_BYTES)
 
     artifacts = [build_pr304(tmp_path, monkeypatch, runtime, name="pr304-staged.json")]
     if artifact_count == 2:
@@ -222,7 +280,10 @@ def backup_files(runtime: Path) -> list[Path]:
 # --------------------------------------------------------------------------- #
 
 
-def test_linux_is_unsupported_with_zero_mutation(tmp_path):
+def test_linux_is_unsupported_with_zero_mutation(tmp_path, monkeypatch):
+    # Simulate Linux explicitly so the unsupported path is exercised on every host,
+    # including a real Windows runner, instead of depending on the actual platform.
+    force_linux(monkeypatch)
     result = wrre.execute_windows_runtime_reconcile(
         tmp_path / "missing.json",
         [tmp_path / "missing-artifact.json"],
@@ -236,6 +297,7 @@ def test_linux_is_unsupported_with_zero_mutation(tmp_path):
     assert result["mutation_performed"] is False
     assert result["receipt_id"] is None
     assert result["safety"]["read_only"] is True
+    assert result["platform"]["system"] == "linux"
     assert not (tmp_path / "data").exists()
 
 
@@ -432,9 +494,9 @@ def test_source_path_escape_blocks(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch)
     outside = tmp_path / "outside-config"
     (outside / "profiles").mkdir(parents=True)
-    (outside / "profiles/inspect.yaml").write_text(PROFILE, encoding="utf-8")
+    write_exact(outside / "profiles/inspect.yaml", CANONICAL_INSPECT_PROFILE_BYTES)
     shutil.rmtree(lab.staged / "config")
-    (lab.staged / "config").symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(lab.staged / "config", outside, target_is_directory=True)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("escapes the staged source root" in blocker for blocker in result["blockers"])
@@ -446,22 +508,22 @@ def test_destination_path_escape_blocks(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch)
     outside = tmp_path / "outside-bin"
     outside.mkdir()
-    (outside / "sfai.cmd").write_text(STALE_WRAPPER, encoding="utf-8")
+    write_exact(outside / "sfai.cmd", STALE_WRAPPER_BYTES)
     shutil.rmtree(lab.runtime / "bin")
-    (lab.runtime / "bin").symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(lab.runtime / "bin", outside, target_is_directory=True)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("escapes the durable runtime root" in blocker for blocker in result["blockers"])
-    assert (outside / "sfai.cmd").read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert (outside / "sfai.cmd").read_bytes() == STALE_WRAPPER_BYTES
 
 
 def test_source_symlink_blocks(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch)
     real = lab.staged / "config/profiles/inspect.real.yaml"
-    real.write_text(PROFILE, encoding="utf-8")
+    write_exact(real, CANONICAL_INSPECT_PROFILE_BYTES)
     target = lab.staged / "config/profiles/inspect.yaml"
     target.unlink()
-    target.symlink_to(real)
+    symlink_or_skip(target, real)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("reparse point or symlink" in blocker for blocker in result["blockers"])
@@ -470,23 +532,23 @@ def test_source_symlink_blocks(tmp_path, monkeypatch):
 def test_destination_symlink_blocks(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch)
     real = lab.runtime / "bin/sfai.real.cmd"
-    real.write_text(STALE_WRAPPER, encoding="utf-8")
+    write_exact(real, STALE_WRAPPER_BYTES)
     target = lab.wrapper_destination
     target.unlink()
-    target.symlink_to(real)
+    symlink_or_skip(target, real)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("reparse point or symlink" in blocker for blocker in result["blockers"])
-    assert real.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert real.read_bytes() == STALE_WRAPPER_BYTES
 
 
 def test_reparse_parent_component_blocks_without_escaping(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch)
     real_dir = lab.staged / "scripts/real-windows"
     real_dir.mkdir()
-    (real_dir / "sfai.cmd").write_text(WRAPPER, encoding="utf-8")
+    write_exact(real_dir / "sfai.cmd", CANONICAL_WRAPPER_BYTES)
     shutil.rmtree(lab.staged / "scripts/windows")
-    (lab.staged / "scripts/windows").symlink_to(real_dir, target_is_directory=True)
+    symlink_or_skip(lab.staged / "scripts/windows", real_dir, target_is_directory=True)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     blockers = " ".join(result["blockers"])
@@ -506,18 +568,17 @@ def test_missing_source_blocks(tmp_path, monkeypatch):
 
 def test_source_hash_drift_blocks_the_whole_transaction(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
-    (lab.staged / "config/profiles/inspect.yaml").write_text(THIRD_PROFILE, encoding="utf-8")
+    write_exact(lab.staged / "config/profiles/inspect.yaml", THIRD_PROFILE_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("drifted from the accepted plan" in blocker for blocker in result["blockers"])
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
     assert temp_or_backup_files(lab.runtime) == []
 
 
 def test_oversized_source_blocks(tmp_path, monkeypatch):
-    oversized = WRAPPER + ("rem padding\r\n" * 25000)
-    assert len(oversized.encode("utf-8")) > wrre.MAX_SOURCE_BYTES["scripts/windows/sfai.cmd"]
-    lab = make_lab(tmp_path, monkeypatch, staged_wrapper=oversized)
+    assert len(OVERSIZED_WRAPPER_BYTES) > wrre.MAX_SOURCE_BYTES["scripts/windows/sfai.cmd"]
+    lab = make_lab(tmp_path, monkeypatch, staged_wrapper=OVERSIZED_WRAPPER_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("maximum size" in blocker for blocker in result["blockers"])
@@ -526,10 +587,10 @@ def test_oversized_source_blocks(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "bad_profile",
     [
-        "name: inspect\nallow_risks: [read\n",
-        "name: not-inspect\ndescription: x\n",
-        "- just\n- a\n- list\n",
-        "name: inspect\nallow_risks: [not-a-risk-tier]\n",
+        b"name: inspect\nallow_risks: [read\n",
+        b"name: not-inspect\ndescription: x\n",
+        b"- just\n- a\n- list\n",
+        b"name: inspect\nallow_risks: [not-a-risk-tier]\n",
     ],
 )
 def test_invalid_inspect_profile_blocks(tmp_path, monkeypatch, bad_profile):
@@ -548,7 +609,7 @@ def test_profile_source_must_decode_as_utf8(tmp_path, monkeypatch):
 
 
 def test_unsafe_yaml_object_construction_is_refused(tmp_path, monkeypatch):
-    unsafe = "!!python/object/apply:os.system ['echo unsafe']\n"
+    unsafe = b"!!python/object/apply:os.system ['echo unsafe']\n"
     lab = make_lab(tmp_path, monkeypatch, staged_profile=unsafe)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
@@ -556,7 +617,7 @@ def test_unsafe_yaml_object_construction_is_refused(tmp_path, monkeypatch):
 
 
 def test_invalid_wrapper_semantic_markers_block(tmp_path, monkeypatch):
-    lab = make_lab(tmp_path, monkeypatch, staged_wrapper=WRAPPER.replace("%ERRORLEVEL%", "0"))
+    lab = make_lab(tmp_path, monkeypatch, staged_wrapper=MARKERLESS_WRAPPER_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("semantic markers" in blocker for blocker in result["blockers"])
@@ -592,8 +653,8 @@ def test_planned_create_and_replace_both_execute(tmp_path, monkeypatch):
     ]
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_EXECUTED
-    assert lab.profile_destination.read_bytes().decode("utf-8") == PROFILE
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == WRAPPER
+    assert lab.profile_destination.read_bytes() == CANONICAL_INSPECT_PROFILE_BYTES
+    assert lab.wrapper_destination.read_bytes() == CANONICAL_WRAPPER_BYTES
     assert result["safety"]["file_create_executed"] is True
     assert result["safety"]["file_replace_executed"] is True
     assert result["safety"]["atomic_replace_executed"] is True
@@ -606,7 +667,7 @@ def test_planned_create_and_replace_both_execute(tmp_path, monkeypatch):
 
 def test_planned_create_narrowed_to_no_op_when_destination_matches(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
-    lab.profile_destination.write_text(PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, CANONICAL_INSPECT_PROFILE_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_PARTIAL_EXECUTED
     profile_op, wrapper_op = result["operations"]
@@ -620,19 +681,19 @@ def test_planned_create_narrowed_to_no_op_when_destination_matches(tmp_path, mon
 
 def test_planned_create_conflict_blocks_everything(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
-    lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("conflicting destination" in blocker for blocker in result["blockers"])
-    assert lab.profile_destination.read_bytes().decode("utf-8") == THIRD_PROFILE
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.profile_destination.read_bytes() == THIRD_PROFILE_BYTES
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
     assert temp_or_backup_files(lab.runtime) == []
     assert result["receipt_id"] is not None
 
 
 def test_planned_replace_narrowed_to_no_op_when_destination_matches(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="stale", wrapper_state="stale")
-    lab.profile_destination.write_text(PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, CANONICAL_INSPECT_PROFILE_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_PARTIAL_EXECUTED
     profile_op = result["operations"][0]
@@ -645,11 +706,11 @@ def test_planned_replace_narrowed_to_no_op_when_destination_matches(tmp_path, mo
 
 def test_planned_replace_third_hash_blocks_everything(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="stale", wrapper_state="stale")
-    lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("third hash" in blocker for blocker in result["blockers"])
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
     assert temp_or_backup_files(lab.runtime) == []
 
 
@@ -659,7 +720,7 @@ def test_planned_replace_destination_disappearance_blocks_everything(tmp_path, m
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("disappeared" in blocker for blocker in result["blockers"])
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
 
 
 def test_planned_no_change_stays_a_no_op(tmp_path, monkeypatch):
@@ -676,11 +737,11 @@ def test_planned_no_change_stays_a_no_op(tmp_path, monkeypatch):
 
 def test_planned_no_change_mismatch_blocks_everything(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="match", wrapper_state="match")
-    lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+    write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("no longer matches" in blocker for blocker in result["blockers"])
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == WRAPPER
+    assert lab.wrapper_destination.read_bytes() == CANONICAL_WRAPPER_BYTES
 
 
 def test_planned_no_change_disappearance_blocks_everything(tmp_path, monkeypatch):
@@ -697,7 +758,7 @@ def test_one_no_op_plus_one_replacement_is_partial(tmp_path, monkeypatch):
     assert result["status"] == wrre.STATUS_PARTIAL_EXECUTED
     assert result["operations"][0]["revalidated_operation"] == "replace_required"
     assert result["operations"][1]["revalidated_operation"] == "no_change"
-    assert lab.profile_destination.read_bytes().decode("utf-8") == PROFILE
+    assert lab.profile_destination.read_bytes() == CANONICAL_INSPECT_PROFILE_BYTES
     assert len(backup_files(lab.runtime)) == 1
 
 
@@ -706,7 +767,7 @@ def test_one_no_op_plus_one_create_is_partial(tmp_path, monkeypatch):
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_PARTIAL_EXECUTED
     assert result["operations"][0]["revalidated_operation"] == "create_required"
-    assert lab.profile_destination.read_bytes().decode("utf-8") == PROFILE
+    assert lab.profile_destination.read_bytes() == CANONICAL_INSPECT_PROFILE_BYTES
     assert backup_files(lab.runtime) == []
 
 
@@ -717,9 +778,7 @@ def test_successful_rerun_with_a_fresh_plan_is_idempotent(tmp_path, monkeypatch)
     backups_after_first = backup_files(lab.runtime)
     assert len(backups_after_first) == 1
 
-    fresh_artifacts = [
-        build_pr304(tmp_path, monkeypatch, lab.runtime, name="pr304-second.json")
-    ]
+    fresh_artifacts = [build_pr304(tmp_path, monkeypatch, lab.runtime, name="pr304-second.json")]
     fresh_packet = build_plan(monkeypatch, fresh_artifacts, lab.staged, lab.runtime)
     assert fresh_packet["status"] == "no_change"
     second_path = tmp_path / "pr305-second.json"
@@ -770,14 +829,12 @@ def test_all_preparation_completes_before_the_first_commit(tmp_path, monkeypatch
 
 def test_backup_is_exclusive_same_directory_and_collision_resistant(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="stale", wrapper_state="match")
-    expected = (
-        f"inspect.yaml.{wrre.BACKUP_MARKER}-{wrre._stamp(FIXED_CLOCK)}-{lab.confirm[:8]}.bak"
-    )
+    expected = f"inspect.yaml.{wrre.BACKUP_MARKER}-{wrre._stamp(FIXED_CLOCK)}-{lab.confirm[:8]}.bak"
     squatter = lab.profile_destination.parent / expected
-    squatter.write_text("pre-existing backup", encoding="utf-8")
+    write_exact(squatter, b"pre-existing backup")
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_PARTIAL_EXECUTED
-    assert squatter.read_bytes().decode("utf-8") == "pre-existing backup"
+    assert squatter.read_bytes() == b"pre-existing backup"
     backups = [p for p in backup_files(lab.runtime) if p != squatter]
     assert len(backups) == 1
     assert backups[0].parent == lab.profile_destination.parent
@@ -787,7 +844,7 @@ def test_backup_is_exclusive_same_directory_and_collision_resistant(tmp_path, mo
 
 def test_backup_hash_matches_the_pre_change_destination(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="stale", wrapper_state="match")
-    pre_change = wrre._sha256_bytes(STALE_PROFILE.encode("utf-8"))
+    pre_change = hashlib.sha256(STALE_PROFILE_BYTES).hexdigest()
     result = run_execute(lab)
     op = result["operations"][0]
     assert op["backup_created"] is True
@@ -809,6 +866,60 @@ def test_temporary_file_hash_verification_is_enforced(tmp_path):
     with pytest.raises(OSError, match="temporary file hash verification failed"):
         wrre._create_temp(prepared, data=b"payload")
     assert not destination.exists()
+
+
+def test_exclusive_write_requests_binary_mode_and_preserves_crlf_bytes(tmp_path, monkeypatch):
+    # Regression: os.open defaults to text mode on Windows, where the C runtime
+    # rewrites "\n" as "\r\n" on write. Without O_BINARY every backup, temporary
+    # file, and restore would be silently corrupted and the durable runtime could
+    # never receive the exact approved source bytes.
+    captured: dict[str, int] = {}
+    real_open = os.open
+
+    def spy(path, flags, *args, **kwargs):
+        captured["flags"] = flags
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(wrre.os, "open", spy)
+    target = tmp_path / "exact.cmd"
+    wrre._exclusive_write(target, CANONICAL_WRAPPER_BYTES)
+
+    assert target.read_bytes() == CANONICAL_WRAPPER_BYTES
+    assert b"\r\r\n" not in target.read_bytes()
+    assert getattr(os, "O_BINARY", 0) == wrre._O_BINARY
+    assert captured["flags"] & os.O_CREAT
+    assert captured["flags"] & os.O_EXCL
+    assert captured["flags"] & wrre._O_BINARY == wrre._O_BINARY
+    with pytest.raises(FileExistsError):
+        wrre._exclusive_write(target, CANONICAL_WRAPPER_BYTES)
+
+
+def test_backup_and_committed_bytes_are_never_newline_normalized(tmp_path, monkeypatch):
+    lab = make_lab(tmp_path, monkeypatch, profile_state="match", wrapper_state="stale")
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_PARTIAL_EXECUTED
+    backup = backup_files(lab.runtime)[0]
+    # The replaced wrapper is CRLF; both the retained backup and the committed
+    # destination must hold the exact original and source bytes.
+    assert backup.read_bytes() == STALE_WRAPPER_BYTES
+    assert lab.wrapper_destination.read_bytes() == CANONICAL_WRAPPER_BYTES
+    assert b"\r\r\n" not in backup.read_bytes()
+    assert b"\r\r\n" not in lab.wrapper_destination.read_bytes()
+    wrapper_op = result["operations"][1]
+    assert wrapper_op["backup_sha256"] == hashlib.sha256(STALE_WRAPPER_BYTES).hexdigest()
+    assert wrapper_op["post_change_sha256"] == hashlib.sha256(CANONICAL_WRAPPER_BYTES).hexdigest()
+
+
+def test_compensation_restores_exact_crlf_bytes(tmp_path, monkeypatch):
+    lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
+
+    def hook(phase, target):
+        return "injected verify failure" if phase == "verify" and target == "bin/sfai.cmd" else None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATED
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
+    assert b"\r\r\n" not in lab.wrapper_destination.read_bytes()
 
 
 def test_commit_uses_atomic_os_replace_only(tmp_path, monkeypatch):
@@ -854,7 +965,7 @@ def test_injected_failure_before_any_commit_causes_zero_mutation(tmp_path, monke
     assert result["status"] == wrre.STATUS_BLOCKED
     assert result["mutation_performed"] is False
     assert not lab.profile_destination.exists()
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
     assert temp_files(lab.runtime) == []
     assert result["receipt_id"] is not None
 
@@ -871,7 +982,7 @@ def test_injected_failure_on_the_first_commit_leaves_no_mutation(tmp_path, monke
     assert result["status"] == wrre.STATUS_BLOCKED
     assert result["mutation_performed"] is False
     assert not lab.profile_destination.exists()
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
     assert temp_files(lab.runtime) == []
     assert result["compensation"]["attempted"] is False
 
@@ -895,7 +1006,7 @@ def test_replacement_compensation_restores_the_original_hash(tmp_path, monkeypat
     entry = result["compensation"]["entries"][0]
     assert entry["action"] == "restore_from_execution_backup"
     assert entry["result"] == "restored"
-    assert lab.profile_destination.read_bytes().decode("utf-8") == STALE_PROFILE
+    assert lab.profile_destination.read_bytes() == STALE_PROFILE_BYTES
     assert not lab.wrapper_destination.exists()
     assert len(backup_files(lab.runtime)) == 1
     assert result["safety"]["compensation_executed"] is True
@@ -916,7 +1027,7 @@ def test_create_compensation_removes_only_the_execution_created_file(tmp_path, m
     assert entry["action"] == "remove_execution_created_file"
     assert entry["result"] == "removed"
     assert not lab.profile_destination.exists()
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
 
 
 def test_compensation_refuses_to_remove_a_drifted_created_file(tmp_path, monkeypatch):
@@ -924,7 +1035,7 @@ def test_compensation_refuses_to_remove_a_drifted_created_file(tmp_path, monkeyp
 
     def hook(phase, target):
         if phase == "commit" and target == "bin/sfai.cmd":
-            lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+            write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
             return "injected second-commit failure"
         return None
 
@@ -933,8 +1044,8 @@ def test_compensation_refuses_to_remove_a_drifted_created_file(tmp_path, monkeyp
     assert result["compensation"]["complete"] is False
     entry = result["compensation"]["entries"][0]
     assert entry["result"] == "refused_drifted_created_file"
-    assert lab.profile_destination.read_bytes().decode("utf-8") == THIRD_PROFILE
-    assert lab.wrapper_destination.read_bytes().decode("utf-8") == STALE_WRAPPER
+    assert lab.profile_destination.read_bytes() == THIRD_PROFILE_BYTES
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
 
 
 def test_post_verification_failure_retains_backups_without_restoration(tmp_path, monkeypatch):
@@ -949,26 +1060,24 @@ def test_post_verification_failure_retains_backups_without_restoration(tmp_path,
     assert result["status"] == wrre.STATUS_VERIFICATION_FAILED
     assert result["compensation"]["attempted"] is False
     assert result["post_verification"]["status"] == "failed"
-    assert lab.profile_destination.read_bytes().decode("utf-8") == PROFILE
+    assert lab.profile_destination.read_bytes() == CANONICAL_INSPECT_PROFILE_BYTES
     assert len(backup_files(lab.runtime)) == 1
     assert any("backups retained" in warning for warning in result["warnings"])
 
 
-def test_create_refuses_when_destination_appears_between_prepare_and_commit(
-    tmp_path, monkeypatch
-):
+def test_create_refuses_when_destination_appears_between_prepare_and_commit(tmp_path, monkeypatch):
     lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="match")
 
     def hook(phase, target):
         if phase == "commit" and target == "config/profiles/inspect.yaml":
-            lab.profile_destination.write_text(THIRD_PROFILE, encoding="utf-8")
+            write_exact(lab.profile_destination, THIRD_PROFILE_BYTES)
         return None
 
     result = run_execute(lab, failure_hook=hook)
     assert result["status"] == wrre.STATUS_BLOCKED
     assert any("appeared" in blocker for blocker in result["blockers"])
     assert result["mutation_performed"] is False
-    assert lab.profile_destination.read_bytes().decode("utf-8") == THIRD_PROFILE
+    assert lab.profile_destination.read_bytes() == THIRD_PROFILE_BYTES
     assert temp_files(lab.runtime) == []
 
 
@@ -977,7 +1086,8 @@ def test_create_refuses_when_destination_appears_between_prepare_and_commit(
 # --------------------------------------------------------------------------- #
 
 
-def test_direct_helper_is_unsupported_on_linux_without_mutation(tmp_path, capsys):
+def test_direct_helper_is_unsupported_on_linux_without_mutation(tmp_path, capsys, monkeypatch):
+    force_linux(monkeypatch)
     helper = load_script(EXECUTE_HELPER)
     data_dir = tmp_path / "data"
     code = helper.main(
@@ -1002,6 +1112,7 @@ def test_direct_helper_is_unsupported_on_linux_without_mutation(tmp_path, capsys
     assert payload["receipt_id"] is None
     assert payload["safety"]["subprocess_executed"] is False
     assert payload["safety"]["powershell_executed"] is False
+    assert payload["platform"]["system"] == "linux"
     assert not data_dir.exists()
 
 

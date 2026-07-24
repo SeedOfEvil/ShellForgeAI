@@ -768,8 +768,16 @@ def _fsync_write(handle_fd: int, data: bytes) -> None:
         os.fsync(handle_fd)
 
 
+#: ``os.open`` defaults to text mode on Windows, where the C runtime rewrites "\n"
+#: as "\r\n" on write. That would silently corrupt backups, temporary files, and
+#: restores, so binary mode is requested explicitly. ``os.O_BINARY`` does not exist
+#: on POSIX, where the flag is unnecessary and resolves to 0.
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
+
 def _exclusive_write(path: Path, data: bytes) -> None:
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    """Create a new file exclusively and write exactly ``data``, byte for byte."""
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_BINARY, 0o600)
     try:
         _fsync_write(fd, data)
     finally:
