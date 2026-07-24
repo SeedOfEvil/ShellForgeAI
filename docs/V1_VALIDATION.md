@@ -40,6 +40,15 @@ Packet artifact path (opt-in):
 It does not run remediation execute, rollback execute, cleanup execute, Docker restart, or Docker Compose mutation.
 
 
+
+## V1 contract resource discovery
+
+`v1 check` resolves the required V1 contract resources from the imported ShellForgeAI package/source lineage before considering the caller's current working directory. The maintained resource contract is `README.md`, `docs/v1-scope.md`, `docs/safety.md`, `docs/cli.md`, and `OPS.md`. The current working directory is a final bounded fallback only when it independently contains that complete exact set.
+
+The resolver uses a fixed, read-only candidate list derived from the imported `shellforgeai` package location, the current Python executable lineage, and then the current working directory. It does not change directories, search home directories or drives, recursively walk parents, use glob/rglob discovery, or pick the first matching filename. If no bounded candidate contains the complete contract, `docs_v1_contract_present` fails and reports the missing relative resource names instead of relying on wrapper CWD behavior or silently passing partial resources. Ordinary wheel layouts that do not carry the full repository documentation set are therefore reported honestly rather than hidden by the caller's CWD.
+
+Wrappers do not need to change CWD for `v1 check`. PR304 Windows runtime-integrity diagnostics and PR305 Windows runtime reconciliation remain unchanged: PR304 is read-only, while PR305 remains preview-only/non-executable with apply/execute, confirmation, backup, atomic replacement, hash verification, receipt, and post-change verification deferred.
+
 ## Disposable container recipe (python:3.12-slim / bookworm)
 
 Use a disposable validation container and a writable copy of the source.
