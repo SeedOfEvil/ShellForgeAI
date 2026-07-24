@@ -54,7 +54,7 @@ A legacy proposal fingerprint is not equivalent to a PR309 subject SHA-256. It b
 
 The analyzer explicitly prohibits inference of capability ID, target identity, evidence timestamps, evidence reference identity, desired outcome, diagnosis summary, blast radius, procedure step IDs, expected effects, revalidation requirements, rollback reversibility, audit requirements, unsupported or irreversible aspects, PR309 attestation, and subject hash.
 
-Any future conversion operation must require explicit reviewed context for these items. PR310 does not define a supplemental-context schema, adapter design, migration workflow, draft subject payload, capability registry, or execution path.
+Any future conversion operation must require explicit reviewed context for these items. PR310 does not define a supplemental-context schema, adapter design, migration workflow, draft subject payload, capability registry, or execution path. PR311 narrows field-source permissions in [Approved Change Construction Policy](APPROVED_CHANGE_CONSTRUCTION_POLICY.md): direct candidate use is limited to `proposal_id` -> `source_proposal_reference`, `risk` -> `risk`, `impact` -> `impact`, `preconditions` -> `preconditions`, and `verification` -> `verification_criteria`; all other legacy values are explicit-context-only or review-context-only, and PR311 still performs no conversion or value extraction.
 
 ## Behavior and safety fields
 

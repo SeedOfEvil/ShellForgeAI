@@ -24,10 +24,11 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 
 - PR309 provides an immutable approval subject, deterministic subject identity, exact attestation binding, and inert structural/capability validation.
 - PR310 establishes the strict legacy compatibility decision: automatic conversion from legacy Proposal schema v1 is prohibited, approval is not portable, and separately reviewed context is required for any future conversion.
-- The PR309/PR310 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
-- Future Stage B work remains explicit: supplemental-context contract decision, persistence format, approval workflow integration, capability binding, current-state execution preflight, and receipt linkage.
+- PR311 establishes a fail-closed field-source policy for future approved-change subject construction: only five legacy fields may be displayed as explicitly reviewed direct candidates, while all other destination values require explicit reviewed context or review-context-only display.
+- The PR309/PR310/PR311 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
+- Future Stage B work remains explicit: supplemental-context contract, explicit reviewed construction operation, persistence format, approval workflow integration, capability binding, current-state execution preflight, and receipt linkage.
 
-Stage B is not complete. The PR309/PR310 foundation defines inert contract and compatibility-assessment modules only; it does not design schemas for supplemental context, persistence, files, commands, receipts, executors, adapters, or a mutation engine.
+Stage B is not complete. The PR309/PR310/PR311 foundation defines inert contract, compatibility-assessment, and construction-policy modules only; it does not design schemas for supplemental context, persistence, files, commands, receipts, executors, adapters, or a mutation engine.
 
 ## Future Stage C — First narrow end-to-end implementation lane
 

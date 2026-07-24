@@ -69,6 +69,7 @@ synthesis** (LLM providers).
 | `core/config.py` | YAML + env settings (`pydantic-settings`). |
 | `core/approved_change_contract.py` | Inert Stage B immutable approved-change subject, attestation binding, canonical hash, and read-only validation; not wired into CLI, proposals, approvals, recipes, persistence, preflight, or execution. |
 | `core/approved_change_compatibility.py` | In-memory findings-only PR310 assessment of legacy Proposal schema v1 against PR309 contract requirements; creates no contract, loads no files, and is not wired into CLI, approval flow, persistence, recipes, preflight, or execution. |
+| `core/approved_change_construction_policy.py` | Immutable PR311 field-source policy metadata and pure validation for future approved-change construction; takes no `Proposal` instance, creates no subject or contract, and is not wired to CLI, approvals, persistence, recipes, preflight, receipts, platforms, or execution. |
 | `core/profiles.py` | Risk-class allow/ask/deny profiles. |
 | `core/session.py` | Session id, data dir, artifact dir. |
 | `core/context.py` | `RuntimeContext` carried through CLI handlers. |
