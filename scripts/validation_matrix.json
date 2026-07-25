@@ -137,6 +137,12 @@
       "tests/test_pr132_followup_grounding.py",
       "tests/test_pr124_followup_resolution.py"
     ]},
+    {"pattern": "src/shellforgeai/core/approved_change_supplemental_context.py", "lane": "targeted_runtime", "reason": "inert Stage B reviewed supplemental-context contract, canonical hashing, or validation changed (no CLI, persistence, mutation, or execution surface)", "tests": [
+      "tests/test_pr314_approved_change_supplemental_context.py",
+      "tests/test_pr311_approved_change_construction_policy.py",
+      "tests/test_pr310_legacy_proposal_compatibility.py",
+      "tests/test_pr309_approved_change_contract.py"
+    ]},
     {"pattern": "src/shellforgeai/interactive/**", "lane": "targeted_runtime", "reason": "interactive UX/command dispatch changed", "tests": [
       "tests/test_pr122_*",
       "tests/test_pr124_*",
