@@ -24,6 +24,7 @@ STATUS_FUTURE = "future"
 MUTATION_NONE = "none"
 MUTATION_GOVERNED_DISPOSABLE_ONLY = "governed_disposable_only"
 MUTATION_SHELLFORGEAI_METADATA_ONLY = "shellforgeai_owned_metadata_only"
+MUTATION_WINDOWS_EXACT_TWO_FILE_ONLY = "windows_exact_two_file_runtime_reconciliation_only"
 
 BROAD_TARGETS = {"all", "*", "everything", "all containers", "all services", "docker"}
 PRODUCTION_TARGETS = {"shellforgeai"}
@@ -249,19 +250,21 @@ _RECIPES: tuple[Recipe, ...] = (
     ),
     Recipe(
         recipe_id="windows.runtime_reconcile",
-        title="Preview Windows durable runtime reconciliation",
+        title="Reconcile the exact two durable Windows runtime files",
         category="windows",
         status=STATUS_PREVIEW_ONLY,
-        mutation_class=MUTATION_NONE,
+        mutation_class=MUTATION_WINDOWS_EXACT_TWO_FILE_ONLY,
         description=(
-            "Preview-only governed reconciliation for exactly the inspect profile and "
-            "Windows sfai.cmd wrapper from validated PR304 runtime-integrity artifacts. "
-            "Execution is not implemented."
+            "Governed reconciliation for exactly the inspect profile and Windows sfai.cmd "
+            "wrapper from validated PR304 runtime-integrity artifacts. Evidence and preview "
+            "come first; the confirmed execute lane is the standalone PR313 direct script "
+            "and is not reachable from this CLI surface or from natural language."
         ),
         required_evidence=(
             "one or two saved PR304 windows_runtime_integrity packets",
             "explicit staged source root",
             "explicit durable runtime root",
+            "one saved PR305 windows_runtime_reconcile packet accepted by its validator",
         ),
         preflight_gates=(
             "Windows platform",
@@ -269,16 +272,23 @@ _RECIPES: tuple[Recipe, ...] = (
             "exact two-file allowlist",
             "source/destination containment and safety",
             "hash availability",
+            "saved PR305 packet revalidation before execution",
+            "explicit roots matching the accepted plan",
+            "staged source content validation and current-state recheck",
+            "durable runtime root already present as a safe directory",
+            "exact destination-parent contract (config/profiles creatable; bin must exist)",
         ),
         approval_gates=(
-            "future explicit operator confirmation",
-            "future saved-preflight validation",
-            "future unchanged evidence/source/destination rechecks",
-            "future same-directory backup before replacement",
-            "future atomic replacement",
-            "future post-copy hash verification",
-            "future receipt",
-            "future post-change PR304 verification from staged root and System32",
+            "explicit --confirm-plan-sha256 matching the accepted plan canonical SHA-256",
+            "recipe-specific authorization only; not a portable approval attestation",
+            "saved-preflight validation",
+            "unchanged evidence/source/destination rechecks immediately before mutation",
+            "same-directory verified backup before replacement",
+            "all-prepared-before-commit transaction sequencing",
+            "atomic replacement",
+            "post-copy hash verification",
+            "execution receipt",
+            "post-change PR304 verification from staged root and System32",
         ),
         verification_required=True,
         rollback_available=False,
@@ -294,16 +304,58 @@ _RECIPES: tuple[Recipe, ...] = (
                 "--durable-runtime-root <runtime> --out-json <packet.json> --json"
             ),
             "python scripts/windows_runtime_reconcile_acceptance.py <packet.json> --json",
-        ),
-        blocked_reason="Preview-only: execution requires a future approved implementation.",
-        safety_notes=(
             (
-                "This recipe has no execute lane and cannot create, replace, back up, "
-                "clean, or repair files."
+                "python scripts/windows_runtime_reconcile_execute.py <packet.json> "
+                "<pr304-a.json> <pr304-b.json> --staged-source-root <source> "
+                "--durable-runtime-root <runtime> --confirm-plan-sha256 <64-lowercase-hex> "
+                "--data-dir <data-dir> --json"
             ),
             (
-                "The standalone helper may save only a deterministic ShellForgeAI "
-                "metadata packet when explicitly requested and refuses overwrite."
+                "python scripts/windows_runtime_reconcile_receipt_acceptance.py <receipt-id> "
+                "--data-dir <data-dir> --json"
+            ),
+            (
+                "python scripts/windows_runtime_reconcile_verify.py <receipt-id> "
+                "--staged-pr304 <artifact.json> --system32-pr304 <artifact.json> "
+                "--staged-source-root <source> --durable-runtime-root <runtime> "
+                "--data-dir <data-dir> --json"
+            ),
+        ),
+        blocked_reason=(
+            "This CLI surface stays preview-only: reconciliation runs only through the "
+            "standalone confirmed PR313 execute script."
+        ),
+        safety_notes=(
+            (
+                "Only the exact two-file allowlist is reachable: "
+                "config/profiles/inspect.yaml -> config/profiles/inspect.yaml and "
+                "scripts/windows/sfai.cmd -> bin/sfai.cmd."
+            ),
+            (
+                "Execution requires the exact canonical plan SHA-256; natural language, "
+                "--yes, bare booleans, and arbitrary paths or mappings are refused."
+            ),
+            (
+                "Replacements take a verified same-directory backup that is retained and "
+                "never pruned; there is no post-success rollback command."
+            ),
+            (
+                "The only directories reachable are the exact config and config/profiles "
+                "components beneath an already-existing durable runtime root; bin must "
+                "already exist and is never created. There is no generic mkdir, "
+                "bootstrap, or installer lane."
+            ),
+            (
+                "Parent-directory actions are part of the confirmed plan hash, so plans "
+                "generated before the destination-parent contract must be regenerated."
+            ),
+            (
+                "Compensation is bounded to files committed by the same confirmed execution; "
+                "cleanup, package, service, registry, and remote lanes stay out of scope."
+            ),
+            (
+                "The standalone helpers may save only deterministic ShellForgeAI-owned "
+                "metadata and receipts, and refuse to overwrite existing artifacts."
             ),
         ),
     ),

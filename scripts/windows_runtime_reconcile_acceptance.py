@@ -17,6 +17,18 @@ ALLOW = [
     ("config/profiles/inspect.yaml", "config/profiles/inspect.yaml"),
     ("scripts/windows/sfai.cmd", "bin/sfai.cmd"),
 ]
+# Exact fixed destination-parent contract (see the preflight helper).
+PARENT_CONTRACT_VERSION = 1
+PARENT_RELATIVE = {
+    "config/profiles/inspect.yaml": "config/profiles",
+    "bin/sfai.cmd": "bin",
+}
+PARENT_CREATION_ALLOWED = {
+    "config/profiles/inspect.yaml": True,
+    "bin/sfai.cmd": False,
+}
+AUTHORIZED_PARENT_DIRECTORIES = ["config", "config/profiles"]
+PARENT_STATES = {"present", "create_required", "blocked"}
 FUT = {
     "future.operator_confirmation",
     "future.saved_preflight_validation",
@@ -63,10 +75,59 @@ FALSE = (
 )
 
 
+def parent_errs(op: dict[str, Any]) -> list[str]:
+    """Validate the exact fixed destination-parent contract for one operation."""
+    e: list[str] = []
+    rel_dst = op.get("allowlist_destination")
+    parent = op.get("destination_parent")
+    if not isinstance(parent, dict):
+        return ["missing destination_parent contract"]
+    if rel_dst not in PARENT_RELATIVE:
+        return ["destination_parent on a non-allowlisted destination"]
+    if parent.get("contract_version") != PARENT_CONTRACT_VERSION:
+        e.append("destination_parent contract_version must be 1")
+    if parent.get("relative_path") != PARENT_RELATIVE[rel_dst]:
+        e.append("destination_parent relative_path mismatch")
+    allowed = PARENT_CREATION_ALLOWED[rel_dst]
+    if parent.get("creation_allowed") is not allowed:
+        e.append("destination_parent creation permission mismatch")
+    state = parent.get("state")
+    if state not in PARENT_STATES:
+        e.append("invalid destination_parent state")
+    chain = parent.get("creation_chain")
+    if not isinstance(chain, list) or any(not isinstance(x, str) for x in chain):
+        e.append("destination_parent creation_chain must be a list of strings")
+        chain = []
+    if not allowed and chain:
+        e.append("destination_parent creation is not authorized for this destination")
+    for entry in chain:
+        if entry not in AUTHORIZED_PARENT_DIRECTORIES:
+            e.append("destination_parent creation_chain entry outside the exact allowlist")
+        if entry.startswith("/") or entry.startswith("\\") or re.match(r"^[A-Za-z]:", entry):
+            e.append("destination_parent creation_chain entry must be relative")
+        if ".." in entry.split("/") or "\\" in entry:
+            e.append("destination_parent creation_chain entry uses an unsafe path form")
+    if len(set(chain)) != len(chain):
+        e.append("destination_parent creation_chain contains duplicates")
+    if chain != [x for x in AUTHORIZED_PARENT_DIRECTORIES if x in chain]:
+        e.append("destination_parent creation_chain ordering mismatch")
+    if state == "create_required" and not chain:
+        e.append("destination_parent create_required without a creation chain")
+    if state in {"present", "blocked"} and chain:
+        e.append("destination_parent creation chain on a non-creating state")
+    if state == "blocked" and not (parent.get("blockers") or []):
+        e.append("blocked destination_parent without a blocker")
+    if state != "blocked" and (parent.get("blockers") or []):
+        e.append("destination_parent blockers on a non-blocked state")
+    return e
+
+
 def errs(p: dict[str, Any]) -> list[str]:
     e = []
     if p.get("schema_version") != 1:
         e.append("schema_version must be 1")
+    if p.get("destination_parent_contract_version") != PARENT_CONTRACT_VERSION:
+        e.append("destination_parent_contract_version must be 1")
     if p.get("mode") != MODE:
         e.append("mode must be windows_runtime_reconcile")
     if p.get("recipe_id") != RECIPE:
@@ -112,12 +173,23 @@ def errs(p: dict[str, Any]) -> list[str]:
             e.append("replace flag mismatch")
         if "<UTCSTAMP>" not in str(o.get("backup_path_pattern")):
             e.append("backup pattern missing UTCSTAMP")
+        e += parent_errs(o)
     summ = p.get("summary") if isinstance(p.get("summary"), dict) else {}
     if summ.get("total_operations") != len(ops):
         e.append("summary total mismatch")
     for k, v in counts.items():
         if summ.get(k) != v:
             e.append(f"summary count mismatch: {k}")
+    parent_counts = {k: 0 for k in PARENT_STATES}
+    for o in ops:
+        state = (o.get("destination_parent") or {}).get("state")
+        if state in parent_counts:
+            parent_counts[state] += 1
+    for state, value in parent_counts.items():
+        if summ.get(f"parent_{state}") != value:
+            e.append(f"summary count mismatch: parent_{state}")
+    if parent_counts["blocked"] and p.get("status") != "blocked":
+        e.append("plan with a blocked destination parent must be blocked")
     expected = (
         "unsupported"
         if p.get("platform", {}).get("system") != "windows"

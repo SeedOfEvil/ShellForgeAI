@@ -117,13 +117,22 @@ def test_runbook_includes_artifact_map_and_decision_matrix_contracts():
 
 
 def test_readme_keeps_capability_first_positioning_and_mutation_refusal():
+    # PR307 modernized the product-facing README wording; the guardrail below tracks the
+    # maintained phrasing (see tests/test_pr257_readme_product_positioning.py and
+    # tests/test_pr307_product_maturity_docs.py) while preserving this test's intent:
+    # capability-first positioning plus explicit mutation refusal must stay in the README.
+    # Runbook discoverability now lives in OPS.md and the three docs asserted by
+    # test_minimal_docs_reference_runbook_without_new_execution_lane, because PR307
+    # deliberately kept deep operational runbooks out of the product-facing README.
     text = README.read_text()
-    assert "ShellForgeAI is strongest at evidence-backed Docker/Linux triage" in text
-    assert "guarded operator workflows" in text
-    assert "audit-friendly receipts and manifests" in text
-    assert "deterministic refusal of unsafe broad mutation" in text
-    assert "docs/ARCHIVE_SOURCE_ACTION_RUNBOOK.md" in text
-    assert "Asks do not execute" in text
+    assert "CLI-first Linux/Docker operator tooling" in text
+    assert "evidence-backed" in text
+    assert "named guarded workflows" in text
+    assert "Auditable artifacts:" in text
+    assert "manifests" in text and "receipts" in text
+    assert "Deterministic mutation refusal/routing" in text
+    assert "refuses unsafe broad mutation" in text
+    assert "Mutation-shaped asks are refused" in text
 
 
 def test_minimal_docs_reference_runbook_without_new_execution_lane():

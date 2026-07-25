@@ -30,6 +30,15 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 
 Stage B is not complete. The PR309/PR310/PR311 foundation defines inert contract, compatibility-assessment, and construction-policy modules only; it does not design schemas for supplemental context, persistence, files, commands, receipts, executors, adapters, or a mutation engine.
 
+## Named Windows two-file governed implementation lane (PR313)
+
+- PR313 establishes exactly one named, local, governed Windows implementation lane: `windows.runtime_reconcile`, limited to `config/profiles/inspect.yaml -> config/profiles/inspect.yaml` and `scripts/windows/sfai.cmd -> bin/sfai.cmd`.
+- It consumes and revalidates the PR304 runtime-integrity and PR305 preview contracts, requires an exact canonical plan-hash confirmation, prepares everything before committing, uses verified backups and atomic replacement, writes an auditable receipt, and offers read-only post-change verification.
+- It does not complete general Stage B or Stage C: it adds no approval workflow integration, no PR309 approved-change construction, no approval portability, no capability registry or generic capability binding, and no generic execution preflight or receipt linkage.
+- Its exact destination-parent contract lets a confirmed create reach only the `config` and `config/profiles` components beneath an already-existing durable runtime root; `bin` and the root itself are never created, and no generic installer, bootstrap, or directory-repair lane was introduced.
+- It implies no additional capabilities. Future expansion stays capability by capability, each with typed inputs, scope limits, gates, verification, reporting, receipts, and tests.
+- Linux/Docker remains the primary V1 lane and release-validation basis; Windows remains preview/early support, and this lane is a narrow local file-integrity repair capability rather than production autonomy.
+
 ## Future Stage C — First narrow end-to-end implementation lane
 
 - Choose one deliberately narrow supported solution type.
