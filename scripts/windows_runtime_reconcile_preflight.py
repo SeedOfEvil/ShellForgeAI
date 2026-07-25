@@ -20,6 +20,24 @@ OPS = (
     ("scripts/windows/sfai.cmd", "bin/sfai.cmd"),
 )
 OP_ORDER = ("no_change", "create_required", "replace_required", "blocked")
+
+# Exact fixed destination-parent contract.
+#
+# Only the inspect-profile destination may have its parent chain created, and only
+# the exact "config" / "config/profiles" components beneath an already-existing
+# durable runtime root. The wrapper parent "bin" must already exist; PR313 never
+# creates it. No caller-supplied or arbitrary directory is reachable.
+PARENT_CONTRACT_VERSION = 1
+PARENT_RELATIVE = {
+    "config/profiles/inspect.yaml": "config/profiles",
+    "bin/sfai.cmd": "bin",
+}
+PARENT_CREATION_ALLOWED = {
+    "config/profiles/inspect.yaml": True,
+    "bin/sfai.cmd": False,
+}
+AUTHORIZED_PARENT_DIRECTORIES = ("config", "config/profiles")
+PARENT_STATES = ("present", "create_required", "blocked")
 GATE_NAMES = (
     "platform.windows",
     "pr304.artifact_count",
@@ -29,6 +47,8 @@ GATE_NAMES = (
     "durable_runtime_root.explicit",
     "pr304.runtime_profile_and_wrapper_blockers_only",
     "allowlist.exact_two_files",
+    "durable_runtime_root.exists_safe_directory",
+    "destination_parent.exact_contract",
     "paths.contained",
     "files.regular_no_reparse",
     "hashes.available",
@@ -183,12 +203,78 @@ def check_artifacts(paths: list[str]):
     return payloads, errs, blockers
 
 
+def parent_chain(rel_parent: str) -> tuple[str, ...]:
+    """Ordered cumulative relative components of a fixed parent path."""
+    parts = rel_parent.split("/")
+    return tuple("/".join(parts[: i + 1]) for i in range(len(parts)))
+
+
+def root_safe(dst_root: Path | None) -> list[str]:
+    """The durable runtime root must already exist as a safe directory."""
+    if dst_root is None:
+        return ["durable runtime root was not supplied"]
+    if not dst_root.expanduser().is_absolute():
+        return ["durable runtime root must be an absolute path"]
+    if is_reparse(dst_root):
+        return ["durable runtime root is a reparse point, symlink, junction, or mount point"]
+    if not dst_root.exists():
+        return ["durable runtime root does not exist"]
+    if not dst_root.is_dir():
+        return ["durable runtime root is not a directory"]
+    return []
+
+
+def destination_parent(dst_root: Path, rel_dst: str) -> dict[str, Any]:
+    """Deterministic fixed destination-parent metadata for one allowlisted file."""
+    rel_parent = PARENT_RELATIVE[rel_dst]
+    allowed = PARENT_CREATION_ALLOWED[rel_dst]
+    blockers: list[str] = []
+    missing: list[str] = []
+    for rel in parent_chain(rel_parent):
+        node = dst_root / rel
+        if not contained(node, dst_root):
+            blockers.append(f"{rel}: parent component escapes the durable runtime root")
+            continue
+        if is_reparse(node):
+            blockers.append(
+                f"{rel}: parent component is a reparse point, symlink, junction, or mount point"
+            )
+            continue
+        if node.exists():
+            if not node.is_dir():
+                blockers.append(f"{rel}: parent component exists and is not a directory")
+            elif missing:
+                blockers.append(f"{rel}: parent chain is inconsistent")
+        elif allowed:
+            missing.append(rel)
+        else:
+            blockers.append(
+                f"{rel}: parent directory is missing and creation is not authorized"
+            )
+    if blockers:
+        state, chain = "blocked", []
+    elif missing:
+        state, chain = "create_required", missing
+    else:
+        state, chain = "present", []
+    return {
+        "contract_version": PARENT_CONTRACT_VERSION,
+        "relative_path": rel_parent,
+        "state": state,
+        "creation_allowed": allowed,
+        "creation_chain": chain,
+        "blockers": blockers,
+    }
+
+
 def operation(
     src_root: Path, dst_root: Path, rel_src: str, rel_dst: str
 ) -> dict[str, Any]:
     src = src_root / rel_src
     dst = dst_root / rel_dst
     blockers = []
+    parent = destination_parent(dst_root, rel_dst)
+    blockers.extend(f"destination parent {item}" for item in parent["blockers"])
     if not contained(src, src_root):
         blockers.append("source path escapes staged root")
     if not contained(dst, dst_root):
@@ -229,6 +315,7 @@ def operation(
         "existing_destination_sha256": dst_hash,
         "expected_post_change_sha256": src_hash,
         "reason": reason,
+        "destination_parent": parent,
         "creation_required": status == "create_required",
         "replacement_required": status == "replace_required",
         "backup_path_pattern": norm(
@@ -302,16 +389,31 @@ def build_packet(
     gates.append(gate("allowlist.exact_two_files", "passed"))
     src_root = Path(staged_source_root).expanduser() if staged_source_root else None
     dst_root = Path(durable_runtime_root).expanduser() if durable_runtime_root else None
+    root_errs = root_safe(dst_root) if system == "windows" and dst_root else []
+    gates.append(
+        gate(
+            "durable_runtime_root.exists_safe_directory",
+            "passed" if not root_errs else "blocked",
+            "; ".join(root_errs),
+        )
+    )
+    if root_errs:
+        blockers.extend(f"durable runtime root: {item}" for item in root_errs)
     if (
         system == "windows"
         and src_root
         and dst_root
         and not art_errs
         and not pr304_blockers
+        and not root_errs
     ):
         ops = [operation(src_root, dst_root, a, b) for a, b in OPS]
     op_blocked = any(o["operation"] == "blocked" for o in ops)
+    parent_blocked = any(
+        (o.get("destination_parent") or {}).get("state") == "blocked" for o in ops
+    )
     gates += [
+        gate("destination_parent.exact_contract", "blocked" if parent_blocked else "passed"),
         gate("paths.contained", "blocked" if op_blocked else "passed"),
         gate("files.regular_no_reparse", "blocked" if op_blocked else "passed"),
         gate("hashes.available", "blocked" if op_blocked else "passed"),
@@ -342,10 +444,12 @@ def build_packet(
             "no PR305 operation generated."
         )
     counts = Counter(o["operation"] for o in ops)
+    parents = Counter((o.get("destination_parent") or {}).get("state") for o in ops)
     return {
         "schema_version": 1,
         "mode": MODE,
         "recipe_id": RECIPE_ID,
+        "destination_parent_contract_version": PARENT_CONTRACT_VERSION,
         "status": status,
         "read_only": True,
         "mutation_performed": False,
@@ -367,6 +471,9 @@ def build_packet(
             "create_required": counts["create_required"],
             "replace_required": counts["replace_required"],
             "blocked": counts["blocked"],
+            "parent_present": parents["present"],
+            "parent_create_required": parents["create_required"],
+            "parent_blocked": parents["blocked"],
         },
         "gates": gates,
         "blockers": blockers

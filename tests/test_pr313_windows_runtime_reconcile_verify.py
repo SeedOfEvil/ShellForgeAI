@@ -17,6 +17,7 @@ from test_pr313_windows_runtime_reconcile_execute import (  # noqa: E402
     load_script,
     make_lab,
     run_execute,
+    symlink_or_skip,
     write_exact,
 )
 
@@ -339,3 +340,118 @@ def test_reconciled_profile_matches_the_staged_source(tmp_path, monkeypatch):
     lab, _ = reconciled_lab(tmp_path, monkeypatch)
     assert lab.profile_destination.read_bytes() == CANONICAL_INSPECT_PROFILE_BYTES
     assert lab.wrapper_destination.read_bytes() == CANONICAL_WRAPPER_BYTES
+
+
+# --------------------------------------------------------------------------- #
+# Destination-parent post-verification
+# --------------------------------------------------------------------------- #
+
+
+def parent_reconciled_lab(tmp_path, monkeypatch, profile_parent="missing_all"):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent=profile_parent,
+    )
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_EXECUTED, result["blockers"]
+    return lab, result
+
+
+@pytest.mark.parametrize("profile_parent", ["missing_all", "missing_profiles"])
+def test_verifier_accepts_created_parent_chain(tmp_path, monkeypatch, profile_parent):
+    lab, result = parent_reconciled_lab(tmp_path, monkeypatch, profile_parent)
+    staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab)
+    verification = run_verify(lab, result, staged, system32)
+    assert verification["status"] == wrre.VERIFY_STATUS_VERIFIED, verification["failures"]
+    names = {check["name"] for check in verification["checks"]}
+    assert "parent.retained_directory.config/profiles" in names
+    assert all(check["status"] == "passed" for check in verification["checks"])
+    assert (lab.runtime / "config/profiles").is_dir()
+
+
+def test_verifier_rejects_a_missing_retained_directory(tmp_path, monkeypatch):
+    lab, result = parent_reconciled_lab(tmp_path, monkeypatch)
+    staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab)
+    lab.profile_destination.unlink()
+    (lab.runtime / "config/profiles").rmdir()
+    verification = run_verify(lab, result, staged, system32)
+    assert verification["status"] == wrre.VERIFY_STATUS_FAILED
+    assert any("retained execution-created directory" in f for f in verification["failures"])
+
+
+def test_verifier_rejects_hostile_reparse_conversion(tmp_path, monkeypatch):
+    lab, result = parent_reconciled_lab(tmp_path, monkeypatch)
+    staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab)
+    lab.profile_destination.unlink()
+    (lab.runtime / "config/profiles").rmdir()
+    elsewhere = tmp_path / "hostile-profiles"
+    elsewhere.mkdir()
+    symlink_or_skip(lab.runtime / "config/profiles", elsewhere, target_is_directory=True)
+    verification = run_verify(lab, result, staged, system32)
+    assert verification["status"] == wrre.VERIFY_STATUS_FAILED
+    assert any("retained execution-created directory" in f for f in verification["failures"])
+
+
+def test_verifier_rejects_bin_parent_creation_claim(tmp_path, monkeypatch):
+    lab, result = parent_reconciled_lab(tmp_path, monkeypatch)
+    staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab)
+    directory = Path(result["receipt_path"])
+    receipt = json.loads((directory / wrre.RECEIPT_JSON).read_bytes().decode("utf-8"))
+    receipt["operations"][1]["destination_parent"]["creation_allowed"] = True
+    (directory / wrre.RECEIPT_JSON).write_bytes(
+        (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    )
+    verification = run_verify(lab, result, staged, system32)
+    # Receipt-bundle integrity fails first: checksum plus parent-contract rejection.
+    assert verification["status"] == wrre.VERIFY_STATUS_BLOCKED
+
+
+def test_verifier_remains_read_only_over_created_directories(tmp_path, monkeypatch):
+    lab, result = parent_reconciled_lab(tmp_path, monkeypatch)
+    staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab)
+    before = snapshot(lab.runtime)
+    before_dirs = sorted(str(p.relative_to(lab.runtime)) for p in lab.runtime.rglob("*"))
+    verification = run_verify(lab, result, staged, system32)
+    assert verification["read_only"] is True
+    assert verification["repair_executed"] is False
+    assert snapshot(lab.runtime) == before
+    assert sorted(str(p.relative_to(lab.runtime)) for p in lab.runtime.rglob("*")) == before_dirs
+
+
+def test_fresh_confirmed_replay_after_parent_creation_is_a_no_op(tmp_path, monkeypatch):
+    lab, first = parent_reconciled_lab(tmp_path, monkeypatch)
+    created = [
+        entry
+        for op in first["operations"]
+        for entry in (op.get("destination_parent") or {}).get("created_directories") or []
+    ]
+    assert created == ["config", "config/profiles"]
+
+    fresh = [build_pr304(tmp_path, monkeypatch, lab.runtime, name="pr304-replay.json")]
+    helper = load_script(SCRIPTS / "windows_runtime_reconcile_preflight.py")
+    packet = helper.build_packet([str(a) for a in fresh], str(lab.staged), str(lab.runtime))
+    assert packet["status"] == "no_change"
+    assert packet["operations"][0]["destination_parent"]["state"] == "present"
+    assert packet["operations"][1]["destination_parent"]["state"] == "present"
+
+    replay_path = tmp_path / "pr305-replay.json"
+    replay_path.write_text(json.dumps(packet, sort_keys=True), encoding="utf-8")
+    replay = run_execute(
+        lab,
+        packet_path=replay_path,
+        artifacts=fresh,
+        confirm_plan_sha256=wrre.canonical_plan_sha256(packet),
+    )
+    assert replay["status"] == wrre.STATUS_NO_CHANGE
+    assert replay["mutation_performed"] is False
+    assert replay["safety"]["parent_directory_create_executed"] is False
+    assert (lab.runtime / "config/profiles").is_dir()
+
+    validation = wrre.validate_saved_receipt(replay["receipt_id"], str(lab.data_dir))
+    assert validation["status"] == "ok", validation["failures"]
+    staged, system32 = fresh_artifacts(tmp_path, monkeypatch, lab, suffix="replay")
+    verification = run_verify(lab, replay, staged, system32)
+    assert verification["status"] == wrre.VERIFY_STATUS_VERIFIED, verification["failures"]

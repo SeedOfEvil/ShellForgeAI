@@ -275,6 +275,8 @@ _RECIPES: tuple[Recipe, ...] = (
             "saved PR305 packet revalidation before execution",
             "explicit roots matching the accepted plan",
             "staged source content validation and current-state recheck",
+            "durable runtime root already present as a safe directory",
+            "exact destination-parent contract (config/profiles creatable; bin must exist)",
         ),
         approval_gates=(
             "explicit --confirm-plan-sha256 matching the accepted plan canonical SHA-256",
@@ -336,6 +338,16 @@ _RECIPES: tuple[Recipe, ...] = (
             (
                 "Replacements take a verified same-directory backup that is retained and "
                 "never pruned; there is no post-success rollback command."
+            ),
+            (
+                "The only directories reachable are the exact config and config/profiles "
+                "components beneath an already-existing durable runtime root; bin must "
+                "already exist and is never created. There is no generic mkdir, "
+                "bootstrap, or installer lane."
+            ),
+            (
+                "Parent-directory actions are part of the confirmed plan hash, so plans "
+                "generated before the destination-parent contract must be regenerated."
             ),
             (
                 "Compensation is bounded to files committed by the same confirmed execution; "

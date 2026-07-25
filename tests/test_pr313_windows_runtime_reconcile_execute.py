@@ -138,9 +138,50 @@ class Lab:
 
 
 def _write_state(path: Path, state: str, staged_bytes: bytes, stale_bytes: bytes) -> None:
-    if state == "missing":
+    if state == "missing" or not path.parent.is_dir():
         return
     write_exact(path, staged_bytes if state == "match" else stale_bytes)
+
+
+def _build_profile_parent(runtime: Path, state: str, tmp_path: Path) -> None:
+    """Materialise the exact config/profiles parent chain in a named state."""
+    config = runtime / "config"
+    profiles = config / "profiles"
+    if state == "present":
+        profiles.mkdir(parents=True)
+    elif state == "missing_profiles":
+        config.mkdir(parents=True)
+    elif state == "missing_all":
+        pass
+    elif state == "file_config":
+        write_exact(config, b"hostile")
+    elif state == "file_profiles":
+        config.mkdir(parents=True)
+        write_exact(profiles, b"hostile")
+    elif state == "reparse_profiles":
+        config.mkdir(parents=True)
+        real = tmp_path / "outside-profiles"
+        real.mkdir(exist_ok=True)
+        symlink_or_skip(profiles, real, target_is_directory=True)
+    else:  # pragma: no cover - defensive
+        raise ValueError(f"unknown profile parent state: {state}")
+
+
+def _build_wrapper_parent(runtime: Path, state: str, tmp_path: Path) -> None:
+    """Materialise the fixed bin parent, which PR313 must never create."""
+    target = runtime / "bin"
+    if state == "present":
+        target.mkdir(parents=True)
+    elif state == "missing":
+        pass
+    elif state == "file":
+        write_exact(target, b"hostile")
+    elif state == "reparse":
+        real = tmp_path / "outside-bin"
+        real.mkdir(exist_ok=True)
+        symlink_or_skip(target, real, target_is_directory=True)
+    else:  # pragma: no cover - defensive
+        raise ValueError(f"unknown wrapper parent state: {state}")
 
 
 def build_pr304(
@@ -186,6 +227,8 @@ def make_lab(
     staged_profile: bytes = CANONICAL_INSPECT_PROFILE_BYTES,
     staged_wrapper: bytes = CANONICAL_WRAPPER_BYTES,
     artifact_count: int = 1,
+    profile_parent: str = "present",
+    wrapper_parent: str = "present",
 ) -> Lab:
     force_windows(monkeypatch)
     staged = tmp_path / "staged"
@@ -193,8 +236,9 @@ def make_lab(
     write_exact(staged / "scripts/windows/sfai.cmd", staged_wrapper)
 
     runtime = tmp_path / "runtime"
-    (runtime / "config/profiles").mkdir(parents=True)
-    (runtime / "bin").mkdir(parents=True)
+    runtime.mkdir(parents=True, exist_ok=True)
+    _build_profile_parent(runtime, profile_parent, tmp_path)
+    _build_wrapper_parent(runtime, wrapper_parent, tmp_path)
     (runtime / "Python314/Scripts").mkdir(parents=True)
     write_exact(runtime / "Python314/python.exe", b"")
     write_exact(runtime / "Python314/Scripts/shellforgeai.exe", b"")
@@ -623,13 +667,467 @@ def test_invalid_wrapper_semantic_markers_block(tmp_path, monkeypatch):
     assert any("semantic markers" in blocker for blocker in result["blockers"])
 
 
-def test_missing_destination_parent_blocks(tmp_path, monkeypatch):
-    lab = make_lab(tmp_path, monkeypatch, profile_state="missing")
+def created_dirs(result: dict) -> list[str]:
+    return [
+        entry
+        for op in result["operations"]
+        for entry in (op.get("destination_parent") or {}).get("created_directories") or []
+    ]
+
+
+def assert_no_directory_mutation(lab: Lab, result: dict, *, expect: set[str] = frozenset()) -> None:
+    """No authorized directory beyond `expect` may exist, and none may be recorded."""
+    assert created_dirs(result) == []
+    assert result["safety"]["parent_directory_create_executed"] is False
+    for relative in ("config", "config/profiles"):
+        if relative not in expect:
+            assert not (lab.runtime / relative).exists(), relative
+
+
+# --------------------------------------------------------------------------- #
+# Exact destination-parent contract
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("wrapper_parent", ["missing", "file", "reparse"])
+def test_unsafe_or_missing_bin_parent_blocks_and_creates_nothing(
+    tmp_path, monkeypatch, wrapper_parent
+):
+    # PR313 never creates "bin". An unsafe or absent wrapper parent is a blocking
+    # runtime-layout failure: the PR305 plan itself blocks, so the plan is not
+    # executable and no directory is ever created.
+    lab = make_lab(tmp_path, monkeypatch, wrapper_parent=wrapper_parent)
+    saved_parent = lab.packet["operations"][1]["destination_parent"]
+    assert saved_parent["relative_path"] == "bin"
+    assert saved_parent["creation_allowed"] is False
+    assert saved_parent["state"] == "blocked"
+    assert saved_parent["creation_chain"] == []
+    assert saved_parent["blockers"]
+    assert lab.packet["status"] == "blocked"
+    assert lab.packet["summary"]["parent_blocked"] == 1
+
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert result["receipt_id"] is None
+    if wrapper_parent == "missing":
+        assert not (lab.runtime / "bin").exists()
+    assert created_dirs(result) == []
+    assert result["safety"]["parent_directory_create_executed"] is False
+
+
+@pytest.mark.parametrize(
+    "profile_parent,expected_chain",
+    [
+        ("missing_all", ["config", "config/profiles"]),
+        ("missing_profiles", ["config/profiles"]),
+    ],
+)
+def test_authorized_parent_chain_is_created_exactly(
+    tmp_path, monkeypatch, profile_parent, expected_chain
+):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent=profile_parent,
+    )
+    saved = lab.packet["operations"][0]["destination_parent"]
+    assert saved["state"] == "create_required"
+    assert saved["creation_chain"] == expected_chain
+    assert saved["relative_path"] == "config/profiles"
+    assert saved["creation_allowed"] is True
+
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_EXECUTED, result["blockers"]
+    assert created_dirs(result) == expected_chain
+    assert result["safety"]["parent_directory_create_executed"] is True
+    assert result["safety"]["parent_directory_compensation_executed"] is False
+    assert (lab.runtime / "config/profiles").is_dir()
+    assert lab.profile_destination.read_bytes() == CANONICAL_INSPECT_PROFILE_BYTES
+    assert lab.wrapper_destination.read_bytes() == CANONICAL_WRAPPER_BYTES
+    # Nothing outside the exact authorized chain was created.
+    assert sorted(p.name for p in lab.runtime.iterdir()) == [
+        "Python314",
+        "bin",
+        "config",
+    ]
+
+
+def test_present_parent_requires_no_directory_action(tmp_path, monkeypatch):
+    lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
+    assert lab.packet["operations"][0]["destination_parent"]["state"] == "present"
+    assert lab.packet["operations"][1]["destination_parent"] == {
+        "contract_version": 1,
+        "relative_path": "bin",
+        "state": "present",
+        "creation_allowed": False,
+        "creation_chain": [],
+        "blockers": [],
+    }
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_EXECUTED
+    assert created_dirs(result) == []
+    assert result["safety"]["parent_directory_create_executed"] is False
+
+
+@pytest.mark.parametrize(
+    "profile_parent", ["file_config", "file_profiles", "reparse_profiles"]
+)
+def test_hostile_parent_chain_blocks_everything(tmp_path, monkeypatch, profile_parent):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent=profile_parent,
+    )
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert created_dirs(result) == []
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
+    assert temp_or_backup_files(lab.runtime) == []
+
+
+def test_saved_chain_narrows_when_config_appears_safely(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    assert lab.packet["operations"][0]["destination_parent"]["creation_chain"] == [
+        "config",
+        "config/profiles",
+    ]
+    (lab.runtime / "config").mkdir()
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_EXECUTED
+    parent = result["operations"][0]["destination_parent"]
+    assert parent["saved_creation_chain"] == ["config", "config/profiles"]
+    assert parent["revalidated_creation_chain"] == ["config/profiles"]
+    assert parent["narrowed"] is True
+    assert created_dirs(result) == ["config/profiles"]
+
+
+def test_saved_chain_narrows_to_no_parent_action(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    (lab.runtime / "config/profiles").mkdir(parents=True)
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_EXECUTED
+    parent = result["operations"][0]["destination_parent"]
+    assert parent["revalidated_state"] == "present"
+    assert parent["narrowed"] is True
+    assert created_dirs(result) == []
+    assert result["safety"]["parent_directory_create_executed"] is False
+
+
+def test_saved_present_parent_that_disappeared_blocks(tmp_path, monkeypatch):
+    lab = make_lab(tmp_path, monkeypatch, profile_state="missing", wrapper_state="stale")
     shutil.rmtree(lab.runtime / "config/profiles")
     result = run_execute(lab)
     assert result["status"] == wrre.STATUS_BLOCKED
-    assert any("parent directory does not exist" in blocker for blocker in result["blockers"])
+    assert any("no longer a safe existing directory" in b for b in result["blockers"])
+    assert created_dirs(result) == []
     assert not (lab.runtime / "config/profiles").exists()
+
+
+@pytest.mark.parametrize("hostile", ["file", "reparse"])
+def test_saved_create_chain_that_turned_hostile_blocks(tmp_path, monkeypatch, hostile):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    if hostile == "file":
+        write_exact(lab.runtime / "config", b"hostile")
+    else:
+        real = tmp_path / "late-outside"
+        real.mkdir()
+        symlink_or_skip(lab.runtime / "config", real, target_is_directory=True)
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert created_dirs(result) == []
+
+
+def test_legacy_plan_without_parent_contract_is_refused(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    legacy = json.loads(json.dumps(lab.packet))
+    legacy.pop("destination_parent_contract_version")
+    for op in legacy["operations"]:
+        op.pop("destination_parent")
+    resave_packet(lab, legacy)
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert result["receipt_id"] is None
+    assert any("regenerate" in blocker for blocker in result["blockers"])
+    assert_no_directory_mutation(lab, result)
+
+
+def test_parent_metadata_change_changes_the_confirmation_hash(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    original = lab.confirm
+    mutated = json.loads(json.dumps(lab.packet))
+    mutated["operations"][0]["destination_parent"]["creation_chain"] = ["config"]
+    assert wrre.canonical_plan_sha256(mutated) != original
+
+
+@pytest.mark.parametrize(
+    "confirmation", ["", "not-a-hash", "b" * 64], ids=["missing", "malformed", "wrong"]
+)
+def test_unconfirmed_execution_creates_zero_directories(tmp_path, monkeypatch, confirmation):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    result = run_execute(lab, confirm_plan_sha256=confirmation)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert result["receipt_id"] is None
+    assert_no_directory_mutation(lab, result)
+    assert not lab.data_dir.exists()
+
+
+def test_linux_unsupported_creates_zero_directories(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    force_linux(monkeypatch)
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_UNSUPPORTED
+    assert_no_directory_mutation(lab, result)
+    assert not lab.data_dir.exists()
+
+
+def test_source_drift_creates_zero_directories(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    write_exact(lab.staged / "config/profiles/inspect.yaml", THIRD_PROFILE_BYTES)
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert_no_directory_mutation(lab, result)
+
+
+def test_wrapper_conflict_prevents_profile_parent_creation(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    write_exact(lab.wrapper_destination, THIRD_WRAPPER_BYTES)
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert any("third hash" in blocker for blocker in result["blockers"])
+    assert_no_directory_mutation(lab, result)
+
+
+def test_full_no_op_creates_zero_directories(tmp_path, monkeypatch):
+    lab = make_lab(tmp_path, monkeypatch, profile_state="match", wrapper_state="match")
+    result = run_execute(lab)
+    assert result["status"] == wrre.STATUS_NO_CHANGE
+    assert created_dirs(result) == []
+    assert result["safety"]["parent_directory_create_executed"] is False
+    assert temp_or_backup_files(lab.runtime) == []
+
+
+def test_first_parent_creation_failure_leaves_no_mutation(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+
+    def hook(phase, target):
+        return "injected first-directory failure" if phase == "parent_directory" else None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_BLOCKED
+    assert_no_directory_mutation(lab, result)
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
+    assert temp_or_backup_files(lab.runtime) == []
+
+
+def test_second_parent_creation_failure_removes_the_first_directory(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+
+    def hook(phase, target):
+        if phase == "parent_directory" and target == "config/profiles":
+            return "injected second-directory failure"
+        return None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATED
+    assert created_dirs(result) == ["config"]
+    assert result["directory_compensation"]["attempted"] is True
+    assert result["directory_compensation"]["complete"] is True
+    assert result["directory_compensation"]["entries"][0]["result"] == "removed"
+    assert not (lab.runtime / "config").exists()
+    assert result["safety"]["parent_directory_create_executed"] is True
+    assert result["safety"]["parent_directory_compensation_executed"] is True
+    assert result["safety"]["file_create_executed"] is False
+
+
+@pytest.mark.parametrize("phase", ["backup", "temp"])
+def test_preparation_failure_removes_execution_created_directories(
+    tmp_path, monkeypatch, phase
+):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+
+    def hook(injected_phase, target):
+        return "injected preparation failure" if injected_phase == phase else None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATED
+    assert created_dirs(result) == ["config", "config/profiles"]
+    # Reverse order: the deepest directory is removed first.
+    removed = [e["relative_directory"] for e in result["directory_compensation"]["entries"]]
+    assert removed == ["config/profiles", "config"]
+    assert not (lab.runtime / "config").exists()
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
+    assert temp_files(lab.runtime) == []
+
+
+def test_commit_failure_runs_file_then_directory_compensation(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+
+    def hook(phase, target):
+        if phase == "commit" and target == "bin/sfai.cmd":
+            return "injected second-commit failure"
+        return None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATED
+    assert result["compensation"]["attempted"] is True
+    assert result["directory_compensation"]["attempted"] is True
+    assert not lab.profile_destination.exists()
+    assert not (lab.runtime / "config").exists()
+    assert lab.wrapper_destination.read_bytes() == STALE_WRAPPER_BYTES
+
+
+def test_pre_existing_directory_is_never_removed(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_profiles",
+    )
+
+    def hook(phase, target):
+        return "injected failure" if phase == "temp" else None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATED
+    assert created_dirs(result) == ["config/profiles"]
+    assert not (lab.runtime / "config/profiles").exists()
+    # "config" pre-existed and must survive.
+    assert (lab.runtime / "config").is_dir()
+
+
+def test_nonempty_execution_created_directory_is_not_removed(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+
+    def hook(phase, target):
+        if phase == "temp":
+            write_exact(lab.runtime / "config/profiles/unrelated.txt", b"someone else")
+            return "injected failure"
+        return None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATION_INCOMPLETE
+    assert result["directory_compensation"]["complete"] is False
+    results = {
+        e["relative_directory"]: e["result"]
+        for e in result["directory_compensation"]["entries"]
+    }
+    assert results["config/profiles"] == "refused_not_empty"
+    assert (lab.runtime / "config/profiles/unrelated.txt").is_file()
+    assert result["safety"]["parent_directory_compensation_executed"] is True
+
+
+def test_directory_compensation_uses_no_recursive_delete(tmp_path, monkeypatch):
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state="missing",
+        wrapper_state="stale",
+        profile_parent="missing_all",
+    )
+    calls: list[str] = []
+    real_rmdir = os.rmdir
+    monkeypatch.setattr(
+        wrre.os, "rmdir", lambda path: (calls.append(str(path)), real_rmdir(path))[1]
+    )
+    monkeypatch.setattr(
+        wrre, "shutil", None, raising=False
+    )  # the module must not reach for a recursive helper
+
+    def hook(phase, target):
+        return "injected failure" if phase == "temp" else None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATED
+    assert len(calls) == 2
 
 
 def test_destination_that_is_a_directory_blocks(tmp_path, monkeypatch):

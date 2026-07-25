@@ -536,3 +536,154 @@ def test_natural_language_and_boolean_confirmation_are_not_execution_sources(tmp
         assert result["safety"]["natural_language_execution"] is False
     assert not lab.profile_destination.exists()
     assert not lab.data_dir.exists()
+
+
+# --------------------------------------------------------------------------- #
+# Destination-parent receipt contract
+# --------------------------------------------------------------------------- #
+
+
+def parent_lab(tmp_path, monkeypatch, **overrides):
+    kwargs = {
+        "profile_state": "missing",
+        "wrapper_state": "stale",
+        "profile_parent": "missing_all",
+    }
+    kwargs.update(overrides)
+    return make_lab(tmp_path, monkeypatch, **kwargs)
+
+
+def test_receipt_records_the_exact_parent_contract(tmp_path, monkeypatch):
+    lab = parent_lab(tmp_path, monkeypatch)
+    result = run_execute(lab)
+    receipt = read_receipt(result)
+    assert receipt["destination_parent_contract_version"] == 1
+    parent = receipt["operations"][0]["destination_parent"]
+    assert parent["relative_path"] == "config/profiles"
+    assert parent["creation_allowed"] is True
+    assert parent["saved_state"] == "create_required"
+    assert parent["revalidated_state"] == "create_required"
+    assert parent["saved_creation_chain"] == ["config", "config/profiles"]
+    assert parent["revalidated_creation_chain"] == ["config", "config/profiles"]
+    assert parent["created_directories"] == ["config", "config/profiles"]
+    assert parent["compensated_directories"] == []
+    assert parent["remaining_created_directories"] == ["config", "config/profiles"]
+    assert parent["preparation_result"] == "created_and_verified"
+    wrapper_parent = receipt["operations"][1]["destination_parent"]
+    assert wrapper_parent["creation_allowed"] is False
+    assert wrapper_parent["created_directories"] == []
+    assert validate(result, lab)["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    "profile_parent,wrapper_state,expected",
+    [
+        ("missing_all", "stale", wrre.STATUS_EXECUTED),
+        ("missing_profiles", "match", wrre.STATUS_PARTIAL_EXECUTED),
+        ("present", "match", wrre.STATUS_NO_CHANGE),
+    ],
+)
+def test_parent_receipts_validate_for_each_status(
+    tmp_path, monkeypatch, profile_parent, wrapper_state, expected
+):
+    profile_state = "match" if expected == wrre.STATUS_NO_CHANGE else "missing"
+    lab = make_lab(
+        tmp_path,
+        monkeypatch,
+        profile_state=profile_state,
+        wrapper_state=wrapper_state,
+        profile_parent=profile_parent,
+    )
+    result = run_execute(lab)
+    assert result["status"] == expected
+    validation = validate(result, lab)
+    assert validation["status"] == "ok", validation["failures"]
+    assert validation["checks"]["destination_parent"] is True
+
+
+def test_directory_compensated_receipt_validates(tmp_path, monkeypatch):
+    lab = parent_lab(tmp_path, monkeypatch)
+
+    def hook(phase, target):
+        return "injected failure" if phase == "temp" else None
+
+    result = run_execute(lab, failure_hook=hook)
+    assert result["status"] == wrre.STATUS_FAILED_COMPENSATED
+    validation = validate(result, lab)
+    assert validation["status"] == "ok", validation["failures"]
+    receipt = read_receipt(result)
+    parent = receipt["operations"][0]["destination_parent"]
+    # Recorded in authorized order; the reverse removal order is visible in the
+    # directory_compensation entries.
+    assert parent["compensated_directories"] == ["config", "config/profiles"]
+    assert parent["remaining_created_directories"] == []
+    removal_order = [
+        e["relative_directory"] for e in receipt["directory_compensation"]["entries"]
+    ]
+    assert removal_order == ["config/profiles", "config"]
+
+
+@pytest.mark.parametrize(
+    "mutate,broken",
+    [
+        (
+            lambda r: r["operations"][0]["destination_parent"].update(
+                {"created_directories": ["C:\\Windows\\Temp"]}
+            ),
+            "no_sensitive_fields",
+        ),
+        (
+            lambda r: r["operations"][0]["destination_parent"].update(
+                {"created_directories": ["config", "config/profiles", "bin"]}
+            ),
+            "destination_parent",
+        ),
+        (
+            lambda r: r["operations"][0]["destination_parent"].update(
+                {"created_directories": ["config/profiles", "config"]}
+            ),
+            "destination_parent",
+        ),
+        (
+            lambda r: r["operations"][1]["destination_parent"].update(
+                {"created_directories": ["config"], "creation_allowed": True}
+            ),
+            "destination_parent",
+        ),
+        (
+            lambda r: r["operations"][0]["destination_parent"].update({"relative_path": "config"}),
+            "destination_parent",
+        ),
+        (lambda r: r.update({"destination_parent_contract_version": 2}), "destination_parent"),
+        (
+            lambda r: r["safety"].update({"parent_directory_create_executed": False}),
+            "destination_parent",
+        ),
+    ],
+)
+def test_parent_metadata_tamper_is_rejected(tmp_path, monkeypatch, mutate, broken):
+    lab = parent_lab(tmp_path, monkeypatch)
+    result = run_execute(lab)
+    directory = receipt_dir(result)
+    receipt = read_receipt(result)
+    mutate(receipt)
+    rewrite(directory, wrre.RECEIPT_JSON, receipt)
+    refresh_manifest(directory)
+    validation = validate(result, lab)
+    assert validation["status"] == "failed"
+    assert validation["checks"]["checksums"] is True
+    assert validation["checks"][broken] is False
+
+
+def test_parent_receipt_holds_no_absolute_path(tmp_path, monkeypatch):
+    lab = parent_lab(tmp_path, monkeypatch)
+    result = run_execute(lab)
+    directory = receipt_dir(result)
+    blob = "\n".join(
+        (directory / name).read_bytes().decode("utf-8") for name in wrre.RECEIPT_REQUIRED_FILES
+    )
+    assert str(lab.runtime) not in blob
+    assert str(tmp_path) not in blob
+    findings: list[str] = []
+    wrre._scan_forbidden(read_receipt(result), findings)
+    assert findings == []

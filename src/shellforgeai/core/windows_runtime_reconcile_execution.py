@@ -53,6 +53,24 @@ ALLOWLIST: tuple[tuple[str, str], ...] = (
     ("scripts/windows/sfai.cmd", "bin/sfai.cmd"),
 )
 
+#: Exact fixed destination-parent contract.
+#:
+#: Only the inspect-profile destination may have its parent chain created, and only
+#: the exact ``config`` / ``config/profiles`` components beneath an already-existing
+#: durable runtime root. The wrapper parent ``bin`` must already exist. No generic
+#: mkdir, bootstrap, installer, or caller-supplied directory is reachable.
+PARENT_CONTRACT_VERSION = 1
+PARENT_RELATIVE: Mapping[str, str] = {
+    "config/profiles/inspect.yaml": "config/profiles",
+    "bin/sfai.cmd": "bin",
+}
+PARENT_CREATION_ALLOWED: Mapping[str, bool] = {
+    "config/profiles/inspect.yaml": True,
+    "bin/sfai.cmd": False,
+}
+AUTHORIZED_PARENT_DIRECTORIES: tuple[str, ...] = ("config", "config/profiles")
+PARENT_STATES = ("present", "create_required", "blocked")
+
 #: Conservative per-source maximum sizes enforced before any preparation.
 MAX_SOURCE_BYTES: Mapping[str, int] = {
     "config/profiles/inspect.yaml": 1024 * 1024,
@@ -137,6 +155,8 @@ SAFETY_DYNAMIC_KEYS: tuple[str, ...] = (
     "backup_created",
     "atomic_replace_executed",
     "compensation_executed",
+    "parent_directory_create_executed",
+    "parent_directory_compensation_executed",
 )
 
 #: Receipt keys that would leak content, environment, credentials, or host paths.
@@ -354,6 +374,8 @@ class ReconcileValidators:
     pr304_compare: Callable[[list[dict[str, Any]]], list[str]]
     pr305_errs: Callable[[dict[str, Any]], list[str]]
     pr305_operation: Callable[[Path, Path, str, str], dict[str, Any]]
+    pr305_destination_parent: Callable[[Path, str], dict[str, Any]]
+    pr305_root_safe: Callable[[Path], list[str]]
     wrapper_markers: Mapping[str, str]
 
 
@@ -368,6 +390,8 @@ def load_validators(scripts_dir: Path | str | None = None) -> ReconcileValidator
         pr304_compare=integrity_acceptance.compare,
         pr305_errs=reconcile_acceptance.errs,
         pr305_operation=preflight.operation,
+        pr305_destination_parent=preflight.destination_parent,
+        pr305_root_safe=preflight.root_safe,
         wrapper_markers=dict(integrity.MARKERS),
     )
 
@@ -385,6 +409,8 @@ def safety_ledger(
     backup_created: bool = False,
     atomic_replace_executed: bool = False,
     compensation_executed: bool = False,
+    parent_directory_create_executed: bool = False,
+    parent_directory_compensation_executed: bool = False,
 ) -> dict[str, bool]:
     return {
         "read_only": not mutation_performed,
@@ -394,6 +420,10 @@ def safety_ledger(
         "backup_created": bool(backup_created),
         "atomic_replace_executed": bool(atomic_replace_executed),
         "compensation_executed": bool(compensation_executed),
+        "parent_directory_create_executed": bool(parent_directory_create_executed),
+        "parent_directory_compensation_executed": bool(
+            parent_directory_compensation_executed
+        ),
         **{key: False for key in SAFETY_FALSE_KEYS},
         "exact_two_file_allowlist": True,
     }
@@ -545,6 +575,23 @@ class FileEvaluation:
     blockers: list[str] = field(default_factory=list)
     source_bytes: bytes | None = None
     destination: Path | None = None
+    parent: dict[str, Any] = field(default_factory=dict)
+    created_directories: list[str] = field(default_factory=list)
+    compensated_directories: list[str] = field(default_factory=list)
+
+    def parent_record(self) -> dict[str, Any]:
+        record = dict(self.parent)
+        record["created_directories"] = list(self.created_directories)
+        record["compensated_directories"] = [
+            item
+            for item in AUTHORIZED_PARENT_DIRECTORIES
+            if item in set(self.compensated_directories)
+        ]
+        record["remaining_created_directories"] = [
+            item for item in self.created_directories
+            if item not in set(self.compensated_directories)
+        ]
+        return record
 
     def public(self) -> dict[str, Any]:
         return {
@@ -558,6 +605,7 @@ class FileEvaluation:
             "saved_destination_sha256": self.saved_destination_sha256,
             "current_pre_change_sha256": self.current_destination_sha256,
             "expected_post_change_sha256": self.expected_post_change_sha256,
+            "destination_parent": self.parent_record(),
             "blockers": list(self.blockers),
         }
 
@@ -570,6 +618,7 @@ def _evaluate_file(
     staged_source_root: Path,
     durable_runtime_root: Path,
     markers: Mapping[str, str],
+    parent_evaluator: Callable[[Path, str], dict[str, Any]],
 ) -> FileEvaluation:
     relative_source, relative_destination = ALLOWLIST[index]
     evaluation = FileEvaluation(
@@ -629,12 +678,15 @@ def _evaluate_file(
                 for message in _validate_source_bytes(relative_source, data, markers)
             )
 
-    # Destination must be absent or a regular file, with an existing exact parent.
-    parent = destination.parent
-    if not parent.is_dir():
-        blockers.append(
-            f"{relative_destination}: exact destination parent directory does not exist"
-        )
+    # The exact fixed destination parent must be present, or safely creatable under
+    # the authorized chain, revalidated against the accepted plan.
+    parent_record, parent_blockers = _revalidate_parent(
+        relative_destination=relative_destination,
+        saved_parent=saved_operation.get("destination_parent"),
+        current_parent=parent_evaluator(durable_runtime_root, relative_destination),
+    )
+    evaluation.parent = parent_record
+    blockers.extend(parent_blockers)
     destination_exists = destination.exists()
     if destination_exists and not destination.is_file():
         blockers.append(
@@ -678,6 +730,104 @@ def _evaluate_file(
         "replace_required",
     }
     return evaluation
+
+
+def _revalidate_parent(
+    *,
+    relative_destination: str,
+    saved_parent: Any,
+    current_parent: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Revalidate the exact fixed parent chain and apply safe narrowing.
+
+    The saved parent metadata is an authorization ceiling and a historical claim.
+    A saved chain may only shrink to the still-missing exact suffix; it can never
+    grow, move, or reach a directory outside the fixed contract.
+    """
+    expected_relative = PARENT_RELATIVE[relative_destination]
+    creation_allowed = PARENT_CREATION_ALLOWED[relative_destination]
+    blockers: list[str] = []
+    record: dict[str, Any] = {
+        "contract_version": PARENT_CONTRACT_VERSION,
+        "relative_path": expected_relative,
+        "creation_allowed": creation_allowed,
+        "saved_state": None,
+        "revalidated_state": "blocked",
+        "saved_creation_chain": [],
+        "revalidated_creation_chain": [],
+        "narrowed": False,
+        "preparation_result": "not_required",
+        "compensation_result": "not_required",
+        "blockers": [],
+    }
+
+    def finish() -> tuple[dict[str, Any], list[str]]:
+        record["blockers"] = [sanitize(item) for item in blockers]
+        return record, blockers
+
+    if not isinstance(saved_parent, dict):
+        blockers.append(
+            f"{expected_relative}: saved plan carries no destination-parent contract; "
+            "regenerate the PR305 plan"
+        )
+        return finish()
+    if saved_parent.get("contract_version") != PARENT_CONTRACT_VERSION:
+        blockers.append(f"{expected_relative}: saved destination-parent contract version mismatch")
+    if saved_parent.get("relative_path") != expected_relative:
+        blockers.append(f"{expected_relative}: saved destination-parent path mismatch")
+    if bool(saved_parent.get("creation_allowed")) is not creation_allowed:
+        blockers.append(f"{expected_relative}: saved parent creation permission mismatch")
+
+    saved_state = saved_parent.get("state")
+    saved_chain = list(saved_parent.get("creation_chain") or [])
+    record["saved_state"] = saved_state
+    record["saved_creation_chain"] = saved_chain
+    if saved_state not in {"present", "create_required"}:
+        blockers.append(f"{expected_relative}: saved parent state is not executable")
+    if saved_chain and not creation_allowed:
+        blockers.append(f"{expected_relative}: saved plan authorizes an unpermitted parent create")
+    if any(item not in AUTHORIZED_PARENT_DIRECTORIES for item in saved_chain):
+        blockers.append(f"{expected_relative}: saved parent chain leaves the exact allowlist")
+    if blockers:
+        return finish()
+
+    current_state = str(current_parent.get("state") or "blocked")
+    current_chain = list(current_parent.get("creation_chain") or [])
+    if current_state == "blocked":
+        blockers.extend(
+            f"{expected_relative}: {item}" for item in (current_parent.get("blockers") or [])
+        )
+        return finish()
+
+    if saved_state == "present":
+        if current_state != "present":
+            blockers.append(
+                f"{expected_relative}: parent was present in the accepted plan but is no "
+                "longer a safe existing directory; fresh PR304 evidence and a new PR305 "
+                "plan are required"
+            )
+            return finish()
+        record["revalidated_state"] = "present"
+        return finish()
+
+    # Saved create_required: narrow to the remaining exact missing suffix.
+    if current_state == "present":
+        record["revalidated_state"] = "present"
+        record["narrowed"] = True
+        return finish()
+    if any(item not in saved_chain for item in current_chain):
+        blockers.append(
+            f"{expected_relative}: current parent chain exceeds the accepted plan; a new "
+            "PR305 plan is required"
+        )
+        return finish()
+    if current_chain != [item for item in saved_chain if item in current_chain]:
+        blockers.append(f"{expected_relative}: current parent chain ordering mismatch")
+        return finish()
+    record["revalidated_state"] = "create_required"
+    record["revalidated_creation_chain"] = current_chain
+    record["narrowed"] = current_chain != saved_chain
+    return finish()
 
 
 def _revalidate_operation(
@@ -929,6 +1079,11 @@ def _load_json_object(path: Path) -> tuple[dict[str, Any] | None, list[str], str
 
 def _plan_contract_errors(packet: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
+    if packet.get("destination_parent_contract_version") != PARENT_CONTRACT_VERSION:
+        errors.append(
+            "saved packet predates the destination-parent contract; regenerate the "
+            "PR305 plan and confirm its new canonical hash"
+        )
     if packet.get("mode") != PLAN_MODE:
         errors.append("saved packet mode is not windows_runtime_reconcile")
     if packet.get("recipe_id") != RECIPE_ID:
@@ -1052,6 +1207,9 @@ def execute_windows_runtime_reconcile(
     runtime_root = Path(durable_runtime_root).expanduser()
     roots_block, root_errors = _validate_roots(source_root, runtime_root, packet)
     blockers.extend(root_errors)
+    blockers.extend(
+        f"durable runtime root: {item}" for item in active.pr305_root_safe(runtime_root)
+    )
 
     if blockers:
         return _envelope(
@@ -1078,6 +1236,7 @@ def execute_windows_runtime_reconcile(
             staged_source_root=source_root,
             durable_runtime_root=runtime_root,
             markers=active.wrapper_markers,
+            parent_evaluator=active.pr305_destination_parent,
         )
         for index in range(len(ALLOWLIST))
     ]
@@ -1127,6 +1286,10 @@ class _ExecutionContext:
     hook: Callable[[str, str], str | None]
     prepared: list[_Prepared] = field(default_factory=list)
     committed: list[_Prepared] = field(default_factory=list)
+    created_directories: list[tuple[str, Path, FileEvaluation]] = field(default_factory=list)
+    directory_compensation: dict[str, Any] = field(
+        default_factory=lambda: {"attempted": False, "complete": True, "entries": []}
+    )
     compensation: dict[str, Any] = field(default_factory=lambda: {"attempted": False})
     post_verification: dict[str, Any] = field(
         default_factory=lambda: {"status": "not_run", "entries": []}
@@ -1141,19 +1304,15 @@ class _ExecutionContext:
         plan_short = self.canonical_sha256[:8]
         try:
             self._prepare(stamp=stamp, plan_short=plan_short)
-        except _InjectedFailure as exc:
+        except (_InjectedFailure, OSError) as exc:
             self._discard_all_temps()
-            return self.finish(
-                status=STATUS_BLOCKED,
-                reason="preparation failed before any destination mutation",
-                blockers=[sanitize(exc)],
-            )
-        except OSError as exc:
-            self._discard_all_temps()
-            return self.finish(
-                status=STATUS_BLOCKED,
-                reason="preparation failed before any destination mutation",
-                blockers=[sanitize_exception(exc)],
+            return self._fail(
+                exc,
+                blocked_reason="preparation failed before any destination mutation",
+                compensated_reason=(
+                    "preparation failed after authorized parent directories were created; "
+                    "bounded compensation ran"
+                ),
             )
         self.all_prepared_before_commit = True
 
@@ -1161,25 +1320,12 @@ class _ExecutionContext:
             self._commit()
         except (_InjectedFailure, OSError) as exc:
             self._discard_all_temps()
-            failure = (
-                sanitize(exc) if isinstance(exc, _InjectedFailure) else sanitize_exception(exc)
-            )
-            if not self.committed:
-                return self.finish(
-                    status=STATUS_BLOCKED,
-                    reason="commit refused before any destination mutation",
-                    blockers=[failure],
-                )
-            self.compensation = _compensate(self.committed, self.durable_runtime_root)
-            status = (
-                STATUS_FAILED_COMPENSATED
-                if self.compensation.get("complete")
-                else STATUS_FAILED_COMPENSATION_INCOMPLETE
-            )
-            return self.finish(
-                status=status,
-                reason="commit failed after partial mutation; bounded compensation ran",
-                blockers=[failure],
+            return self._fail(
+                exc,
+                blocked_reason="commit refused before any destination mutation",
+                compensated_reason=(
+                    "commit failed after partial mutation; bounded compensation ran"
+                ),
             )
 
         self._post_verify()
@@ -1204,9 +1350,67 @@ class _ExecutionContext:
         )
         return self.finish(status=status, reason=reason)
 
+    def _fail(
+        self, exc: BaseException, *, blocked_reason: str, compensated_reason: str
+    ) -> dict[str, Any]:
+        """Compensate files then directories, and report the honest terminal status."""
+        failure = (
+            sanitize(exc) if isinstance(exc, _InjectedFailure) else sanitize_exception(exc)
+        )
+        if self.committed:
+            self.compensation = _compensate(self.committed, self.durable_runtime_root)
+        if self.created_directories:
+            self.directory_compensation = _compensate_directories(
+                self.created_directories, self.durable_runtime_root
+            )
+        if not self.committed and not self.created_directories:
+            return self.finish(status=STATUS_BLOCKED, reason=blocked_reason, blockers=[failure])
+        complete = bool(self.compensation.get("complete", True)) and bool(
+            self.directory_compensation.get("complete", True)
+        )
+        status = (
+            STATUS_FAILED_COMPENSATED if complete else STATUS_FAILED_COMPENSATION_INCOMPLETE
+        )
+        return self.finish(status=status, reason=compensated_reason, blockers=[failure])
+
     # -- phases ------------------------------------------------------------ #
 
+    def _create_parent_directories(self) -> None:
+        """Create only the exact authorized missing parent components, one at a time."""
+        root = self.durable_runtime_root
+        for evaluation in self.evaluations:
+            if not evaluation.mutation_required:
+                continue
+            parent = evaluation.parent
+            if parent.get("revalidated_state") != "create_required":
+                continue
+            if not parent.get("creation_allowed"):
+                raise OSError("parent creation is not authorized for this destination")
+            for relative in parent.get("revalidated_creation_chain") or []:
+                if relative not in AUTHORIZED_PARENT_DIRECTORIES:
+                    raise OSError("parent component is outside the exact allowlist")
+                self._fail_if_injected("parent_directory", relative)
+                node = root / relative
+                prefix = node.parent
+                if not prefix.is_dir() or _is_reparse(prefix):
+                    raise OSError("parent prefix is no longer a safe existing directory")
+                if not _contained(node, root):
+                    raise OSError("parent component escapes the durable runtime root")
+                try:
+                    os.mkdir(node)
+                    owned = True
+                except FileExistsError:
+                    # Benign race: accept only if it appeared as the exact safe directory.
+                    owned = False
+                if not node.is_dir() or _is_reparse(node):
+                    raise OSError("parent component is not a safe directory after creation")
+                if owned:
+                    self.created_directories.append((relative, node, evaluation))
+                    evaluation.created_directories.append(relative)
+            parent["preparation_result"] = "created_and_verified"
+
     def _prepare(self, *, stamp: str, plan_short: str) -> None:
+        self._create_parent_directories()
         for evaluation in self.evaluations:
             if not evaluation.mutation_required:
                 continue
@@ -1305,8 +1509,20 @@ class _ExecutionContext:
         blockers: Sequence[str] = (),
     ) -> dict[str, Any]:
         operations = self._operation_records()
+        for evaluation in self.evaluations:
+            if evaluation.compensated_directories:
+                evaluation.parent["compensation_result"] = (
+                    "removed"
+                    if self.directory_compensation.get("complete")
+                    else "incomplete"
+                )
+            elif self.directory_compensation.get("attempted"):
+                evaluation.parent["compensation_result"] = "attempted"
+        created_any = bool(self.created_directories)
         safety = safety_ledger(
-            mutation_performed=any(item["mutation_performed"] for item in operations),
+            mutation_performed=(
+                any(item["mutation_performed"] for item in operations) or created_any
+            ),
             file_create_executed=any(
                 item["mutation_performed"] and item["revalidated_operation"] == "create_required"
                 for item in operations
@@ -1318,6 +1534,10 @@ class _ExecutionContext:
             backup_created=any(item["backup_created"] for item in operations),
             atomic_replace_executed=any(item["mutation_performed"] for item in operations),
             compensation_executed=bool(self.compensation.get("attempted")),
+            parent_directory_create_executed=created_any,
+            parent_directory_compensation_executed=bool(
+                self.directory_compensation.get("attempted")
+            ),
         )
         receipt = write_execution_receipt(
             data_dir=self.data_dir,
@@ -1329,6 +1549,7 @@ class _ExecutionContext:
             roots=self.roots_block,
             operations=operations,
             compensation=self.compensation,
+            directory_compensation=self.directory_compensation,
             post_verification=self.post_verification,
             transaction={
                 "all_prepared_before_commit": self.all_prepared_before_commit,
@@ -1352,6 +1573,7 @@ class _ExecutionContext:
             roots=self.roots_block,
             operations=operations,
             compensation=self.compensation,
+            directory_compensation=self.directory_compensation,
             post_verification=self.post_verification,
             receipt_id=receipt["receipt_id"],
             receipt_path=receipt["receipt_path"],
@@ -1385,6 +1607,46 @@ class _ExecutionContext:
             )
             records.append(record)
         return records
+
+
+def _compensate_directories(
+    created: list[tuple[str, Path, FileEvaluation]], durable_runtime_root: Path
+) -> dict[str, Any]:
+    """Remove only this execution's own empty authorized directories, in reverse."""
+    entries: list[dict[str, Any]] = []
+    complete = True
+    for relative, node, evaluation in reversed(created):
+        entry: dict[str, Any] = {
+            "relative_directory": relative,
+            "action": "remove_created_directory",
+        }
+        if relative not in AUTHORIZED_PARENT_DIRECTORIES:
+            entry["result"] = "refused_outside_authorized_chain"
+        elif not _contained(node, durable_runtime_root):
+            entry["result"] = "refused_outside_durable_root"
+        elif _is_reparse(node):
+            entry["result"] = "refused_reparse_point"
+        elif not node.is_dir():
+            entry["result"] = "refused_not_a_directory"
+        elif any(node.iterdir()):
+            entry["result"] = "refused_not_empty"
+        else:
+            try:
+                os.rmdir(node)
+                entry["result"] = "removed"
+                evaluation.compensated_directories.append(relative)
+            except OSError as exc:
+                entry["result"] = "failed"
+                entry["error"] = sanitize_exception(exc)
+        if entry["result"] != "removed":
+            complete = False
+        entries.append(entry)
+    return {
+        "attempted": True,
+        "complete": complete,
+        "entries": entries,
+        "scope": "empty directories created by this exact execution only",
+    }
 
 
 class _InjectedFailure(RuntimeError):
@@ -1475,6 +1737,7 @@ def write_execution_receipt(
     roots: Mapping[str, Any],
     operations: Sequence[Mapping[str, Any]],
     compensation: Mapping[str, Any],
+    directory_compensation: Mapping[str, Any],
     post_verification: Mapping[str, Any],
     transaction: Mapping[str, Any],
     safety: Mapping[str, bool],
@@ -1523,6 +1786,8 @@ def write_execution_receipt(
         "summary": counts,
         "transaction": dict(transaction),
         "compensation": dict(compensation),
+        "directory_compensation": dict(directory_compensation),
+        "destination_parent_contract_version": PARENT_CONTRACT_VERSION,
         "post_verification": dict(post_verification),
         "read_only": not safety.get("mutation_performed", False),
         "mutation_performed": bool(safety.get("mutation_performed", False)),
@@ -1671,19 +1936,29 @@ def _receipt_status_precedence_errors(receipt: Mapping[str, Any]) -> list[str]:
     blocked = [item for item in operations if item.get("revalidated_operation") == "blocked"]
     compensation = _as_mapping(receipt.get("compensation"))
     verification = _as_mapping(receipt.get("post_verification"))
-    attempted = bool(compensation.get("attempted"))
+    directory_compensation = _as_mapping(receipt.get("directory_compensation"))
+    attempted = bool(compensation.get("attempted")) or bool(
+        directory_compensation.get("attempted")
+    )
+    compensation_complete = bool(compensation.get("complete", True)) and bool(
+        directory_compensation.get("complete", True)
+    )
     if status == STATUS_BLOCKED and mutated:
         errors.append("blocked receipt records mutation")
+    if status == STATUS_BLOCKED and any(
+        (item.get("destination_parent") or {}).get("created_directories") for item in operations
+    ):
+        errors.append("blocked receipt records created directories")
     if status == STATUS_NO_CHANGE and (mutated or blocked or len(no_ops) != len(ALLOWLIST)):
         errors.append("no_change receipt state mismatch")
     if status == STATUS_EXECUTED and len(mutated) != len(ALLOWLIST):
         errors.append("executed receipt must record two mutations")
     if status == STATUS_PARTIAL_EXECUTED and not (mutated and no_ops):
         errors.append("partial_executed receipt must record one mutation and one no-op")
-    if status == STATUS_FAILED_COMPENSATED and not (attempted and compensation.get("complete")):
+    if status == STATUS_FAILED_COMPENSATED and not (attempted and compensation_complete):
         errors.append("failed_compensated receipt must record complete compensation")
     if status == STATUS_FAILED_COMPENSATION_INCOMPLETE and not (
-        attempted and not compensation.get("complete")
+        attempted and not compensation_complete
     ):
         errors.append("failed_compensation_incomplete receipt must record incomplete compensation")
     if status == STATUS_VERIFICATION_FAILED and verification.get("status") != "failed":
@@ -1747,6 +2022,88 @@ def _receipt_operation_errors(receipt: Mapping[str, Any]) -> list[str]:
     return errors
 
 
+def _receipt_parent_errors(receipt: Mapping[str, Any]) -> list[str]:
+    """Validate the recorded destination-parent contract and directory actions."""
+    errors: list[str] = []
+    if receipt.get("destination_parent_contract_version") != PARENT_CONTRACT_VERSION:
+        errors.append("receipt destination_parent_contract_version must be 1")
+    operations = receipt.get("operations") or []
+    safety = _as_mapping(receipt.get("safety"))
+    status = receipt.get("status")
+    total_created: list[str] = []
+    for item in operations:
+        destination = item.get("relative_destination")
+        parent = item.get("destination_parent")
+        if not isinstance(parent, dict):
+            errors.append(f"{destination}: missing destination_parent record")
+            continue
+        if destination not in PARENT_RELATIVE:
+            errors.append("destination_parent on a non-allowlisted destination")
+            continue
+        allowed = PARENT_CREATION_ALLOWED[destination]
+        if parent.get("contract_version") != PARENT_CONTRACT_VERSION:
+            errors.append(f"{destination}: parent contract version mismatch")
+        if parent.get("relative_path") != PARENT_RELATIVE[destination]:
+            errors.append(f"{destination}: parent relative path mismatch")
+        if parent.get("creation_allowed") is not allowed:
+            errors.append(f"{destination}: parent creation permission mismatch")
+        for key in ("saved_creation_chain", "revalidated_creation_chain", "created_directories",
+                    "compensated_directories", "remaining_created_directories"):
+            value = parent.get(key)
+            if not isinstance(value, list) or any(not isinstance(x, str) for x in value):
+                errors.append(f"{destination}: {key} must be a list of relative directories")
+                continue
+            if not allowed and value:
+                errors.append(f"{destination}: directory action recorded for a non-creating parent")
+            for entry in value:
+                if entry not in AUTHORIZED_PARENT_DIRECTORIES:
+                    errors.append(f"{destination}: {key} entry outside the exact allowlist")
+                elif _ABSOLUTE_PATH_RE.search(entry) or ".." in entry.split("/"):
+                    errors.append(f"{destination}: {key} entry is not a safe relative path")
+            if len(set(value)) != len(value):
+                errors.append(f"{destination}: {key} contains duplicates")
+            if value != [x for x in AUTHORIZED_PARENT_DIRECTORIES if x in value]:
+                errors.append(f"{destination}: {key} ordering mismatch")
+        created = list(parent.get("created_directories") or [])
+        compensated = list(parent.get("compensated_directories") or [])
+        remaining = list(parent.get("remaining_created_directories") or [])
+        chain = list(parent.get("revalidated_creation_chain") or [])
+        if any(entry not in chain for entry in created):
+            errors.append(f"{destination}: created directory outside the revalidated chain")
+        if any(entry not in created for entry in compensated):
+            errors.append(f"{destination}: compensated directory was never created here")
+        expected_remaining = [entry for entry in created if entry not in set(compensated)]
+        if remaining != expected_remaining:
+            errors.append(f"{destination}: retained directory list is inconsistent")
+        if parent.get("revalidated_state") not in PARENT_STATES:
+            errors.append(f"{destination}: invalid revalidated parent state")
+        if parent.get("revalidated_state") != "create_required" and created:
+            errors.append(f"{destination}: directories created without a create_required parent")
+        total_created.extend(created)
+
+    if status in {STATUS_BLOCKED, STATUS_NO_CHANGE, STATUS_UNSUPPORTED} and total_created:
+        errors.append(f"{status} receipt records created directories")
+    if bool(safety.get("parent_directory_create_executed")) != bool(total_created):
+        errors.append("safety parent_directory_create_executed disagrees with the receipt")
+    directory_compensation = _as_mapping(receipt.get("directory_compensation"))
+    attempted = bool(directory_compensation.get("attempted"))
+    if bool(safety.get("parent_directory_compensation_executed")) != attempted:
+        errors.append("safety parent_directory_compensation_executed disagrees with the receipt")
+    if attempted:
+        entries = directory_compensation.get("entries")
+        if not isinstance(entries, list) or not entries:
+            errors.append("directory compensation recorded without entries")
+        else:
+            for entry in entries:
+                if entry.get("action") != "remove_created_directory":
+                    errors.append("directory compensation action outside the bounded scope")
+                if entry.get("relative_directory") not in AUTHORIZED_PARENT_DIRECTORIES:
+                    errors.append("directory compensation touched a non-allowlisted directory")
+        if not total_created:
+            errors.append("directory compensation without any created directory")
+    return errors
+
+
 def _receipt_safety_errors(receipt: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     safety = _as_mapping(receipt.get("safety"))
@@ -1768,8 +2125,14 @@ def _receipt_safety_errors(receipt: Mapping[str, Any]) -> list[str]:
     if receipt.get("read_only") is not (not mutation):
         errors.append("receipt read_only flag disagrees with the safety ledger")
     operations = receipt.get("operations") or []
-    if mutation and not any(item.get("mutation_performed") for item in operations):
-        errors.append("safety claims mutation without a mutated operation")
+    created_any = any(
+        (item.get("destination_parent") or {}).get("created_directories")
+        for item in operations
+    )
+    if mutation and not (
+        any(item.get("mutation_performed") for item in operations) or created_any
+    ):
+        errors.append("safety claims mutation without a mutated operation or created directory")
     if not mutation and any(item.get("mutation_performed") for item in operations):
         errors.append("safety understates a recorded mutation")
     if safety.get("backup_created") and not any(
@@ -1796,6 +2159,7 @@ def validate_saved_receipt(receipt_ref: str, data_dir: Path | str) -> dict[str, 
         "status_precedence": False,
         "safety": False,
         "compensation": False,
+        "destination_parent": False,
         "no_sensitive_fields": False,
     }
     directory = resolve_receipt_ref(receipt_ref, root)
@@ -1903,6 +2267,10 @@ def validate_saved_receipt(receipt_ref: str, data_dir: Path | str) -> dict[str, 
             compensation_errors.append("compensation scope statement is missing")
     checks["compensation"] = not compensation_errors
     failures.extend(compensation_errors)
+
+    parent_errors = _receipt_parent_errors(receipt)
+    checks["destination_parent"] = not parent_errors
+    failures.extend(parent_errors)
 
     sensitive: list[str] = []
     _scan_forbidden(receipt, sensitive)
@@ -2062,6 +2430,30 @@ def verify_windows_runtime_reconcile(
             failures.append(f"{label} PR304 artifact does not report an exact source match")
         else:
             checks.append(_check(f"{label}.import.exact_source_match", True))
+
+    # Every directory this execution created and retained must still be a safe
+    # directory. The verifier never creates, repairs, or removes anything.
+    for item in receipt.get("operations") or []:
+        parent = item.get("destination_parent") or {}
+        relative_destination = str(item.get("relative_destination") or "")
+        if parent.get("creation_allowed") is not PARENT_CREATION_ALLOWED.get(
+            relative_destination
+        ):
+            checks.append(_check(f"parent.creation_permission.{relative_destination}", False))
+            failures.append(f"{relative_destination}: receipt parent creation permission mismatch")
+        for retained in parent.get("remaining_created_directories") or []:
+            if retained not in AUTHORIZED_PARENT_DIRECTORIES:
+                checks.append(_check(f"parent.authorized.{retained}", False))
+                failures.append(f"{retained}: retained directory outside the exact allowlist")
+                continue
+            node = runtime_root / retained
+            reparse = reparse_chain_components(runtime_root, retained)
+            ok = node.is_dir() and not reparse
+            checks.append(_check(f"parent.retained_directory.{retained}", ok))
+            if not ok:
+                failures.append(
+                    f"{retained}: retained execution-created directory is missing or unsafe"
+                )
 
     operations: list[dict[str, Any]] = []
     for item in receipt.get("operations") or []:
