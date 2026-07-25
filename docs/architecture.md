@@ -70,6 +70,7 @@ synthesis** (LLM providers).
 | `core/approved_change_contract.py` | Inert Stage B immutable approved-change subject, attestation binding, canonical hash, and read-only validation; not wired into CLI, proposals, approvals, recipes, persistence, preflight, or execution. |
 | `core/approved_change_compatibility.py` | In-memory findings-only PR310 assessment of legacy Proposal schema v1 against PR309 contract requirements; creates no contract, loads no files, and is not wired into CLI, approval flow, persistence, recipes, preflight, or execution. |
 | `core/approved_change_construction_policy.py` | Immutable PR311 field-source policy metadata and pure validation for future approved-change construction; takes no `Proposal` instance, creates no subject or contract, and is not wired to CLI, approvals, persistence, recipes, preflight, receipts, platforms, or execution. |
+| `core/approved_change_supplemental_context.py` | Immutable PR314 reviewed supplemental-context contract, candidate/context canonical SHA-256 identity, and pure structured validation of reviewed input coverage; provides no construction function, takes no `Proposal`, creates no subject, attestation, or contract, and is not wired to CLI, approvals, persistence, recipes, preflight, receipts, platforms, or execution. |
 | `core/profiles.py` | Risk-class allow/ask/deny profiles. |
 | `core/session.py` | Session id, data dir, artifact dir. |
 | `core/context.py` | `RuntimeContext` carried through CLI handlers. |
@@ -144,6 +145,8 @@ operator's behalf.
 ## Approved-change contract boundary
 
 `core/approved_change_contract.py` is an isolated Stage B domain module. It grants no execution eligibility and exists only to provide a stable approval-bound identity for later reviewed integration. It is not connected to current proposal objects, approval transitions, action compilation, recipes, persistence, receipts, CLI commands, preflight, or execution lanes.
+
+`core/approved_change_supplemental_context.py` is the PR314 reviewed-input boundary module. It defines the complete reviewed value package a future construction operation would require, with per-field review provenance and a supplemental-context identity that is deliberately distinct from the PR309 subject hash. It constructs nothing, persists nothing, and grants no approval or execution eligibility.
 
 `core/approved_change_compatibility.py` is a separate compatibility-boundary module. It performs only in-memory findings assessment of legacy Proposal schema v1; it does not create an approved-change subject, attestation, contract, proposal mutation, adapter, migration, file loader, persistence record, recipe/preflight hook, receipt, CLI command, or execution path. Current Proposal behavior and mutation lanes are unchanged.
 

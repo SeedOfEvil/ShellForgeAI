@@ -25,10 +25,13 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 - PR309 provides an immutable approval subject, deterministic subject identity, exact attestation binding, and inert structural/capability validation.
 - PR310 establishes the strict legacy compatibility decision: automatic conversion from legacy Proposal schema v1 is prohibited, approval is not portable, and separately reviewed context is required for any future conversion.
 - PR311 establishes a fail-closed field-source policy for future approved-change subject construction: only five legacy fields may be displayed as explicitly reviewed direct candidates, while all other destination values require explicit reviewed context or review-context-only display.
-- The PR309/PR310/PR311 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
-- Future Stage B work remains explicit: supplemental-context contract, explicit reviewed construction operation, persistence format, approval workflow integration, capability binding, current-state execution preflight, and receipt linkage.
+- PR314 defines the immutable reviewed supplemental-context contract in [Approved Change Supplemental Context](APPROVED_CHANGE_SUPPLEMENTAL_CONTEXT.md): 12 typed explicit-context reviews plus five typed candidate reviews with explicit accept/reject decisions, per-field review provenance, candidate SHA-256 identity, and a separate supplemental-context SHA-256 that is never a subject, approval, or fingerprint identity.
+- PR314 still performs no subject construction, persistence, approval, binding, preflight, receipt linkage, or execution; it validates reviewed input coverage only.
+- The PR309/PR310/PR311/PR314 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
+- The next Stage B dependency is an explicit reviewed construction operation that consumes a validated PR314 context and the PR311 policy to produce an `ApprovedChangeSubject` only.
+- Future Stage B work remains explicit beyond that: persistence format, approval workflow integration, capability binding, current-state execution preflight, and receipt linkage.
 
-Stage B is not complete. The PR309/PR310/PR311 foundation defines inert contract, compatibility-assessment, and construction-policy modules only; it does not design schemas for supplemental context, persistence, files, commands, receipts, executors, adapters, or a mutation engine.
+Stage B is not complete. The PR309/PR310/PR311/PR314 foundation defines inert contract, compatibility-assessment, construction-policy, and reviewed-input modules only; it does not design schemas for persistence, files, commands, receipts, executors, adapters, or a mutation engine.
 
 ## Named Windows two-file governed implementation lane (PR313)
 

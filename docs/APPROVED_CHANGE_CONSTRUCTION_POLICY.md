@@ -4,6 +4,8 @@ PR311 defines an isolated, immutable field-source policy for any future construc
 
 The policy is metadata and validation only. It does not accept a `Proposal`, extract values, define supplemental context, build a draft subject, create an `ApprovedChangeSubject`, create an `ApprovalAttestation`, create an `ApprovedChangeContract`, persist data, wire CLI or approval flows, run preflight, create receipts, or enable execution. Stage B remains incomplete.
 
+PR314 builds on this policy in [Approved Change Supplemental Context](APPROVED_CHANGE_SUPPLEMENTAL_CONTEXT.md). PR311 remains the sole field-source policy and PR309 remains the sole destination subject schema; PR314 supplies separately reviewed input values only. It derives its 12 explicit-context destinations and its five candidate mappings directly from `EXPLICIT_CONTEXT_ONLY_FIELDS` and `DIRECT_CANDIDATE_ALLOWLIST` so the two contracts cannot drift, and it creates no approval portability, subject, contract, persistence, or execution eligibility.
+
 ## Permanent source classifications
 
 Exactly three source classifications exist:
