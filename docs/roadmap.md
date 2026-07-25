@@ -27,11 +27,14 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 - PR311 establishes a fail-closed field-source policy for future approved-change subject construction: only five legacy fields may be displayed as explicitly reviewed direct candidates, while all other destination values require explicit reviewed context or review-context-only display.
 - PR314 defines the immutable reviewed supplemental-context contract in [Approved Change Supplemental Context](APPROVED_CHANGE_SUPPLEMENTAL_CONTEXT.md): 12 typed explicit-context reviews plus five typed candidate reviews with explicit accept/reject decisions, per-field review provenance, candidate SHA-256 identity, and a separate supplemental-context SHA-256 that is never a subject, approval, or fingerprint identity.
 - PR314 still performs no subject construction, persistence, approval, binding, preflight, receipt linkage, or execution; it validates reviewed input coverage only.
-- The PR309/PR310/PR311/PR314 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
-- The next Stage B dependency is an explicit reviewed construction operation that consumes a validated PR314 context and the PR311 policy to produce an `ApprovedChangeSubject` only.
-- Future Stage B work remains explicit beyond that: persistence format, approval workflow integration, capability binding, current-state execution preflight, and receipt linkage.
+- PR315 adds explicit reviewed subject construction in [Approved Change Subject Construction](APPROVED_CHANGE_SUBJECT_CONSTRUCTION.md): one pure, deterministic, fail-closed in-memory operation that consumes a validated PR314 supplemental context plus an explicit expected supplemental-context SHA-256, and freshly revalidates the canonical PR311 policy at construction time.
+- PR315 produces one PR309 `ApprovedChangeSubject` plus immutable field-by-field construction evidence only, under an exact 1 contract constant + 12 explicit-context + 5 candidate-final authority map, with three permanently distinct identities: supplemental-context, subject, and construction-evidence SHA-256.
+- PR315 adds no approval, contract, persistence, capability registry, capability binding, capability-support decision, preflight, receipt linkage, CLI surface, or execution; a constructed subject is unapproved and non-executable, and reviewer provenance never becomes approval.
+- The PR309/PR310/PR311/PR314/PR315 foundation has no persistence, runtime integration, adapter, CLI route, registry, receipt linkage, preflight hook, or executor.
+- The next Stage B dependency is persistence of the reviewed context, the constructed subject, and the construction evidence, and then approval workflow integration.
+- Future Stage B work remains explicit beyond that: capability binding, current-state execution preflight, and receipt linkage.
 
-Stage B is not complete. The PR309/PR310/PR311/PR314 foundation defines inert contract, compatibility-assessment, construction-policy, and reviewed-input modules only; it does not design schemas for persistence, files, commands, receipts, executors, adapters, or a mutation engine.
+Stage B is not complete. The PR309/PR310/PR311/PR314/PR315 foundation defines inert contract, compatibility-assessment, construction-policy, reviewed-input, and in-memory construction modules only; it does not design schemas for persistence, files, commands, receipts, executors, adapters, or a mutation engine.
 
 ## Named Windows two-file governed implementation lane (PR313)
 
