@@ -75,9 +75,15 @@ def staged(tmp_path, profile="old\n", wrap=WRAP):
     return s
 
 
-def test_linux_unsupported_and_saved_validator(tmp_path):
+def test_linux_unsupported_and_saved_validator(tmp_path, monkeypatch):
     m = load(HELPER)
     v = load(VALIDATOR)
+    # Force the helper's Linux path so this boundary test is deterministic on every
+    # host. Without it, a native Windows runner correctly returns "blocked" for the
+    # missing PR304 artifact instead of the "unsupported" this test asserts. The
+    # validator is not mocked: it branches on the packet's recorded platform, never
+    # on the host.
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     src = staged(tmp_path)
     p = m.build_packet(["missing.json"], str(src), str(tmp_path / "rt"))
     assert p["status"] == "unsupported"
