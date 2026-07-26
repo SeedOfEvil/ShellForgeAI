@@ -8,6 +8,8 @@ PR314 builds on this policy in [Approved Change Supplemental Context](APPROVED_C
 
 PR315 is the only consumer that constructs from this policy, in [Approved Change Subject Construction](APPROVED_CHANGE_SUBJECT_CONSTRUCTION.md). PR311 remains the sole field-source-policy authority: PR315 freshly validates the maintained canonical policy at construction time and refuses any caller-supplied policy, override, or field mapping. It maps the one `contract_constant` destination to the PR309 schema constant, each `explicit_context_only` destination to that destination's reviewed value, and each `legacy_candidate_requires_explicit_review` destination to that candidate review's final reviewed value — never to the raw candidate value. If this policy drifts, construction fails closed. The subject PR315 constructs is unapproved and non-executable, and reviewer metadata never becomes approval.
 
+PR316 records this policy's schema version inside the reviewed-change artifact bundle manifest in [Approved Change Artifact Bundle](APPROVED_CHANGE_ARTIFACT_BUNDLE.md), so the non-circular bundle identity binds which policy version governed the construction. PR311 remains the sole field-source-policy authority: PR316 evaluates no field source itself, reruns the PR315 constructor for every build and every validation, and fails closed if this policy drifts.
+
 ## Permanent source classifications
 
 Exactly three source classifications exist:

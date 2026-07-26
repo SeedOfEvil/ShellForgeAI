@@ -248,6 +248,14 @@ The supplemental-context SHA-256 stays exactly what PR314 defined: reviewed-inpu
 
 A constructed subject remains unapproved, unbound, unpersisted, and non-executable, and reviewer provenance never becomes approval.
 
+## Consumer: PR316 reviewed-change artifact bundle
+
+PR316 defines the persistence payload for a reviewed change in [Approved Change Artifact Bundle](APPROVED_CHANGE_ARTIFACT_BUNDLE.md). It stores a reviewed context as `supplemental-context.json`, serialized only through the maintained `canonical_supplemental_context_json`, and never reimplements that canonicalization.
+
+PR316 does not replace this contract or its identity. The canonical context bytes are the bundle's stored bytes and their SHA-256 is exactly the PR314 supplemental-context identity, which the bundle manifest records and the bundle identity binds. It stays reviewed-input identity: never a subject hash, an evidence hash, an approval hash, or the bundle identity.
+
+PR316 freshly revalidates any stored context through `validate_approved_change_supplemental_context` and rejects a stored context whose bytes are not already canonical, so a pretty-printed, reordered, BOM-prefixed, or alternately timestamped context is never parsed and silently reserialized into acceptance. A valid bundle is still unapproved and non-executable, and PR316 adds no writer: it creates no file or directory.
+
 ## Future dependency
 
-The next Stage B dependency after PR315 is persistence of the reviewed context, the constructed subject, and the construction evidence (PR316). PR314 deliberately pre-implements no part of it, and approval workflow, capability binding, preflight, receipt linkage, and Stage C end-to-end execution all remain deferred.
+The next Stage B dependency after PR316 is PR317's governed non-overwriting atomic bundle publisher and read-only loader. PR314 deliberately pre-implements no part of it, and approval workflow, capability binding, preflight, receipt linkage, and Stage C end-to-end execution all remain deferred.

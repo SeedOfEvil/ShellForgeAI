@@ -249,8 +249,16 @@ PR315 adds no legacy `Proposal` loading or file reads, candidate extraction, rev
 
 Current product behavior, the command surface, and mutation refusal are unchanged.
 
-## Future PR316+ dependencies
+## Consumer: PR316 reviewed-change artifact bundle
 
-The recommended immediate next dependency is **PR316: persist the reviewed context, the constructed subject, and the construction evidence** — an explicit persistence format with artifact bundle and checksum validation. PR315 deliberately pre-implements none of it.
+PR316 defines the persistence payload for a constructed change in [Approved Change Artifact Bundle](APPROVED_CHANGE_ARTIFACT_BUNDLE.md). PR315 remains the sole sanctioned construction path and the sole construction-evidence authority: PR316 accepts no caller-supplied subject or evidence, reruns `construct_approved_change_subject` from the reviewed context, and serializes the results only through the maintained `canonical_subject_json` and `canonical_construction_evidence_json`.
+
+PR316 does not replace these identities. The canonical subject bytes hash to exactly the PR309 subject SHA-256 and the canonical evidence bytes hash to exactly the PR315 construction-evidence SHA-256; the bundle manifest records both, and the separate bundle identity binds them without ever becoming either. During validation PR316 reconstructs the subject and evidence from the stored context and requires the reconstructed canonical bytes to equal the stored bytes exactly, so evidence from one construction can never be paired with a subject from another.
+
+A bundled subject is still unapproved, unbound, unpersisted, and non-executable, and PR316 adds no writer: it creates no file or directory.
+
+## Future PR317+ dependencies
+
+The recommended immediate next dependency after PR316 is **PR317: publish reviewed-change artifact bundles atomically** — the narrowly governed non-overwriting writer and read-only loader for the PR316 bundle. PR315 deliberately pre-implements none of it.
 
 Later Stage B and Stage C work remains explicit and separate: approval-attestation creation, an approval review workflow, authenticated identity, approved-contract construction, approval persistence, a capability registry, exact capability binding, binding `windows.runtime_reconcile`, current-state execution preflight, approved-subject versus live-plan comparison, approved-subject-to-receipt linkage, execution eligibility, an end-to-end lifecycle proof, and any additional mutation capability.
