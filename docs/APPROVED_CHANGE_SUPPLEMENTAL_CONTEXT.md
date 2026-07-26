@@ -238,6 +238,16 @@ The following is an illustrative, abbreviated shape only. It is not a runnable c
 }
 ```
 
+## Consumer: PR315 reviewed subject construction
+
+PR315 is the one consumer of this contract, documented in [Approved Change Subject Construction](APPROVED_CHANGE_SUBJECT_CONSTRUCTION.md). PR314 remains reviewed input only; it still exposes no construction API.
+
+PR315 takes a supplemental context plus an explicit expected supplemental-context SHA-256, freshly revalidates the context through `validate_approved_change_supplemental_context` at construction time rather than trusting any previously saved result, recomputes the context identity, and compares it with the caller's expected identity in constant time. It then takes each explicit-context destination only from that record's `reviewed_value` and each candidate-backed destination only from that record's `final_reviewed_value` — never from `candidate_value`, so a rejected candidate never leaks into the constructed subject.
+
+The supplemental-context SHA-256 stays exactly what PR314 defined: reviewed-input identity. It is never the constructed subject identity and never the construction-evidence identity. Changing only review provenance, or only a rejected candidate whose final reviewed value is unchanged, changes this identity while the PR309 subject identity stays stable.
+
+A constructed subject remains unapproved, unbound, unpersisted, and non-executable, and reviewer provenance never becomes approval.
+
 ## Future dependency
 
-The next Stage B dependency is an explicit reviewed construction operation (PR315). It would consume a validated PR314 context together with the PR311 policy and produce an `ApprovedChangeSubject` only. PR314 deliberately does not pre-implement any part of it, and persistence, approval workflow, capability binding, preflight, receipt linkage, and Stage C end-to-end execution all remain deferred.
+The next Stage B dependency after PR315 is persistence of the reviewed context, the constructed subject, and the construction evidence (PR316). PR314 deliberately pre-implements no part of it, and approval workflow, capability binding, preflight, receipt linkage, and Stage C end-to-end execution all remain deferred.

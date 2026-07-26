@@ -6,6 +6,8 @@ The policy is metadata and validation only. It does not accept a `Proposal`, ext
 
 PR314 builds on this policy in [Approved Change Supplemental Context](APPROVED_CHANGE_SUPPLEMENTAL_CONTEXT.md). PR311 remains the sole field-source policy and PR309 remains the sole destination subject schema; PR314 supplies separately reviewed input values only. It derives its 12 explicit-context destinations and its five candidate mappings directly from `EXPLICIT_CONTEXT_ONLY_FIELDS` and `DIRECT_CANDIDATE_ALLOWLIST` so the two contracts cannot drift, and it creates no approval portability, subject, contract, persistence, or execution eligibility.
 
+PR315 is the only consumer that constructs from this policy, in [Approved Change Subject Construction](APPROVED_CHANGE_SUBJECT_CONSTRUCTION.md). PR311 remains the sole field-source-policy authority: PR315 freshly validates the maintained canonical policy at construction time and refuses any caller-supplied policy, override, or field mapping. It maps the one `contract_constant` destination to the PR309 schema constant, each `explicit_context_only` destination to that destination's reviewed value, and each `legacy_candidate_requires_explicit_review` destination to that candidate review's final reviewed value — never to the raw candidate value. If this policy drifts, construction fails closed. The subject PR315 constructs is unapproved and non-executable, and reviewer metadata never becomes approval.
+
 ## Permanent source classifications
 
 Exactly three source classifications exist:
