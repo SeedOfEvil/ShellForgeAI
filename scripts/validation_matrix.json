@@ -158,6 +158,15 @@
       "tests/test_pr310_legacy_proposal_compatibility.py",
       "tests/test_pr309_approved_change_contract.py"
     ]},
+    {"pattern": "src/shellforgeai/core/approved_change_artifact_persistence.py", "lane": "full", "reason": "governed Stage B artifact-bundle publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_artifacts subtree, atomic no-replace publication, bounded cleanup, and read-only loader; no CLI, natural-language, approval, capability, receipt, host-configuration, or execution surface)", "tests": [
+      "tests/test_pr317_approved_change_artifact_persistence.py",
+      "tests/test_pr316_approved_change_artifact_bundle.py",
+      "tests/test_pr315_approved_change_subject_construction.py",
+      "tests/test_pr314_approved_change_supplemental_context.py",
+      "tests/test_pr311_approved_change_construction_policy.py",
+      "tests/test_pr310_legacy_proposal_compatibility.py",
+      "tests/test_pr309_approved_change_contract.py"
+    ]},
     {"pattern": "src/shellforgeai/interactive/**", "lane": "targeted_runtime", "reason": "interactive UX/command dispatch changed", "tests": [
       "tests/test_pr122_*",
       "tests/test_pr124_*",

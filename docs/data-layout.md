@@ -31,7 +31,31 @@ outside `<data_dir>` are never written or deleted by the runtime.
                                   lab restart allowlist (disabled by default)
   audit/events.jsonl              append-only audit timeline
   audit/incident-index.json       PR40 incident index
+  approved_change_artifacts/<bundle-id>/
+                                  PR317 published reviewed-change artifact
+                                  bundles (exactly four PR316 files each)
 ```
+
+## Reviewed-change artifact bundles (PR317)
+
+```
+<data_dir>/approved_change_artifacts/acb_<64 lowercase hex>/
+  supplemental-context.json
+  approved-change-subject.json
+  construction-evidence.json
+  manifest.json
+```
+
+- The subtree name `approved_change_artifacts` and the four filenames are fixed literals. There is no caller override, alias, or configurable variant.
+- The final directory name is exactly the PR316 `bundle_id` (`acb_` plus the full 64-character bundle identity SHA-256).
+- Each published directory contains exactly those four files and nothing else: no completion marker, lock file, checksum sidecar, Markdown rendering, receipt, timestamp file, or metadata file.
+- Stored bytes are exactly the PR316 canonical UTF-8 bytes — no BOM, no CRLF, no trailing newline, no reserialization.
+- **No overwrite exists.** Publishing an already-published identical bundle returns `bundle_already_present` and writes nothing; a conflicting or invalid existing directory blocks and is never repaired, replaced, quarantined, renamed, deleted, merged, or written around.
+- Loading requires one **explicit full bundle ID**. There is no `latest`, `current`, "most recent", prefix, glob, or path reference, and the loader enforces per-file (1 MiB) and per-bundle (4 MiB) read bounds.
+- Publication requires an explicit `confirm_bundle_identity_sha256` match. **Persistence is not approval and not execution:** a published bundle is unapproved, unbound, and non-executable, and PR317 creates no approval, contract, or receipt and evaluates no capability.
+- PR317 never deletes a published bundle. Retention, cleanup, and deletion of these bundles remain deferred.
+
+See [Approved Change Artifact Persistence](APPROVED_CHANGE_ARTIFACT_PERSISTENCE.md) for the full contract.
 
 Names may vary slightly across versions; treat the table below as the
 canonical lifecycle. Code under `src/shellforgeai/core/` is the source of
