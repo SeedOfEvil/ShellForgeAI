@@ -2035,6 +2035,173 @@ def test_flush_helpers_never_claim_false_durability(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Write-capable file flush
+#
+# On Windows `os.fsync` maps to `FlushFileBuffers`, which requires write access
+# on the handle. A read-only descriptor fails with EBADF, so the prepared-file
+# flush must open write-capable. These tests fail against a read-only flush
+# descriptor on every platform, and additionally reproduce the native Windows
+# failure on the Windows lane.
+# --------------------------------------------------------------------------
+
+
+def flush_open_flags(path: Path, monkeypatch) -> list[int]:
+    """Record the raw flags `_flush_file` passes to `os.open`."""
+    recorded: list[int] = []
+    real_open = os.open
+
+    def spy(target, flags, *args, **kwargs):
+        if str(target) == str(path):
+            recorded.append(flags)
+        return real_open(target, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", spy)
+    persistence._flush_file(path)
+    return recorded
+
+
+def test_prepared_file_flush_opens_a_write_capable_descriptor(tmp_path, monkeypatch):
+    target = tmp_path / "payload"
+    persistence._write_exact_file(target, b"abcd")
+    flags = flush_open_flags(target, monkeypatch)
+    assert len(flags) == 1
+    access = flags[0] & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
+    assert access == os.O_RDWR
+    assert access != os.O_RDONLY
+    assert flags[0] & getattr(os, "O_BINARY", 0) == getattr(os, "O_BINARY", 0)
+    assert flags[0] & getattr(os, "O_NOFOLLOW", 0) == getattr(os, "O_NOFOLLOW", 0)
+
+
+def test_prepared_file_flush_succeeds_on_a_real_prepared_file(tmp_path):
+    target = tmp_path / "payload"
+    persistence._write_exact_file(target, b"abcd")
+    persistence._flush_file(target)
+    assert target.read_bytes() == b"abcd"
+
+
+def test_prepared_file_flush_keeps_the_no_follow_and_identity_protections(tmp_path):
+    target = tmp_path / "payload"
+    persistence._write_exact_file(target, b"abcd")
+    source = inspect.getsource(persistence._flush_file)
+    assert "_open_regular_file_no_follow" in source
+    assert "os.open(" not in source
+    # A directory, a missing path, and a non-regular entry are all refused.
+    with pytest.raises(OSError):
+        persistence._flush_file(tmp_path)
+    with pytest.raises(OSError):
+        persistence._flush_file(tmp_path / "absent")
+
+
+@POSIX_ONLY
+def test_prepared_file_flush_refuses_a_symlink(tmp_path):
+    real = tmp_path / "real"
+    persistence._write_exact_file(real, b"abcd")
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    with pytest.raises(OSError):
+        persistence._flush_file(link)
+    assert real.read_bytes() == b"abcd"
+
+
+@WINDOWS_ONLY
+def test_windows_prepared_file_flush_succeeds(tmp_path):  # pragma: no cover - Windows lane
+    """The exact native regression: a read-only handle raised EBADF here."""
+    target = tmp_path / "payload"
+    persistence._write_exact_file(target, b"abcd")
+    persistence._flush_file(target)
+    read_only = os.open(target, os.O_RDONLY | os.O_BINARY)
+    try:
+        # Documented Windows behaviour: FlushFileBuffers needs write access.
+        # The publisher must never depend on this descriptor.
+        with pytest.raises(OSError):
+            os.fsync(read_only)
+    finally:
+        os.close(read_only)
+
+
+def test_ebadf_flush_failure_is_never_downgraded_to_unsupported(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+
+    def bad_descriptor(fd):
+        raise OSError(errno.EBADF, "Bad file descriptor")
+
+    monkeypatch.setattr(os, "fsync", bad_descriptor)
+    result = publish(bundle, root)
+    assert result.status == "publication_failed_precommit"
+    assert result.file_flush_status == "failed"
+    assert result.file_flush_status != "unsupported"
+    assert result.publication_performed is False
+    assert result.persistence_performed is False
+    assert result.atomic_publish_attempted is False
+    assert result.errors
+    assert not bundle_directory(root, bundle).exists()
+    assert list(root.iterdir()) == []
+
+
+def test_windows_durability_contract_end_to_end(tmp_path, monkeypatch):
+    """One flow covering the full contract the Windows lane must satisfy."""
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+
+    # 1. First publication succeeds with a proven file flush.
+    first = publish(bundle, root)
+    assert first.status == "bundle_published"
+    assert first.file_flush_status == "passed"
+    assert first.publication_performed is True
+    assert first.persistence_performed is True
+    assert first.overwrite_performed is False
+    assert_never_approves(first)
+
+    # 2. The exact PR316 byte streams, lengths, and checksums are unchanged.
+    directory = bundle_directory(root, bundle)
+    assert sorted(item.name for item in directory.iterdir()) == sorted(BUNDLE_FILENAMES)
+    for logical in bundle.files:
+        raw = (directory / logical.relative_path).read_bytes()
+        assert raw == logical.content_utf8.encode("utf-8")
+        assert len(raw) == FIXTURE_A_FILE_SIZES[logical.relative_path]
+        assert hashlib.sha256(raw).hexdigest() == FIXTURE_A_FILE_SHA256[logical.relative_path]
+
+    # 3. The loader reads it back and revalidates through PR316.
+    loaded = load_persisted_approved_change_artifact_bundle(bundle.bundle_id, data_dir=root)
+    assert loaded.status == "persisted_bundle_loaded"
+    assert loaded.bundle == bundle
+    assert loaded.bundle_validation.status == "bundle_valid"
+
+    # 4. A second identical publication writes nothing and refreshes nothing.
+    before = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    }
+    second = publish(bundle, root)
+    assert second.status == "bundle_already_present"
+    assert second.read_only is True
+    assert second.mutation_performed is False
+    assert second.artifact_write_performed is False
+    assert second.temporary_directory_created is False
+    assert {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    } == before
+
+    # 5. An injected file-flush failure still blocks and cleans up completely.
+    other = bundle_b()
+    inject_failure(monkeypatch, "file_flush")
+    blocked = publish(other, root)
+    assert blocked.status == "publication_failed_precommit"
+    assert blocked.file_flush_status == "failed"
+    assert blocked.temporary_cleanup == "completed"
+    assert blocked.temporary_cleanup_performed is True
+    assert blocked.residual_temporary_directory == ""
+    assert not bundle_directory(root, other).exists()
+    assert sorted(item.name for item in publication_root(root).iterdir()) == [bundle.bundle_id]
+    assert {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    } == before
+
+
+# --------------------------------------------------------------------------
 # Immutability
 # --------------------------------------------------------------------------
 

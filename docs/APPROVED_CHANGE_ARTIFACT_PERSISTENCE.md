@@ -150,6 +150,8 @@ After each write the file is flushed, then reread and verified for regular-file 
 
 Before final publication each file is flushed with `os.fsync`, and the prepared directory is flushed where supported. The result records whether directory flush `passed`, is `unsupported`, or `failed`. A required file flush failure blocks publication; a prepared-directory flush failure blocks publication.
 
+The prepared-file flush descriptor is opened **write-capable** (`O_RDWR | O_BINARY | O_NOFOLLOW`). On Windows `os.fsync` maps to `FlushFileBuffers`, which requires write access on the handle and fails with `EBADF` on a read-only descriptor. Nothing is written through that descriptor: the file is one this invocation just created exclusively inside its own private temporary directory, and the same no-follow, regular-file, and pre-open/post-open `(st_dev, st_ino)` identity checks apply as for reads. An `EBADF` — or any other — flush failure is never downgraded to `unsupported`, never skipped, and never swallowed: `file_flush_status` becomes `failed` and publication blocks with no final directory and bounded cleanup of the invocation's own temporary files.
+
 Windows offers no directory flush primitive, so `temporary_directory_flush_status` and `publication_root_flush_status` are reported as `unsupported` there. The limitation is stated explicitly and success is never invented.
 
 After final publication the publication root is flushed where supported and full read-only post-publication validation runs. If a post-publication durability flush fails after the atomic commit, the final bundle is not deleted: the result truthfully records that publication occurred but that durability assurance is incomplete.

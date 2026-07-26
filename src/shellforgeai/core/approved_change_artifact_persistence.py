@@ -620,8 +620,14 @@ def _fsync_directory(path: Path) -> tuple[FlushStatus, str]:
 # ---------------------------------------------------------------------------
 
 
-def _open_regular_file_no_follow(path: Path) -> int:
+def _open_regular_file_no_follow(path: Path, *, access_flags: int = os.O_RDONLY) -> int:
     """Open one existing regular file without ever following a link.
+
+    ``access_flags`` selects the access mode only; every other flag and every
+    safety check is fixed. Reads use the default ``O_RDONLY``; the durability
+    flush uses ``O_RDWR`` because a read-only descriptor cannot be flushed on
+    Windows. No caller-supplied path, filename, or flag beyond that access mode
+    reaches this helper.
 
     Where ``O_NOFOLLOW`` is unavailable the pre-open ``lstat`` identity is
     compared with the post-open descriptor metadata instead.
@@ -629,7 +635,7 @@ def _open_regular_file_no_follow(path: Path) -> int:
     before = os.lstat(path)
     if not stat_module.S_ISREG(before.st_mode) or _is_reparse_stat(before, path):
         raise OSError(f"{path.name} is not a regular file")
-    fd = os.open(path, os.O_RDONLY | _O_BINARY | _O_NOFOLLOW)
+    fd = os.open(path, access_flags | _O_BINARY | _O_NOFOLLOW)
     try:
         after = os.fstat(fd)
         if not stat_module.S_ISREG(after.st_mode):
@@ -1185,8 +1191,20 @@ def _write_exact_file(path: Path, data: bytes) -> None:
 
 
 def _flush_file(path: Path) -> None:
-    """Flush one prepared file to stable storage."""
-    fd = os.open(path, os.O_RDONLY | _O_BINARY | _O_NOFOLLOW)
+    """Flush one prepared file to stable storage.
+
+    The descriptor must be write-capable. On Windows ``os.fsync`` maps to
+    ``FlushFileBuffers``, which requires write access on the handle and fails
+    with ``EBADF`` on a read-only descriptor, so ``O_RDWR`` is requested rather
+    than ``O_RDONLY``. The file is one this invocation just created exclusively
+    inside its own private temporary directory; nothing is written through this
+    descriptor, and the maintained no-follow, regular-file, and pre-open/
+    post-open descriptor-identity checks all still apply unchanged.
+
+    A failed flush is never downgraded to ``unsupported`` and never swallowed:
+    the caller records ``file_flush_status="failed"`` and blocks publication.
+    """
+    fd = _open_regular_file_no_follow(path, access_flags=os.O_RDWR)
     try:
         os.fsync(fd)
     finally:
