@@ -197,6 +197,36 @@ def fs_recorder(monkeypatch):
 
 
 @pytest.fixture
+def no_filesystem_mutation(monkeypatch):
+    """Fail loudly if any filesystem-creating primitive is reached.
+
+    Used by the root-path tests, where the `data_dir` is the filesystem or a
+    drive root and listing it afterwards would be neither safe nor conclusive.
+    A structural rejection must reach no creation primitive at all, anywhere.
+    """
+
+    def raiser(name):
+        def boom(*args, **kwargs):
+            raise AssertionError(f"os.{name} was reached during a structural rejection")
+
+        return boom
+
+    for name in ("mkdir", "makedirs", "rename", "replace", "rmdir", "unlink", "remove"):
+        if hasattr(os, name):
+            monkeypatch.setattr(os, name, raiser(name))
+
+    real_open = os.open
+
+    def guarded_open(path, flags, *args, **kwargs):
+        if flags & (os.O_CREAT | os.O_WRONLY | os.O_RDWR):
+            raise AssertionError("a write-capable os.open was reached")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", guarded_open)
+    return True
+
+
+@pytest.fixture
 def no_replace_primitives(monkeypatch):
     """Prove no replace-capable primitive is ever reachable during publication."""
 
@@ -644,25 +674,73 @@ def test_relative_data_dir_is_rejected_without_filesystem_access(
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("value", ["/", os.path.abspath(os.sep)])
-def test_filesystem_root_data_dir_is_rejected(value, tmp_path):
-    result = publish_approved_change_artifact_bundle(
+#: The two exact structural rejection reasons a root-shaped `data_dir` can hit.
+#: They are asserted precisely per platform rather than loosely matched, so a
+#: root path can never be accepted for the wrong reason.
+FILESYSTEM_ROOT_REASON = "data_dir must not be the filesystem root or a drive root"
+NON_ABSOLUTE_REASON = "data_dir must be an absolute path"
+
+
+def publish_at(value):
+    """Publish against one root-shaped `data_dir` candidate."""
+    return publish_approved_change_artifact_bundle(
         bundle_a(),
         data_dir=value,
         confirm_bundle_identity_sha256=FIXTURE_A_BUNDLE_IDENTITY_SHA256,
     )
+
+
+def assert_root_rejection(result, expected_reason):
+    """Require a fail-closed structural rejection with the exact reason."""
     assert result.status == "publication_blocked"
+    assert expected_reason in result.errors
+    assert result.filesystem_accessed is False
+    assert result.read_only is True
     assert result.mutation_performed is False
-    assert any("root" in error for error in result.errors)
+    assert result.artifact_write_performed is False
+    assert result.publication_root_created is False
+    assert result.temporary_directory_created is False
+    assert result.prepared_file_count == 0
+    assert result.all_files_prepared_before_publish is False
+    assert result.atomic_publish_attempted is False
+    assert result.publication_performed is False
+    assert result.persistence_performed is False
+    assert result.temporary_cleanup == "not_required"
+    assert_never_approves(result)
 
 
-def test_windows_drive_root_shape_is_rejected():
-    result = publish_approved_change_artifact_bundle(
-        bundle_a(),
-        data_dir=Path("C:\\") if os.name == "nt" else Path("/"),
-        confirm_bundle_identity_sha256=FIXTURE_A_BUNDLE_IDENTITY_SHA256,
-    )
-    assert result.status == "publication_blocked"
+@POSIX_ONLY
+def test_posix_filesystem_root_data_dir_is_rejected(no_filesystem_mutation):
+    """Literal `/` is the POSIX filesystem root and is rejected as such."""
+    assert Path("/").is_absolute()
+    for value in ("/", Path("/"), os.path.abspath(os.sep)):
+        assert_root_rejection(publish_at(value), FILESYSTEM_ROOT_REASON)
+
+
+@WINDOWS_ONLY
+def test_windows_drive_root_data_dir_is_rejected(
+    tmp_path, no_filesystem_mutation
+):  # pragma: no cover - Windows lane
+    """A real drive root, derived from the active disposable test location."""
+    anchor = Path(tmp_path.anchor)
+    assert anchor.is_absolute()
+    assert anchor.drive
+    for value in (anchor, str(anchor), os.path.abspath(os.sep)):
+        assert_root_rejection(publish_at(value), FILESYSTEM_ROOT_REASON)
+
+
+@WINDOWS_ONLY
+def test_windows_literal_slash_is_rejected_as_non_absolute(
+    no_filesystem_mutation,
+):  # pragma: no cover - Windows lane
+    """`Path("/")` carries no drive on Windows, so it is not an absolute path.
+
+    PR317 fails closed earlier, before the filesystem-root check. The rejection
+    is still structural, still blocked, and still mutates nothing.
+    """
+    assert not Path("/").is_absolute()
+    for value in ("/", Path("/")):
+        assert_root_rejection(publish_at(value), NON_ABSOLUTE_REASON)
 
 
 def test_missing_data_dir_is_rejected(tmp_path):
