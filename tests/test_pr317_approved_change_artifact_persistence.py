@@ -2945,15 +2945,31 @@ def test_public_surface_is_exactly_the_two_operations_and_the_atomic_helper():
 
 
 def test_module_is_not_imported_by_cli_approvals_recipes_or_execution():
+    # PR318's read-only approval-binding module is the one governed consumer of
+    # the loader; it is named here explicitly so no CLI, approvals, recipe, or
+    # execution module can quietly reach the persistence boundary instead.
+    permitted = {
+        "approved_change_artifact_persistence.py",
+        "approved_change_approval_workflow.py",
+    }
     roots = [Path("src/shellforgeai/cli"), Path("src/shellforgeai/core")]
     offenders = []
     for base in roots:
         for path in base.rglob("*.py"):
-            if path.name == "approved_change_artifact_persistence.py":
+            if path.name in permitted:
                 continue
             if "approved_change_artifact_persistence" in path.read_text(encoding="utf-8"):
                 offenders.append(str(path))
     assert offenders == []
+
+
+def test_the_pr318_consumer_uses_only_the_read_only_loader():
+    source = Path("src/shellforgeai/core/approved_change_approval_workflow.py").read_text(
+        encoding="utf-8"
+    )
+    assert "load_persisted_approved_change_artifact_bundle" in source
+    assert "publish_approved_change_artifact_bundle" not in source
+    assert "atomic_no_replace_directory_publish" not in source
 
 
 def test_fixed_layout_literals_are_module_constants():
