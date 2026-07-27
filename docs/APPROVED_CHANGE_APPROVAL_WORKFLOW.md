@@ -188,8 +188,10 @@ PR318 adds **no approval persistence**, no approval artifact file, no approval w
 
 The production module imports only `__future__`, `hmac`, `json`, `typing`, `pydantic`, and the maintained PR309/PR316/PR317 modules at runtime; `datetime` and `pathlib` appear only inside a `TYPE_CHECKING` block.
 
-## Future approval-persistence dependency
+## Approval persistence (PR319)
 
-An in-memory approval disappears with the process. The next focused Stage B dependency is deterministic **approval-artifact persistence** — canonical approval bytes, a governed writer, and an exact-ID loader for them — expected as PR319, **not execution**.
+An in-memory approval disappears with the process. PR319 adds deterministic **approval-artifact persistence** on top of this operation, in [Approved Change Approval Artifact Persistence](APPROVED_CHANGE_APPROVAL_ARTIFACT_PERSISTENCE.md): one canonical `approved-change-approval.json`, a distinct non-circular approval-artifact identity and `aca_` ID, one governed atomic no-replace publisher beneath `<data_dir>/approved_change_approvals/`, and one exact-ID read-only loader.
 
-Everything after that remains explicitly deferred: persisted approval loading, approval revocation/cancellation/expiration, authenticated identity, role validation, identity-provider integration, a capability registry, capability-support evaluation, exact capability binding, binding `windows.runtime_reconcile`, current-state execution preflight, subject/live-plan comparison, receipt creation and linkage, execution eligibility, Stage C execution, CLI approval commands, and natural-language approval.
+PR319 consumes one fully successful result of this operation and creates no approval of its own. It does not authenticate identity, does not add mutable approval state, and adds no revocation, capability support, preflight, receipts, CLI surface, or execution. The result type and the safety ledger described above are unchanged by it.
+
+Everything after that remains explicitly deferred: persisted approval discovery beyond one exact artifact ID, approval revocation/cancellation/expiration/supersession, quorum or multi-approver semantics, authenticated identity, role validation, identity-provider integration, a capability registry, capability-support evaluation, exact capability binding, binding `windows.runtime_reconcile`, current-state execution preflight, subject/live-plan comparison, receipt creation and linkage, execution eligibility, Stage C execution, CLI approval commands, and natural-language approval.

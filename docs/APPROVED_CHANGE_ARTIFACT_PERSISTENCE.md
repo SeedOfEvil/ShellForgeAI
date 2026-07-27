@@ -321,6 +321,12 @@ Persisted artifacts are the substrate an approval workflow needs, not the approv
 
 PR317 is unchanged by it. PR318 adds no alternate loader, accepts no arbitrary persisted path, bypasses no PR316 validation, rewrites or repairs no persisted byte, republishes nothing, and changes no publisher behaviour or on-disk layout. Loading for approval remains strictly read-only: after an approval binding the persisted tree is byte- and mtime-identical.
 
+## Approval-artifact consumer (PR319)
+
+PR319 is the second and last governed consumer of the loader: [Approved Change Approval Artifact Persistence](APPROVED_CHANGE_APPROVAL_ARTIFACT_PERSISTENCE.md) persists one successful PR318 approval beneath its own separate fixed subtree, `<data_dir>/approved_change_approvals/<approval-artifact-id>/`, and revalidates the exact PR317 source bundle — its bundle ID, its bundle identity, and its canonical `approved-change-subject.json` bytes — through `load_persisted_approved_change_artifact_bundle` on every load.
+
+PR317 is unchanged by it. PR319 never calls `publish_approved_change_artifact_bundle`, never reuses `atomic_no_replace_directory_publish` as a generic persistence engine (it owns a narrow primitive that follows the same proven behaviour), accepts no arbitrary source path, resolves no `latest`/`current` reference, and changes no PR317 on-disk layout. The reviewed-change subtree stays read-only for PR319: after publishing and loading an approval artifact the PR317 tree is byte- and mtime-identical.
+
 ## Remaining deferred work
 
-Approval persistence itself is still not implemented anywhere: PR318 keeps its approval and contract in memory only. Canonical approval-artifact persistence, persisted approval loading, authenticated identity, capability registry, capability-support evaluation, exact capability binding, current-state preflight, subject-to-receipt linkage, execution eligibility, persisted-bundle deletion, retention integration, and any CLI or natural-language access all remain deferred to PR319 or later.
+Persisted-bundle deletion, retention integration, and any CLI or natural-language access to this boundary all remain deferred. Beyond approval persistence itself, persisted approval discovery beyond one exact artifact ID, approval revocation/cancellation/expiration/supersession, authenticated identity, capability registry, capability-support evaluation, exact capability binding, current-state preflight, subject-to-receipt linkage, and execution eligibility remain deferred to PR320 or later.
