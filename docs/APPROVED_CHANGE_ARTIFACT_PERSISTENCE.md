@@ -130,15 +130,27 @@ No final directory is ever visible before step 17.
 
 ## Temporary sibling contract
 
-One private temporary directory is created beneath `<data_dir>/approved_change_artifacts/`, named `.pending-<bundle_id>-<private nonce>`. It is:
+One private temporary directory is created beneath `<data_dir>/approved_change_artifacts/`, named `.pending-<16 lowercase hex>` — a short fixed prefix plus one internally generated token, 25 characters in total. It is:
 
 - a direct child of the fixed publication root, and therefore on the same filesystem as the final directory;
-- named internally, with no caller-provided suffix;
+- named internally, with no caller-provided suffix and no bundle ID;
 - created exclusively with `os.mkdir` and restrictive mode `0o700` where supported;
 - verified not to be a symlink or reparse point;
 - never recorded inside the bundle, the manifest, or any persisted file.
 
-Randomness is used only for the unpublished temporary directory name. The private nonce never affects canonical bytes, bundle identity, the bundle ID, any persisted file, any semantic identity, or any public durable identifier.
+Randomness is used only for the unpublished temporary directory name. The private token never affects canonical bytes, bundle identity, the bundle ID, any persisted file, any semantic identity, or any public durable identifier.
+
+### Why the pending name carries no bundle ID
+
+The pending directory deliberately does **not** repeat the 68-character bundle ID. Doing so made the unpublished temporary path 42 characters longer than the durable path it prepares, so a data root whose final bundle path fit could still overflow the Windows `MAX_PATH` limit while writing the temporary copy: under ordinary Windows test-root geometry the temporary `supplemental-context.json` path reached exactly 260 characters and exclusive creation failed with `Errno 2`.
+
+With the short name the pending path is always shorter than the final path it prepares, so preparation can never be the binding length constraint. The full exact PR316 bundle ID remains the final durable directory name, unchanged: `approved_change_artifacts/acb_<64 lowercase hex>/`.
+
+### Addressable final paths
+
+The four persisted filenames are fixed, so the longest final path a publication would ever need is known before anything is created. When that path exceeds what the platform can address without extended-length path syntax — `MAX_PUBLICATION_PATH_CHARS`, 259 on Windows (`MAX_PATH` minus the terminating NUL) and 4095 on POSIX — publication is blocked up front with `publication_blocked`, before the publication root, any temporary directory, or any file is created. Only lengths are reported; no host absolute path enters a result.
+
+PR317 adds no extended-length path support and never emits a `\?\` path in a public result or in persisted data.
 
 ## Exact binary writes
 

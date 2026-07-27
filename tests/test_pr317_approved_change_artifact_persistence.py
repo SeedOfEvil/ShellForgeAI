@@ -33,6 +33,7 @@ from test_pr316_approved_change_artifact_bundle import (  # noqa: E402
     FIXTURE_A_FILE_SIZES,
     FIXTURE_A_SUBJECT_SHA256,
     build,
+    context_alt_provenance,
     context_b,
 )
 
@@ -1180,8 +1181,11 @@ def test_temporary_directory_is_a_private_sibling_of_the_final_directory(tmp_pat
     assert temporary.parent == publication_root(root)
     assert temporary.parent == bundle_directory(root, bundle).parent
     assert temporary.name.startswith(TEMPORARY_DIRECTORY_PREFIX)
-    assert bundle.bundle_id in temporary.name
     assert temporary.name != bundle.bundle_id
+    # The pending name carries no bundle ID and no semantic identity.
+    assert bundle.bundle_id not in temporary.name
+    assert bundle.bundle_identity_sha256 not in temporary.name
+    assert len(temporary.name) == persistence.TEMPORARY_DIRECTORY_NAME_LENGTH
 
 
 def test_temporary_nonce_never_reaches_the_published_bundle(tmp_path, monkeypatch):
@@ -2199,6 +2203,325 @@ def test_windows_durability_contract_end_to_end(tmp_path, monkeypatch):
         path.name: (path.read_bytes(), path.stat().st_mtime_ns)
         for path in sorted(directory.iterdir())
     } == before
+
+
+# --------------------------------------------------------------------------
+# Short private pending-directory names
+#
+# The pending directory once carried the full 68-character bundle ID, which made
+# the unpublished temporary path 42 characters longer than the durable path it
+# prepares. Under normal Windows pytest temporary-root geometry that pushed the
+# temporary `supplemental-context.json` path to exactly MAX_PATH and exclusive
+# creation failed with Errno 2. These tests fail against the full-ID pending
+# name on every platform.
+# --------------------------------------------------------------------------
+
+
+def pending_names(root: Path, bundle, monkeypatch) -> list[str]:
+    """Capture the pending directory names observed during one publication."""
+    seen: list[str] = []
+
+    def failpoint(name: str) -> None:
+        if name == "temporary_directory_flush":
+            seen.extend(
+                item.name
+                for item in publication_root(root).iterdir()
+                if item.name.startswith(TEMPORARY_DIRECTORY_PREFIX)
+            )
+
+    monkeypatch.setattr(persistence, "_failpoint", failpoint)
+    assert publish(bundle, root).status == "bundle_published"
+    return seen
+
+
+def test_pending_directory_name_is_short_and_carries_no_bundle_id(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    names = pending_names(root, bundle, monkeypatch)
+    assert len(names) == 1
+    name = names[0]
+
+    assert name.startswith(TEMPORARY_DIRECTORY_PREFIX)
+    token = name[len(TEMPORARY_DIRECTORY_PREFIX) :]
+    assert len(token) == 2 * persistence.TEMPORARY_NONCE_BYTES
+    assert all(character in "0123456789abcdef" for character in token)
+    assert len(name) == persistence.TEMPORARY_DIRECTORY_NAME_LENGTH
+    # Short enough that preparation can never be the binding length constraint.
+    assert len(name) <= len(APPROVED_CHANGE_ARTIFACTS_DIRNAME)
+    assert len(name) < len(bundle.bundle_id)
+
+    assert bundle.bundle_id not in name
+    assert bundle.bundle_identity_sha256 not in name
+    for semantic in (
+        FIXTURE_A_CONTEXT_SHA256,
+        FIXTURE_A_SUBJECT_SHA256,
+        FIXTURE_A_EVIDENCE_SHA256,
+    ):
+        assert semantic not in name
+
+
+def test_pending_path_is_always_shorter_than_the_final_path_it_prepares(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    name = pending_names(root, bundle, monkeypatch)[0]
+    longest_pending = max(
+        len(str(publication_root(root) / name / filename)) for filename in BUNDLE_FILENAMES
+    )
+    longest_final = max(
+        len(str(bundle_directory(root, bundle) / filename)) for filename in BUNDLE_FILENAMES
+    )
+    assert longest_pending < longest_final
+
+
+def test_pending_directory_is_an_exclusive_direct_child_of_the_fixed_root(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    observed: list[Path] = []
+    real_mkdir = os.mkdir
+
+    def spy(path, *args, **kwargs):
+        observed.append(Path(path))
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", spy)
+    assert publish(bundle, root).status == "bundle_published"
+    pending = [p for p in observed if p.name.startswith(TEMPORARY_DIRECTORY_PREFIX)]
+    assert len(pending) == 1
+    assert pending[0].parent == publication_root(root)
+    assert pending[0].parent == bundle_directory(root, bundle).parent
+
+    # Exclusive: `os.mkdir` is used, and a colliding name is never reused.
+    persistence._write_exact_file(tmp_path / "probe", b"x")
+    existing = publication_root(root) / f"{TEMPORARY_DIRECTORY_PREFIX}{'0' * 16}"
+    existing.mkdir()
+    with pytest.raises(FileExistsError):
+        os.mkdir(existing, persistence.PERSISTED_DIRECTORY_MODE)
+
+
+def test_two_invocations_receive_distinct_private_pending_names(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    first = pending_names(root, bundle_a(), monkeypatch)[0]
+    second = pending_names(root, bundle_b(), monkeypatch)[0]
+    assert first != second
+    assert {first, second} == {first, second}
+    # Both are still the same fixed short shape.
+    for name in (first, second):
+        assert len(name) == persistence.TEMPORARY_DIRECTORY_NAME_LENGTH
+    # A large sample of tokens stays unique.
+    tokens = {persistence._temporary_nonce() for _ in range(256)}
+    assert len(tokens) == 256
+
+
+def test_pending_token_never_reaches_any_durable_artifact(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    monkeypatch.setattr(persistence, "_temporary_nonce", lambda: "abcdef0123456789")
+    result = publish(bundle, root)
+    assert result.status == "bundle_published"
+    directory = bundle_directory(root, bundle)
+    assert "abcdef0123456789" not in directory.name
+    assert "abcdef0123456789" not in result.relative_bundle_directory
+    assert "abcdef0123456789" not in result.bundle_id
+    assert "abcdef0123456789" not in result.bundle_identity_sha256
+    assert "abcdef0123456789" not in json.dumps(result.model_dump(mode="json"))
+    for name in BUNDLE_FILENAMES:
+        assert b"abcdef0123456789" not in (directory / name).read_bytes()
+    loaded = load_persisted_approved_change_artifact_bundle(bundle.bundle_id, data_dir=root)
+    assert loaded.status == "persisted_bundle_loaded"
+    assert "abcdef0123456789" not in json.dumps(loaded.model_dump(mode="json"))
+
+
+def test_final_bundle_directory_is_still_the_exact_full_bundle_id(tmp_path):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    result = publish(bundle, root)
+    assert result.status == "bundle_published"
+    directory = bundle_directory(root, bundle)
+    assert directory.name == bundle.bundle_id
+    assert directory.name == f"acb_{bundle.bundle_identity_sha256}"
+    assert len(directory.name) == 68
+    assert directory.parent.name == APPROVED_CHANGE_ARTIFACTS_DIRNAME
+    assert result.relative_bundle_directory == (
+        f"{APPROVED_CHANGE_ARTIFACTS_DIRNAME}/{bundle.bundle_id}"
+    )
+
+
+def test_normal_test_root_geometry_publishes_end_to_end(tmp_path, monkeypatch):
+    """The full contract under an unshortened, ordinary test temporary root."""
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+
+    # 1. First publication, with a proven file flush.
+    first = publish(bundle, root)
+    assert first.status == "bundle_published"
+    assert first.file_flush_status == "passed"
+    assert first.publication_performed is True
+    assert first.persistence_performed is True
+    assert first.overwrite_performed is False
+    assert_never_approves(first)
+
+    # 2. Exact PR316 bytes, lengths, hashes, bundle identity, and bundle ID.
+    directory = bundle_directory(root, bundle)
+    assert sorted(item.name for item in directory.iterdir()) == sorted(BUNDLE_FILENAMES)
+    for logical in bundle.files:
+        raw = (directory / logical.relative_path).read_bytes()
+        assert raw == logical.content_utf8.encode("utf-8")
+        assert len(raw) == FIXTURE_A_FILE_SIZES[logical.relative_path]
+        assert hashlib.sha256(raw).hexdigest() == FIXTURE_A_FILE_SHA256[logical.relative_path]
+    assert first.bundle_identity_sha256 == FIXTURE_A_BUNDLE_IDENTITY_SHA256
+    assert first.bundle_id == f"acb_{FIXTURE_A_BUNDLE_IDENTITY_SHA256}"
+
+    # 3. Loader.
+    loaded = load_persisted_approved_change_artifact_bundle(bundle.bundle_id, data_dir=root)
+    assert loaded.status == "persisted_bundle_loaded"
+    assert loaded.bundle == bundle
+
+    # 4. Idempotency with zero writes and unchanged timestamps.
+    before = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    }
+    second = publish(bundle, root)
+    assert second.status == "bundle_already_present"
+    assert second.read_only is True
+    assert second.artifact_write_performed is False
+    assert second.temporary_directory_created is False
+    assert {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    } == before
+
+    # 5. Conflicting existing content stays blocked without overwrite.
+    conflicting = bundle_b()
+    conflicting_directory = publication_root(root) / conflicting.bundle_id
+    conflicting_directory.mkdir()
+    for name in BUNDLE_FILENAMES:
+        (conflicting_directory / name).write_bytes(b"{}")
+    conflict = publish(conflicting, root)
+    assert conflict.status == "publication_blocked"
+    assert conflict.overwrite_performed is False
+    assert conflict.artifact_write_performed is False
+    for name in BUNDLE_FILENAMES:
+        assert (conflicting_directory / name).read_bytes() == b"{}"
+
+    # 6. Destination-appeared no-replace behaviour.
+    third = build(context_alt_provenance()).bundle
+    assert third.bundle_id not in {bundle.bundle_id, conflicting.bundle_id}
+    run_at(monkeypatch, "atomic_publish", race_destination(root, third, "identical"))
+    raced = publish(third, root)
+    assert raced.status == "bundle_already_present"
+    assert raced.atomic_publish_attempted is True
+    assert raced.atomic_publish_outcome == "destination_exists"
+    assert raced.atomic_publish_succeeded is False
+    assert raced.temporary_cleanup == "completed"
+    assert raced.overwrite_performed is False
+
+    # 7. Injected failure leaves no final bundle and cleans up completely. A
+    # second ordinary test root keeps this independent of the bundles above.
+    fresh = tmp_path / "data-second"
+    fresh.mkdir()
+    inject_failure(monkeypatch, "file_flush")
+    blocked_result = publish(bundle, fresh)
+    assert blocked_result.status == "publication_failed_precommit"
+    assert blocked_result.file_flush_status == "failed"
+    assert blocked_result.temporary_cleanup == "completed"
+    assert blocked_result.temporary_cleanup_performed is True
+    assert blocked_result.residual_temporary_directory == ""
+    assert blocked_result.publication_performed is False
+    assert not bundle_directory(fresh, bundle).exists()
+    assert list(fresh.iterdir()) == []
+
+    # The bundles under the first root were never touched by any of the above.
+    assert {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    } == before
+    assert not [
+        item
+        for item in publication_root(root).iterdir()
+        if item.name.startswith(TEMPORARY_DIRECTORY_PREFIX)
+    ]
+
+
+def test_unaddressable_final_path_fails_closed_before_anything_is_created(
+    tmp_path, monkeypatch, fs_recorder
+):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    # A limit that the fixed final bundle path cannot satisfy under this root.
+    longest_final = max(
+        len(str(bundle_directory(root, bundle) / name)) for name in BUNDLE_FILENAMES
+    )
+    monkeypatch.setattr(persistence, "MAX_PUBLICATION_PATH_CHARS", longest_final - 1)
+    fs_recorder.calls.clear()
+
+    result = publish(bundle, root)
+    assert result.status == "publication_blocked"
+    assert any("too long" in error for error in result.errors)
+    assert result.publication_performed is False
+    assert result.persistence_performed is False
+    assert result.overwrite_performed is False
+    assert result.publication_root_created is False
+    assert result.temporary_directory_created is False
+    assert result.artifact_write_performed is False
+    assert result.mutation_performed is False
+    assert result.atomic_publish_attempted is False
+    assert_never_approves(result)
+
+    # Nothing was created: no publication root, no pending directory, no bundle.
+    assert list(root.iterdir()) == []
+    assert fs_recorder.creations(root) == []
+    # Only lengths are reported; no host absolute path leaks into the result.
+    assert str(tmp_path) not in json.dumps(result.model_dump(mode="json"))
+
+
+def test_unaddressable_final_path_never_disturbs_an_existing_bundle(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    assert publish(bundle, root).status == "bundle_published"
+    directory = bundle_directory(root, bundle)
+    before = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    }
+
+    other = bundle_b()
+    longest_final = max(len(str(bundle_directory(root, other) / name)) for name in BUNDLE_FILENAMES)
+    monkeypatch.setattr(persistence, "MAX_PUBLICATION_PATH_CHARS", longest_final - 1)
+    result = publish(other, root)
+    assert result.status == "publication_blocked"
+    assert not bundle_directory(root, other).exists()
+    assert sorted(item.name for item in publication_root(root).iterdir()) == [bundle.bundle_id]
+    assert {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in sorted(directory.iterdir())
+    } == before
+
+
+def test_publication_path_limit_matches_the_platform():
+    if os.name == "nt":  # pragma: no cover - Windows lane
+        assert persistence.MAX_PUBLICATION_PATH_CHARS == 259
+    else:
+        assert persistence.MAX_PUBLICATION_PATH_CHARS == 4095
+    source = module_code_without_strings()
+    # No extended-length path support was added.
+    assert "\\\\?\\" not in ast.unparse(module_tree_without_docstrings())
+    assert "GetLongPathName" not in source
+    assert "GetShortPathName" not in source
+
+
+@WINDOWS_ONLY
+def test_windows_normal_test_root_geometry_fits_max_path(tmp_path):  # pragma: no cover - Windows
+    """The exact native regression: the prepared path once hit MAX_PATH here."""
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    result = publish(bundle, root)
+    assert result.status == "bundle_published"
+    assert result.file_flush_status == "passed"
+    directory = bundle_directory(root, bundle)
+    for name in BUNDLE_FILENAMES:
+        assert len(str(directory / name)) <= persistence.MAX_PUBLICATION_PATH_CHARS
+        assert (directory / name).is_file()
 
 
 # --------------------------------------------------------------------------

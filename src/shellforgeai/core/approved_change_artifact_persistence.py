@@ -68,8 +68,25 @@ APPROVED_CHANGE_ARTIFACTS_DIRNAME = "approved_change_artifacts"
 
 #: The private temporary sibling prefix. It never enters the final directory,
 #: any persisted file, the manifest, the bundle identity, or the bundle ID.
+#:
+#: The pending directory is named ``.pending-<16 lowercase hex>`` — a short fixed
+#: prefix plus one internally generated token, and deliberately *not* the bundle
+#: ID. Carrying the full 68-character bundle ID here made the unpublished
+#: temporary path 42 characters longer than the durable path it prepares, so a
+#: data root whose final bundle path fits could still overflow the Windows
+#: ``MAX_PATH`` limit while writing the temporary copy. The pending path is now
+#: always shorter than the final path it prepares, so preparation can never be
+#: the binding length constraint.
 TEMPORARY_DIRECTORY_PREFIX = ".pending-"
-TEMPORARY_NONCE_BYTES = 16
+TEMPORARY_NONCE_BYTES = 8
+TEMPORARY_DIRECTORY_NAME_LENGTH = len(TEMPORARY_DIRECTORY_PREFIX) + 2 * TEMPORARY_NONCE_BYTES
+
+#: The longest publication path this platform can address without extended-length
+#: path syntax. Windows ``MAX_PATH`` is 260 including the terminating NUL; POSIX
+#: ``PATH_MAX`` is 4096 on the maintained platforms. PR317 never emits a ``\\?\``
+#: path and adds no extended-length support: an unaddressable final path is
+#: blocked before anything is created.
+MAX_PUBLICATION_PATH_CHARS = 259 if os.name == "nt" else 4095
 
 #: Conservative read bounds enforced before any untrusted file is read.
 MAX_PERSISTED_BUNDLE_FILE_BYTES = 1_048_576
@@ -182,7 +199,7 @@ def _failpoint(name: str) -> None:
 
 
 def _temporary_nonce() -> str:
-    """Return a private nonce for the unpublished temporary directory name."""
+    """Return a short private token for the unpublished temporary directory name."""
     return secrets.token_hex(TEMPORARY_NONCE_BYTES)
 
 
@@ -579,6 +596,26 @@ def _check_publication_root_containment(data_dir: Path, root: Path) -> list[str]
         if _real(root).parent != _real(data_dir):
             errors.append("publication root escapes the resolved data directory")
     return errors
+
+
+def _projected_final_path_errors(final_directory: Path) -> list[str]:
+    """Refuse a data root whose fixed final durable paths are unaddressable.
+
+    The four persisted filenames are fixed, so the longest final path this
+    publication would ever need is known before anything is created. When that
+    path cannot be addressed without extended-length path syntax the publication
+    is blocked up front, so no temporary directory or file is created for a
+    bundle that could never be published. Only lengths are reported: no host
+    absolute path is ever placed in a result.
+    """
+    longest = max(len(str(final_directory / name)) for name in BUNDLE_FILENAMES)
+    if longest > MAX_PUBLICATION_PATH_CHARS:
+        return [
+            "the data directory is too long for the fixed final bundle path: the longest "
+            f"persisted path would be {longest} characters and this platform addresses at "
+            f"most {MAX_PUBLICATION_PATH_CHARS}"
+        ]
+    return []
 
 
 def _check_child_containment(root: Path, child: Path, label: str) -> list[str]:
@@ -1350,6 +1387,16 @@ def _publish_confirmed_bundle(
             root_errors,
         )
 
+    # The fixed final paths are fully known here. A data root that cannot address
+    # them is refused before any directory or file is created.
+    length_errors = _projected_final_path_errors(root / bundle_id)
+    if length_errors:
+        return blocked(
+            "publication_blocked",
+            "the fixed final bundle path is not addressable beneath this data directory",
+            length_errors,
+        )
+
     state = _PublicationState()
     if not _path_exists_without_following(root):
         try:
@@ -1395,8 +1442,11 @@ def _publish_confirmed_bundle(
             temporary_cleanup="not_required",
         )
 
-    # 10. One private temporary sibling directory.
-    temporary = root / f"{TEMPORARY_DIRECTORY_PREFIX}{bundle_id}-{_temporary_nonce()}"
+    # 10. One private temporary sibling directory. Its name is a short fixed
+    # prefix plus one internally generated token only: no bundle ID, no semantic
+    # identity, and nothing caller-controlled. It is always shorter than the
+    # final directory it prepares.
+    temporary = root / f"{TEMPORARY_DIRECTORY_PREFIX}{_temporary_nonce()}"
     temp_containment = _check_child_containment(root, temporary, "temporary directory")
     if temp_containment:
         _cleanup_publication_root(root, resolved_data_dir, state)
