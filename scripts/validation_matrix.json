@@ -178,6 +178,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_artifact.py", "lane": "targeted_runtime", "reason": "inert Stage B canonical approval-artifact contract, non-circular approval-artifact identity, aca_ artifact ID, builder, or validator changed (built only from one fully successful PR318 approval result; no filesystem, writer, loader, CLI, natural-language, persistence, mutation, new approval, capability binding, preflight, receipt, or execution surface)", "tests": [
+      "tests/test_pr320_approved_change_approval_inventory.py",
       "tests/test_pr319_approved_change_approval_artifact_persistence.py",
       "tests/test_pr318_approved_change_approval_workflow.py",
       "tests/test_pr317_approved_change_artifact_persistence.py",
@@ -189,6 +190,19 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_persistence.py", "lane": "full", "reason": "governed Stage B approval-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_approvals subtree, atomic no-replace publication, bounded cleanup, and an exact-ID read-only loader that revalidates the PR309 approval binding and the exact read-only PR317 source bundle; no CLI, natural-language, new approval, mutable approval state, overwrite, revocation, capability, receipt, host-configuration, or execution surface)", "tests": [
+      "tests/test_pr320_approved_change_approval_inventory.py",
+      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+      "tests/test_pr318_approved_change_approval_workflow.py",
+      "tests/test_pr317_approved_change_artifact_persistence.py",
+      "tests/test_pr316_approved_change_artifact_bundle.py",
+      "tests/test_pr315_approved_change_subject_construction.py",
+      "tests/test_pr314_approved_change_supplemental_context.py",
+      "tests/test_pr311_approved_change_construction_policy.py",
+      "tests/test_pr310_legacy_proposal_compatibility.py",
+      "tests/test_pr309_approved_change_contract.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/approved_change_approval_inventory.py", "lane": "targeted_runtime", "reason": "bounded read-only Stage B approval-artifact inventory changed (one direct-child-only, no-follow scan of the fixed <data_dir>/approved_change_approvals root under a fixed maintained entry bound, validating exact aca_ candidates only through the maintained PR319 exact-ID loader and returning immutable summaries sorted lexicographically by artifact ID plus explicit anomalies; no filesystem write, persisted index, pointer, approval selection, latest/current resolution, capability-support evaluation, capability binding, preflight, receipt, CLI, natural-language, or execution surface)", "tests": [
+      "tests/test_pr320_approved_change_approval_inventory.py",
       "tests/test_pr319_approved_change_approval_artifact_persistence.py",
       "tests/test_pr318_approved_change_approval_workflow.py",
       "tests/test_pr317_approved_change_artifact_persistence.py",
