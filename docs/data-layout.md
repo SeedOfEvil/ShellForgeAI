@@ -34,6 +34,9 @@ outside `<data_dir>` are never written or deleted by the runtime.
   approved_change_artifacts/<bundle-id>/
                                   PR317 published reviewed-change artifact
                                   bundles (exactly four PR316 files each)
+  approved_change_approvals/<approval-artifact-id>/
+                                  PR319 published approval artifacts
+                                  (exactly one canonical file each)
 ```
 
 ## Reviewed-change artifact bundles (PR317)
@@ -56,6 +59,25 @@ outside `<data_dir>` are never written or deleted by the runtime.
 - PR317 never deletes a published bundle. Retention, cleanup, and deletion of these bundles remain deferred.
 
 See [Approved Change Artifact Persistence](APPROVED_CHANGE_ARTIFACT_PERSISTENCE.md) for the full contract.
+
+## Approval artifacts (PR319)
+
+```
+<data_dir>/approved_change_approvals/aca_<64 lowercase hex>/
+  approved-change-approval.json
+```
+
+- The subtree name `approved_change_approvals` and the filename `approved-change-approval.json` are fixed literals. There is no caller override, alias, or configurable variant.
+- The final directory name is exactly the PR319 `approval_artifact_id` (`aca_` plus the full 64-character approval-artifact identity SHA-256, the SHA-256 of the exact canonical file bytes). It is never the `acb_` bundle ID, the subject SHA-256, or a legacy Proposal fingerprint.
+- Each published directory contains exactly that one file and nothing else: no second file, sidecar, completion marker, lock file, mutable status file, pointer file, symlink, `latest` entry, Markdown rendering, receipt, or metadata file.
+- Stored bytes are the canonical UTF-8 approval bytes — no BOM, no CRLF, no trailing newline, no reserialization, no redaction.
+- The artifact records **one immutable approval event**, not mutable approval state. There is no status field, revocation, cancellation, expiration, supersession, quorum, or approval-state transition.
+- **No overwrite exists.** Republishing an identical artifact returns `approval_artifact_already_present` and writes nothing; a conflicting or invalid existing directory blocks and is never repaired, replaced, quarantined, renamed, deleted, merged, or written around.
+- Loading requires one **explicit full `aca_` artifact ID**. There is no `latest`, `current`, "most recent", prefix, glob, path, or listing reference, and the loader enforces a 1 MiB read bound and revalidates the PR309 approval binding plus the exact PR317 source bundle from the same `<data_dir>`.
+- Publication requires an explicit `confirm_approval_artifact_identity_sha256` match. **Persistence is not approval and not authorization:** the approval was created by PR318, and a persisted artifact is unbound to any capability and non-executable. PR319 evaluates no capability, runs no preflight, and creates or links no receipt.
+- PR319 never deletes a published approval artifact and never writes to the PR317 bundle subtree. Retention, cleanup, and deletion of approval artifacts are **unsupported** and remain deferred.
+
+See [Approved Change Approval Artifact Persistence](APPROVED_CHANGE_APPROVAL_ARTIFACT_PERSISTENCE.md) for the full contract.
 
 Names may vary slightly across versions; treat the table below as the
 canonical lifecycle. Code under `src/shellforgeai/core/` is the source of

@@ -1593,15 +1593,34 @@ def test_module_exposes_no_cli_persistence_or_registry_surface():
 
 
 def test_module_is_not_imported_by_cli_approvals_recipes_or_execution():
+    # PR319's pure approval-artifact module is the one governed consumer of this
+    # result type; it is named here explicitly so no CLI, approvals, recipe, or
+    # execution module can quietly reach the approval-binding operation instead.
+    permitted = {
+        "approved_change_approval_workflow.py",
+        "approved_change_approval_artifact.py",
+    }
     roots = [Path("src/shellforgeai/cli"), Path("src/shellforgeai/core")]
     offenders = []
     for base in roots:
         for path in base.rglob("*.py"):
-            if path.name == "approved_change_approval_workflow.py":
+            if path.name in permitted:
                 continue
             if "approved_change_approval_workflow" in path.read_text(encoding="utf-8"):
                 offenders.append(str(path))
     assert offenders == []
+
+
+def test_the_pr319_consumer_only_consumes_the_maintained_result():
+    # PR319 consumes one fully successful PR318 result. It never reimplements
+    # the approval-binding operation and never creates an approval of its own.
+    source = Path("src/shellforgeai/core/approved_change_approval_artifact.py").read_text(
+        encoding="utf-8"
+    )
+    assert "ApprovedChangeApprovalWorkflowResult" in source
+    assert "construct_approved_change_contract_from_persisted_bundle" not in source
+    assert "ApprovalAttestation(" not in source
+    assert "ApprovedChangeContract(" not in source
 
 
 def test_fixed_identifiers_are_taken_from_the_maintained_modules():

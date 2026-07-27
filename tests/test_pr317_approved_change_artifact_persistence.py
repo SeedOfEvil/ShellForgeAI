@@ -2945,12 +2945,14 @@ def test_public_surface_is_exactly_the_two_operations_and_the_atomic_helper():
 
 
 def test_module_is_not_imported_by_cli_approvals_recipes_or_execution():
-    # PR318's read-only approval-binding module is the one governed consumer of
-    # the loader; it is named here explicitly so no CLI, approvals, recipe, or
-    # execution module can quietly reach the persistence boundary instead.
+    # PR318's read-only approval-binding module and PR319's approval-artifact
+    # persistence boundary are the only governed consumers of the loader; they
+    # are named here explicitly so no CLI, approvals, recipe, or execution
+    # module can quietly reach the persistence boundary instead.
     permitted = {
         "approved_change_artifact_persistence.py",
         "approved_change_approval_workflow.py",
+        "approved_change_approval_persistence.py",
     }
     roots = [Path("src/shellforgeai/cli"), Path("src/shellforgeai/core")]
     offenders = []
@@ -2970,6 +2972,78 @@ def test_the_pr318_consumer_uses_only_the_read_only_loader():
     assert "load_persisted_approved_change_artifact_bundle" in source
     assert "publish_approved_change_artifact_bundle" not in source
     assert "atomic_no_replace_directory_publish" not in source
+
+
+def test_the_pr319_consumer_uses_only_the_read_only_loader():
+    # PR319 persists approval artifacts under its own fixed subtree. It reads
+    # PR317 source bundles through the maintained exact-ID loader only, and it
+    # never calls PR317's publisher or reuses its atomic primitive as a generic
+    # persistence engine.
+    source = Path("src/shellforgeai/core/approved_change_approval_persistence.py").read_text(
+        encoding="utf-8"
+    )
+    assert "load_persisted_approved_change_artifact_bundle" in source
+    assert "publish_approved_change_artifact_bundle" not in source
+    assert "atomic_no_replace_directory_publish(" not in source
+
+
+def test_the_pr317_bundle_subtree_is_never_written_by_pr319(tmp_path):
+    # PR319 owns a separate fixed subtree; the PR317 layout is unchanged and
+    # every PR317 byte and mtime survives an approval-artifact publication.
+    from datetime import datetime, timezone
+
+    from shellforgeai.core.approved_change_approval_artifact import (
+        build_approved_change_approval_artifact,
+    )
+    from shellforgeai.core.approved_change_approval_persistence import (
+        APPROVED_CHANGE_APPROVALS_DIRNAME,
+        publish_approved_change_approval_artifact,
+    )
+    from shellforgeai.core.approved_change_approval_workflow import (
+        construct_approved_change_contract_from_persisted_bundle,
+    )
+
+    def snapshot(base: Path):
+        return {
+            str(path.relative_to(base)): (
+                path.read_bytes() if path.is_file() else b"",
+                path.stat().st_mtime_ns,
+            )
+            for path in sorted(base.rglob("*"))
+        }
+
+    root = data_dir(tmp_path)
+    bundle = bundle_a()
+    publish(bundle, root)
+    bundle_tree = snapshot(root / APPROVED_CHANGE_ARTIFACTS_DIRNAME)
+
+    workflow = construct_approved_change_contract_from_persisted_bundle(
+        bundle.bundle_id,
+        data_dir=root,
+        approval_decision="approve",
+        confirm_bundle_identity_sha256=bundle.bundle_identity_sha256,
+        confirm_subject_sha256=next(
+            item.sha256
+            for item in bundle.files
+            if item.relative_path == APPROVED_CHANGE_SUBJECT_FILENAME
+        ),
+        approved_by="operator-approver",
+        approved_at=datetime(2026, 7, 27, 9, 0, 0, tzinfo=timezone.utc),
+        reason="reviewed the exact persisted reviewed-change subject",
+    )
+    built = build_approved_change_approval_artifact(workflow)
+    assert built.status == "approval_artifact_constructed"
+    published = publish_approved_change_approval_artifact(
+        built.artifact,
+        data_dir=root,
+        confirm_approval_artifact_identity_sha256=(
+            built.artifact.approval_artifact_identity_sha256
+        ),
+    )
+    assert published.status == "approval_artifact_published"
+    assert snapshot(root / APPROVED_CHANGE_ARTIFACTS_DIRNAME) == bundle_tree
+    assert (root / APPROVED_CHANGE_APPROVALS_DIRNAME).is_dir()
+    assert APPROVED_CHANGE_APPROVALS_DIRNAME != APPROVED_CHANGE_ARTIFACTS_DIRNAME
 
 
 def test_fixed_layout_literals_are_module_constants():
