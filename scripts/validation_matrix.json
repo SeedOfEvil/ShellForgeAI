@@ -167,6 +167,16 @@
       "tests/test_pr310_legacy_proposal_compatibility.py",
       "tests/test_pr309_approved_change_contract.py"
     ]},
+    {"pattern": "src/shellforgeai/core/approved_change_approval_workflow.py", "lane": "targeted_runtime", "reason": "read-only Stage B approval-binding operation changed (explicit approve decision plus exact bundle-identity and subject-hash confirmations over one persisted bundle loaded through the maintained PR317 exact-ID loader; in-memory attestation and contract only, with no filesystem write, approval persistence, capability-support evaluation, preflight, receipt linkage, CLI, natural-language, or execution surface)", "tests": [
+      "tests/test_pr318_approved_change_approval_workflow.py",
+      "tests/test_pr317_approved_change_artifact_persistence.py",
+      "tests/test_pr316_approved_change_artifact_bundle.py",
+      "tests/test_pr315_approved_change_subject_construction.py",
+      "tests/test_pr314_approved_change_supplemental_context.py",
+      "tests/test_pr311_approved_change_construction_policy.py",
+      "tests/test_pr310_legacy_proposal_compatibility.py",
+      "tests/test_pr309_approved_change_contract.py"
+    ]},
     {"pattern": "src/shellforgeai/interactive/**", "lane": "targeted_runtime", "reason": "interactive UX/command dispatch changed", "tests": [
       "tests/test_pr122_*",
       "tests/test_pr124_*",

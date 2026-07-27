@@ -315,6 +315,12 @@ PR317 adds no CLI command, interactive route, natural-language publication, impl
 
 The production module imports only `__future__`, `ctypes`, `dataclasses`, `hashlib`, `hmac`, `json`, `os`, `pathlib`, `platform`, `pydantic`, `re`, `secrets`, `stat`, `sys`, `typing`, and the maintained PR316 bundle module.
 
-## Future approval-workflow dependency
+## Approval-workflow consumer (PR318)
 
-Persisted artifacts are the substrate an approval workflow will need, not the approval itself. The next Stage B dependency is approval-workflow integration — approval-attestation creation, approved-contract construction, authenticated identity, and approval persistence — not execution. Capability registry, capability-support evaluation, exact capability binding, current-state preflight, subject-to-receipt linkage, execution eligibility, persisted-bundle deletion, retention integration, and any CLI or natural-language access all remain deferred to PR318 or later.
+Persisted artifacts are the substrate an approval workflow needs, not the approval itself. PR318 is the first and only consumer of the loader: [Approved Change Approval Workflow](APPROVED_CHANGE_APPROVAL_WORKFLOW.md) calls `load_persisted_approved_change_artifact_bundle` with one exact bundle ID and one explicit `data_dir`, and builds one `ApprovalAttestation` and one `ApprovedChangeContract` in memory from the loaded bundle.
+
+PR317 is unchanged by it. PR318 adds no alternate loader, accepts no arbitrary persisted path, bypasses no PR316 validation, rewrites or repairs no persisted byte, republishes nothing, and changes no publisher behaviour or on-disk layout. Loading for approval remains strictly read-only: after an approval binding the persisted tree is byte- and mtime-identical.
+
+## Remaining deferred work
+
+Approval persistence itself is still not implemented anywhere: PR318 keeps its approval and contract in memory only. Canonical approval-artifact persistence, persisted approval loading, authenticated identity, capability registry, capability-support evaluation, exact capability binding, current-state preflight, subject-to-receipt linkage, execution eligibility, persisted-bundle deletion, retention integration, and any CLI or natural-language access all remain deferred to PR319 or later.
