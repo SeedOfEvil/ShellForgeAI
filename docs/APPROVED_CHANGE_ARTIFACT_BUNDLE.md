@@ -12,7 +12,7 @@ PR309 defined the destination schema and the subject identity. PR311 defined the
 
 At that point a reviewed change existed only as three live Python objects with three separate identities. Any caller wanting to keep it would have had to invent its own file layout, its own serialization, its own checksum scheme, and its own idea of which artifacts belong together — exactly the ad-hoc drift the earlier slices prohibit. Writing files before agreeing on the payload would also have made the filesystem boundary the place where correctness is decided.
 
-PR316 closes that gap in the safe order: define the exact bytes, the exact file set, the exact checksums, and the exact identity chain first; leave the governed writer to PR317.
+PR316 closes that gap in the safe order: define the exact bytes, the exact file set, the exact checksums, and the exact identity chain first; leave the governed writer to PR317, which is now implemented in [Approved Change Artifact Persistence](APPROVED_CHANGE_ARTIFACT_PERSISTENCE.md).
 
 A valid bundle is still not approved, not authorized, not an `ApprovedChangeContract`, not bound to a capability, not persisted, and not executable.
 
@@ -256,7 +256,7 @@ The manifest records five fixed policy values. They are contract metadata only. 
 | `existing_identical_policy` | `validate_and_return_already_present` |
 | `destination_policy` | `fixed_full_bundle_id_directory` |
 
-The future PR317 writer will be required to derive the destination directory from the full bundle ID, prepare all files outside the final destination, verify all prepared files, publish the complete bundle in one final atomic directory transition, never overwrite, return `already_present` only for an existing fully valid identical bundle, and block on conflicting or invalid existing contents.
+PR317 implements exactly that in [Approved Change Artifact Persistence](APPROVED_CHANGE_ARTIFACT_PERSISTENCE.md): it derives the destination directory from the full bundle ID, prepares all files in a private temporary sibling outside the final destination, verifies every prepared file, publishes the complete bundle in one atomic no-replace directory transition, never overwrites, returns `bundle_already_present` only for an existing fully valid byte-identical bundle, and blocks on conflicting or invalid existing contents.
 
 ## Non-executable, unapproved, unpersisted JSON-shaped example
 
@@ -313,8 +313,8 @@ The production module imports only `hashlib`, `hmac`, `json`, `re`, `typing`, `p
 
 Current product behavior, the command surface, and mutation refusal are unchanged.
 
-## PR317 writer and loader dependency
+## PR317 writer and loader
 
-The next Stage B dependency is **PR317: publish reviewed-change artifact bundles atomically** — the narrowly governed filesystem boundary that this contract exists to constrain. Its expected scope is a fixed data-root subtree, a full bundle-ID destination directory, a temporary sibling preparation directory, exclusive binary writes, exact byte and checksum verification, flush where supported, one final atomic directory publication step, no overwrite, `already_present` for a valid identical existing bundle, blocking on an invalid or conflicting existing directory, bounded cleanup only of the unpublished temporary directory created by that invocation, and a read-only persisted-bundle loader and validator.
+**PR317: publish reviewed-change artifact bundles atomically** is the narrowly governed filesystem boundary that this contract exists to constrain. It is documented in [Approved Change Artifact Persistence](APPROVED_CHANGE_ARTIFACT_PERSISTENCE.md) and implemented in `src/shellforgeai/core/approved_change_artifact_persistence.py`: a fixed `<data_dir>/approved_change_artifacts` subtree, a full bundle-ID destination directory, a private temporary sibling preparation directory, exclusive binary writes, exact byte and checksum verification, flush where supported, one atomic no-replace directory publication step, no overwrite, `bundle_already_present` for a valid identical existing bundle, blocking on an invalid or conflicting existing directory, bounded cleanup only of the unpublished temporary directory created by that invocation, and a read-only persisted-bundle loader that reruns this validator.
 
-PR316 deliberately pre-implements none of it. Approval attestation, approved-contract construction, authenticated identity, approval workflow and persistence, the capability registry, capability-support evaluation, exact capability binding, `windows.runtime_reconcile` binding, current-state execution preflight, subject/live-plan comparison, subject-to-receipt linkage, execution eligibility, Stage C end-to-end execution, and any additional mutation capability all remain deferred.
+PR317 changes none of this contract: not the four-file set, not the canonical bytes, not the manifest, not the bundle identity, and not the bundle ID. It persists exactly `content_utf8.encode("utf-8")` and revalidates through `validate_approved_change_artifact_bundle`. PR316 deliberately pre-implements none of the filesystem boundary. Approval attestation, approved-contract construction, authenticated identity, approval workflow and persistence, the capability registry, capability-support evaluation, exact capability binding, `windows.runtime_reconcile` binding, current-state execution preflight, subject/live-plan comparison, subject-to-receipt linkage, execution eligibility, Stage C end-to-end execution, and any additional mutation capability all remain deferred.
