@@ -124,13 +124,13 @@ from shellforgeai.core.approved_change_supplemental_context import (
 # instead of silently changing what ShellForgeAI claims to support.
 # --------------------------------------------------------------------------
 
-MAINTAINED_CATALOG_BYTE_LENGTH = 465
+MAINTAINED_CATALOG_BYTE_LENGTH = 464
 MAINTAINED_CATALOG_IDENTITY_SHA256 = (
-    "7dcf112b0807bd7388912b5b1cf59f2be8c0d5b30ec6fa0d05265d88b936da61"
+    "762d8263642289f4c7230e0e4c625720c3cee461c6f229a724a8b2e15cc0786d"
 )
 MAINTAINED_CATALOG_CANONICAL_JSON = (
     '{"catalog_type":"approved_change_capability_support_catalog","declarations":'
-    '[{"authorization_available":false,"capability_binding_available":false,'
+    '[{"authorization_available":false,"capability_binding_available":true,'
     '"capability_id":"windows.runtime_reconcile","execution_available":false,'
     '"match_rule":"exact_capability_id_only","preflight_available":false,'
     '"receipt_linkage_available":false,"schema_version":"1",'
@@ -222,7 +222,7 @@ def declaration_payload(**overrides):
         "support_status": SUPPORT_STATUS_DECLARED_SUPPORTED,
         "match_rule": MATCH_RULE_EXACT_CAPABILITY_ID_ONLY,
         "validation_scope": VALIDATION_SCOPE_CONTRACT_VALIDATION_ONLY,
-        "capability_binding_available": False,
+        "capability_binding_available": True,
         "authorization_available": False,
         "preflight_available": False,
         "receipt_linkage_available": False,
@@ -378,7 +378,7 @@ def test_every_declaration_field_has_its_exact_expected_value():
         "support_status": "declared_supported",
         "match_rule": "exact_capability_id_only",
         "validation_scope": "approved_change_contract_validation_only",
-        "capability_binding_available": False,
+        "capability_binding_available": True,
         "authorization_available": False,
         "preflight_available": False,
         "receipt_linkage_available": False,
@@ -386,9 +386,14 @@ def test_every_declaration_field_has_its_exact_expected_value():
     }
 
 
-def test_every_availability_field_is_false():
+def test_every_not_yet_implemented_availability_field_is_false():
+    """PR322 made the read-only in-memory binding operation available.
+
+    That is the only availability field a maintained declaration may assert
+    today. Authorization, preflight, receipt linkage, and execution stay false.
+    """
     for declaration in maintained_approved_change_capability_support_catalog().declarations:
-        assert declaration.capability_binding_available is False
+        assert declaration.capability_binding_available is True
         assert declaration.authorization_available is False
         assert declaration.preflight_available is False
         assert declaration.receipt_linkage_available is False
@@ -665,20 +670,30 @@ def test_wrong_declaration_enums_are_invalid(overrides):
 @pytest.mark.parametrize(
     "field",
     [
-        "capability_binding_available",
         "authorization_available",
         "preflight_available",
         "receipt_linkage_available",
         "execution_available",
     ],
 )
-def test_any_availability_field_set_true_is_invalid(field):
+def test_any_not_yet_implemented_availability_field_set_true_is_invalid(field):
     result = validate_approved_change_capability_support_catalog(
         catalog_payload(declaration_payload(**{field: True}))
     )
     assert result.status == "capability_support_catalog_invalid"
     assert result.catalog_valid is False
     assert any(field in item and "must be false" in item for item in result.errors)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_capability_binding_availability_is_the_one_declarable_availability(value):
+    """PR322 exists, so a declaration may state binding availability either way."""
+    result = validate_approved_change_capability_support_catalog(
+        catalog_payload(declaration_payload(capability_binding_available=value))
+    )
+    assert result.status == "capability_support_catalog_valid"
+    assert result.catalog_valid is True
+    assert not any("capability_binding_available" in item for item in result.errors)
 
 
 def test_an_availability_field_set_true_on_the_model_is_still_rejected():
@@ -797,7 +812,9 @@ def test_a_supported_result_never_claims_binding_authorization_preflight_or_exec
     assert result.execution_allowed is False
     assert result.execution_available is False
     assert result.execution_status == "not_executed"
-    assert result.declaration.capability_binding_available is False
+    # PR322's read-only in-memory binding operation exists, but PR321 never
+    # performs it: this evaluator still reports capability_bound=false.
+    assert result.declaration.capability_binding_available is True
     assert result.declaration.authorization_available is False
     assert result.declaration.preflight_available is False
     assert result.declaration.receipt_linkage_available is False
@@ -1437,7 +1454,6 @@ def test_the_declaration_never_claims_a_pr313_binding(tmp_path):
     artifact = publish_for(capability_bundle(WINDOWS_RUNTIME_RECONCILE_CAPABILITY_ID), root)
     result = evaluate(artifact.approval_artifact_id, root)
     assert result.capability_bound is False
-    assert result.declaration.capability_binding_available is False
     assert (
         "windows.runtime_reconcile is not bound to the PR313 lane by this declaration"
         in result.warnings
@@ -1445,6 +1461,7 @@ def test_the_declaration_never_claims_a_pr313_binding(tmp_path):
     payload = json.dumps(result.model_dump(mode="json"))
     assert "binding_id" not in payload
     assert "bound_lane" not in payload
+    assert "lane_id" not in payload
 
 
 # --------------------------------------------------------------------------
@@ -1643,15 +1660,30 @@ def test_the_public_surface_is_exactly_the_maintained_operations():
 
 
 def test_the_module_is_not_imported_by_cli_approvals_recipes_or_execution():
-    roots = [Path("src/shellforgeai/cli"), Path("src/shellforgeai/core")]
+    # The PR322 read-only capability-binding module is the only permitted
+    # consumer: it confirms support solely through this evaluator instead of
+    # replacing the decision with its own membership check.
+    permitted = {
+        "approved_change_capability_support.py",
+        "approved_change_capability_binding.py",
+    }
     offenders = [
         str(path)
-        for base in roots
+        for base in (Path("src/shellforgeai/cli"), Path("src/shellforgeai/core"))
         for path in base.rglob("*.py")
-        if path.name != "approved_change_capability_support.py"
+        if path.name not in permitted
         and "approved_change_capability_support" in path.read_text(encoding="utf-8")
     ]
     assert offenders == []
+
+
+def test_the_only_permitted_consumer_is_read_only():
+    source = Path("src/shellforgeai/core/approved_change_capability_binding.py").read_text(
+        encoding="utf-8"
+    )
+    assert "evaluate_persisted_approved_change_capability_support" in source
+    assert "publish_approved_change_approval_artifact" not in source
+    assert "build_approved_change_approval_artifact" not in source
 
 
 def test_no_cli_surface_was_added():
@@ -1698,7 +1730,7 @@ def test_cross_platform_parity_of_catalog_bytes_and_identity():
     canonical = canonical_approved_change_capability_support_catalog_json(catalog)
     assert canonical == MAINTAINED_CATALOG_CANONICAL_JSON
     assert canonical.encode("utf-8") == MAINTAINED_CATALOG_CANONICAL_JSON.encode("utf-8")
-    assert len(canonical.encode("utf-8")) == MAINTAINED_CATALOG_BYTE_LENGTH == 465
+    assert len(canonical.encode("utf-8")) == MAINTAINED_CATALOG_BYTE_LENGTH == 464
     assert "\r" not in canonical
     assert compute_approved_change_capability_support_catalog_sha256(catalog) == (
         MAINTAINED_CATALOG_IDENTITY_SHA256
@@ -1725,7 +1757,7 @@ def test_cross_platform_parity_of_supported_and_unsupported_evaluation(tmp_path)
         "support_status": "declared_supported",
         "match_rule": "exact_capability_id_only",
         "validation_scope": "approved_change_contract_validation_only",
-        "capability_binding_available": False,
+        "capability_binding_available": True,
         "authorization_available": False,
         "preflight_available": False,
         "receipt_linkage_available": False,

@@ -178,6 +178,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_artifact.py", "lane": "targeted_runtime", "reason": "inert Stage B canonical approval-artifact contract, non-circular approval-artifact identity, aca_ artifact ID, builder, or validator changed (built only from one fully successful PR318 approval result; no filesystem, writer, loader, CLI, natural-language, persistence, mutation, new approval, capability binding, preflight, receipt, or execution surface)", "tests": [
+      "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
       "tests/test_pr319_approved_change_approval_artifact_persistence.py",
@@ -191,6 +192,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_persistence.py", "lane": "full", "reason": "governed Stage B approval-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_approvals subtree, atomic no-replace publication, bounded cleanup, and an exact-ID read-only loader that revalidates the PR309 approval binding and the exact read-only PR317 source bundle; no CLI, natural-language, new approval, mutable approval state, overwrite, revocation, capability, receipt, host-configuration, or execution surface)", "tests": [
+      "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
       "tests/test_pr319_approved_change_approval_artifact_persistence.py",
@@ -204,6 +206,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_inventory.py", "lane": "targeted_runtime", "reason": "bounded read-only Stage B approval-artifact inventory changed (one direct-child-only, no-follow scan of the fixed <data_dir>/approved_change_approvals root under a fixed maintained entry bound, validating exact aca_ candidates only through the maintained PR319 exact-ID loader and returning immutable summaries sorted lexicographically by artifact ID plus explicit anomalies; no filesystem write, persisted index, pointer, approval selection, latest/current resolution, capability-support evaluation, capability binding, preflight, receipt, CLI, natural-language, or execution surface)", "tests": [
+      "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
       "tests/test_pr319_approved_change_approval_artifact_persistence.py",
@@ -216,7 +219,22 @@
       "tests/test_pr310_legacy_proposal_compatibility.py",
       "tests/test_pr309_approved_change_contract.py"
     ]},
-    {"pattern": "src/shellforgeai/core/approved_change_capability_support.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change capability-support declaration and evaluation changed (one immutable source-maintained catalog with a deterministic SHA-256 identity declaring exactly windows.runtime_reconcile for approved-change contract validation only, plus one read-only evaluator that requires an exact catalog-identity confirmation before any filesystem access, loads one exact persisted PR319 approval artifact through the maintained exact-ID loader, and decides support only through the maintained PR309 validate_approved_change_contract; no catalog persistence, dynamic discovery, recipe-registry-derived support, caller-supplied capability set, approval selection, latest/current resolution, capability binding, PR313 integration, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)", "tests": [
+    {"pattern": "src/shellforgeai/core/approved_change_capability_support.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change capability-support declaration and evaluation changed (one immutable source-maintained catalog with a deterministic SHA-256 identity declaring exactly windows.runtime_reconcile for approved-change contract validation only, plus one read-only evaluator that requires an exact catalog-identity confirmation before any filesystem access, loads one exact persisted PR319 approval artifact through the maintained exact-ID loader, and decides support only through the maintained PR309 validate_approved_change_contract; no catalog persistence, dynamic discovery, recipe-registry-derived support, caller-supplied capability set, approval selection, latest/current resolution, in-module capability binding, PR313 integration, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface; the maintained declaration's capability_binding_available field states only that the separate read-only PR322 in-memory binding operation exists)", "tests": [
+      "tests/test_pr322_approved_change_capability_binding.py",
+      "tests/test_pr321_approved_change_capability_support.py",
+      "tests/test_pr320_approved_change_approval_inventory.py",
+      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+      "tests/test_pr318_approved_change_approval_workflow.py",
+      "tests/test_pr317_approved_change_artifact_persistence.py",
+      "tests/test_pr316_approved_change_artifact_bundle.py",
+      "tests/test_pr315_approved_change_subject_construction.py",
+      "tests/test_pr314_approved_change_supplemental_context.py",
+      "tests/test_pr311_approved_change_construction_policy.py",
+      "tests/test_pr310_legacy_proposal_compatibility.py",
+      "tests/test_pr309_approved_change_contract.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/approved_change_capability_binding.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change capability binding changed (one immutable source-maintained lane declaration for the named PR313 governed Windows two-file runtime-reconciliation lane with a deterministic SHA-256 identity, plus one read-only operation that requires exact PR321 catalog-identity and lane-declaration-identity confirmations before any filesystem access, confirms support only through the maintained PR321 evaluator, obtains exact binding metadata only through the maintained PR319 exact-ID loader, and constructs exactly one in-memory binding with a non-circular deterministic identity; no binding persistence, publication, or loading, dynamic lane discovery, caller-supplied declaration, approval selection, latest/current resolution, target/procedure/evidence/current-state compatibility evaluation, PR313 invocation, PR304/PR305 validation, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)", "tests": [
+      "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
       "tests/test_pr319_approved_change_approval_artifact_persistence.py",

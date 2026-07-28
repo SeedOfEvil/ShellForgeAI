@@ -27,6 +27,12 @@ availability. ``windows.runtime_reconcile`` is *not* bound to the PR313 lane
 here: this declaration recognizes the exact capability ID for approved-change
 contract validation only.
 
+The maintained declaration's ``capability_binding_available`` field is ``true``
+because the separate read-only PR322 in-memory capability-binding operation
+exists. That field states only that the operation exists; this module still
+performs no binding, names no lane, and reports ``capability_bound=false`` on
+every result.
+
 The catalog is source-maintained and stays in memory: it is never persisted,
 published, inventoried, loaded from disk, discovered from plugins, derived from
 ``recipe_registry``, or assembled from a caller-supplied set. The evaluator
@@ -177,10 +183,14 @@ class ApprovedChangeCapabilitySupportDeclaration(_FrozenModel):
 
     The declaration carries exactly the semantics required to state support
     without implying anything further. The five availability fields exist so a
-    declaration can never be silently read as more than it is; the maintained
-    catalog validator requires every one of them to be ``false``, so no
-    declaration in this repository can assert binding, authorization,
-    preflight, receipt linkage, or execution availability today.
+    declaration can never be silently read as more than it is.
+
+    ``capability_binding_available`` states only whether the maintained
+    read-only PR322 in-memory capability-binding *operation* exists for this
+    exact capability ID. It is true today, and it still asserts nothing about
+    authorization, preflight, receipt linkage, or execution: the maintained
+    catalog validator requires those four to be ``false``, so no declaration in
+    this repository can assert them.
     """
 
     schema_version: Literal["1"] = CAPABILITY_SUPPORT_SCHEMA_VERSION
@@ -233,6 +243,9 @@ _MAINTAINED_CATALOG = ApprovedChangeCapabilitySupportCatalog(
     declarations=(
         ApprovedChangeCapabilitySupportDeclaration(
             capability_id=WINDOWS_RUNTIME_RECONCILE_CAPABILITY_ID,
+            # PR322 makes the read-only in-memory capability-binding operation
+            # available for this exact capability ID. Nothing else changed.
+            capability_binding_available=True,
         ),
     ),
 )
@@ -448,18 +461,29 @@ def _catalog_validation_result(
     )
 
 
+#: The availability fields no declaration may ever assert. They stay false
+#: until each corresponding governed capability actually exists.
+_UNAVAILABLE_DECLARATION_FIELDS = (
+    "authorization_available",
+    "preflight_available",
+    "receipt_linkage_available",
+    "execution_available",
+)
+
+
 def _declaration_availability_errors(
     declaration: ApprovedChangeCapabilitySupportDeclaration,
 ) -> list[str]:
-    """Require every availability field to be false on every declaration."""
+    """Require every not-yet-implemented availability field to be false.
+
+    ``capability_binding_available`` is deliberately not in this set: the
+    read-only PR322 in-memory capability-binding operation exists, so a
+    maintained declaration may state that it does. Binding availability is
+    still not authorization, preflight, receipt linkage, or execution, and
+    those four remain false on every declaration.
+    """
     errors: list[str] = []
-    for field in (
-        "capability_binding_available",
-        "authorization_available",
-        "preflight_available",
-        "receipt_linkage_available",
-        "execution_available",
-    ):
+    for field in _UNAVAILABLE_DECLARATION_FIELDS:
         if getattr(declaration, field) is not False:
             errors.append(
                 f"declaration {declaration.capability_id}: {field} must be false — PR321 declares "
@@ -475,9 +499,9 @@ def validate_approved_change_capability_support_catalog(
 
     A valid catalog carries the exact schema version, the exact catalog type,
     at least one declaration, unique exact capability IDs in valid PR309
-    syntax with no wildcard, the exact declaration enums, every availability
-    field false, a deterministic canonical payload, and a deterministic
-    identity.
+    syntax with no wildcard, the exact declaration enums, every
+    not-yet-implemented availability field false, a deterministic canonical
+    payload, and a deterministic identity.
     """
     if catalog is None or isinstance(catalog, (str, bytes, int, float, bool, list, tuple)):
         return _catalog_validation_result(

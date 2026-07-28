@@ -34,7 +34,7 @@ PR321 never parses persisted approval JSON, never recomputes an artifact identit
 
 PR320 remains discovery only, and PR321 does not use it. There is no inventory call, no automatic selection, no filtering, no ranking, and no `latest`, `current`, or "most recent" resolution. One exact full `aca_` artifact ID is always required.
 
-PR313 remains separate. `windows.runtime_reconcile` is the only capability ID PR321 declares, and that declaration imports no PR313 execution code, inspects no PR313 plan, validates no PR304 or PR305 artifact, evaluates no target path, checks no `System32`, calls no preflight, creates or validates no receipt, invokes no recipe or executor, and does not claim that any persisted approved subject is bound to the PR313 lane. **PR313 capability binding remains future work.**
+PR313 remains separate from *this* module. `windows.runtime_reconcile` is the only capability ID PR321 declares, and that declaration imports no PR313 execution code, inspects no PR313 plan, validates no PR304 or PR305 artifact, evaluates no target path, checks no `System32`, calls no preflight, creates or validates no receipt, invokes no recipe or executor, and does not claim that any persisted approved subject is bound to the PR313 lane. The exact read-only in-memory binding itself landed separately in PR322 — see [Approved Change Capability Binding](APPROVED_CHANGE_CAPABILITY_BINDING.md) — and it still invokes no PR313 runtime.
 
 The recipe registry stays separate too. Support is never derived from `recipe_registry.py`: that registry holds read-only, preview-only, disabled, and future recipe states whose semantics are not approved-change capability support. PR321 scans no `_RECIPES`, infers nothing from recipe status or mutation class, imports no recipe command, exposes no recipe ID as a binding, and never converts preview availability into execution availability.
 
@@ -51,7 +51,7 @@ Exactly one capability is declared today:
 | `support_status` | `"declared_supported"` |
 | `match_rule` | `"exact_capability_id_only"` |
 | `validation_scope` | `"approved_change_contract_validation_only"` |
-| `capability_binding_available` | `false` |
+| `capability_binding_available` | `true` (PR322) |
 | `authorization_available` | `false` |
 | `preflight_available` | `false` |
 | `receipt_linkage_available` | `false` |
@@ -72,7 +72,7 @@ Nothing else is declared: not `docker.disposable_restart`, not a read-only recip
       "support_status": "declared_supported",
       "match_rule": "exact_capability_id_only",
       "validation_scope": "approved_change_contract_validation_only",
-      "capability_binding_available": false,
+      "capability_binding_available": true,
       "authorization_available": false,
       "preflight_available": false,
       "receipt_linkage_available": false,
@@ -93,8 +93,8 @@ catalog_identity_sha256 = SHA256(exact canonical catalog UTF-8 bytes)
 For the maintained catalog those values are committed fixtures:
 
 ```
-canonical byte length : 465
-catalog identity      : 7dcf112b0807bd7388912b5b1cf59f2be8c0d5b30ec6fa0d05265d88b936da61
+canonical byte length : 464
+catalog identity      : 762d8263642289f4c7230e0e4c625720c3cee461c6f229a724a8b2e15cc0786d
 ```
 
 The catalog is **source-maintained and in-memory only**. There is no persisted catalog ID, no prefix, no catalog file, no catalog subtree, no catalog publisher, and no catalog inventory.
@@ -128,7 +128,9 @@ evaluate_persisted_approved_change_capability_support(
 - `capability_support_catalog_invalid`
 - `invalid_capability_support_catalog_input`
 
-A valid catalog requires the exact schema version, the exact catalog type, at least one declaration, unique exact capability IDs, valid PR309 capability-ID syntax with no wildcard, the exact declaration enums, every binding/authorization/preflight/receipt/execution availability field `false`, a deterministic canonical payload, and a deterministic catalog identity. The maintained source catalog validates successfully.
+A valid catalog requires the exact schema version, the exact catalog type, at least one declaration, unique exact capability IDs, valid PR309 capability-ID syntax with no wildcard, the exact declaration enums, every *not-yet-implemented* availability field (`authorization_available`, `preflight_available`, `receipt_linkage_available`, `execution_available`) `false`, a deterministic canonical payload, and a deterministic catalog identity. The maintained source catalog validates successfully.
+
+`capability_binding_available` is the one availability field a declaration may assert, because the read-only PR322 in-memory capability-binding operation exists. Asserting it states only that the operation exists; PR321 still performs no binding and reports `capability_bound=false` on every result.
 
 ## Explicit inputs only
 
@@ -329,6 +331,6 @@ There is no new persisted subtree and no new persisted file, so the data layout 
 
 ## Next dependency
 
-Stage B remains incomplete. The next focused dependency is **exact read-only capability binding — still not execution**.
+Stage B remains incomplete. PR322 added the exact read-only in-memory capability binding in [Approved Change Capability Binding](APPROVED_CHANGE_CAPABILITY_BINDING.md). The next focused dependency is **current-state execution preflight and exact approved-subject to live-PR313-plan comparison — still not execution**.
 
-Everything else stays deferred to PR322 or later: a binding identity, binding the exact approved subject to the exact PR313 lane, target and procedure compatibility evaluation, PR304/PR305 evidence compatibility, current-state execution preflight, subject/live-plan comparison, authenticated identity, role validation, identity-provider integration, authorization, receipt creation and linkage, execution eligibility, Stage C execution, capability catalog persistence, dynamic capability discovery, plugin capability registration, multiple supported mutation capabilities, Docker mutation capability support, filtered approval search, automatic approval selection, `latest` or `current` resolution, and CLI or natural-language approval, capability, or execution routes.
+Everything else stays deferred to PR323 or later: persisted binding artifacts, target and procedure compatibility evaluation, PR304/PR305 evidence compatibility, current-state execution preflight, subject/live-plan comparison, authenticated identity, role validation, identity-provider integration, authorization, receipt creation and linkage, execution eligibility, Stage C execution, capability catalog persistence, dynamic capability discovery, plugin capability registration, multiple supported mutation capabilities, Docker mutation capability support, filtered approval search, automatic approval selection, `latest` or `current` resolution, and CLI or natural-language approval, capability, or execution routes.

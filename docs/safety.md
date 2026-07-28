@@ -1200,14 +1200,40 @@ PR321 adds **no mutation surface at all**. It adds exactly one immutable, source
 
 **Declared support is not runtime compatibility and is not PR313 eligibility.** No target compatibility, procedure compatibility, precondition, or current-state evidence is evaluated. No PR313 execution, preflight, receipt, or verification module is imported or reached, no PR304 or PR305 artifact is validated, no target path or `System32` location is inspected, and no recipe is invoked. Support is never derived from `recipe_registry`, whose read-only, preview-only, disabled, and future recipe states are not approved-change capability support.
 
-**Capability binding remains false.** Matching is exact, case-sensitive `capability_id` equality only — no prefix, suffix, namespace, alias, case folding, fuzzy, wildcard, caller-supplied regex, recipe-ID mapping, target inference, or procedure inference — so two entirely different approved subjects sharing the declared ID are both supported. Every result reports `capability_bound=false`, `preflight_evaluated=false`, `receipt_created=false`, and `receipt_linked=false`.
+**Capability binding remains false in PR321.** Matching is exact, case-sensitive `capability_id` equality only — no prefix, suffix, namespace, alias, case folding, fuzzy, wildcard, caller-supplied regex, recipe-ID mapping, target inference, or procedure inference — so two entirely different approved subjects sharing the declared ID are both supported. Every PR321 result reports `capability_bound=false`, `preflight_evaluated=false`, `receipt_created=false`, and `receipt_linked=false`. Binding itself is the separate read-only PR322 operation below.
 
-**Execution remains unavailable.** Every result reports `execution_allowed=false`, `execution_available=false`, and `execution_status=not_executed`, and every maintained declaration carries `capability_binding_available=false`, `authorization_available=false`, `preflight_available=false`, `receipt_linkage_available=false`, and `execution_available=false`.
+**Execution remains unavailable.** Every result reports `execution_allowed=false`, `execution_available=false`, and `execution_status=not_executed`. The maintained declaration carries `capability_binding_available=true` — stating only that the read-only PR322 in-memory binding operation exists — and `authorization_available=false`, `preflight_available=false`, `receipt_linkage_available=false`, and `execution_available=false`.
 
 **Evaluation is read-only and fail-closed.** The catalog stays in memory and is never persisted, published, inventoried, or loaded from disk, so no new persisted state or subtree exists. The evaluator reaches the filesystem only indirectly through the maintained PR319 exact-ID loader; it opens no file for writing, creates no file or directory, renames, replaces, unlinks, removes, or truncates nothing, uses no temporary directory, and refreshes no timestamp. The explicit 64-lowercase-hex catalog-identity confirmation is validated with `hmac.compare_digest` **before any filesystem access**, so a malformed or mismatched confirmation performs zero filesystem access, loads no artifact, and evaluates no capability. An unknown exact capability ID is a completed unsupported evaluation, not an exception, and every other failure reports `capability_supported=false`.
 
 **No approval is selected.** PR321 requires one exact full `aca_` artifact ID. It calls no PR320 inventory operation and resolves no `latest`, `current`, or "most recent" approval, and it accepts no caller-supplied supported-capability collection, declaration, catalog, contract, approval, or artifact object.
 
 **No natural-language capability-support or execution route exists.** PR321 adds no CLI command, no interactive route, no natural-language or implicit capability evaluation, and no model-generated support decision. No legacy `Proposal` is read, converted, or bridged into capability support.
+
+Existing safety boundaries are unchanged: the Docker disposable-restart lane, the receipt recovery lane, cleanup refusal, remediation refusal, the PR313 Windows reconciliation lane, and natural-language mutation refusal all keep their current gates.
+
+## PR322 read-only approved-change capability binding
+
+PR322 adds **no mutation surface at all**. It adds exactly one immutable, source-maintained lane declaration, one immutable in-memory binding model, and one read-only operation that constructs a binding, and nothing else. It is documented in full in [Approved Change Capability Binding](APPROVED_CHANGE_CAPABILITY_BINDING.md).
+
+**Binding is an in-memory identity association only.** `capability_bound=true` means exactly one thing: one exact approved subject identity has been associated with one exact immutable named-lane declaration in memory. It never means the lane can run.
+
+**Binding is not authorization.** No authenticated identity, role, or identity-provider proof is involved; persisted `approved_by` remains self-asserted metadata, and reviewer provenance is still not approval. Every result reports `authorization_evaluated=false`.
+
+**Binding is not compatibility and is not preflight.** No target compatibility, procedure compatibility, precondition, current-state evidence, or evidence freshness is evaluated, and the approved subject is never compared with a PR313 plan. Two materially different approved subjects sharing the declared capability ID both bind, with distinct binding identities, and every result warns that compatibility was not evaluated.
+
+**PR313 is never invoked.** No PR313 execution, preflight, receipt, or verification module is imported or reached, no PR304 or PR305 artifact is validated, no staged source, durable runtime root, or `System32` location is inspected, and no recipe or executor is called. The lane declaration is source-maintained: it is never derived from `recipe_registry`, a PR313 module, a script name, filesystem contents, an environment variable, or an installed plugin.
+
+**Nothing is persisted.** The lane declaration and the binding both stay in memory. There is no persisted binding artifact, binding ID, prefix, publisher, loader, or subtree, so no new persisted state exists and the persisted tree stays byte- and mtime-identical. Every result reports `binding_persisted=false`, `receipt_created=false`, and `receipt_linked=false`.
+
+**Both confirmation gates precede any filesystem access.** The explicit raw 64-lowercase-hex PR321 catalog-identity confirmation and the explicit raw 64-lowercase-hex lane-declaration-identity confirmation are both validated and compared with `hmac.compare_digest` before anything is loaded, so a malformed, stale, uppercase, swapped, or mismatched confirmation performs zero filesystem access, calls neither maintained authority, and evaluates no binding. The lane-declaration confirmation authorizes exactly one thing — bind against this exact source-maintained lane declaration — and is never authorization, preflight approval, or execution confirmation.
+
+**Support is never re-decided.** PR322 calls the maintained PR321 evaluator exactly once for the support decision and reaches persisted approvals only through the maintained PR319 exact-ID loader; any disagreement between those two maintained reads fails closed with no binding. An undeclared capability ID is a completed unbindable result, not an exception.
+
+**No approval is selected.** PR322 requires one exact full `aca_` artifact ID. It calls no PR320 inventory operation and resolves no `latest`, `current`, or "most recent" approval, and it accepts no caller-supplied artifact, contract, support result, catalog, or lane declaration.
+
+**Execution remains unavailable.** Every result reports `execution_allowed=false`, `execution_available=false`, and `execution_status=not_executed`, and the maintained lane declaration carries `binding_persistence_available=false`, `authorization_available=false`, `preflight_available=false`, `receipt_linkage_available=false`, and `execution_available=false`.
+
+**No natural-language capability-binding or execution route exists.** PR322 adds no CLI command, no interactive route, no natural-language or implicit binding, and no model-generated binding decision. No legacy `Proposal` is read, converted, or bridged into a binding.
 
 Existing safety boundaries are unchanged: the Docker disposable-restart lane, the receipt recovery lane, cleanup refusal, remediation refusal, the PR313 Windows reconciliation lane, and natural-language mutation refusal all keep their current gates.
