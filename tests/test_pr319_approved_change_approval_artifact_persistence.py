@@ -2705,13 +2705,16 @@ def test_the_modules_expose_no_cli_registry_or_mutable_state_surface():
 
 
 def test_the_modules_are_not_imported_by_cli_approvals_recipes_or_execution():
-    # The PR320 read-only inventory module is the one permitted consumer: it
-    # validates every exact candidate through this loader instead of adding a
-    # competing parser. It is still forbidden the publisher and every write.
+    # The PR320 read-only inventory module and the PR321 read-only
+    # capability-support evaluator are the only permitted consumers: each one
+    # reaches persisted approvals solely through this exact-ID loader instead of
+    # adding a competing parser. Both are still forbidden the publisher, the
+    # builder, and every write.
     permitted = {
         "approved_change_approval_artifact.py",
         "approved_change_approval_persistence.py",
         "approved_change_approval_inventory.py",
+        "approved_change_capability_support.py",
     }
     roots = [Path("src/shellforgeai/cli"), Path("src/shellforgeai/core")]
     for target in ("approved_change_approval_artifact", "approved_change_approval_persistence"):
@@ -2725,10 +2728,15 @@ def test_the_modules_are_not_imported_by_cli_approvals_recipes_or_execution():
         assert offenders == [], (target, offenders)
 
 
-def test_the_only_permitted_consumer_is_the_read_only_inventory_module():
-    source = Path("src/shellforgeai/core/approved_change_approval_inventory.py").read_text(
-        encoding="utf-8"
-    )
+@pytest.mark.parametrize(
+    "consumer",
+    [
+        "src/shellforgeai/core/approved_change_approval_inventory.py",
+        "src/shellforgeai/core/approved_change_capability_support.py",
+    ],
+)
+def test_the_only_permitted_consumers_are_read_only(consumer):
+    source = Path(consumer).read_text(encoding="utf-8")
     assert "load_persisted_approved_change_approval_artifact" in source
     assert "publish_approved_change_approval_artifact" not in source
     assert "build_approved_change_approval_artifact" not in source
