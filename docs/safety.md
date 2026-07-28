@@ -1189,3 +1189,25 @@ PR320 adds **no mutation surface at all**. It adds exactly one bounded, determin
 **No natural-language inventory or approval route exists.** PR320 adds no CLI command, no interactive route, no natural-language or implicit discovery, and no model-generated inventory. It scans no legacy approval directory, converts no legacy `Proposal`, reads no legacy approval status, and never combines legacy proposals with this inventory.
 
 Existing safety boundaries are unchanged: the Docker disposable-restart lane, the receipt recovery lane, cleanup refusal, remediation refusal, the PR313 Windows reconciliation lane, and natural-language mutation refusal all keep their current gates.
+
+## PR321 typed read-only approved-change capability support
+
+PR321 adds **no mutation surface at all**. It adds exactly one immutable, source-maintained capability-support declaration catalog and one read-only evaluator over one exact persisted PR319 approval artifact, and nothing else. It is documented in full in [Approved Change Capability Support](APPROVED_CHANGE_CAPABILITY_SUPPORT.md).
+
+**Declared support is contract validation only.** The maintained catalog declares exactly one capability, `windows.runtime_reconcile`, with `validation_scope=approved_change_contract_validation_only`. A supported result means only that the approved subject's exact `capability_id` appears in the exact confirmed maintained catalog and that the maintained PR309 `validate_approved_change_contract` returned `contract_valid` against exactly that catalog's capability IDs.
+
+**Declared support is not authorization.** No authenticated identity, role, or identity-provider proof is involved; persisted `approved_by` remains self-asserted metadata, and reviewer provenance is still not approval. Every result reports `authorization_evaluated=false`.
+
+**Declared support is not runtime compatibility and is not PR313 eligibility.** No target compatibility, procedure compatibility, precondition, or current-state evidence is evaluated. No PR313 execution, preflight, receipt, or verification module is imported or reached, no PR304 or PR305 artifact is validated, no target path or `System32` location is inspected, and no recipe is invoked. Support is never derived from `recipe_registry`, whose read-only, preview-only, disabled, and future recipe states are not approved-change capability support.
+
+**Capability binding remains false.** Matching is exact, case-sensitive `capability_id` equality only — no prefix, suffix, namespace, alias, case folding, fuzzy, wildcard, caller-supplied regex, recipe-ID mapping, target inference, or procedure inference — so two entirely different approved subjects sharing the declared ID are both supported. Every result reports `capability_bound=false`, `preflight_evaluated=false`, `receipt_created=false`, and `receipt_linked=false`.
+
+**Execution remains unavailable.** Every result reports `execution_allowed=false`, `execution_available=false`, and `execution_status=not_executed`, and every maintained declaration carries `capability_binding_available=false`, `authorization_available=false`, `preflight_available=false`, `receipt_linkage_available=false`, and `execution_available=false`.
+
+**Evaluation is read-only and fail-closed.** The catalog stays in memory and is never persisted, published, inventoried, or loaded from disk, so no new persisted state or subtree exists. The evaluator reaches the filesystem only indirectly through the maintained PR319 exact-ID loader; it opens no file for writing, creates no file or directory, renames, replaces, unlinks, removes, or truncates nothing, uses no temporary directory, and refreshes no timestamp. The explicit 64-lowercase-hex catalog-identity confirmation is validated with `hmac.compare_digest` **before any filesystem access**, so a malformed or mismatched confirmation performs zero filesystem access, loads no artifact, and evaluates no capability. An unknown exact capability ID is a completed unsupported evaluation, not an exception, and every other failure reports `capability_supported=false`.
+
+**No approval is selected.** PR321 requires one exact full `aca_` artifact ID. It calls no PR320 inventory operation and resolves no `latest`, `current`, or "most recent" approval, and it accepts no caller-supplied supported-capability collection, declaration, catalog, contract, approval, or artifact object.
+
+**No natural-language capability-support or execution route exists.** PR321 adds no CLI command, no interactive route, no natural-language or implicit capability evaluation, and no model-generated support decision. No legacy `Proposal` is read, converted, or bridged into capability support.
+
+Existing safety boundaries are unchanged: the Docker disposable-restart lane, the receipt recovery lane, cleanup refusal, remediation refusal, the PR313 Windows reconciliation lane, and natural-language mutation refusal all keep their current gates.
