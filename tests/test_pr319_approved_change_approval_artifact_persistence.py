@@ -2705,16 +2705,18 @@ def test_the_modules_expose_no_cli_registry_or_mutable_state_surface():
 
 
 def test_the_modules_are_not_imported_by_cli_approvals_recipes_or_execution():
-    # The PR320 read-only inventory module and the PR321 read-only
-    # capability-support evaluator are the only permitted consumers: each one
-    # reaches persisted approvals solely through this exact-ID loader instead of
-    # adding a competing parser. Both are still forbidden the publisher, the
+    # The PR320 read-only inventory module, the PR321 read-only
+    # capability-support evaluator, and the PR322 read-only capability-binding
+    # module are the only permitted consumers: each one reaches persisted
+    # approvals solely through this exact-ID loader instead of adding a
+    # competing parser. All three are still forbidden the publisher, the
     # builder, and every write.
     permitted = {
         "approved_change_approval_artifact.py",
         "approved_change_approval_persistence.py",
         "approved_change_approval_inventory.py",
         "approved_change_capability_support.py",
+        "approved_change_capability_binding.py",
     }
     roots = [Path("src/shellforgeai/cli"), Path("src/shellforgeai/core")]
     for target in ("approved_change_approval_artifact", "approved_change_approval_persistence"):
@@ -2733,6 +2735,7 @@ def test_the_modules_are_not_imported_by_cli_approvals_recipes_or_execution():
     [
         "src/shellforgeai/core/approved_change_approval_inventory.py",
         "src/shellforgeai/core/approved_change_capability_support.py",
+        "src/shellforgeai/core/approved_change_capability_binding.py",
     ],
 )
 def test_the_only_permitted_consumers_are_read_only(consumer):
