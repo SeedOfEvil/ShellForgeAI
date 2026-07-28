@@ -223,11 +223,37 @@ def assert_never_expands(result) -> None:
         assert "Traceback" not in " ".join(anomaly.errors)
 
 
+def path_spellings(value) -> set[str]:
+    """Every spelling one absolute path can take in reported text.
+
+    ``OSError.__str__`` embeds ``repr(filename)``, which doubles backslashes;
+    Windows also accepts ``/`` separators, extended-length prefixes, and
+    case-varied spellings. All of them must be absent from public output.
+    """
+    base = str(value)
+    forms = {base, base.replace("\\", "/"), base.replace("/", "\\")}
+    for form in tuple(forms):
+        forms.add(form.replace("\\", "\\\\"))
+        forms.add("\\\\?\\" + form)
+        forms.add(form.upper())
+        forms.add(form.lower())
+    return {form for form in forms if form}
+
+
 def assert_no_host_paths(result, root: Path) -> None:
     markers = {str(root), str(root.parent), str(Path(root).resolve())}
     blob = result.model_dump_json()
     for marker in markers:
         assert marker not in blob, marker
+
+
+def assert_path_free(result, root: Path, *extra) -> None:
+    """Prove no spelling of any host absolute path survives into the result."""
+    blob = result.model_dump_json()
+    candidates = [root, root.parent, Path(root).resolve(), *extra]
+    for candidate in candidates:
+        for spelling in path_spellings(candidate):
+            assert spelling not in blob, spelling
 
 
 def assert_blocked(result, root: Path | None = None) -> None:
@@ -526,6 +552,11 @@ def test_the_approval_timestamp_is_the_maintained_canonical_utc_spelling(tmp_pat
 # Unexpected names
 # --------------------------------------------------------------------------
 
+#: Every semantic unexpected-name case PR320 must report. Two of these differ
+#: only by case, which is a genuine product case on POSIX but a single directory
+#: entry on Windows, so the tuple is never materialised as-is: it is partitioned
+#: below into groups that are unique under the active filesystem's own
+#: case-normalization rules, and every name is additionally exercised alone.
 UNEXPECTED_NAMES = (
     "latest",
     "current",
@@ -540,12 +571,54 @@ UNEXPECTED_NAMES = (
 )
 
 
-def test_every_unexpected_direct_child_is_an_explicit_anomaly(tmp_path):
+def partition_case_safe(names):
+    """Split ``names`` into groups co-creatable in one directory on this platform.
+
+    ``os.path.normcase`` is identity on POSIX and case-folding on Windows, so a
+    POSIX run gets exactly one group holding every name while a Windows run
+    splits case-only collisions into separate groups. No name is ever dropped.
+    """
+    groups: list[list[str]] = []
+    for name in names:
+        key = os.path.normcase(name)
+        for group in groups:
+            if key not in {os.path.normcase(item) for item in group}:
+                group.append(name)
+                break
+        else:
+            groups.append([name])
+    return tuple(tuple(group) for group in groups)
+
+
+UNEXPECTED_NAME_GROUPS = partition_case_safe(UNEXPECTED_NAMES)
+GROUP_IDS = [f"group{index}" for index in range(len(UNEXPECTED_NAME_GROUPS))]
+NAME_IDS = [f"name{index}" for index in range(len(UNEXPECTED_NAMES))]
+
+
+def test_the_case_safe_partition_preserves_every_unexpected_name():
+    flattened = [name for group in UNEXPECTED_NAME_GROUPS for name in group]
+    assert sorted(flattened) == sorted(UNEXPECTED_NAMES)
+    assert len(flattened) == len(set(flattened))
+    # No group can collide with itself on this platform's filesystem.
+    for group in UNEXPECTED_NAME_GROUPS:
+        keys = [os.path.normcase(name) for name in group]
+        assert len(keys) == len(set(keys)), group
+    # The case-only variants are real, distinct product cases either way.
+    assert f"ACA_{OTHER_HEX64}" in flattened
+    assert f"{APPROVAL_ARTIFACT_ID_PREFIX}{OTHER_HEX64.upper()}" in flattened
+    if os.path.normcase("A") != "A":
+        assert len(UNEXPECTED_NAME_GROUPS) > 1
+    else:
+        assert len(UNEXPECTED_NAME_GROUPS) == 1
+
+
+@pytest.mark.parametrize("names", UNEXPECTED_NAME_GROUPS, ids=GROUP_IDS)
+def test_every_unexpected_direct_child_is_an_explicit_anomaly(tmp_path, names):
     root = data_dir(tmp_path)
     artifact = artifact_for(bundle_a(), root)
     publish_artifact(artifact, root)
     base = publication_root(root)
-    for name in UNEXPECTED_NAMES:
+    for name in names:
         (base / name).mkdir()
         (base / name / "payload.json").write_text("{}", encoding="utf-8")
     before = snapshot(root)
@@ -553,18 +626,52 @@ def test_every_unexpected_direct_child_is_an_explicit_anomaly(tmp_path):
     result = inventory(root)
     assert result.status == "approval_artifact_inventory_loaded_with_anomalies"
     assert result.inventory_complete is False
-    assert result.scanned_entry_count == 1 + len(UNEXPECTED_NAMES)
+    assert result.scanned_entry_count == 1 + len(names)
     assert result.valid_entry_count == 1
-    assert result.anomaly_count == len(UNEXPECTED_NAMES)
+    assert result.anomaly_count == len(names)
     assert entry_names(result) == [FIXTURE_A_APPROVAL_ARTIFACT_ID]
-    assert anomaly_pairs(result) == sorted((name, "unexpected_name") for name in UNEXPECTED_NAMES)
+    assert anomaly_pairs(result) == sorted((name, "unexpected_name") for name in names)
     for anomaly in result.anomalies:
-        assert anomaly.entry_name in UNEXPECTED_NAMES
+        assert anomaly.entry_name in names
         assert "/" not in anomaly.entry_name and "\\" not in anomaly.entry_name
         assert anomaly.loader_status == ""
     assert_never_expands(result)
     assert_no_host_paths(result, root)
     assert snapshot(root) == before
+
+
+@pytest.mark.parametrize("name", UNEXPECTED_NAMES, ids=NAME_IDS)
+def test_each_unexpected_name_is_individually_reported(tmp_path, monkeypatch, name):
+    """Each name alone in its own data root, so no case collision is possible."""
+    root = data_dir(tmp_path)
+    base = publication_root(root)
+    base.mkdir()
+    (base / name).mkdir()
+    (base / name / "payload.json").write_text("{}", encoding="utf-8")
+
+    seen: list[str] = []
+    real_listdir = os.listdir
+
+    def recorded(path, *args, **kwargs):
+        seen.append(str(path))
+        return real_listdir(path, *args, **kwargs)
+
+    def refusing_loader(artifact_id, *, data_dir):
+        raise AssertionError("the loader must never see a malformed name")
+
+    monkeypatch.setattr(os, "listdir", recorded)
+    monkeypatch.setattr(
+        inventory_module, "load_persisted_approved_change_approval_artifact", refusing_loader
+    )
+    result = inventory(root)
+
+    assert anomaly_pairs(result) == [(name, "unexpected_name")]
+    assert result.entries == ()
+    assert result.valid_entry_count == 0
+    assert result.inventory_complete is False
+    # Never followed and never recursed into: only the fixed root is enumerated.
+    assert seen == [str(base)]
+    assert_never_expands(result)
 
 
 def test_an_unexpected_child_is_never_recursed_into(tmp_path, monkeypatch):
@@ -585,11 +692,12 @@ def test_an_unexpected_child_is_never_recursed_into(tmp_path, monkeypatch):
     assert seen == [str(base)]
 
 
-def test_a_malformed_name_is_never_offered_to_the_loader(tmp_path, monkeypatch):
+@pytest.mark.parametrize("names", UNEXPECTED_NAME_GROUPS, ids=GROUP_IDS)
+def test_a_malformed_name_is_never_offered_to_the_loader(tmp_path, monkeypatch, names):
     root = data_dir(tmp_path)
     base = publication_root(root)
     base.mkdir()
-    for name in UNEXPECTED_NAMES:
+    for name in names:
         (base / name).mkdir()
 
     calls: list[str] = []
@@ -603,7 +711,7 @@ def test_a_malformed_name_is_never_offered_to_the_loader(tmp_path, monkeypatch):
     )
     result = inventory(root)
     assert calls == []
-    assert result.anomaly_count == len(UNEXPECTED_NAMES)
+    assert result.anomaly_count == len(names)
 
 
 # --------------------------------------------------------------------------
@@ -681,10 +789,16 @@ def test_an_uninspectable_child_is_an_explicit_anomaly(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "lstat", guarded)
     result = inventory(root)
     assert anomaly_pairs(result) == [(EXACT_UNPUBLISHED_ID, "entry_not_inspectable")]
-    assert result.anomalies[0].errors
-    # The reported OSError names a path, so the host data root is redacted.
-    assert "<data_dir>" in " ".join(result.anomalies[0].errors)
-    assert_no_host_paths(result, root)
+    (anomaly,) = result.anomalies
+    assert anomaly.errors
+    # The injected OSError names an absolute path. PR320 never reports raw
+    # exception text, so only the deterministic path-free classification is
+    # public — on every platform, whatever the separator spelling.
+    reported = " ".join(anomaly.errors)
+    assert "PermissionError" in reported
+    assert "errno=13" in reported
+    assert "permission denied" not in reported
+    assert_path_free(result, root, publication_root(root) / EXACT_UNPUBLISHED_ID)
 
 
 def test_an_exact_id_child_that_disappears_during_validation_is_reported(tmp_path, monkeypatch):
@@ -1162,6 +1276,192 @@ def test_the_inventory_module_owns_no_parser_loader_or_binding_recomputation():
 
 
 # --------------------------------------------------------------------------
+# Path-safe public error reporting
+#
+# ``OSError.__str__`` embeds ``repr(filename)``, which doubles every backslash,
+# so a Windows host path inside a raw exception string can never be matched by
+# literal-prefix redaction. PR320 therefore reports deterministic, path-free
+# classification for its own exception boundaries, and hardens the redaction of
+# inherited maintained PR319 strings against every spelling of the data root.
+# --------------------------------------------------------------------------
+
+
+def test_the_public_os_error_detail_is_deterministic_and_path_free():
+    detail = inventory_module._public_os_error_detail
+    leaked = "/srv/sfai/data/approved_change_approvals/aca_x"
+
+    plain = PermissionError(13, "permission denied", leaked)
+    assert detail(plain) == "PermissionError errno=13"
+
+    # ``OSError`` auto-selects a concrete subclass from errno; the reported
+    # type name is whatever that subclass is, and never any filename.
+    two_paths = OSError(2, "no such file", leaked, None, leaked + "-2")
+    rendered = detail(two_paths)
+    assert rendered == f"{type(two_paths).__name__} errno=2"
+    assert two_paths.filename == leaked
+    assert leaked not in rendered
+    assert str(two_paths) not in rendered
+    assert repr(two_paths) not in rendered
+
+    # Repeated formatting is byte-identical, and nothing is read from filename.
+    assert detail(plain) == detail(PermissionError(13, "different text", "/other/path"))
+
+    class _WinLike(OSError):
+        pass
+
+    win = _WinLike(13, "access is denied", leaked)
+    win.winerror = 5
+    assert detail(win) == "_WinLike errno=13 winerror=5"
+    assert leaked not in detail(win)
+
+    assert detail(OSError()) == "OSError"
+
+
+def test_the_redactor_collapses_every_spelling_of_the_data_root(tmp_path):
+    root = data_dir(tmp_path)
+    redact = inventory_module._redactor(root)
+    base = str(root)
+    spellings = [
+        base,
+        base.replace("\\", "\\\\"),  # repr-escaped, exactly as OSError renders it
+        base.replace("\\", "/"),
+        "\\\\?\\" + base,
+    ]
+    if inventory_module._CASE_INSENSITIVE_PATHS:
+        spellings.append(base.upper())
+    for spelling in spellings:
+        cleaned = redact(f"persisted approval directory is not inspectable: '{spelling}'")
+        assert "<data_dir>" in cleaned, spelling
+        assert spelling not in cleaned, spelling
+        assert base not in cleaned, spelling
+
+
+def test_the_root_spelling_set_is_deterministic_and_longest_first(tmp_path):
+    root = data_dir(tmp_path)
+    spellings = inventory_module._root_spellings(root)
+    assert spellings == inventory_module._root_spellings(root)
+    assert all(spellings)
+    assert list(spellings) == sorted(spellings, key=lambda item: (-len(item), item))
+    assert str(root) in spellings
+    assert inventory_module._EXTENDED_LENGTH_PREFIX + str(root) in spellings
+    assert str(root).replace("\\", "/") in spellings
+    assert str(root).replace("\\", "\\\\") in spellings
+
+
+def test_a_root_inspection_error_never_leaks_a_host_path(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    base = publication_root(root)
+    base.mkdir()
+
+    def boom(path, *args, **kwargs):
+        raise PermissionError(13, "permission denied", str(path))
+
+    monkeypatch.setattr(inventory_module, "_filesystem_identity", boom)
+    result = inventory(root)
+    assert result.status == "approval_artifact_inventory_blocked"
+    reported = " ".join(result.errors)
+    assert "PermissionError" in reported
+    assert "errno=13" in reported
+    assert "permission denied" not in reported
+    assert "[Errno" not in reported
+    assert_path_free(result, root, base)
+
+
+def test_an_enumeration_error_never_leaks_a_host_path(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    base = publication_root(root)
+    base.mkdir()
+
+    def boom(path, *args, **kwargs):
+        raise PermissionError(13, "permission denied", str(path))
+
+    monkeypatch.setattr(os, "listdir", boom)
+    result = inventory(root)
+    assert result.status == "approval_artifact_inventory_blocked"
+    reported = " ".join(result.errors)
+    assert "PermissionError" in reported
+    assert "errno=13" in reported
+    assert "permission denied" not in reported
+    assert "[Errno" not in reported
+    assert_path_free(result, root, base)
+
+
+def test_a_child_inspection_error_never_leaks_a_windows_shaped_host_path(tmp_path, monkeypatch):
+    """The exact regression: a repr-escaped absolute path must not survive."""
+    root = data_dir(tmp_path)
+    base = publication_root(root)
+    base.mkdir()
+    (base / EXACT_UNPUBLISHED_ID).mkdir()
+    child = base / EXACT_UNPUBLISHED_ID
+    real_lstat = os.lstat
+
+    windows_shaped = r"C:\Users\runner\AppData\Local\Temp\data\aca_child"
+
+    def guarded(path, *args, **kwargs):
+        if str(path).endswith(EXACT_UNPUBLISHED_ID):
+            raise PermissionError(13, "Access is denied", windows_shaped)
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", guarded)
+    result = inventory(root)
+
+    assert anomaly_pairs(result) == [(EXACT_UNPUBLISHED_ID, "entry_not_inspectable")]
+    blob = result.model_dump_json()
+    for spelling in path_spellings(windows_shaped):
+        assert spelling not in blob, spelling
+    assert "Access is denied" not in blob
+    assert "[Errno" not in blob
+    assert_path_free(result, root, child)
+    # The anomaly still names the direct child by its single safe name only.
+    assert result.anomalies[0].entry_name == EXACT_UNPUBLISHED_ID
+
+
+def test_an_inherited_loader_error_carrying_a_path_is_redacted(tmp_path, monkeypatch):
+    root = data_dir(tmp_path)
+    artifact = artifact_for(bundle_a(), root)
+    publish_artifact(artifact, root)
+    directory = publication_root(root) / artifact.approval_artifact_id
+    real_loader = load_persisted_approved_change_approval_artifact
+
+    def leaking_loader(artifact_id, *, data_dir):
+        loaded = real_loader(artifact_id, data_dir=data_dir)
+        escaped = str(directory).replace("\\", "\\\\")
+        return loaded.model_copy(
+            update={
+                "status": "persisted_approval_artifact_invalid",
+                "errors": (
+                    f"persisted approval directory is not inspectable: '{directory}'",
+                    f"persisted approval file is not readable: '{escaped}'",
+                ),
+            }
+        )
+
+    monkeypatch.setattr(
+        inventory_module, "load_persisted_approved_change_approval_artifact", leaking_loader
+    )
+    result = inventory(root)
+
+    (anomaly,) = result.anomalies
+    assert anomaly.category == "invalid_approval_artifact"
+    assert anomaly.errors
+    assert all("<data_dir>" in item for item in anomaly.errors)
+    assert_path_free(result, root, directory)
+
+
+def test_no_public_error_field_ever_carries_raw_exception_text():
+    source = Path(inventory_module.__file__).read_text(encoding="utf-8")
+    for token in ("str(exc)", "repr(exc)", "exc.filename", "exc.filename2", "format_exc"):
+        assert token not in source, token
+    # Every OSError handler that reports detail must route through the helper.
+    tree = ast.parse(source)
+    reporting = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_public_os_error_detail":
+            reporting += 1
+    assert reporting == 3
+
+
+# --------------------------------------------------------------------------
 # No writes
 # --------------------------------------------------------------------------
 
@@ -1445,6 +1745,7 @@ def test_static_the_import_set_is_exactly_the_maintained_dependencies():
         "os",
         "pathlib",
         "pydantic",
+        "re",
         "shellforgeai.core.approved_change_approval_artifact",
         "shellforgeai.core.approved_change_approval_persistence",
         "shellforgeai.core.approved_change_artifact_bundle",

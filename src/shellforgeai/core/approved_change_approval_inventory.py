@@ -36,6 +36,7 @@ artifact for that exact ID.
 from __future__ import annotations
 
 import os
+import re
 import stat as stat_module
 from pathlib import Path
 from typing import Any, Literal
@@ -74,6 +75,17 @@ REQUIRED_APPROVAL_ARTIFACT_LOAD_STATUS = "persisted_approval_artifact_loaded"
 
 #: The PR319 loader status meaning the exact candidate is no longer present.
 _LOADER_NOT_FOUND_STATUS = "persisted_approval_artifact_not_found"
+
+#: The one placeholder every redacted host data root collapses to.
+DATA_DIR_PLACEHOLDER = "<data_dir>"
+
+#: The Windows extended-length path prefix. PR320 never emits one, but inherited
+#: text may carry it, so it is registered as one more spelling to redact.
+_EXTENDED_LENGTH_PREFIX = "\\\\?\\"
+
+#: True where the platform compares paths case-insensitively, so a redacted root
+#: must match a case-varied spelling of itself.
+_CASE_INSENSITIVE_PATHS = os.path.normcase("A") != "A"
 
 INVENTORY_STATUSES = (
     "approval_artifact_inventory_loaded",
@@ -279,21 +291,62 @@ def _result(
     )
 
 
-def _redactor(data_dir: Path) -> Any:
-    """Return a redactor that strips host absolute paths from reported text.
+def _public_os_error_detail(exc: OSError) -> str:
+    """Return one deterministic, path-free classification of one ``OSError``.
 
-    Every path PR319 can name lies beneath the explicit data root, so replacing
-    that root — in both its given and its resolved spelling — with a fixed
-    placeholder is sufficient and fully deterministic. No traceback is ever
-    reported, and no path is ever reconstructed from artifact content.
+    ``OSError.__str__`` embeds ``repr(filename)`` — and ``repr`` doubles every
+    backslash — so on Windows a raw exception string carries a host absolute
+    path in a spelling no literal-prefix redaction can be relied on to match.
+    PR320 therefore never reports raw exception text at all: only the exception
+    type and its safe numeric codes become public. ``filename`` and
+    ``filename2`` are deliberately never read.
     """
-    roots = sorted({str(data_dir), str(_real(data_dir))}, key=lambda item: (-len(item), item))
+    parts = [type(exc).__name__]
+    if exc.errno is not None:
+        parts.append(f"errno={exc.errno}")
+    winerror = getattr(exc, "winerror", None)
+    if winerror is not None:
+        parts.append(f"winerror={winerror}")
+    return " ".join(parts)
+
+
+def _root_spellings(data_dir: Path) -> tuple[str, ...]:
+    """Return every spelling of the explicit data root inherited text may carry.
+
+    A maintained PR319 string interpolates ``OSError``, so a root can appear
+    backslash-escaped exactly as ``repr`` renders it. Windows additionally
+    accepts ``/`` separators and the extended-length prefix. Each spelling is
+    registered explicitly instead of trusting one literal form, longest first so
+    a prefixed spelling is redacted before the bare one.
+    """
+    literal: set[str] = set()
+    for base in (str(data_dir), str(_real(data_dir))):
+        if not base:
+            continue
+        literal.add(base)
+        literal.add(base.replace("\\", "/"))
+        literal.add(_EXTENDED_LENGTH_PREFIX + base)
+    escaped = {item.replace("\\", "\\\\") for item in literal}
+    return tuple(sorted(literal | escaped, key=lambda item: (-len(item), item)))
+
+
+def _redactor(data_dir: Path) -> Any:
+    """Return a redactor that strips host absolute paths from inherited text.
+
+    Every path a maintained PR319 string can name lies beneath the explicit data
+    root, so collapsing that root — in every spelling it can appear in, and
+    case-insensitively where the platform compares paths that way — is
+    sufficient and fully deterministic. PR320's own exception boundaries never
+    rely on this: they report path-free classification instead. No traceback is
+    ever reported, and no path is ever reconstructed from artifact content.
+    """
+    flags = re.IGNORECASE if _CASE_INSENSITIVE_PATHS else 0
+    patterns = tuple(re.compile(re.escape(item), flags) for item in _root_spellings(data_dir))
 
     def redact(text: str) -> str:
         cleaned = text
-        for root in roots:
-            if root:
-                cleaned = cleaned.replace(root, "<data_dir>")
+        for pattern in patterns:
+            cleaned = pattern.sub(DATA_DIR_PLACEHOLDER, cleaned)
         return cleaned
 
     return redact
@@ -425,7 +478,7 @@ def inventory_persisted_approved_change_approval_artifacts(
         return _result(
             "approval_artifact_inventory_blocked",
             reason="the fixed approval-artifact root is not inspectable",
-            errors=[f"approval-artifact root is not inspectable: {redact(str(exc))}"],
+            errors=[f"approval-artifact root is not inspectable: {_public_os_error_detail(exc)}"],
             filesystem_accessed=True,
             inventory_root_present=True,
         )
@@ -438,7 +491,7 @@ def inventory_persisted_approved_change_approval_artifacts(
         return _result(
             "approval_artifact_inventory_blocked",
             reason="the fixed approval-artifact root could not be safely enumerated",
-            errors=[f"approval-artifact root enumeration failed: {redact(str(exc))}"],
+            errors=[f"approval-artifact root enumeration failed: {_public_os_error_detail(exc)}"],
             filesystem_accessed=True,
             inventory_root_present=True,
         )
@@ -501,8 +554,8 @@ def inventory_persisted_approved_change_approval_artifacts(
                 _anomaly(
                     name,
                     "entry_not_inspectable",
-                    reason="the direct child could not be safely inspected",
-                    errors=[f"direct child is not inspectable: {redact(str(exc))}"],
+                    reason="the direct child could not be inspected",
+                    errors=[f"direct child could not be inspected: {_public_os_error_detail(exc)}"],
                 )
             )
             continue
