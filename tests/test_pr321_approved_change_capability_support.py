@@ -1660,12 +1660,15 @@ def test_the_public_surface_is_exactly_the_maintained_operations():
 
 
 def test_the_module_is_not_imported_by_cli_approvals_recipes_or_execution():
-    # The PR322 read-only capability-binding module is the only permitted
-    # consumer: it confirms support solely through this evaluator instead of
-    # replacing the decision with its own membership check.
+    # The PR322 read-only capability-binding module and the PR323 read-only
+    # plan-link module are the only permitted consumers. PR322 confirms support
+    # solely through this evaluator instead of replacing the decision with its
+    # own membership check; PR323 reads only the maintained catalog identity so
+    # it can compare an explicit confirmation before any filesystem access.
     permitted = {
         "approved_change_capability_support.py",
         "approved_change_capability_binding.py",
+        "approved_change_plan_link.py",
     }
     offenders = [
         str(path)

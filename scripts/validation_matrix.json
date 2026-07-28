@@ -178,6 +178,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_artifact.py", "lane": "targeted_runtime", "reason": "inert Stage B canonical approval-artifact contract, non-circular approval-artifact identity, aca_ artifact ID, builder, or validator changed (built only from one fully successful PR318 approval result; no filesystem, writer, loader, CLI, natural-language, persistence, mutation, new approval, capability binding, preflight, receipt, or execution surface)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
       "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
@@ -192,6 +193,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_persistence.py", "lane": "full", "reason": "governed Stage B approval-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_approvals subtree, atomic no-replace publication, bounded cleanup, and an exact-ID read-only loader that revalidates the PR309 approval binding and the exact read-only PR317 source bundle; no CLI, natural-language, new approval, mutable approval state, overwrite, revocation, capability, receipt, host-configuration, or execution surface)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
       "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
@@ -206,6 +208,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_approval_inventory.py", "lane": "targeted_runtime", "reason": "bounded read-only Stage B approval-artifact inventory changed (one direct-child-only, no-follow scan of the fixed <data_dir>/approved_change_approvals root under a fixed maintained entry bound, validating exact aca_ candidates only through the maintained PR319 exact-ID loader and returning immutable summaries sorted lexicographically by artifact ID plus explicit anomalies; no filesystem write, persisted index, pointer, approval selection, latest/current resolution, capability-support evaluation, capability binding, preflight, receipt, CLI, natural-language, or execution surface)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
       "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
@@ -220,6 +223,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_capability_support.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change capability-support declaration and evaluation changed (one immutable source-maintained catalog with a deterministic SHA-256 identity declaring exactly windows.runtime_reconcile for approved-change contract validation only, plus one read-only evaluator that requires an exact catalog-identity confirmation before any filesystem access, loads one exact persisted PR319 approval artifact through the maintained exact-ID loader, and decides support only through the maintained PR309 validate_approved_change_contract; no catalog persistence, dynamic discovery, recipe-registry-derived support, caller-supplied capability set, approval selection, latest/current resolution, in-module capability binding, PR313 integration, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface; the maintained declaration's capability_binding_available field states only that the separate read-only PR322 in-memory binding operation exists)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
       "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
@@ -234,6 +238,7 @@
       "tests/test_pr309_approved_change_contract.py"
     ]},
     {"pattern": "src/shellforgeai/core/approved_change_capability_binding.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change capability binding changed (one immutable source-maintained lane declaration for the named PR313 governed Windows two-file runtime-reconciliation lane with a deterministic SHA-256 identity, plus one read-only operation that requires exact PR321 catalog-identity and lane-declaration-identity confirmations before any filesystem access, confirms support only through the maintained PR321 evaluator, obtains exact binding metadata only through the maintained PR319 exact-ID loader, and constructs exactly one in-memory binding with a non-circular deterministic identity; no binding persistence, publication, or loading, dynamic lane discovery, caller-supplied declaration, approval selection, latest/current resolution, target/procedure/evidence/current-state compatibility evaluation, PR313 invocation, PR304/PR305 validation, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
       "tests/test_pr322_approved_change_capability_binding.py",
       "tests/test_pr321_approved_change_capability_support.py",
       "tests/test_pr320_approved_change_approval_inventory.py",
@@ -246,6 +251,29 @@
       "tests/test_pr311_approved_change_construction_policy.py",
       "tests/test_pr310_legacy_proposal_compatibility.py",
       "tests/test_pr309_approved_change_contract.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/approved_change_plan_link.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change plan link changed (one immutable in-memory plan link whose non-circular deterministic SHA-256 identity names the exact PR322 binding identity and the exact PR305/PR313 canonical plan SHA-256, plus one read-only operation that validates one explicitly supplied parsed plan mapping through the maintained plan-contract seam, requires exact canonical plan-SHA, PR321 catalog-identity, and PR322 lane-declaration-identity confirmations before any filesystem access, obtains its binding only through the maintained PR322 operation called exactly once, accepts only ready or no_change plans, and compares only maintained typed capability/lane/mode/recipe/allowlist/parent-contract/status facts; no plan-link persistence, publication, or loading, caller-supplied binding, contract, artifact, catalog, lane declaration, plan path, or output path, approval selection, latest/current resolution, plan-packet or host-path disclosure, target/procedure/evidence semantic evaluation, live staged-source, durable-runtime, or System32 inspection, current-state revalidation, PR313 execution, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
+      "tests/test_pr322_approved_change_capability_binding.py",
+      "tests/test_pr321_approved_change_capability_support.py",
+      "tests/test_pr320_approved_change_approval_inventory.py",
+      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+      "tests/test_pr318_approved_change_approval_workflow.py",
+      "tests/test_pr317_approved_change_artifact_persistence.py",
+      "tests/test_pr316_approved_change_artifact_bundle.py",
+      "tests/test_pr315_approved_change_subject_construction.py",
+      "tests/test_pr314_approved_change_supplemental_context.py",
+      "tests/test_pr311_approved_change_construction_policy.py",
+      "tests/test_pr310_legacy_proposal_compatibility.py",
+      "tests/test_pr309_approved_change_contract.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/windows_runtime_reconcile_plan_contract.py", "lane": "full", "reason": "pure maintained Windows runtime-reconcile plan contract changed (the single home of the PR305 saved-packet acceptance rules, the destination-parent contract, the narrower PR313 executable-plan contract, the exact fixed two-file allowlist, the accepted ready/no_change statuses, and the canonical plan JSON/SHA-256 identity that scripts/windows_runtime_reconcile_acceptance.py, the PR313 execution lane, and the PR323 plan link all delegate to; pure constants, canonicalization, identity, and structural validation only, with no filesystem, current-state, preparation, backup, atomic-replacement, compensation, receipt, verification, subprocess, shell, network, clock, environment, or mutation path)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
+      "tests/test_pr313_windows_runtime_reconcile_execute.py",
+      "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+      "tests/test_pr313_windows_runtime_reconcile_verify.py",
+      "tests/test_pr305_windows_runtime_reconcile.py",
+      "tests/test_pr304_windows_runtime_integrity.py"
     ]},
     {"pattern": "src/shellforgeai/interactive/**", "lane": "targeted_runtime", "reason": "interactive UX/command dispatch changed", "tests": [
       "tests/test_pr122_*",
@@ -342,7 +370,8 @@
       "tests/test_pr68_disposable_compose_restart_proof.py",
       "tests/test_pr89_disposable_remediation.py"
     ]},
-    {"pattern": "src/shellforgeai/core/windows_runtime_reconcile_execution.py", "lane": "full", "reason": "governed Windows two-file runtime reconciliation execution changed (bounded local mutation)", "tests": [
+    {"pattern": "src/shellforgeai/core/windows_runtime_reconcile_execution.py", "lane": "full", "reason": "governed Windows two-file runtime reconciliation execution changed (bounded local mutation; its plan constants, canonical plan identity, and executable-plan contract are delegated to the pure core/windows_runtime_reconcile_plan_contract.py seam)", "tests": [
+      "tests/test_pr323_approved_change_plan_link.py",
       "tests/test_pr313_windows_runtime_reconcile_execute.py",
       "tests/test_pr313_windows_runtime_reconcile_receipt.py",
       "tests/test_pr313_windows_runtime_reconcile_verify.py",
@@ -432,7 +461,7 @@
     {"pattern": "scripts/windows_smoke_acceptance.py", "lane": "targeted_runtime", "reason": "local saved-JSON Windows smoke acceptance helper changed", "tests": ["tests/test_pr263_windows_smoke_acceptance.py", "tests/test_pr262_windows_read_only_status.py", "tests/test_pr261_windows_read_only_doctor.py", "tests/test_pr259_platform_detection.py"]},
     {"pattern": "scripts/windows_interactive_acceptance.py", "lane": "targeted_runtime", "reason": "local saved-transcript Windows interactive acceptance helper changed", "tests": ["tests/test_pr280_windows_interactive_acceptance.py", "tests/test_pr279_windows_interactive_platform_aware_performance.py", "tests/test_pr278_collectors_json_null_parsing.py"]},
     {"pattern": "scripts/windows_runtime_reconcile_preflight.py", "lane": "full", "reason": "PR305 preview packet and exact destination-parent contract changed (feeds bounded local mutation)", "tests": ["tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr305_windows_runtime_reconcile.py", "tests/test_pr304_windows_runtime_integrity.py"]},
-    {"pattern": "scripts/windows_runtime_reconcile_acceptance.py", "lane": "full", "reason": "PR305 acceptance and destination-parent contract validation changed", "tests": ["tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr305_windows_runtime_reconcile.py", "tests/test_pr304_windows_runtime_integrity.py"]},
+    {"pattern": "scripts/windows_runtime_reconcile_acceptance.py", "lane": "full", "reason": "PR305 acceptance and destination-parent contract validation changed (the rules now live in the pure core/windows_runtime_reconcile_plan_contract.py seam that this script, the PR313 execution lane, and the PR323 plan link all delegate to)", "tests": ["tests/test_pr323_approved_change_plan_link.py", "tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr305_windows_runtime_reconcile.py", "tests/test_pr304_windows_runtime_integrity.py"]},
     {"pattern": "scripts/windows_runtime_reconcile_execute.py", "lane": "full", "reason": "governed Windows two-file runtime reconciliation execute helper changed (bounded local mutation)", "tests": ["tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr304_windows_runtime_integrity.py", "tests/test_pr305_windows_runtime_reconcile.py"]},
     {"pattern": "scripts/windows_runtime_reconcile_receipt_acceptance.py", "lane": "full", "reason": "Windows runtime reconciliation execution receipt validator changed", "tests": ["tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr174_v2_recipe_receipt_integrity.py"]},
     {"pattern": "scripts/windows_runtime_reconcile_verify.py", "lane": "full", "reason": "Windows runtime reconciliation post-change verification helper changed", "tests": ["tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr304_windows_runtime_integrity.py"]},

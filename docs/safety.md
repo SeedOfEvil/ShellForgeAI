@@ -1236,4 +1236,34 @@ PR322 adds **no mutation surface at all**. It adds exactly one immutable, source
 
 **No natural-language capability-binding or execution route exists.** PR322 adds no CLI command, no interactive route, no natural-language or implicit binding, and no model-generated binding decision. No legacy `Proposal` is read, converted, or bridged into a binding.
 
+## PR323 read-only approved-change plan link
+
+PR323 adds **no mutation surface at all**. It adds exactly one immutable in-memory plan-link model, one read-only operation that constructs a link, and one pure saved-plan contract seam extracted verbatim from the maintained PR305 acceptance script and the PR313 execution module, and nothing else. It is documented in full in [Approved Change Plan Link](APPROVED_CHANGE_PLAN_LINK.md).
+
+**Linking is an in-memory identity association only.** `plan_linked=true` means exactly one thing: the exact approved binding identity has been associated with the exact canonical identity of one maintained-validator-approved saved Windows reconcile plan. It never means the plan is currently safe to run.
+
+**Linking is not authorization.** No authenticated identity, role, or identity-provider proof is involved; persisted `approved_by` remains self-asserted metadata. Every result reports `authorization_evaluated=false`.
+
+**Linking is not semantic compatibility.** Only maintained typed facts are compared — capability ID, lane ID, plan mode, plan recipe ID, the exact fixed two-file allowlist, the destination-parent contract version, and an accepted plan status. No subject target free text, procedure description, diagnosis text, desired-outcome text, risk wording, rollback prose, or evidence reference is read or interpreted. Two materially different approved subjects sharing the declared capability ID may both be structurally linked to the same valid plan, with distinct link identities, and every result reports `subject_semantic_compatibility_evaluated=false`, `target_compatibility_evaluated=false`, `procedure_compatibility_evaluated=false`, and `evidence_compatibility_evaluated=false`. There is deliberately no broad `subject_fully_compatible` field.
+
+**Linking is not current-state preflight.** No live staged source, durable runtime root, `System32` location, destination parent, or file hash is inspected, no PR304 evidence freshness is validated, and no precondition is proved to still hold. Every result reports `current_state_preflight_evaluated=false` and `preflight_evaluated=false`.
+
+**PR313 execution is never invoked.** No PR313 execute, current-state revalidation, preparation, backup, atomic-replacement, compensation, receipt, or verification function is imported or reached, and no recipe or executor is called. Only the pure plan-contract seam — constants, canonicalization, SHA-256 identity, and structural validation — is used.
+
+**Only `ready` and `no_change` plans link.** A `no_change` packet is still the exact validated plan identity for the observed state, and it grants no execution eligibility. `blocked`, `unsupported`, malformed, structurally inconsistent, wrong-mode, wrong-recipe, reordered- or widened-allowlist, extra-operation, wrong-parent-contract-version, invalid-hash, and unsafe-safety packets all fail closed with no link.
+
+**Nothing is persisted and no packet or host path is returned.** The link stays in memory. There is no persisted plan-link artifact, ID, prefix, publisher, loader, or subtree, so no new persisted state exists and the persisted tree stays byte- and mtime-identical. The caller's plan mapping is never modified. The full plan packet is never returned, and no staged-source root, durable-runtime root, source path, destination path, backup path pattern, parent absolute path, user name, or host name ever reaches a result. Every result reports `plan_link_persisted=false`, `plan_packet_written=false`, `receipt_created=false`, and `receipt_linked=false`.
+
+**All three confirmation gates precede any filesystem access.** The explicit raw 64-lowercase-hex canonical plan-SHA confirmation, PR321 catalog-identity confirmation, and PR322 lane-declaration-identity confirmation are each validated and compared with `hmac.compare_digest` before anything is loaded, so a malformed, empty, uppercase, prefixed, stale, swapped, or mismatched confirmation performs zero filesystem access, calls the maintained PR322 operation zero times, and evaluates no link. The plan-SHA confirmation authorizes exactly one thing — compare against this exact validated saved plan packet — and is never authorization, preflight approval, or execution confirmation.
+
+**Binding is never re-decided.** PR323 calls the maintained PR322 binding operation exactly once and constructs no competing binding; an incomplete, unbound, self-invalid, or failed PR322 result fails closed with no link. An undeclared or near-miss capability ID is a completed unlinkable result, not an exception.
+
+**No approval is selected.** PR323 requires one exact full `aca_` artifact ID. It calls no PR320 inventory operation and resolves no `latest`, `current`, or "most recent" approval, and it accepts no caller-supplied artifact, contract, capability binding, catalog, or lane declaration.
+
+**Execution remains unavailable.** Every result reports `execution_allowed=false`, `execution_available=false`, and `execution_status=not_executed`.
+
+**No natural-language plan-link or execution route exists.** PR323 adds no CLI command, no interactive route, no natural-language or implicit linking, and no model-generated link decision. No legacy `Proposal` is read, converted, or bridged into a link.
+
+**The pure extraction changed no behaviour.** Moving the PR305 acceptance rules, the PR313 executable-plan contract, and the canonical plan identity into `core/windows_runtime_reconcile_plan_contract.py` is delegation-only: no execution, filesystem mutation, current-state revalidation, receipt, backup, or compensation logic moved, the allowlist was not broadened, and the canonical plan identity did not change. The maintained PR304, PR305, and PR313 suites pass unchanged as the regression proof.
+
 Existing safety boundaries are unchanged: the Docker disposable-restart lane, the receipt recovery lane, cleanup refusal, remediation refusal, the PR313 Windows reconciliation lane, and natural-language mutation refusal all keep their current gates.
