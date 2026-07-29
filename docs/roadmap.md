@@ -14,6 +14,13 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 - Windows/PowerShell V1 remains planned as read-only local evidence / Windows read-only doctor prototype support; Linux/Docker remains primary and the safety model remains unchanged.
 - The complete final-state lifecycle is not yet implemented across arbitrary operator-developed solutions.
 
+## Windows operator UX — interactive identity (PR324)
+
+- PR324 corrects platform-aware interactive identity only: the startup banner subtitle now reports the local host as Linux, Windows, or macOS from Python's read-only `platform.system()` value, with the safe generic `CLI-first AI Ops for this host` fallback for an empty or unrecognized platform, and the banner quote pool is platform-neutral on non-Linux hosts.
+- PR324 changes nothing else: interactive intent classification and route selection, evidence collectors and evidence vocabulary, model context, model prompts, model selection, mutation refusal, trust, workspace, and the CLI command surface all remain unchanged, and no probing, shell, subprocess, PowerShell, WinRM, network call, or persistence was added.
+- The Linux-primary V1 product contract is unchanged; PR324 corrects banner presentation only and does not promote Windows beyond preview/early support.
+- The next focused Windows UX dependency is Windows-native interactive service routing; Windows-specific service evidence collection, suppression of generic Linux collectors, and OS-aware model-context vocabulary remain deferred beyond it.
+
 ## Stage A — Product contract
 
 - Establish the canonical lifecycle and final-state implementation boundary in [North Star](north-star.md).
