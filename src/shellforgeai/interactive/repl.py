@@ -64,11 +64,13 @@ from shellforgeai.core.windows_operator_ux import (
     WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
     WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
     WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+    WINDOWS_OPERATOR_INTENT_SERVICES,
     WINDOWS_OPERATOR_INTENT_STATUS,
     WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
+    WINDOWS_SERVICES_COMMAND,
     WINDOWS_STANDARD_EVIDENCE_COMMAND,
     WindowsOperatorRoute,
-    classify_windows_operator_intent,
+    classify_windows_interactive_intent,
     render_windows_operator_guidance,
     render_windows_operator_safe_next_section,
     windows_operator_safe_commands,
@@ -110,7 +112,12 @@ _WINDOWS_INTENT_LABELS = {
     "windows_doctor": "Windows doctor",
     "windows_evidence": "Windows evidence",
     "windows_processes": "Windows processes",
+    WINDOWS_OPERATOR_INTENT_SERVICES: "Windows services",
 }
+
+WINDOWS_SERVICES_SAFE_NEXT_COMMANDS: tuple[str, ...] = windows_operator_safe_commands(
+    WINDOWS_OPERATOR_INTENT_SERVICES
+)
 
 
 def _is_windows_host() -> bool:
@@ -124,7 +131,7 @@ def _normalized_interactive_phrase(text: str) -> str:
 
 
 def _windows_route(text: str, *, host_system: str | None = None) -> WindowsOperatorRoute | None:
-    return classify_windows_operator_intent(text, host_system=host_system or platform.system())
+    return classify_windows_interactive_intent(text, host_system=host_system or platform.system())
 
 
 def _is_generic_system_status_phrase(text: str) -> bool:
@@ -249,6 +256,8 @@ def _interactive_windows_mutation_refusal(text: str) -> str:
 
 
 def _windows_interactive_command(intent: str, limit: str | None = None) -> str:
+    if intent == WINDOWS_OPERATOR_INTENT_SERVICES:
+        return WINDOWS_SERVICES_COMMAND
     if intent == "windows_status":
         return "shellforgeai windows status --json"
     if intent == "windows_doctor":
@@ -264,6 +273,27 @@ def _windows_interactive_command(intent: str, limit: str | None = None) -> str:
 def _windows_interactive_pending_context(
     *, session_id: str, intent: str, source_command: str
 ) -> LatestDiagnosisContext:
+    is_services = intent == WINDOWS_OPERATOR_INTENT_SERVICES
+    safe_next_commands = list(
+        WINDOWS_SERVICES_SAFE_NEXT_COMMANDS
+        if is_services
+        else WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS
+    )
+    suggested_followup_categories = (
+        [
+            WINDOWS_OPERATOR_INTENT_SERVICES,
+            "windows_events",
+            "windows_status",
+            "windows_doctor",
+        ]
+        if is_services
+        else [
+            "windows_status",
+            "windows_doctor",
+            "windows_evidence",
+            "windows_processes",
+        ]
+    )
     return LatestDiagnosisContext(
         session_id=session_id,
         created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -279,13 +309,8 @@ def _windows_interactive_pending_context(
             "Interactive routing only renders safe guidance here; use the explicit "
             "Windows command to collect JSON evidence.",
         ],
-        safe_next_commands=list(WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS),
-        suggested_followup_categories=[
-            "windows_status",
-            "windows_doctor",
-            "windows_evidence",
-            "windows_processes",
-        ],
+        safe_next_commands=safe_next_commands,
+        suggested_followup_categories=suggested_followup_categories,
         source_command=source_command,
         deterministic_only=True,
         model_assessment_status="not_called",
@@ -301,6 +326,13 @@ def _render_windows_read_only_intent(
     memory_payload: dict[str, Any] | None = None,
 ) -> str:
     host_is_windows = _is_windows_host() if is_windows is None else is_windows
+    if intent == WINDOWS_OPERATOR_INTENT_SERVICES:
+        # The maintained Windows services guidance is rendered verbatim: generic
+        # Windows metric limitations (load average, Linux-only collectors) are
+        # not part of a service inventory/health answer.
+        return render_windows_operator_guidance(
+            WindowsOperatorRoute(WINDOWS_OPERATOR_INTENT_SERVICES, host_is_windows, True)
+        )
     label = _WINDOWS_INTENT_LABELS.get(intent, "Windows read-only request")
     command = _windows_interactive_command(intent, limit)
     next_commands = "\n".join(f"- {cmd}" for cmd in WINDOWS_INTERACTIVE_SAFE_NEXT_COMMANDS)
@@ -2808,6 +2840,18 @@ def start_interactive(
                         shared_windows_route, limitation_lines=limitation_lines
                     )
                 )
+                continue
+            if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_SERVICES:
+                # Bounded read-only service inventory/health: deterministic
+                # guidance only. The canonical services command is shown, never
+                # executed, and no service collector is invoked.
+                latest_context = _windows_interactive_pending_context(
+                    session_id=runtime.session.session_id,
+                    intent=WINDOWS_OPERATOR_INTENT_SERVICES,
+                    source_command=WINDOWS_SERVICES_COMMAND,
+                )
+                pending_followup = None
+                console.print(render_windows_operator_guidance(shared_windows_route))
                 continue
             if (
                 shared_windows_route.intent

@@ -638,7 +638,23 @@ should keep running the PR184 command-surface golden guardrail.
 
 ## Windows read-only phrases
 
-Interactive mode deterministically recognizes explicit Windows read-only phrases such as `show me the windows status`, `windows doctor`, `windows evidence`, and `windows processes limit 10`. These phrases only render allowlisted safe command guidance and set `/pending` to a `windows-local-read-only` context with Windows safe-next commands. They do not execute shell commands, PowerShell, WinRM/PSRemoting, subprocesses, Docker/Compose, cleanup, remediation, rollback, recovery, or mutation, and broad natural-language execution remains out of scope.
+Interactive mode deterministically recognizes explicit Windows read-only phrases such as `show me the windows status`, `windows doctor`, `windows evidence`, `windows services`, and `windows processes limit 10`. These phrases only render allowlisted safe command guidance and set `/pending` to a `windows-local-read-only` context with Windows safe-next commands. They do not execute shell commands, PowerShell, WinRM/PSRemoting, subprocesses, Docker/Compose, cleanup, remediation, rollback, recovery, or mutation, and broad natural-language execution remains out of scope.
+
+### Windows service inventory/health questions (PR325)
+
+Since PR325, interactive mode also routes a bounded set of read-only service inventory/health questions deterministically, before generic diagnosis, Linux evidence collection, or model handling. Accepted phrasings include `show service status`, `show services`, `show me the services`, `service status`, `services health`, `are the services healthy`, `what services are running`, `which services are running`, `list services`, `show failed services`, `check services`, and their explicit `windows services` forms.
+
+The route renders `## Windows services guidance` and suggests the canonical command first:
+
+```text
+shellforgeai windows services --json --limit 25
+```
+
+No service query is run automatically. The route is guidance only: it executes no command, invokes no service collector, calls no model, and performs no service control, process termination, remediation, rollback, or recovery. `/pending` records the route as `windows-local-read-only` / `windows_services` with the services command first, followed by the `events`, `status`, and `doctor` read-only drill-downs.
+
+Matching is anchored to whole phrases, so unrelated text that merely contains the word "service" — `customer service`, `customer service status`, `service desk`, `service account`, `service agreement`, `professional services`, `software as a service` — is not routed. Linux-, systemd-, and Docker-scoped service phrases keep their existing routing. On a non-Windows host, generic phrases such as `show service status` are not captured by the Windows route at all; explicitly Windows-scoped phrases such as `show Windows services` render the non-Windows-host Windows guidance, which performs no Windows probing and states that the command is to be run on the Windows host.
+
+Mutation requests such as `restart Windows services`, `stop the service`, and `clean up and restart services` keep their existing refusal, which has priority over this read-only route. Named-service lookup (for example `is the Spooler service running`) and Windows service evidence synthesis remain deferred; the explicit `shellforgeai windows services` command is still the only service evidence command.
 
 ### Windows operator-parity prompts
 
@@ -680,6 +696,8 @@ Interactive model calls use the same provider lifecycle as `ask`: concise progre
 
 Interactive mode shares the same Windows operator classifier and renderer used by `shellforgeai ask`. The deterministic Windows intent families are generic Windows status/health, check-first/check-next, slow/latency/performance first pass, strongest CPU/memory/disk/process signal, current-host/operator handoff, and Windows-scoped mutation refusal. Mutation refusal has priority over status or performance classification.
 
+Interactive mode adds exactly one route on top of that shared set: the PR325 bounded read-only `windows_services` intent. It is evaluated only after the shared classifier returns no route, so mutation refusal and every existing intent keep their exact priority, and `shellforgeai ask` routing is unchanged.
+
 Windows-host guidance begins with `Context: Windows local read-only.` Explicit Windows guidance from a non-Windows host begins with `Context: Windows guidance requested from a non-Windows host.` and includes `No Windows probing was performed.` Every non-mutation response ends with `No command was executed. No action was taken.` and `No cleanup, restart, service control, process termination, remediation, rollback, or recovery was performed.` Refusals begin with `Refused: natural-language mutation is not allowed.` followed by the same no-action marker.
 
-The first recommended bounded read-only check is always `shellforgeai windows evidence --profile standard --json`. Per-intent drill-downs then use canonical `shellforgeai windows status --json`, `doctor`, `processes --limit 10`, `events --limit 50 --since-hours 24`, `network`, `volumes --limit 32`, and `services --limit 25` commands as applicable. These are optional drill-downs after the standard profile, not instructions to execute everything. Generic Linux/Docker prompts such as unqualified system status on Linux are not captured by this Windows route. Established bounded Windows performance and handoff evidence paths remain read-only and do not call a provider/model for deterministic routes. `--no-evidence` is an `ask` option and does not apply to interactive mode.
+The first recommended bounded read-only check is `shellforgeai windows evidence --profile standard --json` for every intent except the PR325 service route, which leads with `shellforgeai windows services --json --limit 25`. Per-intent drill-downs then use canonical `shellforgeai windows status --json`, `doctor`, `processes --limit 10`, `events --limit 50 --since-hours 24`, `network`, `volumes --limit 32`, and `services --limit 25` commands as applicable. These are optional drill-downs after the standard profile, not instructions to execute everything. Generic Linux/Docker prompts such as unqualified system status on Linux are not captured by this Windows route. Established bounded Windows performance and handoff evidence paths remain read-only and do not call a provider/model for deterministic routes. `--no-evidence` is an `ask` option and does not apply to interactive mode.

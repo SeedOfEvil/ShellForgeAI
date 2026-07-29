@@ -21,6 +21,16 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 - The Linux-primary V1 product contract is unchanged; PR324 corrects banner presentation only and does not promote Windows beyond preview/early support.
 - The next focused Windows UX dependency is Windows-native interactive service routing; Windows-specific service evidence collection, suppression of generic Linux collectors, and OS-aware model-context vocabulary remain deferred beyond it.
 
+## Windows operator UX — interactive service routing (PR325)
+
+- PR325 adds Windows-native interactive service routing only: one bounded, deterministic, read-only `windows_services` intent that recognizes a small anchored set of service inventory/health questions (`show service status`, `show services`, `service status`, `services health`, `are the services healthy`, `what services are running`, `list services`, `show failed services`, `check services`, and their explicit `windows services` forms) before generic diagnosis, Linux evidence collection, or model handling, and renders `## Windows services guidance` leading with `shellforgeai windows services --json --limit 25`.
+- The route is interactive-specific: it lives in a new pure `classify_windows_interactive_intent` seam that delegates to the shared `classify_windows_operator_intent` first and only evaluates the service predicate when the shared classifier returns no route, so mutation refusal and every existing Windows intent keep their exact priority and top-level `ask` routing is unchanged.
+- PR325 runs nothing: the canonical services command is shown, never executed. No service collector was added or invoked, no Service Control Manager, PowerShell, WinRM, WMI/CIM, registry, shell, or subprocess path was introduced, and no service start, stop, restart, recovery, or configuration change exists.
+- PR325 changes nothing else: evidence collectors and evidence vocabulary, model context, model prompts, model selection, mutation refusal wording, persistence, authorization, preflight, receipts, and the CLI command surface all remain unchanged, and no CLI or slash command was added.
+- Anchored whole-phrase matching keeps unrelated wording out of the route (`customer service status`, `service desk`, `service account`, `professional services`, `software as a service`), and Linux-, systemd-, and Docker-scoped service phrases keep their existing routing. On a non-Windows host, generic service phrases are not captured at all and explicit Windows phrases render the non-probing non-Windows-host guidance.
+- The Linux-primary V1 product contract is unchanged; PR325 corrects interactive routing only and does not promote Windows beyond preview/early support.
+- The next focused Windows UX dependency is Windows-specific service evidence presentation and collection for this route; named-service lookup, suppression of generic Linux collectors, and OS-aware model-context vocabulary remain deferred beyond it.
+
 ## Stage A — Product contract
 
 - Establish the canonical lifecycle and final-state implementation boundary in [North Star](north-star.md).
