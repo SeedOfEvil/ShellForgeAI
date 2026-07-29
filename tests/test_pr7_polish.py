@@ -22,7 +22,7 @@ def test_banner_quote_deterministic(monkeypatch):
     rt.profile.name = "inspect"
     rt.settings.model.provider = "codex"
     rt.settings.model.model = "gpt-5.5"
-    panel = build_banner(rt, True, chooser=lambda q: q[0])
+    panel = build_banner(rt, True, chooser=lambda q: q[0], host_system="Linux")
     txt = str(panel.renderable)
     assert "ShellForgeAI" in txt and "CLI-first AI Ops for Linux" in txt
     assert QUOTES[0] in txt

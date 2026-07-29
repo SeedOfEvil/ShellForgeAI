@@ -3,6 +3,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from shellforgeai.cli import app
+from shellforgeai.interactive.banner import platform_label
 from shellforgeai.interactive.commands import route_input
 from shellforgeai.interactive.workspace import WorkspaceTrustStore
 
@@ -13,7 +14,7 @@ def test_no_args_enters_interactive_and_exit() -> None:
     result = runner.invoke(app, input="n\n")
     assert result.exit_code == 0
     assert "ShellForgeAI" in result.stdout
-    assert "CLI-first AI Ops for Linux" in result.stdout
+    assert f"CLI-first AI Ops for {platform_label()}" in result.stdout
     assert "Trust " in result.stdout
     assert "Workspace not trusted" in result.stdout
     assert "Missing command" not in result.stdout
@@ -45,4 +46,6 @@ def test_trust_store(tmp_path: Path) -> None:
 def test_interactive_command_alias() -> None:
     result = runner.invoke(app, ["interactive"], input="n\n")
     assert result.exit_code == 0
+    assert "ShellForgeAI" in result.stdout
+    assert f"CLI-first AI Ops for {platform_label()}" in result.stdout
     assert "Trust " in result.stdout

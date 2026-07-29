@@ -10,6 +10,17 @@ and workspace path. Build metadata env vars: `SHELLFORGEAI_BUILD_PR`,
 `SHELLFORGEAI_BUILD_COMMIT`, `SHELLFORGEAI_BUILD_BRANCH`,
 `SHELLFORGEAI_BUILD_DATE`.
 
+Since PR324 the banner subtitle identifies the **local host** platform from
+Python's read-only `platform.system()` value: `CLI-first AI Ops for Linux`,
+`CLI-first AI Ops for Windows`, or `CLI-first AI Ops for macOS`. An empty or
+unrecognized platform falls back to the safe generic `CLI-first AI Ops for
+this host` rather than claiming a specific OS. The banner quote is drawn from
+a platform-neutral subset on Windows, macOS, and unknown hosts, so Linux-only
+banner wording (`journalctl`, `sudo`, `grep`, container phrasing) never
+appears on a non-Linux host. This is banner presentation only: routing,
+evidence collection, model context, model selection, trust, and workspace
+behavior are unchanged, and no probing, shell, or subprocess is involved.
+
 ## Workspace trust
 
 On first run in a workspace you are asked to trust it. Trust is cached under
