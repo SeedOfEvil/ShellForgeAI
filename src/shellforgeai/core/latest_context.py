@@ -419,6 +419,13 @@ def render_latest_context_pending(ctx: LatestDiagnosisContext) -> str:
         lines.append(
             "- Suggested follow-up categories: " + ", ".join(ctx.suggested_followup_categories)
         )
+    if ctx.diagnosis_kind == "windows_services":
+        if ctx.evidence_highlights:
+            lines.append("- Service evidence facts:")
+            lines.extend(f"  - {item}" for item in ctx.evidence_highlights)
+        if ctx.limitations:
+            lines.append("- Limitations:")
+            lines.extend(f"  - {item}" for item in ctx.limitations)
     if ctx.safe_next_commands:
         lines.append("- Safe next commands:")
         lines.extend(f"  - {c}" for c in ctx.safe_next_commands)

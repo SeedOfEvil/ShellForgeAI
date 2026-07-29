@@ -371,8 +371,22 @@ def _run_windows_interactive(monkeypatch: Any, tmp_path: Any, transcript: str) -
     ):
         monkeypatch.setattr(f"shellforgeai.core.collectors.{collector}", _forbidden(collector))
     monkeypatch.setattr(
-        "shellforgeai.windows_services.windows_services_payload",
-        _forbidden("the Windows services collector"),
+        "shellforgeai.interactive.repl.windows_services_payload",
+        lambda *, max_services: {
+            "status": "ok",
+            "platform": {"system": "windows"},
+            "read_only": True,
+            "mutation_performed": False,
+            "windows_v1": {"available": True},
+            "services": {
+                "total_count": 0,
+                "state_counts": {},
+                "runtime_summary": {},
+                "items": [],
+                "collection_limits": {"max_services": max_services, "truncated": False},
+            },
+            "next_safe_command": "shellforgeai windows status --json",
+        },
     )
     monkeypatch.setattr(
         "shellforgeai.core.windows_evidence_context.build_windows_evidence_context",
@@ -398,9 +412,9 @@ def test_native_windows_service_questions_route_before_generic_handling(
     out = res.stdout
     assert res.exception is None, out
     assert res.exit_code == 0, out
-    assert "## Windows services guidance" in out
+    assert "## Windows services evidence" in out
     assert "Context/visibility: windows-local-read-only." in out
-    assert f"Start with this bounded read-only check:\n- {SERVICES_COMMAND}" in out
+    assert SERVICES_COMMAND in out
     assert "No command was executed. No action was taken." in out
     assert "Traceback" not in out
     lowered = out.lower()
@@ -652,7 +666,6 @@ def test_service_route_source_slice_is_read_only() -> None:
         "secret",
         "diagnose_target",
         "collect_evidence",
-        "windows_services_payload",
     )
     assert not any(term in slice_ for term in forbidden)
     # Positive control: the guard would catch a real execution lane.

@@ -640,21 +640,21 @@ should keep running the PR184 command-surface golden guardrail.
 
 Interactive mode deterministically recognizes explicit Windows read-only phrases such as `show me the windows status`, `windows doctor`, `windows evidence`, `windows services`, and `windows processes limit 10`. These phrases only render allowlisted safe command guidance and set `/pending` to a `windows-local-read-only` context with Windows safe-next commands. They do not execute shell commands, PowerShell, WinRM/PSRemoting, subprocesses, Docker/Compose, cleanup, remediation, rollback, recovery, or mutation, and broad natural-language execution remains out of scope.
 
-### Windows service inventory/health questions (PR325)
+### Windows service inventory/health questions
 
-Since PR325, interactive mode also routes a bounded set of read-only service inventory/health questions deterministically, before generic diagnosis, Linux evidence collection, or model handling. Accepted phrasings include `show service status`, `show services`, `show me the services`, `service status`, `services health`, `are the services healthy`, `what services are running`, `which services are running`, `list services`, `show failed services`, `check services`, and their explicit `windows services` forms.
+Interactive mode routes a bounded set of read-only service inventory/health questions deterministically, before generic diagnosis, Linux evidence collection, or model handling. Accepted phrasings include `show service status`, `show services`, `service status`, `services health`, `what services are running`, and their explicit `windows services` forms.
 
-The route renders `## Windows services guidance` and suggests the canonical command first:
+On a native Windows host, this route calls the maintained in-process Windows services payload exactly once with a 25-record limit and renders `## Windows services evidence`. It does not execute the displayed CLI command, invoke a subprocess or shell, call a model, or perform service control. The summary includes payload status, total and per-state counts, a runtime summary, a bounded runtime-signal preview, collection limit/truncation, and explicit not-collected scope. `/pending` retains only bounded facts and services-first safe-next commands; it never retains the full service item list.
+
+Runtime signals are point-in-time observations rather than failure diagnoses. Stopped services can be normal, named-service expectations are not evaluated, and service configuration and recovery policy are not collected. Named-service lookup remains deferred.
+
+The canonical explicit command remains the first safe next check, but is shown rather than executed:
 
 ```text
 shellforgeai windows services --json --limit 25
 ```
 
-No service query is run automatically. The route is guidance only: it executes no command, invokes no service collector, calls no model, and performs no service control, process termination, remediation, rollback, or recovery. `/pending` records the route as `windows-local-read-only` / `windows_services` with the services command first, followed by the `events`, `status`, and `doctor` read-only drill-downs.
-
-Matching is anchored to whole phrases, so unrelated text that merely contains the word "service" — `customer service`, `customer service status`, `service desk`, `service account`, `service agreement`, `professional services`, `software as a service` — is not routed. Linux-, systemd-, and Docker-scoped service phrases keep their existing routing. On a non-Windows host, generic phrases such as `show service status` are not captured by the Windows route at all; explicitly Windows-scoped phrases such as `show Windows services` render the non-Windows-host Windows guidance, which performs no Windows probing and states that the command is to be run on the Windows host.
-
-Mutation requests such as `restart Windows services`, `stop the service`, and `clean up and restart services` keep their existing refusal, which has priority over this read-only route. Named-service lookup (for example `is the Spooler service running`) and Windows service evidence synthesis remain deferred; the explicit `shellforgeai windows services` command is still the only service evidence command.
+Matching remains anchored to whole phrases. On a non-Windows host, generic service phrases are not captured by the Windows route, while explicitly Windows-scoped phrases render guidance only without calling the payload or probing Windows. Mutation requests keep their existing higher-priority refusal and never collect service evidence.
 
 ### Windows operator-parity prompts
 
