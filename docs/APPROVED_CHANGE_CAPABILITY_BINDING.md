@@ -335,6 +335,8 @@ There is no new persisted subtree and no new persisted file, so the data layout 
 
 ## Next dependency
 
-Stage B remains incomplete. The next focused dependency is **current-state execution preflight and exact approved-subject to live-PR313-plan comparison — still not execution**.
+Stage B remains incomplete. PR323 took the next step: [Approved Change Plan Link](APPROVED_CHANGE_PLAN_LINK.md) links one exact PR322 binding to the exact canonical identity of one maintained-validator-approved saved PR305 plan, under an exact plan-SHA confirmation. It obtains its binding only through `construct_persisted_approved_change_capability_binding`, constructs no competing binding, evaluates no target or procedure semantics, and inspects no live current state.
 
-Everything else stays deferred to PR323 or later: persisted binding artifacts, PR304/PR305 evidence compatibility, target and procedure compatibility, staged-source and durable-runtime validation, `System32` validation, authenticated identity, role validation, authorization, receipt linkage, execution eligibility, Stage C execution, additional supported capabilities, dynamic capability or lane registration, and CLI or natural-language binding or execution routes.
+After PR323 the next focused dependency is **live current-state revalidation of the exact linked plan — still not execution**.
+
+Everything else stays deferred to PR324 or later: persisted binding and plan-link artifacts, PR304 evidence freshness and compatibility, target and procedure semantic compatibility, staged-source and durable-runtime validation, `System32` validation, authenticated identity, role validation, authorization, receipt linkage, execution eligibility, Stage C execution, additional supported capabilities, dynamic capability or lane registration, and CLI or natural-language binding, plan-link, or execution routes.

@@ -1831,14 +1831,28 @@ def test_the_public_surface_is_exactly_the_maintained_operations():
 
 
 def test_the_module_is_not_imported_by_cli_approvals_recipes_or_execution():
+    # The PR323 read-only plan-link module is the only permitted consumer: it
+    # obtains its binding solely through this maintained operation instead of
+    # constructing a competing binding of its own.
+    permitted = {
+        "approved_change_capability_binding.py",
+        "approved_change_plan_link.py",
+    }
     offenders = [
         str(path)
         for base in (Path("src/shellforgeai/cli"), Path("src/shellforgeai/core"))
         for path in base.rglob("*.py")
-        if path.name != "approved_change_capability_binding.py"
+        if path.name not in permitted
         and "approved_change_capability_binding" in path.read_text(encoding="utf-8")
     ]
     assert offenders == []
+
+
+def test_the_only_permitted_consumer_uses_the_maintained_binding_operation():
+    source = Path("src/shellforgeai/core/approved_change_plan_link.py").read_text(encoding="utf-8")
+    assert "construct_persisted_approved_change_capability_binding" in source
+    assert "evaluate_persisted_approved_change_capability_support" not in source
+    assert "load_persisted_approved_change_approval_artifact" not in source
 
 
 def test_no_cli_surface_was_added():

@@ -17,7 +17,6 @@ network path, and natural language never reaches it.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import importlib.util
 import json
 import os
@@ -31,7 +30,24 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-SCHEMA_VERSION = 1
+from shellforgeai.core.windows_runtime_reconcile_plan_contract import (
+    ACCEPTED_PLAN_STATUSES,  # noqa: F401 - maintained PR313 constant re-export
+    ALLOWLIST,
+    AUTHORIZED_PARENT_DIRECTORIES,
+    PARENT_CONTRACT_VERSION,
+    PARENT_CREATION_ALLOWED,
+    PARENT_RELATIVE,
+    PARENT_STATES,
+    PLAN_SCHEMA_VERSION,
+    SAVED_OPERATIONS,
+    canonical_plan_json,  # noqa: F401 - maintained PR313 helper re-export
+    canonical_plan_sha256,
+    confirmation_matches,
+    is_plan_sha256,
+    saved_plan_executable_contract_errors,
+)
+
+SCHEMA_VERSION = PLAN_SCHEMA_VERSION
 RECIPE_ID = "windows.runtime_reconcile"
 PLAN_MODE = "windows_runtime_reconcile"
 EXECUTE_MODE = "windows_runtime_reconcile_execute"
@@ -47,29 +63,23 @@ RECEIPT_MANIFEST = "manifest.json"
 RECEIPT_REQUIRED_FILES = (RECEIPT_JSON, RECEIPT_MD, RECEIPT_MANIFEST)
 RECEIPT_ROOT_NAME = "windows_runtime_reconcile_receipts"
 
-#: The complete, fixed, ordered execution allowlist.  Nothing else is reachable.
-ALLOWLIST: tuple[tuple[str, str], ...] = (
-    ("config/profiles/inspect.yaml", "config/profiles/inspect.yaml"),
-    ("scripts/windows/sfai.cmd", "bin/sfai.cmd"),
+#: The complete, fixed, ordered execution allowlist and the exact fixed
+#: destination-parent contract.  Both are the maintained pure plan-contract
+#: constants, re-exported here so every existing PR313 consumer keeps its exact
+#: import surface while exactly one definition exists.  Nothing else is
+#: reachable: only the inspect-profile destination may have its parent chain
+#: created, and only the exact ``config`` / ``config/profiles`` components
+#: beneath an already-existing durable runtime root.  The wrapper parent ``bin``
+#: must already exist.  No generic mkdir, bootstrap, installer, or
+#: caller-supplied directory is reachable.
+__all_plan_contract_reexports__ = (
+    "ALLOWLIST",
+    "AUTHORIZED_PARENT_DIRECTORIES",
+    "PARENT_CONTRACT_VERSION",
+    "PARENT_CREATION_ALLOWED",
+    "PARENT_RELATIVE",
+    "PARENT_STATES",
 )
-
-#: Exact fixed destination-parent contract.
-#:
-#: Only the inspect-profile destination may have its parent chain created, and only
-#: the exact ``config`` / ``config/profiles`` components beneath an already-existing
-#: durable runtime root. The wrapper parent ``bin`` must already exist. No generic
-#: mkdir, bootstrap, installer, or caller-supplied directory is reachable.
-PARENT_CONTRACT_VERSION = 1
-PARENT_RELATIVE: Mapping[str, str] = {
-    "config/profiles/inspect.yaml": "config/profiles",
-    "bin/sfai.cmd": "bin",
-}
-PARENT_CREATION_ALLOWED: Mapping[str, bool] = {
-    "config/profiles/inspect.yaml": True,
-    "bin/sfai.cmd": False,
-}
-AUTHORIZED_PARENT_DIRECTORIES: tuple[str, ...] = ("config", "config/profiles")
-PARENT_STATES = ("present", "create_required", "blocked")
 
 #: Conservative per-source maximum sizes enforced before any preparation.
 MAX_SOURCE_BYTES: Mapping[str, int] = {
@@ -80,9 +90,6 @@ MAX_SOURCE_BYTES: Mapping[str, int] = {
 INSPECT_PROFILE_NAME = "inspect"
 BACKUP_MARKER = "sfai-pr305-backup"
 TEMP_MARKER = "sfai-pr313-tmp"
-
-SAVED_OPERATIONS = ("no_change", "create_required", "replace_required")
-ACCEPTED_PLAN_STATUSES = ("ready", "no_change")
 
 STATUS_EXECUTED = "executed"
 STATUS_PARTIAL_EXECUTED = "partial_executed"
@@ -307,25 +314,6 @@ def root_fingerprint(root: Path | str | None) -> str | None:
     if normalized is None:
         return None
     return hashlib.sha256(_case(normalized).encode("utf-8")).hexdigest()
-
-
-def canonical_plan_json(packet: Mapping[str, Any]) -> str:
-    """Deterministic canonical JSON used for the confirmation identity."""
-    return json.dumps(packet, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def canonical_plan_sha256(packet: Mapping[str, Any]) -> str:
-    return hashlib.sha256(canonical_plan_json(packet).encode("utf-8")).hexdigest()
-
-
-def is_plan_sha256(value: object) -> bool:
-    return bool(_SHA256_RE.fullmatch(str(value or "")))
-
-
-def confirmation_matches(supplied: str, expected: str) -> bool:
-    if not is_plan_sha256(supplied) or not is_plan_sha256(expected):
-        return False
-    return hmac.compare_digest(str(supplied), str(expected))
 
 
 def windows_reconcile_receipt_root(data_dir: Path | str) -> Path:
@@ -1078,38 +1066,8 @@ def _load_json_object(path: Path) -> tuple[dict[str, Any] | None, list[str], str
 
 
 def _plan_contract_errors(packet: Mapping[str, Any]) -> list[str]:
-    errors: list[str] = []
-    if packet.get("destination_parent_contract_version") != PARENT_CONTRACT_VERSION:
-        errors.append(
-            "saved packet predates the destination-parent contract; regenerate the "
-            "PR305 plan and confirm its new canonical hash"
-        )
-    if packet.get("mode") != PLAN_MODE:
-        errors.append("saved packet mode is not windows_runtime_reconcile")
-    if packet.get("recipe_id") != RECIPE_ID:
-        errors.append("saved packet recipe_id is not windows.runtime_reconcile")
-    if packet.get("status") not in ACCEPTED_PLAN_STATUSES:
-        errors.append("saved packet status is not ready or no_change")
-    expected_allowlist = [{"source": a, "destination": b} for a, b in ALLOWLIST]
-    if packet.get("allowlist") != expected_allowlist:
-        errors.append("saved packet allowlist does not match the exact two-file allowlist")
-    operations = packet.get("operations")
-    if not isinstance(operations, list) or len(operations) != len(ALLOWLIST):
-        errors.append("saved packet must contain exactly two allowlisted operations")
-        return errors
-    pairs = [
-        (op.get("allowlist_source"), op.get("allowlist_destination"))
-        if isinstance(op, dict)
-        else (None, None)
-        for op in operations
-    ]
-    if pairs != list(ALLOWLIST):
-        errors.append("saved packet operation ordering or allowlist mismatch")
-    for op in operations:
-        if not isinstance(op, dict) or op.get("operation") not in SAVED_OPERATIONS:
-            errors.append("saved packet contains a non-executable operation")
-            break
-    return errors
+    """Delegate to the maintained pure executable-plan contract."""
+    return saved_plan_executable_contract_errors(packet)
 
 
 def execute_windows_runtime_reconcile(
