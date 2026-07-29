@@ -25,6 +25,9 @@ WINDOWS_PHRASES = [
     ("windows evidence", "windows_evidence"),
     ("show me windows processes", "windows_processes"),
     ("windows processes", "windows_processes"),
+    ("windows services", "windows_services"),
+    ("show windows services", "windows_services"),
+    ("show me windows services", "windows_services"),
 ]
 
 

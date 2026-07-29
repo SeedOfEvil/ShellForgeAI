@@ -162,6 +162,7 @@ _WINDOWS_READ_ONLY_INTENT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"^(?:show(?: me)?(?: the)? )?windows status$"), "windows_status"),
     (re.compile(r"^(?:show(?: me)?(?: the)? )?windows doctor$"), "windows_doctor"),
     (re.compile(r"^(?:show(?: me)?(?: the)? )?windows evidence$"), "windows_evidence"),
+    (re.compile(r"^(?:show(?: me)?(?: the)? )?windows services$"), "windows_services"),
     (
         re.compile(r"^(?:show(?: me)?(?: the)? )?windows processes(?: limit (?P<limit>\d{1,3}))?$"),
         "windows_processes",

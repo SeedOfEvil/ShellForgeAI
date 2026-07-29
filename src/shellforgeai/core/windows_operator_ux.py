@@ -11,6 +11,7 @@ WINDOWS_OPERATOR_INTENT_NEXT_CHECK: Final = "windows_next_check"
 WINDOWS_OPERATOR_INTENT_PERFORMANCE: Final = "windows_performance"
 WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL: Final = "windows_strongest_signal"
 WINDOWS_OPERATOR_INTENT_HANDOFF: Final = "windows_handoff"
+WINDOWS_OPERATOR_INTENT_SERVICES: Final = "windows_services"
 WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL: Final = "windows_mutation_refusal"
 
 WINDOWS_STANDARD_EVIDENCE_COMMAND: Final = "shellforgeai windows evidence --profile standard --json"
@@ -60,6 +61,12 @@ _COMMANDS_BY_INTENT: Final[dict[str, tuple[str, ...]]] = {
         WINDOWS_STATUS_COMMAND,
         WINDOWS_DOCTOR_COMMAND,
     ),
+    WINDOWS_OPERATOR_INTENT_SERVICES: (
+        WINDOWS_SERVICES_COMMAND,
+        WINDOWS_EVENTS_COMMAND,
+        WINDOWS_STATUS_COMMAND,
+        WINDOWS_DOCTOR_COMMAND,
+    ),
     WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL: (
         WINDOWS_STANDARD_EVIDENCE_COMMAND,
         WINDOWS_STATUS_COMMAND,
@@ -74,6 +81,7 @@ _HEADINGS: Final[dict[str, str]] = {
     WINDOWS_OPERATOR_INTENT_PERFORMANCE: "## Windows performance first pass",
     WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL: "## Windows CPU/memory/disk/process comparison",
     WINDOWS_OPERATOR_INTENT_HANDOFF: "## Windows current-host handoff",
+    WINDOWS_OPERATOR_INTENT_SERVICES: "## Windows services guidance",
 }
 
 
@@ -194,6 +202,32 @@ def _handoff(text: str) -> bool:
     )
 
 
+_SERVICE_LEAD: Final = r"(?:show|list|check|get)(?: me)?(?: the)? "
+_SERVICE_STATE: Final = r"(?:failed |running |stopped |all |automatic )?"
+_SERVICE_NOUN: Final = r"(?:windows )?services?"
+_SERVICE_ASPECT: Final = r"(?:status|health|state)"
+_SERVICE_TAIL: Final = r"(?: on (?:this |the )?(?:host|machine|server|system|box))?"
+
+# Deliberately anchored full-string forms only. Broad substring matching on the
+# word "service" would capture unrelated operator text such as "customer service
+# status", "service desk", or "software as a service".
+_SERVICE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern)
+    for pattern in (
+        rf"{_SERVICE_LEAD}{_SERVICE_STATE}{_SERVICE_NOUN}{_SERVICE_TAIL}",
+        rf"{_SERVICE_LEAD}{_SERVICE_STATE}{_SERVICE_NOUN} {_SERVICE_ASPECT}{_SERVICE_TAIL}",
+        rf"{_SERVICE_NOUN} {_SERVICE_ASPECT}{_SERVICE_TAIL}",
+        rf"windows services?{_SERVICE_TAIL}",
+        rf"(?:are|is)(?: the)? {_SERVICE_STATE}{_SERVICE_NOUN} healthy{_SERVICE_TAIL}",
+        rf"(?:what|which)(?: windows)? services? are running{_SERVICE_TAIL}",
+    )
+)
+
+
+def _services(text: str) -> bool:
+    return any(pattern.fullmatch(text) for pattern in _SERVICE_PATTERNS)
+
+
 def _mutation(text: str, explicit_windows: bool) -> bool:
     actions = (
         "clean up",
@@ -238,6 +272,30 @@ def classify_windows_operator_intent(text: str, *, host_system: str) -> WindowsO
     return None
 
 
+def classify_windows_interactive_intent(
+    text: str, *, host_system: str
+) -> WindowsOperatorRoute | None:
+    """Interactive-only superset of :func:`classify_windows_operator_intent`.
+
+    The shared classifier runs first and its route is returned unchanged, so
+    mutation refusal and every existing read-only intent keep their exact
+    priority and the top-level ``ask`` contract is untouched. Only text the
+    shared classifier leaves unclassified is tested against the bounded
+    read-only Windows service inventory/health predicate.
+    """
+    shared = classify_windows_operator_intent(text, host_system=host_system)
+    if shared is not None:
+        return shared
+    normalized = normalize_windows_operator_text(text)
+    if not normalized or not _services(normalized):
+        return None
+    host_is_windows = host_system.casefold() == "windows"
+    explicit = _explicit_windows(normalized)
+    if not _scoped(normalized, host_is_windows, explicit):
+        return None
+    return WindowsOperatorRoute(WINDOWS_OPERATOR_INTENT_SERVICES, host_is_windows, explicit)
+
+
 def windows_operator_safe_commands(intent: str) -> tuple[str, ...]:
     return tuple(_COMMANDS_BY_INTENT.get(intent, (WINDOWS_STANDARD_EVIDENCE_COMMAND,)))
 
@@ -250,7 +308,11 @@ def render_windows_operator_safe_next_section(intent: str) -> str:
     if rest:
         lines.extend(("", "Relevant read-only drill-downs:"))
         lines.extend(f"- {cmd}" for cmd in rest)
-        lines.append("These commands are optional drill-downs after the standard profile.")
+        lines.append(
+            "These commands are optional drill-downs after the services command."
+            if intent == WINDOWS_OPERATOR_INTENT_SERVICES
+            else "These commands are optional drill-downs after the standard profile."
+        )
     lines.extend(
         [
             "",

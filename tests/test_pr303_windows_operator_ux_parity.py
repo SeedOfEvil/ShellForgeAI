@@ -34,6 +34,15 @@ def test_helper_is_pure_deterministic_and_commands_safe() -> None:
         )
         commands += ("x",)
         assert ux.windows_operator_safe_commands(intent)[-1] != "x"
+    # PR325: the interactive-only services intent is the one route that leads
+    # with the canonical services command instead of the standard profile.
+    service_commands = ux.windows_operator_safe_commands(ux.WINDOWS_OPERATOR_INTENT_SERVICES)
+    assert service_commands[0] == ux.WINDOWS_SERVICES_COMMAND
+    assert len(service_commands) == len(set(service_commands))
+    assert not any(
+        any(term in c for term in ("cleanup", "restart", "kill", "terminate"))
+        for c in service_commands
+    )
 
 
 @pytest.mark.parametrize(
@@ -131,6 +140,19 @@ def test_strongest_handoff_and_mutation_priority() -> None:
             == ux.WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL
         )
     assert ux.classify_windows_operator_intent("show service status", host_system="Windows") is None
+    # PR325 keeps the shared classifier unchanged; only the interactive-only
+    # superset recognizes the bounded read-only service phrase, and mutation
+    # refusal still wins there.
+    service_route = ux.classify_windows_interactive_intent(
+        "show service status", host_system="Windows"
+    )
+    assert service_route is not None
+    assert service_route.intent == ux.WINDOWS_OPERATOR_INTENT_SERVICES
+    mutation_route = ux.classify_windows_interactive_intent(
+        "restart Windows services", host_system="Windows"
+    )
+    assert mutation_route is not None
+    assert mutation_route.intent == ux.WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL
 
 
 def test_rendering_contract_windows_and_non_windows_and_refusal() -> None:
@@ -205,8 +227,13 @@ def test_source_guardrails_positive_control() -> None:
         "windows_evidence",
     )
     assert not any(term in helper for term in forbidden_helper)
+    # `ask` keeps the shared classifier; since PR325 the REPL routes through the
+    # interactive-only superset seam, which delegates to the shared classifier
+    # first so mutation refusal and existing intents keep their exact priority.
     assert "classify_windows_operator_intent" in ask
-    assert "classify_windows_operator_intent" in repl
+    assert "classify_windows_interactive_intent" not in ask
+    assert "classify_windows_interactive_intent" in repl
+    assert "classify_windows_operator_intent" in helper
     unsafe = helper + "\nsubprocess.run(['x'])\n"
     assert "subprocess" in unsafe
 
