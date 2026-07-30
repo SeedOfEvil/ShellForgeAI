@@ -99,7 +99,10 @@ def register(app: typer.Typer) -> None:
             classify_windows_operator_intent,
             render_windows_operator_guidance,
         )
-        from shellforgeai.llm.prompts import build_contextual_prompt
+        from shellforgeai.llm.prompts import (
+            build_contextual_prompt,
+            build_windows_evidence_model_prompt,
+        )
         from shellforgeai.llm.schemas import ModelRequest
 
         cli = _cli()
@@ -411,7 +414,11 @@ def register(app: typer.Typer) -> None:
                 and ctx_mode != "full"
                 else ctx_mode
             )
-            prompt = build_contextual_prompt(question, prompt_context, mode=effective_mode)
+            prompt = (
+                build_windows_evidence_model_prompt(question, prompt_context, mode=effective_mode)
+                if windows_packet is not None
+                else build_contextual_prompt(question, prompt_context, mode=effective_mode)
+            )
         else:
             prompt_context = {
                 "host": platform.platform(),
@@ -426,10 +433,13 @@ def register(app: typer.Typer) -> None:
             if docker_grounding is not None:
                 prompt_context["deterministic_docker_evidence"] = docker_grounding["prompt_block"]
             _apply_windows_evidence_context(prompt_context)
-            prompt = build_contextual_prompt(
-                question,
-                prompt_context,
-                mode="full" if windows_packet is not None and ctx_mode != "full" else ctx_mode,
+            effective_mode = (
+                "full" if windows_packet is not None and ctx_mode != "full" else ctx_mode
+            )
+            prompt = (
+                build_windows_evidence_model_prompt(question, prompt_context, mode=effective_mode)
+                if windows_packet is not None
+                else build_contextual_prompt(question, prompt_context, mode=effective_mode)
             )
         resp = provider.complete(
             ModelRequest(

@@ -79,7 +79,7 @@ from shellforgeai.interactive.banner import build_banner
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.codex import CodexProvider, classify_model_failure
 from shellforgeai.llm.manager import build_provider
-from shellforgeai.llm.prompts import build_contextual_prompt
+from shellforgeai.llm.prompts import build_contextual_prompt, build_windows_evidence_model_prompt
 from shellforgeai.llm.schemas import ModelRequest
 from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import disk, host, network, process, registry, storage, systemd
@@ -4156,12 +4156,11 @@ No command was executed.""")
             update_grounding_from_latest_context(grounding, latest_context)
             _record_latest_context_in_session_summary(session_summary, latest_context)
         with console.status("Preparing context..."):
-            prompt = build_contextual_prompt(
-                user_input if routed.name != "ask" else routed.args,
-                context,
-                # The Windows evidence packet needs the larger context budget
-                # to keep its numeric facts intact in the prompt.
-                mode="full" if windows_packet is not None else "standard",
+            prompt_question = user_input if routed.name != "ask" else routed.args
+            prompt = (
+                build_windows_evidence_model_prompt(prompt_question, context, mode="full")
+                if windows_packet is not None
+                else build_contextual_prompt(prompt_question, context, mode="standard")
             )
         try:
             resp_text, resp_streamed = _run_model_synthesis(

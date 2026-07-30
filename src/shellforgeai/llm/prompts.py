@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 
-from shellforgeai.llm.system_prompt import SHELLFORGE_SYSTEM_PROMPT
+from shellforgeai.llm.system_prompt import SHELLFORGE_SYSTEM_PROMPT, WINDOWS_EVIDENCE_SYSTEM_PROMPT
 
 SECRET_RE = re.compile(
     r"(api_key|token|secret|password|bearer|authorization|private_key|client_secret|refresh_token|access_token|auth\.json)",
@@ -72,3 +72,41 @@ or ask the operator to run collectors manually."""
 def build_contextual_prompt(question: str, context: dict, mode: str = "standard") -> str:
     max_chars = 800 if mode == "minimal" else 2500 if mode == "standard" else 5000
     return build_model_prompt(question, context, max_chars=max_chars)
+
+
+def build_windows_evidence_model_prompt(
+    question: str, context: dict, *, mode: str = "standard"
+) -> str:
+    """Build the dedicated prompt for an already-selected Windows evidence path."""
+    from shellforgeai.core.windows_evidence_context import (
+        project_windows_evidence_for_model,
+        windows_evidence_prompt_facts,
+    )
+
+    max_chars = 800 if mode == "minimal" else 2500 if mode == "standard" else 5000
+    packet = context.get("windows_evidence") or {}
+    projected = project_windows_evidence_for_model(packet)
+    model_context = {
+        "identity": "Windows host with Windows-local read-only evidence",
+        "windows_evidence": projected,
+        "windows_evidence_facts": windows_evidence_prompt_facts(projected),
+        "evidence_gaps": projected.get("evidence_gaps", []),
+        "read_only": True,
+        "mutation_permitted": False,
+    }
+    capability_map = """Available Windows read-only evidence capabilities:
+- Windows status and host information; Windows doctor
+- physical and virtual memory
+- drives and volumes, storage capacity, and free space
+- Windows processes and Windows services with service state
+- Windows events and Event Logs
+- Windows network evidence
+
+Use only capabilities and facts represented by the supplied Windows evidence packet."""
+    payload = redact_text(json.dumps(model_context, indent=2, ensure_ascii=False))[:max_chars]
+    return (
+        f"{WINDOWS_EVIDENCE_SYSTEM_PROMPT}\n\n{capability_map}\n\n"
+        "Ground the answer only in the supplied Windows-local read-only evidence. "
+        "Preserve evidence gaps and do not infer health. No mutation is permitted.\n"
+        f"Question: {question}\nContext:\n{payload}"
+    )
