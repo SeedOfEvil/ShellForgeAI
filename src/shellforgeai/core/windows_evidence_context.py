@@ -17,6 +17,7 @@ limitation instead of crashing interactive mode or inventing values.
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from typing import Any
 
 from shellforgeai.core.windows_operator_ux import (
@@ -386,6 +387,39 @@ def windows_evidence_prompt_facts(packet: dict[str, Any]) -> list[dict[str, str]
     return rows
 
 
+def project_windows_evidence_for_model(packet: dict[str, Any]) -> dict[str, Any]:
+    """Return a bounded, non-mutating Windows-native model projection."""
+    projected = deepcopy(
+        {
+            key: packet.get(key)
+            for key in (
+                "platform",
+                "visibility",
+                "read_only",
+                "mutation_performed",
+                "host",
+                "platform_detail",
+                "python_runtime",
+                "memory",
+                "disk",
+                "processes",
+                "services",
+                "evidence_gaps",
+                "safe_next_commands",
+            )
+        }
+    )
+    disk = projected.get("disk")
+    if isinstance(disk, dict):
+        disk.pop("inode_limitation", None)
+    projected["limitations"] = [
+        item
+        for item in packet.get("limitations") or []
+        if "inode" not in str(item).lower() and str(item) != LINUX_ONLY_COLLECTORS_SKIPPED_MARKER
+    ]
+    return projected
+
+
 _FORBIDDEN_PREAMBLE_TERMS = (
     "agents.md",
     "shellforgeai invariants",
@@ -467,6 +501,28 @@ def is_container_primary_framing(text: str) -> bool:
     return any(term in head for term in _CONTAINER_FRAMING_TERMS) and "windows" not in head
 
 
+_LINUX_PRIMARY_OPERATIONAL_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\bsystemctl\b",
+        r"\bjournalctl\b",
+        r"\bsystemd[- ](?:unit|service)s?\b",
+        r"(?<!\S)df\s+-i\b",
+        r"(?<!\S)ps\s+aux\b",
+        r"(?<!\w)/var/log(?:/|\b)",
+        r"\binode[- ](?:pressure|exhaustion|equivalent)\b",
+        r"\b(?:use|check)(?:\s+(?:the|for))?\s+inodes?\b",
+        r"\blinux\s+service\s+manager\b",
+    )
+)
+
+
+def contains_linux_primary_operational_framing(text: str) -> bool:
+    """Detect precise Linux-primary operational guidance in a Windows answer."""
+    normalized = _normalize_answer_text(text)
+    return any(pattern.search(normalized) for pattern in _LINUX_PRIMARY_OPERATIONAL_PATTERNS)
+
+
 def is_rejected_windows_model_answer(text: str) -> bool:
     """Bad-output gate for Windows evidence-context answers.
 
@@ -480,6 +536,7 @@ def is_rejected_windows_model_answer(text: str) -> bool:
         contains_project_policy_preamble(text)
         or is_metadata_primary_answer(text)
         or is_container_primary_framing(text)
+        or contains_linux_primary_operational_framing(text)
     )
 
 
@@ -520,7 +577,16 @@ def render_windows_evidence_answer(question: str, packet: dict[str, Any]) -> str
             + "\n"
         )
 
-    limitations = "\n".join(f"- {item}." for item in packet.get("limitations") or [])
+    windows_native_limitations = [
+        item
+        for item in packet.get("limitations") or []
+        if "inode" not in str(item).lower() and item != LINUX_ONLY_COLLECTORS_SKIPPED_MARKER
+    ]
+    limitation_lines = ""
+    if windows_native_limitations:
+        limitation_lines = "\nEvidence gaps:\n" + "\n".join(
+            f"- {item}." for item in windows_native_limitations
+        )
     commands = "\n".join(f"- {cmd}" for cmd in packet.get("safe_next_commands") or [])
     process_service_note = (
         "Process/service evidence above is read-only.\n"
@@ -535,8 +601,8 @@ def render_windows_evidence_answer(question: str, packet: dict[str, Any]) -> str
         + "\n"
         + process_service_note
         + gap_lines
-        + "\nWindows metric limitations:\n"
-        + limitations
+        + limitation_lines
+        + "\nEvidence gaps are stated above; no missing fact was inferred."
         + "\n\nSafe next read-only commands:\n"
         + commands
         + "\n\nSafety: read-only evidence only. No command was executed, and no "

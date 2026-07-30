@@ -1,5 +1,7 @@
 # Codex integration (current + future)
 
+Evidence-backed Windows model calls use a dedicated Windows-native system identity and Windows-only capability map. A pure model-facing projection preserves bounded host, memory, drive/volume, process, service, safe-next, and evidence-gap facts without changing the raw Windows evidence packet or its limits; Linux-only limitation markers are omitted from model context. Precise Linux-primary operational guidance is rejected before operator output and replaced by the deterministic read-only Windows evidence fallback. Provider and model selection and the Linux/default prompt path are unchanged.
+
 ## Current architecture (provider mode)
 
 - ShellForgeAI calls the Codex CLI as a model/provider for analysis text

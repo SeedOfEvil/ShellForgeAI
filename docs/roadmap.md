@@ -1,5 +1,11 @@
 # Roadmap
 
+## OS-aware model-context vocabulary
+
+- The Windows evidence-backed model path has a dedicated Windows-native identity, capability map, bounded evidence projection, precise Linux-primary answer gate, and deterministic Windows evidence fallback.
+- Linux/default prompts and the Linux-primary V1 contract remain unchanged. No provider or model-selection modernization occurs here.
+- Model-selection modernization may be considered only after separate review. Stage B linked-plan current-state revalidation remains a separate future dependency.
+
 ShellForgeAI's active roadmap is forward-looking. The permanent final-state product contract is defined in [North Star](north-star.md). Historical PR-by-PR engineering chronology has moved to [Project history archive](archive/PROJECT_HISTORY.md).
 
 ## Current product
