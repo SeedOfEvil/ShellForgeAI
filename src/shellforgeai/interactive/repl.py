@@ -85,6 +85,7 @@ from shellforgeai.render.summary import write_diagnosis_summary_md
 from shellforgeai.tools import disk, host, network, process, registry, storage, systemd
 from shellforgeai.version import get_build_info
 from shellforgeai.windows_memory import windows_memory_payload, windows_memory_summary
+from shellforgeai.windows_services import render_windows_services_text, windows_services_payload
 
 from .commands import route_input
 from .guards import is_multiline_shell_fragment, is_shell_fragment_line, looks_like_shell_command
@@ -118,6 +119,7 @@ _WINDOWS_INTENT_LABELS = {
 WINDOWS_SERVICES_SAFE_NEXT_COMMANDS: tuple[str, ...] = windows_operator_safe_commands(
     WINDOWS_OPERATOR_INTENT_SERVICES
 )
+WINDOWS_INTERACTIVE_SERVICES_LIMIT = 25
 
 
 def _is_windows_host() -> bool:
@@ -315,6 +317,102 @@ def _windows_interactive_pending_context(
         deterministic_only=True,
         model_assessment_status="not_called",
         facts={"visibility": "windows-local-read-only", "recent_intent": intent},
+    )
+
+
+def _windows_services_latest_context(
+    *, session_id: str, payload: dict[str, Any]
+) -> LatestDiagnosisContext:
+    """Keep only bounded service summaries in the in-memory latest context."""
+
+    services = payload.get("services") or {}
+    limits = services.get("collection_limits") or {}
+    state_counts = dict(services.get("state_counts") or {})
+    runtime_summary = dict(services.get("runtime_summary") or {})
+    highlights = [
+        f"Payload status: {payload.get('status', 'unknown')}",
+        f"Total services: {services.get('total_count', 0)}",
+        "State counts: " + "; ".join(f"{key}={value}" for key, value in state_counts.items()),
+        "Runtime summary: " + "; ".join(f"{key}={value}" for key, value in runtime_summary.items()),
+        "Collection limit: "
+        f"max_services={limits.get('max_services', WINDOWS_INTERACTIVE_SERVICES_LIMIT)}; "
+        f"truncated={str(limits.get('truncated', False)).lower()}",
+    ]
+    limitations = [
+        "Runtime signals are point-in-time observations, not failure diagnoses; "
+        "stopped services can be normal.",
+        "Named-service expectations, configuration, dependencies, and recovery policy "
+        "are not collected.",
+    ]
+    if payload.get("status") != "ok":
+        highlights = [
+            f"Payload status: {payload.get('status', 'unknown')}",
+            f"Reason: {payload.get('reason', 'Windows services evidence is unavailable.')}",
+        ]
+    return LatestDiagnosisContext(
+        session_id=session_id,
+        created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        target="windows-local-read-only",
+        diagnosis_kind=WINDOWS_OPERATOR_INTENT_SERVICES,
+        evidence_highlights=highlights,
+        findings=[f"Windows services payload status: {payload.get('status', 'unknown')}"],
+        limitations=limitations,
+        safe_next_commands=list(WINDOWS_SERVICES_SAFE_NEXT_COMMANDS),
+        suggested_followup_categories=[
+            WINDOWS_OPERATOR_INTENT_SERVICES,
+            "windows_events",
+            "windows_status",
+            "windows_doctor",
+        ],
+        source_command=WINDOWS_SERVICES_COMMAND,
+        deterministic_only=True,
+        model_assessment_status="not_called",
+        facts={
+            "visibility": "windows-local-read-only",
+            "payload_status": payload.get("status", "unknown"),
+            "total_service_count": services.get("total_count", 0),
+            "state_counts": state_counts,
+            "runtime_summary": runtime_summary,
+            "collection_limit": limits.get("max_services", WINDOWS_INTERACTIVE_SERVICES_LIMIT),
+            "truncated": bool(limits.get("truncated", False)),
+        },
+    )
+
+
+def _collect_windows_services_interactive_payload() -> dict[str, Any]:
+    """Call the maintained payload once and fail closed with a sanitized error."""
+
+    try:
+        return windows_services_payload(max_services=WINDOWS_INTERACTIVE_SERVICES_LIMIT)
+    except Exception:
+        return {
+            "status": "error",
+            "platform": {"system": "windows"},
+            "read_only": True,
+            "mutation_performed": False,
+            "windows_v1": {"available": True},
+            "reason": "Windows service evidence collection failed unexpectedly.",
+        }
+
+
+def _render_windows_services_interactive_evidence(payload: dict[str, Any]) -> str:
+    """Wrap the maintained bounded renderer with interactive safety context."""
+
+    safe_next = "\n".join(f"- {command}" for command in WINDOWS_SERVICES_SAFE_NEXT_COMMANDS)
+    return (
+        "## Windows services evidence\n"
+        "Context: Windows local read-only.\n"
+        "Context/visibility: windows-local-read-only.\n\n"
+        f"{render_windows_services_text(payload)}\n\n"
+        "Interpretation limits:\n"
+        "- Runtime signals are point-in-time observations, not failure diagnoses.\n"
+        "- Stopped services can be normal; named-service expectations are not evaluated.\n"
+        "- Service configuration and recovery policy are not collected.\n\n"
+        "Safe next commands:\n"
+        f"{safe_next}\n\n"
+        "No command was executed. No action was taken.\n"
+        "No cleanup, restart, service control, process termination, remediation, "
+        "rollback, or recovery was performed."
     )
 
 
@@ -2842,16 +2940,21 @@ def start_interactive(
                 )
                 continue
             if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_SERVICES:
-                # Bounded read-only service inventory/health: deterministic
-                # guidance only. The canonical services command is shown, never
-                # executed, and no service collector is invoked.
-                latest_context = _windows_interactive_pending_context(
-                    session_id=runtime.session.session_id,
-                    intent=WINDOWS_OPERATOR_INTENT_SERVICES,
-                    source_command=WINDOWS_SERVICES_COMMAND,
-                )
                 pending_followup = None
-                console.print(render_windows_operator_guidance(shared_windows_route))
+                if not shared_windows_route.host_is_windows:
+                    latest_context = _windows_interactive_pending_context(
+                        session_id=runtime.session.session_id,
+                        intent=WINDOWS_OPERATOR_INTENT_SERVICES,
+                        source_command=WINDOWS_SERVICES_COMMAND,
+                    )
+                    console.print(render_windows_operator_guidance(shared_windows_route))
+                    continue
+                with console.status("Collecting Windows read-only service evidence..."):
+                    services_payload = _collect_windows_services_interactive_payload()
+                latest_context = _windows_services_latest_context(
+                    session_id=runtime.session.session_id, payload=services_payload
+                )
+                console.print(_render_windows_services_interactive_evidence(services_payload))
                 continue
             if (
                 shared_windows_route.intent
