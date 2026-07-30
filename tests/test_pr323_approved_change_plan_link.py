@@ -1758,7 +1758,11 @@ def test_the_module_is_not_imported_by_cli_approvals_recipes_or_execution():
         str(path)
         for base in (Path("src/shellforgeai/cli"), Path("src/shellforgeai/core"))
         for path in base.rglob("*.py")
-        if path.name != "approved_change_plan_link.py"
+        if path.name
+        not in {
+            "approved_change_plan_link.py",
+            "approved_change_plan_current_state.py",
+        }
         and "approved_change_plan_link" in path.read_text(encoding="utf-8")
     ]
     assert offenders == []

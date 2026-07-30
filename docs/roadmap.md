@@ -1,5 +1,12 @@
 # Roadmap
 
+The approved-change work now includes point-in-time live current-state
+revalidation for one exact PR323-linked Windows runtime-reconcile plan. It does
+not execute, and Stage B remains incomplete. Future gates still include PR304
+evidence freshness, authenticated identity, authorization, receipt linkage, a
+future execution preflight, and separately justified persistence of link or
+current-state artifacts.
+
 ## OS-aware model-context vocabulary
 
 - The Windows evidence-backed model path has a dedicated Windows-native identity, capability map, bounded evidence projection, precise Linux-primary answer gate, and deterministic Windows evidence fallback.

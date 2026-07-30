@@ -1837,6 +1837,7 @@ def test_the_module_is_not_imported_by_cli_approvals_recipes_or_execution():
     permitted = {
         "approved_change_capability_binding.py",
         "approved_change_plan_link.py",
+        "approved_change_plan_current_state.py",
     }
     offenders = [
         str(path)

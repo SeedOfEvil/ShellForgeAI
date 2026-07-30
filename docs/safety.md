@@ -1,5 +1,10 @@
 # Safety
 
+Linked-plan current-state revalidation is local, fixed-scope, and read-only. It
+does not write, execute, persist, or create receipts, and its point-in-time
+result grants neither authorization nor execution eligibility. No CLI or
+natural-language route reaches the operation.
+
 ## V1 safety contract
 
 V1 release validation must explicitly prove deterministic refusal and governed
