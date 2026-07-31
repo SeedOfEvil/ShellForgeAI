@@ -1,5 +1,16 @@
 # Roadmap
 
+## Shared platform-aware operator contract
+
+- The shared immutable platform contract now centralizes local platform
+  classification reuse, support-lane identity, high-level route family, generic
+  presentation vocabulary, and deterministic unsupported fallback for ask and
+  interactive evidence paths. It adds no intent, collector, command, provider,
+  model, or execution behavior.
+- PR330 is the separate command-suggestion validation seam. PR331 is the
+  separate bounded evidence-first timing/progressive-response seam. PR332 is
+  the separate short golden-path and advanced-help seam.
+
 The approved-change work now includes point-in-time live current-state
 revalidation for one exact PR323-linked Windows runtime-reconcile plan. It does
 not execute, and Stage B remains incomplete. Future gates still include PR304

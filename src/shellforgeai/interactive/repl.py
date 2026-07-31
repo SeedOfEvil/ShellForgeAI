@@ -52,6 +52,10 @@ from shellforgeai.core.latest_context import (
     render_latest_context_pending,
 )
 from shellforgeai.core.plans import Plan, PlanStep
+from shellforgeai.core.platform_operator_contract import (
+    build_platform_operator_contract,
+    render_unsupported_platform_operator_response,
+)
 from shellforgeai.core.windows_evidence_context import (
     WINDOWS_EVIDENCE_MODEL_DIRECTIVE,
     build_windows_evidence_context,
@@ -2908,6 +2912,7 @@ def start_interactive(
     latest_context: LatestDiagnosisContext | None = None
     grounding = FollowupGroundingState()
     session_summary = InteractiveSessionSummaryState(session_id=runtime.session.session_id)
+    operator_contract = build_platform_operator_contract()
     while True:
         try:
             user_input = input("sfai> ").strip()
@@ -3533,6 +3538,9 @@ No command was executed.""")
             continue
 
         if routed.name in {"diagnose"}:
+            if not operator_contract.local_evidence_available:
+                console.print(render_unsupported_platform_operator_response(operator_contract))
+                continue
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, routed.args, online=False, since="30m")
             if routed.args == "network":
@@ -4077,6 +4085,9 @@ No command was executed.""")
             followup_intent in {"system_role", "health_status", "next_steps"}
             and latest_context is None
         ):
+            if not operator_contract.local_evidence_available:
+                console.print(render_unsupported_platform_operator_response(operator_contract))
+                continue
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, "health", online=False, since="30m")
             checks = [
@@ -4106,6 +4117,11 @@ No command was executed.""")
             continue
         if followup_intent is not None and latest_context is None:
             console.print(no_latest_context_reply())
+            continue
+        if not operator_contract.local_evidence_available and _is_machine_health_question(
+            user_input
+        ):
+            console.print(render_unsupported_platform_operator_response(operator_contract))
             continue
         provider = build_provider(runtime.settings)
         kind = "ask"

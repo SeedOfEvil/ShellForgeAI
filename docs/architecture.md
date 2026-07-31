@@ -32,6 +32,16 @@ CLI → collectors → triage → ops reports → artifacts → governed remedia
 - Slash commands are deterministic and unknown slash commands do not call the model.
 - Recognized operator asks route to deterministic report/triage/refusal paths.
 - Deterministic safety routes do not depend on model availability.
+- The immutable shared platform operator contract derives classification and
+  support-lane identity from maintained `detect_platform()` / `support_status()`
+  behavior. Existing intent authorities select a route first; the contract
+  supplies only generic platform dispatch and presentation metadata.
+- Linux/Docker and Windows specialized renderers remain authoritative. For an
+  already-selected generic evidence route on Darwin or an unknown platform,
+  ask and interactive mode return the shared deterministic unsupported response
+  before collection, provider construction, or model use.
+- Later command validation, timed/progressive response, and golden-path/help
+  work may consume this contract but are not part of it.
 
 ### Artifact lifecycle
 

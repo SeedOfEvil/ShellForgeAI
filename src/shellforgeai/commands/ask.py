@@ -88,6 +88,10 @@ def register(app: typer.Typer) -> None:
         )
         from shellforgeai.core.command_suggestions import filter_unsupported_command_suggestions
         from shellforgeai.core.diagnose import findings_summary_line
+        from shellforgeai.core.platform_operator_contract import (
+            build_platform_operator_contract,
+            render_unsupported_platform_operator_response,
+        )
         from shellforgeai.core.runbook import build_runbook, render_runbook_md
         from shellforgeai.core.windows_operator_ux import (
             WINDOWS_OPERATOR_INTENT_HANDOFF,
@@ -232,10 +236,15 @@ def register(app: typer.Typer) -> None:
                     cli.console.print("")
                     cli.console.print(render_docker_evidence_explainability(None), end="")
                 return
+        route = AskRoute(mode=PLAIN) if no_evidence else route_ask_intent(question)
+        if not no_evidence and route.mode == EVIDENCE_BACKED:
+            operator_contract = build_platform_operator_contract()
+            if not operator_contract.local_evidence_available:
+                cli.console.print(render_unsupported_platform_operator_response(operator_contract))
+                return
+
         provider = cli.build_provider(runtime.settings)
         ctx_mode = "full" if full_context else context
-
-        route = AskRoute(mode=PLAIN) if no_evidence else route_ask_intent(question)
         # PR289 — Windows interactive evidence-context parity: on a Windows
         # host, model-backed asks carry the bounded read-only Windows evidence
         # packet so answers are grounded in actual host facts.

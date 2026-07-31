@@ -43,6 +43,14 @@ rollback previews, closure reports, exports, or cleanup plans.
 
 Current product maturity is defined in [Product status](PRODUCT_STATUS.md): V1 released; early beta-quality; guarded and not production-autonomous. Safety boundaries are part of that guarded product model, not an Alpha classification. Linux/Docker remains the primary V1 lane; Windows preview maturity is tracked separately.
 
+The shared platform operator contract is immutable presentation and dispatch
+metadata only; it does not inspect natural language, select collectors, or
+execute. For an already-selected generic operator evidence route on macOS or
+an unknown platform, ShellForgeAI deterministically collects nothing, executes
+nothing, and points only to `shellforgeai platform doctor --json`. Natural
+language still cannot execute, and maintained mutation refusal remains ahead
+of platform evidence handling with unchanged wording.
+
 ## North Star implementation boundary
 
 Future approved implementation remains subject to the [North Star](north-star.md) contract: supported, typed, bounded implementation of the exact approved solution, not raw natural-language or arbitrary command execution.

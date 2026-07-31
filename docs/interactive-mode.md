@@ -76,6 +76,16 @@ Debug
 
 ## Routing
 
+- Generic evidence fallback uses the shared immutable platform operator
+  contract. Linux continues through the maintained Linux evidence path and
+  Windows through its Windows-local read-only path; specialized Docker and
+  Windows deterministic routes retain their existing renderers.
+- On macOS or an unknown platform, an already-classified generic operator
+  evidence request returns deterministic unsupported guidance before local
+  collection, provider construction, or model synthesis. The only next-safe
+  command is `shellforgeai platform doctor --json`. Plain conversation, help,
+  and command explanation/review remain available, and mutation refusal keeps
+  higher priority.
 - Slash commands are deterministic.
 - `diagnose ...`, `research ...`, `plan ...`, `ask ...` are explicit.
 - Free-form text is classified. Recognized ops intents (disk, performance,
