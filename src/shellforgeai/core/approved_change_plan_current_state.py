@@ -292,11 +292,28 @@ def revalidate_linked_windows_runtime_reconcile_plan_current_state(
         return _result(
             "unsupported", reason="current-state revalidation is supported only on Windows", **base
         )
-    source_root, runtime_root = Path(staged_source_root), Path(durable_runtime_root)
-    base.update(
-        staged_source_root_fingerprint=root_fingerprint(source_root) or "",
-        durable_runtime_root_fingerprint=root_fingerprint(runtime_root) or "",
-    )
+    try:
+        source_root = Path(staged_source_root)
+        runtime_root = Path(durable_runtime_root)
+    except Exception:
+        return _result(
+            "invalid_current_state_input",
+            reason="governed root input is invalid",
+            errors=["governed root preparation failed safely"],
+            **base,
+        )
+    try:
+        base.update(
+            staged_source_root_fingerprint=root_fingerprint(source_root) or "",
+            durable_runtime_root_fingerprint=root_fingerprint(runtime_root) or "",
+        )
+    except Exception:
+        return _result(
+            "current_state_blocked",
+            reason="complete current-state inspection was not possible",
+            errors=["governed root preparation failed safely"],
+            **base,
+        )
     try:
         validators = load_validators()
         root_errors = validators.pr305_root_safe(runtime_root)

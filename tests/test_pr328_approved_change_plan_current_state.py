@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -64,6 +65,133 @@ def call(tmp_path, packet, catalog, lane, link, **overrides):
     return current.revalidate_linked_windows_runtime_reconcile_plan_current_state(
         link.approval_artifact_id, packet, **values
     )
+
+
+def exact_link_result(link):
+    return SimpleNamespace(
+        link_complete=True,
+        plan_link=link,
+        capability_support_evaluated=True,
+        capability_supported=True,
+        capability_binding_evaluated=True,
+        capability_bound=True,
+        plan_linked=True,
+        errors=(),
+    )
+
+
+def guard_inspection(monkeypatch):
+    monkeypatch.setattr(current, "load_validators", lambda: pytest.fail("validators reached"))
+    monkeypatch.setattr(current, "_evaluate_file", lambda *a, **k: pytest.fail("file reached"))
+
+
+def assert_fail_closed_safety(result):
+    assert result.read_only
+    assert result.execution_status == "not_executed"
+    assert not result.current_state_revalidation_evaluated
+    assert not result.current_state_matched
+    false_fields = (
+        "mutation_performed",
+        "artifact_write_performed",
+        "publication_performed",
+        "persistence_performed",
+        "authorization_evaluated",
+        "preflight_evaluated",
+        "receipt_created",
+        "receipt_linked",
+        "host_configuration_mutation_performed",
+        "file_create_executed",
+        "file_replace_executed",
+        "backup_created",
+        "atomic_replace_executed",
+        "parent_directory_create_executed",
+        "compensation_executed",
+        "service_control_executed",
+        "process_termination_executed",
+        "registry_modified",
+        "powershell_executed",
+        "winrm_used",
+        "qga_used",
+        "remote_execution",
+        "subprocess_executed",
+        "shell_executed",
+        "natural_language_execution",
+        "network_call",
+        "model_called",
+        "secret_read",
+        "auth_cache_read",
+        "execution_allowed",
+        "execution_available",
+    )
+    assert all(getattr(result, field) is False for field in false_fields)
+
+
+class InvalidRoot(os.PathLike[str]):
+    def __fspath__(self) -> str:
+        raise RuntimeError("private failure at C:/not-for-results")
+
+
+@pytest.mark.parametrize("root_name", ["staged_source_root", "durable_runtime_root"])
+def test_path_construction_failure_is_sanitized_before_inspection(monkeypatch, tmp_path, root_name):
+    packet = plan_packet()
+    catalog, lane, link = confirmations(packet)
+    link_calls = []
+    monkeypatch.setattr(
+        current,
+        "link_persisted_approved_change_to_windows_runtime_reconcile_plan",
+        lambda *a, **k: link_calls.append(1) or exact_link_result(link),
+    )
+    monkeypatch.setattr(current.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        current, "root_fingerprint", lambda root: pytest.fail("fingerprint reached")
+    )
+    guard_inspection(monkeypatch)
+
+    result = call(tmp_path, packet, catalog, lane, link, **{root_name: InvalidRoot()})
+
+    assert result.status == "invalid_current_state_input"
+    assert result.reason == "governed root input is invalid"
+    assert result.errors == ("governed root preparation failed safely",)
+    assert link_calls == [1]
+    assert "C:/" not in result.model_dump_json()
+    assert "RuntimeError" not in result.model_dump_json()
+    assert "Traceback" not in result.model_dump_json()
+    assert_fail_closed_safety(result)
+
+
+@pytest.mark.parametrize("failure_call", [1, 2])
+def test_root_fingerprint_failure_is_sanitized_before_inspection(
+    monkeypatch, tmp_path, failure_call
+):
+    packet = plan_packet()
+    catalog, lane, link = confirmations(packet)
+    calls = []
+    monkeypatch.setattr(
+        current,
+        "link_persisted_approved_change_to_windows_runtime_reconcile_plan",
+        lambda *a, **k: exact_link_result(link),
+    )
+    monkeypatch.setattr(current.platform, "system", lambda: "Windows")
+
+    def fail_fingerprint(root):
+        calls.append(root)
+        if len(calls) == failure_call:
+            raise OSError("private failure at C:/not-for-results")
+        return "a" * 64
+
+    monkeypatch.setattr(current, "root_fingerprint", fail_fingerprint)
+    guard_inspection(monkeypatch)
+
+    result = call(tmp_path, packet, catalog, lane, link)
+
+    assert result.status == "current_state_blocked"
+    assert result.reason == "complete current-state inspection was not possible"
+    assert result.errors == ("governed root preparation failed safely",)
+    assert len(calls) == failure_call
+    assert "C:/" not in result.model_dump_json()
+    assert "OSError" not in result.model_dump_json()
+    assert "Traceback" not in result.model_dump_json()
+    assert_fail_closed_safety(result)
 
 
 @pytest.mark.parametrize("bad", ["", "A" * 64, "sha256:" + "a" * 64, "a" * 63, " a" * 32])
