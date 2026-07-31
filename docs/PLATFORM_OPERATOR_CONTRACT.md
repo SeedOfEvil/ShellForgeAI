@@ -57,6 +57,14 @@ health follow-up, or machine-health request returns before collectors and the
 model. Plain conversation, help, command explanation/review, and explicit
 non-evidence handlers remain available.
 
+The same session contract gates every maintained interactive local-evidence
+boundary: `/health`, evidence-producing CLI dispatch, routed diagnosis,
+refusal-adjacent log diagnosis, pending/deeper follow-ups, firewall diagnosis,
+service diagnosis, and generic health collection. Metadata/control dispatch
+such as `version` remains available. Generic session summaries render the
+contract's summary heading, evidence label, and visibility; specialized Docker
+and Windows renderers remain unchanged.
+
 The unsupported renderer is deterministic. It identifies the safe display
 name and support lane, reports `read_only=true` and
 `mutation_performed=false`, says that no supported local evidence lane was

@@ -53,6 +53,7 @@ from shellforgeai.core.latest_context import (
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.platform_operator_contract import (
+    PlatformOperatorContract,
     build_platform_operator_contract,
     render_unsupported_platform_operator_response,
 )
@@ -2393,6 +2394,39 @@ def _run_interactive_cli_dispatch(console: Console, argv: tuple[str, ...]) -> st
     return output
 
 
+_LOCAL_EVIDENCE_DISPATCH_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("doctor",),
+    ("status",),
+    ("ops", "report"),
+    ("triage",),
+    ("propose",),
+    ("verify",),
+    ("handoff",),
+    ("v1", "check"),
+    ("remediation", "self-test"),
+    ("remediation", "eligibility"),
+)
+
+
+def _unsupported_local_evidence_response_if_needed(
+    contract: PlatformOperatorContract,
+    *,
+    routed_name: str = "",
+    routed_argv: tuple[str, ...] = (),
+    evidence_boundary: str | None = None,
+) -> str | None:
+    """Return the shared fallback only for an already-selected evidence path."""
+
+    if contract.local_evidence_available:
+        return None
+    selected = evidence_boundary is not None or routed_name == "/health"
+    if routed_name == "cli_dispatch":
+        selected = any(
+            routed_argv[: len(prefix)] == prefix for prefix in _LOCAL_EVIDENCE_DISPATCH_PREFIXES
+        )
+    return render_unsupported_platform_operator_response(contract) if selected else None
+
+
 def _interactive_mutation_refusal(text: str) -> str:
     return (
         "Refused: natural-language mutation is not allowed.\n"
@@ -2680,15 +2714,23 @@ def _session_summary_payload(state: InteractiveSessionSummaryState) -> dict[str,
 
 
 def render_interactive_session_summary(
-    state: InteractiveSessionSummaryState, *, json_output: bool = False
+    state: InteractiveSessionSummaryState,
+    contract: PlatformOperatorContract,
+    *,
+    json_output: bool = False,
 ) -> str:
     payload = _session_summary_payload(state)
     if json_output:
         return json.dumps(payload, indent=2, sort_keys=True)
 
+    identity = (
+        f"{contract.summary_heading}\n"
+        f"Evidence: {contract.evidence_label}\n"
+        f"Visibility: {contract.visibility}\n"
+    )
     if state.events_seen == 0 and not state.checks and not state.findings and not state.refusals:
         return (
-            "Session summary: read-only inspection session.\n"
+            identity + "Session summary: read-only inspection session.\n"
             "No diagnostic evidence has been collected in this interactive session yet. "
             "I don't have any collected evidence to summarize.\n\n"
             "First safe next command:\n"
@@ -2699,7 +2741,7 @@ def render_interactive_session_summary(
             "- Natural-language mutation remained blocked."
         )
 
-    lines = ["Session summary: read-only inspection session."]
+    lines = [identity.rstrip(), "Session summary: read-only inspection session."]
     if state.latest_target and state.checks:
         lines.append(f"\nUsing latest {state.checks[-1]} diagnosis context.")
     if state.checks:
@@ -3057,6 +3099,12 @@ def start_interactive(
             console.print(_interactive_windows_mutation_refusal(routed.args or user_input))
             continue
         if routed.name == "/summary":
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract, evidence_boundary="generic_operator_summary"
+            )
+            if unsupported is not None:
+                console.print(unsupported)
+                continue
             raw_args = routed.argv or tuple(routed.args.strip().lower().split())
             args = set(raw_args)
             allowed_args = {"--json", "--save"}
@@ -3088,7 +3136,9 @@ def start_interactive(
             else:
                 console.print(
                     render_interactive_session_summary(
-                        session_summary, json_output=("--json" in args)
+                        session_summary,
+                        operator_contract,
+                        json_output=("--json" in args),
                     )
                 )
             continue
@@ -3152,6 +3202,12 @@ def start_interactive(
                         "I don’t have a pending investigation. Tell me what symptom to check, "
                         "such as slow system, disk issue, network issue, or service issue."
                     )
+                continue
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract, evidence_boundary="pending_followup"
+            )
+            if unsupported is not None:
+                console.print(unsupported)
                 continue
             console.print(
                 f'I’ll treat "{user_input}" as a read-only follow-up to the pending checks. '
@@ -3312,6 +3368,12 @@ Commands:
         if routed.name in {"/doctor", "/status", "/health"}:
             b = get_build_info()
             if routed.name == "/health":
+                unsupported = _unsupported_local_evidence_response_if_needed(
+                    operator_contract, routed_name=routed.name
+                )
+                if unsupported is not None:
+                    console.print(unsupported)
+                    continue
                 checks = _collect_machine_health()
                 console.print("Collected evidence:")
                 _evidence_table(console, checks)
@@ -3382,6 +3444,14 @@ Commands:
             )
             continue
         if routed.name == "cli_dispatch":
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract,
+                routed_name=routed.name,
+                routed_argv=routed.argv,
+            )
+            if unsupported is not None:
+                console.print(unsupported)
+                continue
             dispatch_output = _run_interactive_cli_dispatch(console, routed.argv)
             if routed.argv[:2] == ("ops", "report"):
                 update_grounding_from_ops_report_text(grounding, dispatch_output)
@@ -3404,6 +3474,15 @@ Commands:
             continue
         if routed.name == "logs_mutation_refused":
             session_summary.note_refusal("log deletion/truncation request refused")
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract, evidence_boundary="log_diagnosis"
+            )
+            if unsupported is not None:
+                console.print(
+                    "Log deletion, truncation, or rotation is not performed by ShellForgeAI."
+                )
+                console.print(unsupported)
+                continue
             console.print(
                 "Log deletion, truncation, or rotation is not performed by ShellForgeAI. "
                 "Collecting read-only log evidence instead so you can decide safely."
@@ -3538,8 +3617,16 @@ No command was executed.""")
             continue
 
         if routed.name in {"diagnose"}:
-            if not operator_contract.local_evidence_available:
-                console.print(render_unsupported_platform_operator_response(operator_contract))
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract, evidence_boundary="routed_diagnosis"
+            )
+            if unsupported is not None:
+                action_response = _detect_action_request(user_input)
+                if action_response is not None:
+                    session_summary.note_refusal("mutation request refused")
+                    console.print(action_response)
+                else:
+                    console.print(unsupported)
                 continue
             with console.status("Collecting evidence..."):
                 res = diagnose_target(runtime, routed.args, online=False, since="30m")
@@ -3863,6 +3950,12 @@ No command was executed.""")
             continue
         if _is_firewall_question(user_input):
             paste_guard_active = False
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract, evidence_boundary="firewall_diagnosis"
+            )
+            if unsupported is not None:
+                console.print(unsupported)
+                continue
             with console.status("Collecting firewall evidence..."):
                 res = diagnose_target(runtime, "firewall", online=False, since="30m")
             checks = [
@@ -3973,6 +4066,12 @@ No command was executed.""")
             continue
 
         if user_input.strip().lower() in {"what did you check?", "what did you check"}:
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract, evidence_boundary="generic_operator_summary"
+            )
+            if unsupported is not None:
+                console.print(unsupported)
+                continue
             artifact_dir = runtime.session.artifact_dir
             files = [
                 name
@@ -3983,6 +4082,9 @@ No command was executed.""")
                 "deeper follow-up pass" if completed_followups else "first-pass read-only check"
             )
             console.print(
+                f"{operator_contract.summary_heading}\n"
+                f"Evidence: {operator_contract.evidence_label}\n"
+                f"Visibility: {operator_contract.visibility}\n"
                 f"That was a {pass_kind}. I looked at CPU/memory/load, disk and inode usage, "
                 "storage pressure, process activity, container and mount context, recent "
                 "trend clues, and network/DNS context.\n"
@@ -4014,6 +4116,17 @@ No command was executed.""")
             continue
         service_action_target = _extract_service_action_target(user_input)
         if service_action_target:
+            unsupported = _unsupported_local_evidence_response_if_needed(
+                operator_contract, evidence_boundary="service_diagnosis"
+            )
+            if unsupported is not None:
+                action_response = _detect_action_request(user_input)
+                if action_response is not None:
+                    session_summary.note_refusal("mutation request refused")
+                    console.print(action_response)
+                else:
+                    console.print(unsupported)
+                continue
             with console.status("Collecting read-only service evidence..."):
                 res = diagnose_target(runtime, service_action_target, online=False, since="30m")
             checks = [
