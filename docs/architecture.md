@@ -1,5 +1,12 @@
 # Architecture
 
+The approved-change chain separates structural and live facts: PR323 associates
+one approved capability binding with one validated saved plan, while the
+read-only current-state revalidation API compares that exact link with only the
+fixed PR313 two-file filesystem scope at one instant. Authorization and any
+future execution preflight remain later, separate gates. The mutation-capable
+PR313 execution operation is not invoked by current-state revalidation.
+
 ## V1 architecture contract
 
 CLI → collectors → triage → ops reports → artifacts → governed remediation.
