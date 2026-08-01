@@ -140,6 +140,11 @@ Run `shellforgeai --help` for the full command surface.
 - **Windows:** preview/early support for local read-only evidence, deterministic operator guidance, and validated Windows Server 2025 workflows. See [Windows/PowerShell V1](docs/WINDOWS_POWERSHELL_V1.md).
 - **Other platforms:** no supported operational lane is currently promised.
 
+Generic operator evidence paths share one immutable platform contract. On
+macOS or an unrecognized host they fail closed before collection or model use
+and point only to `shellforgeai platform doctor --json`; plain conversation and
+help remain available. See [Platform operator contract](docs/PLATFORM_OPERATOR_CONTRACT.md).
+
 ## Documentation map
 
 - [Product status](docs/PRODUCT_STATUS.md)
