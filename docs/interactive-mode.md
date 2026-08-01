@@ -652,9 +652,9 @@ Interactive mode deterministically recognizes explicit Windows read-only phrases
 
 ### Windows service inventory/health questions
 
-Interactive mode routes a bounded set of read-only service inventory/health questions deterministically, before generic diagnosis, Linux evidence collection, or model handling. Accepted phrasings include `show service status`, `show services`, `service status`, `services health`, `what services are running`, and their explicit `windows services` forms.
+Interactive mode routes a bounded set of read-only service inventory/health questions deterministically, before generic diagnosis, Linux evidence collection, or model handling. Accepted phrasings include `show service status`, `show services`, `service status`, `services health`, `local service health`, `show me the local service health and explain what matters to an operator on call`, `what services are running`, and their explicit `windows services` forms.
 
-On a native Windows host, this route calls the maintained in-process Windows services payload exactly once with a 25-record limit and renders `## Windows services evidence`. It does not execute the displayed CLI command, invoke a subprocess or shell, call a model, or perform service control. The summary includes payload status, total and per-state counts, a runtime summary, a bounded runtime-signal preview, collection limit/truncation, and explicit not-collected scope. `/pending` retains only bounded facts and services-first safe-next commands; it never retains the full service item list.
+On a native Windows host, this route calls the maintained in-process Windows services payload exactly once with a 25-record limit and renders `## Windows services evidence`. It does not execute the displayed CLI command, invoke a subprocess or shell, call a model, or perform service control. The summary includes payload status, total and per-state counts, a runtime summary, a bounded runtime-signal preview, collection limit/truncation, and explicit not-collected scope. The latest bounded service identity survives a later mutation refusal, `What should I check next?`, `/pending`, and `/summary`; the refusal records that no action occurred, while the safe follow-up and summary remain services-first. `/pending` retains only bounded facts and services-first safe-next commands; it never retains the full service item list.
 
 Runtime signals are point-in-time observations rather than failure diagnoses. Stopped services can be normal, named-service expectations are not evaluated, and service configuration and recovery policy are not collected. Named-service lookup remains deferred.
 
@@ -664,7 +664,7 @@ The canonical explicit command remains the first safe next check, but is shown r
 shellforgeai windows services --json --limit 25
 ```
 
-Matching remains anchored to whole phrases. On a non-Windows host, generic service phrases are not captured by the Windows route, while explicitly Windows-scoped phrases render guidance only without calling the payload or probing Windows. Mutation requests keep their existing higher-priority refusal and never collect service evidence.
+Matching remains anchored to whole phrases. On a non-Windows host, generic service phrases retain the existing Linux/generic service route and are not captured by the Windows route, while explicitly Windows-scoped phrases render guidance only without calling the payload or probing Windows. Mutation requests keep their existing higher-priority refusal and never collect service evidence or execute an action.
 
 ### Windows operator-parity prompts
 
