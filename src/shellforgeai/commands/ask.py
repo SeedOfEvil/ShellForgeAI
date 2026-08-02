@@ -681,11 +681,22 @@ def register(app: typer.Typer) -> None:
 
             if is_rejected_windows_model_answer(answer_text):
                 # PR289 — project/policy preamble, metadata-primary, or
-                # container-framed output never reaches stdout as the answer;
-                # replace it with the evidence-grounded Windows answer.
+                # container-framed output never reaches stdout as the answer.
+                # When PR332 already rendered authoritative evidence, report
+                # only the bounded gate result rather than relabelling or
+                # repeating deterministic evidence as a model assessment.
                 windows_gated = True
-                answer_text = render_windows_evidence_answer(question, windows_packet)
-        cli.console.print(render_model_assessment(answer_text) if evidence_stage else answer_text)
+                answer_text = (
+                    ""
+                    if evidence_stage is not None
+                    else render_windows_evidence_answer(question, windows_packet)
+                )
+        if windows_gated and evidence_stage is not None:
+            cli.console.print(render_model_unavailable("rejected_windows_model_answer"))
+        else:
+            cli.console.print(
+                render_model_assessment(answer_text) if evidence_stage else answer_text
+            )
         if not windows_gated:
             cli.console.print(
                 f"\nProvider: {resp.provider}\nModel: {resp.model}\n{cli._usage_line(resp)}"

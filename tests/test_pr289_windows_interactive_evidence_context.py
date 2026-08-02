@@ -635,12 +635,36 @@ def test_ask_bad_preamble_is_gated_to_evidence_answer(monkeypatch: Any, tmp_path
     assert res.exit_code == 0
     assert "Understood" not in out
     assert "operate within the ShellForgeAI invariants" not in out
-    assert "From the evidence currently loaded" in out
+    assert out.count("## Windows evidence") == 1
+    assert out.count("Model assessment pending...") == 1
+    assert out.count("## Model assessment unavailable") == 1
+    assert "## Model assessment\n" not in out
+    assert "Failure class: rejected_windows_model_answer" in out
+    assert "The deterministic evidence above remains the current answer." in out
+    assert out.count("hostname=WIN2025-SFAI01") == 1
+    assert "## Windows evidence summary" not in out
     assert "shellforgeai windows processes --json --limit 10" in out
-    assert "shellforgeai windows services --json --limit 25" in out
     # Provider metadata is not the primary answer for gated Windows output.
     assert "Provider:" not in out
     assert "Model:" not in out
+
+
+def test_ask_accepted_windows_model_answer_keeps_two_stage_order(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    _pin_ask_windows(monkeypatch, tmp_path)
+    _GoodEvidenceProvider.prompts = []
+    monkeypatch.setattr("shellforgeai.cli.build_provider", lambda *_: _GoodEvidenceProvider())
+    res = runner.invoke(app, ["ask", "What is running on this system?"])
+    out = res.stdout
+    assert res.exit_code == 0
+    assert out.count("## Windows evidence") == 1
+    assert out.count("Model assessment pending...") == 1
+    assert out.count("## Model assessment\n") == 1
+    assert out.count("On this Windows host the read-only evidence packet shows 182 visible") == 1
+    assert "## Model assessment unavailable" not in out
+    assert out.index("## Windows evidence") < out.index("Model assessment pending...")
+    assert out.index("Model assessment pending...") < out.index("## Model assessment\n")
 
 
 def test_ask_model_failure_falls_back_to_windows_evidence(monkeypatch: Any, tmp_path: Path) -> None:

@@ -3905,7 +3905,7 @@ No command was executed.""")
                             "rather than fullness, I can investigate performance/I/O next."
                         )
                 except Exception as exc:
-                    provider_error = str(exc)
+                    provider_error = type(exc).__name__
                 if provider_error:
                     failure_safe_next = (
                         "\nSafe next command:\nshellforgeai windows status --json"
@@ -4398,7 +4398,7 @@ No command was executed.""")
                 stream_to_console=windows_packet is None,
             )
         except Exception as exc:
-            if windows_packet is not None:
+            if windows_packet is not None or evidence_already_rendered:
                 console.print(render_model_unavailable(type(exc).__name__))
             else:
                 console.print(_sanitize_provider_error(str(exc)))
