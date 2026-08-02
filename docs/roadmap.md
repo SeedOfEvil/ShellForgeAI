@@ -12,6 +12,12 @@
   Command-suggestion validation moves to PR331, bounded evidence-first
   timing/progressive synthesis moves to PR332, and short golden-path and
   advanced-help work moves to PR333.
+- Model-assisted operator paths present a bounded, authoritative deterministic
+  evidence stage before synchronous synthesis. The supplemental assessment is
+  clearly separated; its failure does not erase evidence. A five-second
+  first-evidence target is measured without collector cancellation, token
+  streaming, or background provider work. Golden-path and advanced-help work
+  remain deferred to PR333.
 
 The approved-change work now includes point-in-time live current-state
 revalidation for one exact PR323-linked Windows runtime-reconcile plan. It does

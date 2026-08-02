@@ -49,6 +49,12 @@ shellforgeai ask "what should I inspect first?" --explain-evidence
 
 Recognized operator questions route through deterministic read-only evidence before any synthesis. Mutation-shaped asks are refused and redirected to a safe read-only next command or review surface.
 
+For model-assisted operator questions, ShellForgeAI flushes a concise bounded
+evidence answer first, then calls the configured provider synchronously and
+presents its output as a supplemental model assessment. Provider failure leaves
+the deterministic evidence intact. This ordering is not token streaming and
+does not create background work.
+
 ### Report, history, and compare
 
 ```bash
