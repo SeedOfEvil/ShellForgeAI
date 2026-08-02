@@ -9998,6 +9998,7 @@ def _emit_docker_grounding_answer(
     *,
     removed_commands: list[str] | None = None,
     model_available: bool = True,
+    render: bool = True,
 ) -> None:
     """PR222 — print the deterministic Docker grounding block + read-only audit.
 
@@ -10011,7 +10012,8 @@ def _emit_docker_grounding_answer(
         render_docker_grounding_block,
     )
 
-    console.print(render_docker_grounding_block(ctx), end="")
+    if render:
+        console.print(render_docker_grounding_block(ctx), end="")
     envelope = build_docker_grounding_envelope(ctx, removed_commands=removed_commands)
     _append_audit_event(
         runtime,

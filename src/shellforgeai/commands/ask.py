@@ -88,6 +88,13 @@ def register(app: typer.Typer) -> None:
         )
         from shellforgeai.core.command_suggestions import filter_unsupported_command_suggestions
         from shellforgeai.core.diagnose import findings_summary_line
+        from shellforgeai.core.evidence_first_response import (
+            EvidenceFirstResponse,
+            EvidenceResponseTimeline,
+            render_evidence_first,
+            render_model_assessment,
+            render_model_unavailable,
+        )
         from shellforgeai.core.platform_operator_contract import (
             build_platform_operator_contract,
             render_unsupported_platform_operator_response,
@@ -243,6 +250,7 @@ def register(app: typer.Typer) -> None:
                 cli.console.print(render_unsupported_platform_operator_response(operator_contract))
                 return
 
+        timeline = EvidenceResponseTimeline()
         provider = cli.build_provider(runtime.settings)
         ctx_mode = "full" if full_context else context
         # PR289 — Windows interactive evidence-context parity: on a Windows
@@ -450,6 +458,96 @@ def register(app: typer.Typer) -> None:
                 if windows_packet is not None
                 else build_contextual_prompt(question, prompt_context, mode=effective_mode)
             )
+        # The evidence stage is deliberately complete and flushed before the
+        # existing synchronous provider starts.  It is not token streaming.
+        evidence_stage: EvidenceFirstResponse | None = None
+        if windows_packet is not None:
+            windows_rows = windows_evidence_prompt_facts(windows_packet)
+            evidence_stage = EvidenceFirstResponse(
+                platform="Windows",
+                evidence_label="Windows local read-only evidence",
+                evidence_source="ShellForgeAI Windows collectors",
+                intent=route.intent_label or "operator question",
+                evidence_available=any(row.get("status") == "ok" for row in windows_rows),
+                findings=tuple(
+                    "From the evidence currently loaded: " + str(row.get("summary"))
+                    for row in windows_rows
+                    if row.get("status") == "ok"
+                ),
+                limitations=tuple(
+                    str(item)
+                    for item in (windows_packet.get("limitations") or [])
+                    if "inode" not in str(item).lower() and "linux-only" not in str(item).lower()
+                ),
+                safe_next_commands=tuple(windows_packet.get("safe_next_commands") or ()),
+            )
+        elif docker_grounding is not None:
+            if docker_grounding.get("grounded") and docker_grounding.get("top_suspect"):
+                docker_findings = (
+                    "I'm using current ShellForgeAI Docker triage evidence.",
+                    f"Top suspect: {docker_grounding.get('top_suspect')}; "
+                    f"Severity: {docker_grounding.get('severity')}; "
+                    f"Confidence: {docker_grounding.get('confidence')}",
+                    "Evidence themes: "
+                    + (
+                        ", ".join(str(v) for v in docker_grounding.get("evidence_themes") or [])
+                        or "deterministic triage signal"
+                    ),
+                )
+            else:
+                docker_findings = (
+                    "I do not have current deterministic Docker triage evidence for this answer.",
+                )
+            evidence_stage = EvidenceFirstResponse(
+                platform="Linux/Docker",
+                evidence_label="Docker deterministic triage evidence",
+                evidence_source=str(docker_grounding.get("evidence_source") or "docker triage"),
+                intent=route.intent_label or "Docker operator question",
+                evidence_available=bool(docker_grounding.get("evidence_available")),
+                findings=docker_findings,
+                limitations=(
+                    "Evidence is a bounded projection of current Docker triage.",
+                    "No cleanup, restart, remediation, rollback, or Docker mutation was performed.",
+                ),
+                safe_next_commands=(str(docker_grounding.get("safe_next_command")),)
+                if docker_grounding.get("safe_next_command")
+                else (),
+            )
+        elif route.mode == EVIDENCE_BACKED:
+            findings = ()
+            if evidence_result is not None:
+                findings = tuple(
+                    f"{item.title}: {item.detail}" for item in list(evidence_result.findings)[:3]
+                )
+            evidence_stage = EvidenceFirstResponse(
+                platform=build_platform_operator_contract().display_name,
+                evidence_label=f"{route.intent_label} evidence",
+                evidence_source="ShellForgeAI typed read-only collectors",
+                intent=route.intent_label,
+                evidence_available=evidence_result is not None,
+                findings=findings,
+                limitations=(
+                    (
+                        f"Evidence collection unavailable ({evidence_error.split(':', 1)[0]})."
+                        if evidence_error
+                        else "Only the strongest bounded findings are shown."
+                    ),
+                ),
+                safe_next_commands=tuple(getattr(evidence_result, "safe_next_commands", ())[:1])
+                if evidence_result is not None
+                else (),
+            )
+        if evidence_stage is not None:
+            timeline.mark_evidence_ready()
+            cli.console.print(render_evidence_first(evidence_stage))
+            if docker_grounding is not None and explain_evidence:
+                cli.console.print("")
+                cli.console.print(render_docker_evidence_explainability(docker_grounding), end="")
+            output_file = getattr(cli.console, "file", None)
+            if output_file is not None and hasattr(output_file, "flush"):
+                output_file.flush()
+            timeline.mark_evidence_rendered()
+            timeline.mark_model_start()
         resp = provider.complete(
             ModelRequest(
                 prompt=prompt,
@@ -459,26 +557,26 @@ def register(app: typer.Typer) -> None:
                 metadata={"raw": raw, "progress_callback": _model_progress_callback()},
             )
         )
+        if evidence_stage is not None:
+            timeline.mark_model_end()
         if not resp.ok:
+            failure_meta = getattr(resp, "metadata", None) or {}
+            failure_class = str(failure_meta.get("codex_exec_error_class") or "unknown")
+            if evidence_stage is not None:
+                cli.console.print("")
+                cli.console.print(render_model_unavailable(failure_class))
             if windows_packet is not None:
                 # PR289 — model/auth failed, but the bounded read-only Windows
                 # evidence packet still answers safely.
-                from shellforgeai.core.windows_evidence_context import (
-                    render_windows_evidence_answer,
+                cli.console.print(
+                    "Model assistance is unavailable; the deterministic Windows "
+                    "evidence above remains the answer."
                 )
 
-                cli.console.print(render_windows_evidence_answer(question, windows_packet))
-                cli.console.print(
-                    "\nModel assistance is unavailable, so the read-only Windows "
-                    "evidence above is the answer."
-                )
                 # PR291 — preserve the actual bounded Codex failure reason so
                 # the lane can distinguish repository trust, timeout, binary
                 # resolution, and auth readiness failures. No auth-cache read,
                 # no environment dump; stderr excerpt is bounded + sanitized.
-                failure_meta = getattr(resp, "metadata", None) or {}
-                failure_class = str(failure_meta.get("codex_exec_error_class") or "unknown")
-                cli.console.print(f"Model failure class: {failure_class}")
                 try:
                     import json as _json
 
@@ -527,16 +625,11 @@ def register(app: typer.Typer) -> None:
                 # clean auth-diagnostic pointer (a real read-only command), not
                 # an unsupported command or an invented diagnosis.
                 cli._emit_docker_grounding_answer(
-                    runtime, question, docker_grounding, model_available=False
-                )
-                if explain_evidence:
-                    cli.console.print("")
-                    cli.console.print(
-                        render_docker_evidence_explainability(docker_grounding), end=""
-                    )
-                cli.console.print(
-                    "\nModel assistance is unavailable, so the deterministic ShellForgeAI "
-                    "evidence above is the answer."
+                    runtime,
+                    question,
+                    docker_grounding,
+                    model_available=False,
+                    render=False,
                 )
                 cli.console.print("Check model auth with: shellforgeai model doctor --json")
                 return
@@ -588,16 +681,27 @@ def register(app: typer.Typer) -> None:
 
             if is_rejected_windows_model_answer(answer_text):
                 # PR289 — project/policy preamble, metadata-primary, or
-                # container-framed output never reaches stdout as the answer;
-                # replace it with the evidence-grounded Windows answer.
+                # container-framed output never reaches stdout as the answer.
+                # When PR332 already rendered authoritative evidence, report
+                # only the bounded gate result rather than relabelling or
+                # repeating deterministic evidence as a model assessment.
                 windows_gated = True
-                answer_text = render_windows_evidence_answer(question, windows_packet)
-        cli.console.print(answer_text)
+                answer_text = (
+                    ""
+                    if evidence_stage is not None
+                    else render_windows_evidence_answer(question, windows_packet)
+                )
+        if windows_gated and evidence_stage is not None:
+            cli.console.print(render_model_unavailable("rejected_windows_model_answer"))
+        else:
+            cli.console.print(
+                render_model_assessment(answer_text) if evidence_stage else answer_text
+            )
         if not windows_gated:
             cli.console.print(
                 f"\nProvider: {resp.provider}\nModel: {resp.model}\n{cli._usage_line(resp)}"
             )
-        if docker_grounding is not None:
+        if docker_grounding is not None and evidence_stage is None:
             cli.console.print("")
             cli._emit_docker_grounding_answer(
                 runtime,
@@ -609,6 +713,15 @@ def register(app: typer.Typer) -> None:
             if explain_evidence:
                 cli.console.print("")
                 cli.console.print(render_docker_evidence_explainability(docker_grounding), end="")
+        elif docker_grounding is not None:
+            cli._emit_docker_grounding_answer(
+                runtime,
+                question,
+                docker_grounding,
+                removed_commands=removed_commands,
+                model_available=True,
+                render=False,
+            )
         if route.mode == EVIDENCE_BACKED and evidence_result is not None:
             artifact_dir = runtime.session.artifact_dir
             ev_path = artifact_dir / "evidence.json"

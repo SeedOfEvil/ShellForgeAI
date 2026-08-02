@@ -124,6 +124,11 @@ class _AuthFailureProvider:
         )
 
 
+class _RaisingProvider:
+    def complete(self, request):  # noqa: ANN001
+        raise RuntimeError("raw provider path=/private/token and stderr detail")
+
+
 def _drive_repl(monkeypatch, tmp_path: Path, inputs: list[str], provider=None) -> str:
     monkeypatch.setattr(repl, "_confirm_workspace", lambda *a, **k: True)
     monkeypatch.setattr(repl, "build_provider", lambda *a, **k: provider or _FakeProvider())
@@ -310,6 +315,29 @@ def test_codex_jsonl_auth_failure_is_suppressed_in_assessment(monkeypatch, tmp_p
     assert "turn.started" not in out
     assert "turn.failed" not in out
     assert "refresh token already used" not in low
+
+
+def test_provider_exception_after_evidence_completes_bounded_two_stage_response(
+    monkeypatch, tmp_path
+) -> None:
+    out = _drive_repl(
+        monkeypatch,
+        tmp_path,
+        ["this system is feeling a bit slow", "/exit"],
+        provider=_RaisingProvider(),
+    )
+    low = out.lower()
+    assert out.count("Collected 7 read-only evidence item(s).") == 1
+    assert out.count("Model assessment pending...") == 1
+    assert out.count("## Model assessment unavailable") == 1
+    assert "Failure class: RuntimeError" in out
+    assert "The deterministic evidence above remains the current answer." in out
+    assert "## Model assessment\n" not in out
+    assert "raw provider" not in low
+    assert "/private" not in low
+    assert "stderr detail" not in low
+    assert "traceback" not in low
+    assert "goodbye" in low
 
 
 def test_container_limited_truthfulness_for_system_role(monkeypatch, tmp_path) -> None:

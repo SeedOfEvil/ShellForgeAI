@@ -25,6 +25,12 @@ from shellforgeai.core.collectors import _to_item as _evidence_item_from_result
 from shellforgeai.core.context import RuntimeContext
 from shellforgeai.core.diagnose import diagnose_target, findings_summary_line
 from shellforgeai.core.evidence import EvidenceCategory, classify_target
+from shellforgeai.core.evidence_first_response import (
+    EvidenceFirstResponse,
+    render_evidence_first,
+    render_model_assessment,
+    render_model_unavailable,
+)
 from shellforgeai.core.followup_grounding import (
     FollowupGroundingState,
     render_grounded_resolution,
@@ -3829,6 +3835,13 @@ No command was executed.""")
                         },
                         mode="standard",
                     )
+                    # The diagnosis evidence was rendered above.  Flush the
+                    # operator-visible pending transition before the blocking
+                    # synchronous provider call; this is not model streaming.
+                    console.print("Model assessment pending...")
+                    output_file = getattr(console, "file", None)
+                    if output_file is not None and hasattr(output_file, "flush"):
+                        output_file.flush()
                     mresp_text, mresp_streamed = _run_model_synthesis(
                         console,
                         provider,
@@ -3856,7 +3869,7 @@ No command was executed.""")
                         runtime_context=runtime_context,
                         artifact_dir=runtime.session.artifact_dir,
                     )
-                    console.print("\n## Assessment")
+                    console.print("\n## Model assessment")
                     if (
                         (not _has_substantive_response(mresp_text))
                         or _is_bad_model_assessment(mresp_text)
@@ -3892,11 +3905,17 @@ No command was executed.""")
                             "rather than fullness, I can investigate performance/I/O next."
                         )
                 except Exception as exc:
-                    provider_error = str(exc)
+                    provider_error = type(exc).__name__
                 if provider_error:
+                    failure_safe_next = (
+                        "\nSafe next command:\nshellforgeai windows status --json"
+                        if _is_windows_platform_checks(checks)
+                        else ""
+                    )
                     console.print(
-                        _deterministic_operator_summary(routed.args, checks)
-                        + "\n## Artifacts\n"
+                        render_model_unavailable(provider_error.split(":", 1)[0])
+                        + failure_safe_next
+                        + "\n\n## Artifacts\n"
                         + f"- evidence: {ep}\n- plan: {pp}\n- summary: {sp}\n"
                         + (
                             "\nNote: model synthesis unavailable "
@@ -4323,6 +4342,34 @@ No command was executed.""")
             )
             update_grounding_from_latest_context(grounding, latest_context)
             _record_latest_context_in_session_summary(session_summary, latest_context)
+        evidence_already_rendered = windows_packet is None and bool(context.get("machine_health"))
+        if windows_packet is not None:
+            windows_rows = windows_evidence_prompt_facts(windows_packet)
+            stage = EvidenceFirstResponse(
+                platform="Windows",
+                evidence_label="Windows local read-only evidence",
+                evidence_source="ShellForgeAI Windows collectors",
+                intent="interactive operator question",
+                evidence_available=any(row.get("status") == "ok" for row in windows_rows),
+                findings=tuple(
+                    str(row.get("summary")) for row in windows_rows if row.get("status") == "ok"
+                ),
+                limitations=tuple(
+                    str(item)
+                    for item in (windows_packet.get("limitations") or [])
+                    if "inode" not in str(item).lower() and "linux-only" not in str(item).lower()
+                ),
+                safe_next_commands=tuple(windows_packet.get("safe_next_commands") or ()),
+            )
+            console.print(render_evidence_first(stage))
+            output_file = getattr(console, "file", None)
+            if output_file is not None and hasattr(output_file, "flush"):
+                output_file.flush()
+        elif evidence_already_rendered:
+            console.print("Model assessment pending...")
+            output_file = getattr(console, "file", None)
+            if output_file is not None and hasattr(output_file, "flush"):
+                output_file.flush()
         with console.status("Preparing context..."):
             prompt_question = user_input if routed.name != "ask" else routed.args
             prompt = (
@@ -4351,13 +4398,8 @@ No command was executed.""")
                 stream_to_console=windows_packet is None,
             )
         except Exception as exc:
-            if windows_packet is not None:
-                console.print(render_windows_evidence_answer(user_input, windows_packet))
-                console.print(
-                    "\nNote: model synthesis unavailable "
-                    f"({_sanitize_provider_error(str(exc))}); the Windows read-only "
-                    "evidence above is the answer."
-                )
+            if windows_packet is not None or evidence_already_rendered:
+                console.print(render_model_unavailable(type(exc).__name__))
             else:
                 console.print(_sanitize_provider_error(str(exc)))
             continue
@@ -4380,7 +4422,9 @@ No command was executed.""")
         ):
             # Gated: raw model output stays in the audit artifact above, and the
             # operator gets an evidence-grounded Windows answer instead.
-            console.print(render_windows_evidence_answer(user_input, windows_packet))
+            console.print(
+                render_model_assessment(render_windows_evidence_answer(user_input, windows_packet))
+            )
         elif not _has_substantive_response(resp_text) and kind == "diagnose":
             console.print(
                 _deterministic_operator_summary("health", context.get("machine_health", []))
@@ -4390,4 +4434,4 @@ No command was executed.""")
                 "ShellForgeAI did not produce a response for that input. No action was taken."
             )
         elif not resp_streamed:
-            renderer.render(_sanitize_provider_error(resp_text), None)
+            console.print(render_model_assessment(_sanitize_provider_error(resp_text)))

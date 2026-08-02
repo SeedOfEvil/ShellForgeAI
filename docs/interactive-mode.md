@@ -375,7 +375,14 @@ input or natural language.
 
 ## Streaming synthesis
 
-After collection, the REPL shows a synthesis status and streams the model
+After collection, the REPL renders a bounded deterministic evidence response,
+flushes it, and marks the supplemental model assessment as pending before the
+existing synchronous provider call. The evidence remains the authoritative
+answer; successful model text follows under a separate **Model assessment**
+heading, while a bounded unavailable section leaves the evidence intact on
+failure or timeout. The five-second first-evidence budget is measured rather
+than enforced by cancellation. This is not token-level streaming and no
+background work continues after the turn. The REPL then presents the model
 answer when the provider supports it. Normal answers hide internal
 collector names; technical names remain in `/tools`, `/evidence`, and
 debug/raw output.
