@@ -1,5 +1,14 @@
 # Safety
 
+Operator-facing command suggestions pass through a deterministic, read-only
+validation boundary before rendering or bounded context retention. The boundary
+checks the packaged Typer/Click command path, arguments, options, maintained
+value bounds, explicit suggestability policy, and active or explicitly targeted
+platform. A parse-valid command is not necessarily suggestable: governed and
+mutation-capable surfaces remain excluded from ordinary guidance. Invalid
+originals and fallbacks fail closed; validation inspects registrations and never
+invokes a command callback or shell.
+
 Linked-plan current-state revalidation is local, fixed-scope, and read-only. It
 does not write, execute, persist, or create receipts, and its point-in-time
 result grants neither authorization nor execution eligibility. No CLI or

@@ -11,6 +11,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from shellforgeai.core.command_suggestion_validation import (
+    NO_VALIDATED_COMMAND,
+    CommandSuggestionValidationResult,
+    RouteFamily,
+    SuggestionPolicy,
+    validate_command_suggestion,
+)
+
 
 @dataclass(frozen=True)
 class SafeCommand:
@@ -231,7 +239,7 @@ SAFE_COMMANDS: tuple[SafeCommand, ...] = (
     ),
     SafeCommand(
         "propose_docker",
-        "shellforgeai propose docker --json",
+        "shellforgeai propose --from-triage --json",
         "v2_preview",
         True,
         False,
@@ -239,7 +247,7 @@ SAFE_COMMANDS: tuple[SafeCommand, ...] = (
     ),
     SafeCommand(
         "apply_preview_docker",
-        "shellforgeai apply-preview docker --json",
+        "shellforgeai apply-preview --from-triage --json",
         "v2_preview",
         True,
         False,
@@ -247,7 +255,7 @@ SAFE_COMMANDS: tuple[SafeCommand, ...] = (
     ),
     SafeCommand(
         "verify_docker",
-        "shellforgeai verify docker --json",
+        "shellforgeai verify --from-triage --json",
         "v2_preview",
         True,
         False,
@@ -255,7 +263,7 @@ SAFE_COMMANDS: tuple[SafeCommand, ...] = (
     ),
     SafeCommand(
         "handoff_docker",
-        "shellforgeai handoff docker --json",
+        "shellforgeai handoff --from-triage --json",
         "v2_preview",
         True,
         False,
@@ -264,6 +272,65 @@ SAFE_COMMANDS: tuple[SafeCommand, ...] = (
 )
 
 _COMMAND_BY_ID = {entry.id: entry for entry in SAFE_COMMANDS}
+
+SUGGESTION_POLICIES: tuple[SuggestionPolicy, ...] = (
+    SuggestionPolicy(("platform", "doctor"), "portable_read_only"),
+    SuggestionPolicy(("model", "doctor"), "portable_read_only"),
+    SuggestionPolicy(("status",), "linux_read_only"),
+    SuggestionPolicy(("doctor",), "linux_read_only"),
+    SuggestionPolicy(("ops", "report"), "linux_read_only"),
+    SuggestionPolicy(("ops", "status"), "linux_read_only"),
+    SuggestionPolicy(("triage", "docker"), "linux_read_only"),
+    SuggestionPolicy(("triage", "docker", "detail"), "linux_read_only"),
+    SuggestionPolicy(("triage", "docker", "snapshot"), "linux_read_only"),
+    SuggestionPolicy(("triage", "docker", "timeline"), "linux_read_only"),
+    SuggestionPolicy(("propose",), "preview_read_only"),
+    SuggestionPolicy(("apply-preview",), "preview_read_only"),
+    SuggestionPolicy(("verify",), "preview_read_only"),
+    SuggestionPolicy(("handoff",), "preview_read_only"),
+    SuggestionPolicy(("windows", "evidence"), "windows_read_only"),
+    SuggestionPolicy(("windows", "status"), "windows_read_only"),
+    SuggestionPolicy(("windows", "doctor"), "windows_read_only"),
+    SuggestionPolicy(("windows", "processes"), "windows_read_only"),
+    SuggestionPolicy(("windows", "events"), "windows_read_only"),
+    SuggestionPolicy(("windows", "network"), "windows_read_only"),
+    SuggestionPolicy(("windows", "volumes"), "windows_read_only"),
+    SuggestionPolicy(("windows", "services"), "windows_read_only"),
+)
+
+
+def validate_operator_command_suggestion(
+    command: str,
+    *,
+    active_platform: RouteFamily = "linux_primary",
+    intended_platform: RouteFamily | None = None,
+) -> CommandSuggestionValidationResult:
+    """Validate one suggestion against the live packaged surface, fail closed."""
+    try:
+        from shellforgeai.cli_surface import snapshot_packaged_cli_surface
+
+        surface = snapshot_packaged_cli_surface()
+        return validate_command_suggestion(
+            command,
+            active_platform=active_platform,
+            intended_platform=intended_platform,
+            surface=surface,
+            policies=SUGGESTION_POLICIES,
+        )
+    except Exception:
+        target = intended_platform or active_platform
+        return CommandSuggestionValidationResult(
+            command,
+            None,
+            False,
+            "surface_unavailable",
+            active_platform,
+            target,
+            (),
+            (),
+            (),
+            None,
+        )
 
 
 def _safe_identifier(value: str | None) -> str | None:
@@ -353,14 +420,23 @@ def _matches_registry(tokens: list[str]) -> bool:
     return False
 
 
-def is_known_safe_shellforgeai_command(text: str) -> bool:
+def is_known_safe_shellforgeai_command(
+    text: str,
+    *,
+    active_platform: RouteFamily = "linux_primary",
+    intended_platform: RouteFamily | None = None,
+) -> bool:
     candidate = " ".join((text or "").strip().split())
     if not candidate or _UNSAFE_SHELL_RE.search(candidate):
         return False
     parts = candidate.split()
-    if not parts or parts[0].lower() not in {"shellforgeai", "sfai"}:
+    if not parts or parts[0] != "shellforgeai":
         return False
-    return _matches_registry(parts[1:])
+    return validate_operator_command_suggestion(
+        candidate,
+        active_platform=active_platform,
+        intended_platform=intended_platform,
+    ).valid
 
 
 def _contains_only_safe_command(text: str) -> bool:
@@ -375,13 +451,25 @@ def _contains_only_safe_command(text: str) -> bool:
 
 
 def filter_or_replace_unsafe_command_suggestions(
-    text: str, topic: str | None = None, suspect: str | None = None
+    text: str,
+    topic: str | None = None,
+    suspect: str | None = None,
+    *,
+    active_platform: RouteFamily = "linux_primary",
+    intended_platform: RouteFamily | None = None,
+    fallback_command: str | None = None,
 ) -> SafeCommandFilterResult:
     if not text:
         return SafeCommandFilterResult(
             safe_text=text, removed_suggestions=[], replacement_commands=[]
         )
-    fallback = suggest_safe_next_command(topic, suspect=suspect)
+    fallback_candidate = fallback_command or suggest_safe_next_command(topic, suspect=suspect)
+    fallback_result = validate_operator_command_suggestion(
+        fallback_candidate,
+        active_platform=active_platform,
+        intended_platform=intended_platform,
+    )
+    fallback = fallback_result.canonical_command if fallback_result.valid else None
     spans: list[tuple[int, int, str, bool]] = []
     for m in _TOOL_RE.finditer(text):
         tool = m.group(1).lower()
@@ -390,9 +478,18 @@ def filter_or_replace_unsafe_command_suggestions(
             continue
         original = text[m.start() : end]
         if tool == "docker":
-            unsafe = _docker_mutation(tokens) or _UNSAFE_SHELL_RE.search(original) is not None
+            target = intended_platform or active_platform
+            unsafe = (
+                target != "linux_primary"
+                or _docker_mutation(tokens)
+                or _UNSAFE_SHELL_RE.search(original) is not None
+            )
         else:
-            unsafe = not is_known_safe_shellforgeai_command("shellforgeai " + " ".join(tokens))
+            unsafe = not is_known_safe_shellforgeai_command(
+                "shellforgeai " + " ".join(tokens),
+                active_platform=active_platform,
+                intended_platform=intended_platform,
+            )
         spans.append((m.start(), end, original, unsafe))
     if not spans:
         return SafeCommandFilterResult(
@@ -413,7 +510,7 @@ def filter_or_replace_unsafe_command_suggestions(
                 out.append(fallback)
                 replacements.append(fallback)
             else:
-                out.append("no supported safe command is available")
+                out.append(NO_VALIDATED_COMMAND)
         else:
             out.append(original)
         cursor = end
