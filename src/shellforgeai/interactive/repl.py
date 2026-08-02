@@ -190,6 +190,15 @@ def _latest_context_is_windows_local(ctx: LatestDiagnosisContext | None) -> bool
     )
 
 
+def _latest_context_is_windows_services(ctx: LatestDiagnosisContext | None) -> bool:
+    """Return whether the operative bounded context is Windows services evidence."""
+    return bool(
+        ctx is not None
+        and ctx.diagnosis_kind == WINDOWS_OPERATOR_INTENT_SERVICES
+        and ctx.target == "windows-local-read-only"
+    )
+
+
 def _should_use_windows_local_guidance(ctx: LatestDiagnosisContext | None) -> bool:
     return _is_windows_host() or _latest_context_is_windows_local(ctx)
 
@@ -2662,11 +2671,32 @@ def _record_latest_context_in_session_summary(
         state.note_safe_command(command)
 
 
+def _handle_windows_services_interactive_route(
+    *,
+    runtime: RuntimeContext,
+    grounding: FollowupGroundingState,
+    session_summary: InteractiveSessionSummaryState,
+) -> tuple[str, LatestDiagnosisContext]:
+    """Collect and preserve one bounded Windows services evidence context."""
+    payload = _collect_windows_services_interactive_payload()
+    latest_context = _windows_services_latest_context(
+        session_id=runtime.session.session_id, payload=payload
+    )
+    update_grounding_from_latest_context(grounding, latest_context)
+    _record_latest_context_in_session_summary(session_summary, latest_context)
+    return _render_windows_services_interactive_evidence(payload), latest_context
+
+
 def _first_safe_summary_command(state: InteractiveSessionSummaryState) -> str:
     if any("metadata hygiene" in finding.lower() for finding in state.findings):
         return "shellforgeai audit cleanup review"
     if state.top_suspect:
         return f"shellforgeai triage docker detail {state.top_suspect}"
+    if (
+        WINDOWS_OPERATOR_INTENT_SERVICES in state.checks
+        and WINDOWS_SERVICES_COMMAND in state.safe_next_commands
+    ):
+        return WINDOWS_SERVICES_COMMAND
     if state.latest_target and state.latest_target not in {
         "health",
         "machine health",
@@ -2997,11 +3027,12 @@ def start_interactive(
                     console.print(render_windows_operator_guidance(shared_windows_route))
                     continue
                 with console.status("Collecting Windows read-only service evidence..."):
-                    services_payload = _collect_windows_services_interactive_payload()
-                latest_context = _windows_services_latest_context(
-                    session_id=runtime.session.session_id, payload=services_payload
-                )
-                console.print(_render_windows_services_interactive_evidence(services_payload))
+                    rendered, latest_context = _handle_windows_services_interactive_route(
+                        runtime=runtime,
+                        grounding=grounding,
+                        session_summary=session_summary,
+                    )
+                console.print(rendered)
                 continue
             if (
                 shared_windows_route.intent
@@ -3011,6 +3042,14 @@ def start_interactive(
                 }
                 or not shared_windows_route.host_is_windows
             ):
+                if (
+                    shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_NEXT_CHECK
+                    and _latest_context_is_windows_services(latest_context)
+                ):
+                    console.print(
+                        render_windows_operator_safe_next_section(WINDOWS_OPERATOR_INTENT_SERVICES)
+                    )
+                    continue
                 latest_context = _windows_interactive_pending_context(
                     session_id=runtime.session.session_id,
                     intent=shared_windows_route.intent,

@@ -7,9 +7,11 @@
   presentation vocabulary, and deterministic unsupported fallback for ask and
   interactive evidence paths. It adds no intent, collector, command, provider,
   model, or execution behavior.
-- PR330 is the separate command-suggestion validation seam. PR331 is the
-  separate bounded evidence-first timing/progressive-response seam. PR332 is
-  the separate short golden-path and advanced-help seam.
+- PR330 preserves Windows service-health route correctness and the bounded
+  service evidence identity across interactive follow-ups and summaries.
+  Command-suggestion validation moves to PR331, bounded evidence-first
+  timing/progressive synthesis moves to PR332, and short golden-path and
+  advanced-help work moves to PR333.
 
 The approved-change work now includes point-in-time live current-state
 revalidation for one exact PR323-linked Windows runtime-reconcile plan. It does

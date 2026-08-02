@@ -207,6 +207,7 @@ _SERVICE_STATE: Final = r"(?:failed |running |stopped |all |automatic )?"
 _SERVICE_NOUN: Final = r"(?:windows )?services?"
 _SERVICE_ASPECT: Final = r"(?:status|health|state)"
 _SERVICE_TAIL: Final = r"(?: on (?:this |the )?(?:host|machine|server|system|box))?"
+_SERVICE_EXPLANATION: Final = r"(?: and explain what matters(?: to an operator(?: on call)?)?)?"
 
 # Deliberately anchored full-string forms only. Broad substring matching on the
 # word "service" would capture unrelated operator text such as "customer service
@@ -217,6 +218,10 @@ _SERVICE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
         rf"{_SERVICE_LEAD}{_SERVICE_STATE}{_SERVICE_NOUN}{_SERVICE_TAIL}",
         rf"{_SERVICE_LEAD}{_SERVICE_STATE}{_SERVICE_NOUN} {_SERVICE_ASPECT}{_SERVICE_TAIL}",
         rf"{_SERVICE_NOUN} {_SERVICE_ASPECT}{_SERVICE_TAIL}",
+        (
+            rf"(?:{_SERVICE_LEAD})?local service "
+            rf"{_SERVICE_ASPECT}{_SERVICE_TAIL}{_SERVICE_EXPLANATION}"
+        ),
         rf"windows services?{_SERVICE_TAIL}",
         rf"(?:are|is)(?: the)? {_SERVICE_STATE}{_SERVICE_NOUN} healthy{_SERVICE_TAIL}",
         rf"(?:what|which)(?: windows)? services? are running{_SERVICE_TAIL}",
