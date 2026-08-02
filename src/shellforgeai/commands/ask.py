@@ -574,7 +574,10 @@ def register(app: typer.Typer) -> None:
             # mutation-style commands; rewrite them to the deterministic safe
             # next command before printing.
             answer_text, removed_commands = filter_unsupported_command_suggestions(
-                resp.text, safe_next_command=docker_grounding.get("safe_next_command")
+                resp.text,
+                safe_next_command=docker_grounding.get("safe_next_command"),
+                active_platform=build_platform_operator_contract().route_family,
+                intended_platform="linux_primary",
             )
         windows_gated = False
         if windows_packet is not None:

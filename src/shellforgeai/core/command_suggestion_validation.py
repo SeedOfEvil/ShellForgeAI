@@ -157,13 +157,20 @@ def validate_command_suggestion(
     policy = next((item for item in policies if item.command_path == matched.path), None)
     if policy is None:
         return rejected("not_suggestable", matched.path)
+    # Unsupported-local guidance is deliberately narrower than the general
+    # portable class.  Platform doctor is the only supported way to establish
+    # the host lane; an explicit supported target remains a separate policy.
+    if (
+        active_platform == "unsupported"
+        and intended_platform is None
+        and matched.path != ("platform", "doctor")
+    ):
+        return rejected("wrong_platform", matched.path)
     allowed = {
         "unsupported": {"portable_read_only"},
         "linux_primary": {"portable_read_only", "linux_read_only", "preview_read_only"},
         "windows_read_only": {"portable_read_only", "windows_read_only"},
     }[target]
-    if active_platform == "unsupported" and intended_platform is None:
-        allowed = {"portable_read_only"}
     if policy.safety_class not in allowed:
         return rejected("wrong_platform", matched.path)
     canonical = " ".join(tokens)

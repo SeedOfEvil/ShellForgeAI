@@ -420,14 +420,23 @@ def _matches_registry(tokens: list[str]) -> bool:
     return False
 
 
-def is_known_safe_shellforgeai_command(text: str) -> bool:
+def is_known_safe_shellforgeai_command(
+    text: str,
+    *,
+    active_platform: RouteFamily = "linux_primary",
+    intended_platform: RouteFamily | None = None,
+) -> bool:
     candidate = " ".join((text or "").strip().split())
     if not candidate or _UNSAFE_SHELL_RE.search(candidate):
         return False
     parts = candidate.split()
     if not parts or parts[0] != "shellforgeai":
         return False
-    return _matches_registry(parts[1:]) and validate_operator_command_suggestion(candidate).valid
+    return validate_operator_command_suggestion(
+        candidate,
+        active_platform=active_platform,
+        intended_platform=intended_platform,
+    ).valid
 
 
 def _contains_only_safe_command(text: str) -> bool:
@@ -442,14 +451,24 @@ def _contains_only_safe_command(text: str) -> bool:
 
 
 def filter_or_replace_unsafe_command_suggestions(
-    text: str, topic: str | None = None, suspect: str | None = None
+    text: str,
+    topic: str | None = None,
+    suspect: str | None = None,
+    *,
+    active_platform: RouteFamily = "linux_primary",
+    intended_platform: RouteFamily | None = None,
+    fallback_command: str | None = None,
 ) -> SafeCommandFilterResult:
     if not text:
         return SafeCommandFilterResult(
             safe_text=text, removed_suggestions=[], replacement_commands=[]
         )
-    fallback_candidate = suggest_safe_next_command(topic, suspect=suspect)
-    fallback_result = validate_operator_command_suggestion(fallback_candidate)
+    fallback_candidate = fallback_command or suggest_safe_next_command(topic, suspect=suspect)
+    fallback_result = validate_operator_command_suggestion(
+        fallback_candidate,
+        active_platform=active_platform,
+        intended_platform=intended_platform,
+    )
     fallback = fallback_result.canonical_command if fallback_result.valid else None
     spans: list[tuple[int, int, str, bool]] = []
     for m in _TOOL_RE.finditer(text):
@@ -459,9 +478,18 @@ def filter_or_replace_unsafe_command_suggestions(
             continue
         original = text[m.start() : end]
         if tool == "docker":
-            unsafe = _docker_mutation(tokens) or _UNSAFE_SHELL_RE.search(original) is not None
+            target = intended_platform or active_platform
+            unsafe = (
+                target != "linux_primary"
+                or _docker_mutation(tokens)
+                or _UNSAFE_SHELL_RE.search(original) is not None
+            )
         else:
-            unsafe = not is_known_safe_shellforgeai_command("shellforgeai " + " ".join(tokens))
+            unsafe = not is_known_safe_shellforgeai_command(
+                "shellforgeai " + " ".join(tokens),
+                active_platform=active_platform,
+                intended_platform=intended_platform,
+            )
         spans.append((m.start(), end, original, unsafe))
     if not spans:
         return SafeCommandFilterResult(

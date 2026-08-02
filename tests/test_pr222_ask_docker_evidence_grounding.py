@@ -253,6 +253,36 @@ def test_12_preserves_allowed_readonly_suggestions(patched_scene, fake_provider)
     assert "shellforgeai status --json" in out.stdout
 
 
+def test_pr331_docker_filter_receives_active_and_intended_platform(
+    patched_scene, fake_provider, monkeypatch
+):
+    captured = {}
+
+    def capture(text, **kwargs):
+        captured.update(kwargs)
+        return text, []
+
+    monkeypatch.setattr(
+        "shellforgeai.core.command_suggestions.filter_unsupported_command_suggestions",
+        capture,
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.platform_operator_contract.build_platform_operator_contract",
+        lambda: type(
+            "Contract",
+            (),
+            {"route_family": "windows_read_only", "local_evidence_available": True},
+        )(),
+    )
+    out = _ask("why is beszel-agent suspicious?")
+    assert out.exit_code == 0, out.stdout
+    assert captured["active_platform"] == "windows_read_only"
+    assert captured["intended_platform"] == "linux_primary"
+    assert captured["safe_next_command"] == (
+        "shellforgeai triage docker detail beszel-agent --json"
+    )
+
+
 def test_13_unknown_shellforgeai_command_not_emitted(patched_scene, fake_provider):
     _set_provider(fake_provider, text="Then run shellforgeai frobnicate docker right away.")
     out = _ask("why is beszel-agent suspicious?")

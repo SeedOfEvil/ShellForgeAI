@@ -64,6 +64,7 @@ def remediation_plan_command(target: str, scenario: str, *, json: bool = False) 
 # Backward-compatible wrappers for the PR223 safe-command registry.  Command
 # suggestion validation now lives in ``safe_commands`` so model-backed ask and
 # future operator guidance share one read-only allowlist.
+from shellforgeai.core.command_suggestion_validation import RouteFamily  # noqa: E402
 from shellforgeai.core.safe_commands import (  # noqa: E402
     filter_or_replace_unsafe_command_suggestions,
     is_known_safe_shellforgeai_command,
@@ -78,16 +79,17 @@ __all__ = [
 
 
 def filter_unsupported_command_suggestions(
-    text: str, *, safe_next_command: str | None = None
+    text: str,
+    *,
+    safe_next_command: str | None = None,
+    active_platform: RouteFamily = "linux_primary",
+    intended_platform: RouteFamily | None = None,
 ) -> tuple[str, list[str]]:
-    result = filter_or_replace_unsafe_command_suggestions(text, topic="docker")
-    if safe_next_command and result.removed_suggestions:
-        # Preserve the historical PR222 API: callers may pass an already
-        # computed deterministic safe-next command.  Re-run replacement against
-        # the registry-selected command shape by direct substitution only for
-        # suggestions already removed by the central registry.
-        safe_text = result.safe_text
-        for replacement in set(result.replacement_commands):
-            safe_text = safe_text.replace(replacement, safe_next_command)
-        return safe_text, result.removed_suggestions
+    result = filter_or_replace_unsafe_command_suggestions(
+        text,
+        topic="docker",
+        active_platform=active_platform,
+        intended_platform=intended_platform,
+        fallback_command=safe_next_command,
+    )
     return result.safe_text, result.removed_suggestions
