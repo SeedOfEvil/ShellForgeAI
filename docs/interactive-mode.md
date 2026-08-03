@@ -715,6 +715,24 @@ For installed Windows use, `sfai.cmd ask` and `sfai.cmd interactive` can be laun
 
 ## Bounded analytical evidence continuity
 
+Native Windows performance, strongest-signal, service-health, disk/volume-capacity,
+network-health, and crash-health questions share one compact Windows-local evidence
+packet. It projects the existing status, memory, process, service, event, network,
+and volume collectors once; each answer may emphasize a domain without discarding
+the other native facts. Available Windows facts take precedence over incompatible
+Linux-tool unavailable rows. Later bounded analytical questions reuse the
+session-local packet without recollection, while explicit Docker, container, and
+Compose targets retain Docker routing.
+
+The deterministic packet is rendered and flushed before synchronous model
+synthesis. Provider failure or rejected Windows output cannot erase or duplicate
+that evidence. The packet states its limits: CPU utilization and per-process CPU,
+disk-I/O latency/IOPS/queue depth, active connections, deeper route-table data,
+end-to-end DNS reachability, packet loss, and service recovery policy are not
+collected. Interface metadata is not proof of end-to-end health, and stopped
+services are not by themselves confirmed failures. This routing adds no collector,
+command, execution, streaming, background work, persistence, or mutation.
+
 An interactive session retains one latest bounded evidence context in memory. The
 context is session-local and nonpersistent: it is not a transcript, general
 conversational memory, or cross-session memory. It contains only compact collected

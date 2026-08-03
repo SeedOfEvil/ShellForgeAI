@@ -174,4 +174,11 @@ Stage B is not complete. The PR309/PR310/PR311/PR314/PR315/PR316/PR317/PR318/PR3
 
 ## Final state
 
+Adjacent native Windows performance, strongest-signal, services, disk/volume, and
+network symptom routes now use the existing bounded standard-evidence components as
+one coherent interactive packet. This adds no collectors or commands. Deeper CPU,
+process attribution, disk-I/O, connection, route, DNS, packet-loss, and service
+recovery metrics remain separately scoped future work; golden-path and advanced-help
+work also remains deferred.
+
 ShellForgeAI remains one CLI-first operator interface with the complete lifecycle: Understand → Investigate → Diagnose → Propose → Obtain approval → Implement → Verify → Report. It can implement approved bounded changes through supported capabilities, verify outcomes with fresh evidence, and report facts, receipts, and remaining risk without becoming a dashboard, control plane, generic shell, or broad orchestration platform.

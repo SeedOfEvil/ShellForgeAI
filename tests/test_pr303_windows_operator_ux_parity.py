@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -269,10 +270,16 @@ def test_actual_windows_performance_preserves_pr289_body_and_layers_safe_next(
         "shellforgeai.interactive.repl.windows_memory_payload", pr289._fake_memory_payload
     )
 
-    def _fail_provider(*_: object) -> object:
-        raise AssertionError("Windows performance route must not call the model provider")
+    pr289._pin_context_builders(monkeypatch)
 
-    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
+    class _Provider:
+        def complete(self, request: object) -> object:
+            return SimpleNamespace(
+                ok=True,
+                text="Native Windows memory and volume evidence provides the bounded first pass.",
+            )
+
+    monkeypatch.setattr("shellforgeai.interactive.repl.build_provider", lambda *_: _Provider())
     result = runner.invoke(
         app,
         ["interactive", "--yes-trust", "--no-trust-cache"],
@@ -283,29 +290,16 @@ def test_actual_windows_performance_preserves_pr289_body_and_layers_safe_next(
     )
     out = result.stdout
     assert result.exit_code == 0, out
-    assert "## Windows latency first-pass diagnosis" in out
-    assert "## Assessment" in out
+    assert "## Windows evidence" in out
+    assert "## Model assessment" in out
     assert "memory used=20.0%" in out
     assert "available=6.4GiB/8.0GiB" in out
     assert "Memory summary unavailable" not in out
-    assert "root_free=156.0GiB/256.0GiB" in out
+    assert "free=156.0GiB/256.0GiB" in out
     assert "Load average is not available on Windows" in out
-    section = out.split("Start with this bounded read-only check:", 1)[1]
-    command_lines = [line.strip() for line in section.splitlines() if line.strip().startswith("-")]
-    assert command_lines[0] == "- shellforgeai windows evidence --profile standard --json"
-    assert command_lines[1:6] == [
-        "- shellforgeai windows processes --json --limit 10",
-        "- shellforgeai windows events --json --limit 50 --since-hours 24",
-        "- shellforgeai windows network --json",
-        "- shellforgeai windows volumes --json --limit 32",
-        "- shellforgeai windows status --json",
-    ]
-    assert "No command was executed. No action was taken." in out
-    normalized = " ".join(out.split())
-    assert (
-        "No cleanup, restart, service control, process termination, remediation, "
-        "rollback, or recovery was performed."
-    ) in normalized
+    assert "shellforgeai windows evidence --profile standard --json" in out
+    assert "mutation_performed=false" in out
+    assert "read_only=true" in out
     assert "sfai.cmd" not in out
     assert "Traceback" not in out
 

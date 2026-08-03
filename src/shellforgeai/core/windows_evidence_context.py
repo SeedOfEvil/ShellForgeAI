@@ -33,14 +33,17 @@ from shellforgeai.windows_disks import (
     INODES_UNAVAILABLE_MARKER,
     windows_disks_payload,
 )
+from shellforgeai.windows_events import windows_events_payload
 from shellforgeai.windows_memory import (
     LOAD_AVERAGE_UNAVAILABLE_MARKER,
     MEMORY_UNAVAILABLE_MARKER,
     windows_memory_payload,
 )
+from shellforgeai.windows_network import windows_network_payload
 from shellforgeai.windows_processes import windows_processes_payload
 from shellforgeai.windows_services import windows_services_payload
 from shellforgeai.windows_status import windows_status_payload
+from shellforgeai.windows_volumes import windows_volumes_payload
 
 LINUX_ONLY_COLLECTORS_SKIPPED_MARKER = "Linux-only collectors skipped on Windows"
 
@@ -48,6 +51,8 @@ LINUX_ONLY_COLLECTORS_SKIPPED_MARKER = "Linux-only collectors skipped on Windows
 WINDOWS_CONTEXT_PROCESS_LIMIT = 10
 WINDOWS_CONTEXT_SERVICE_LIMIT = 10
 WINDOWS_CONTEXT_DISK_ROOT_LIMIT = 6
+WINDOWS_CONTEXT_EVENT_LIMIT = 20
+WINDOWS_CONTEXT_NETWORK_INTERFACE_LIMIT = 16
 
 WINDOWS_EVIDENCE_SAFE_NEXT_COMMANDS: tuple[str, ...] = (
     WINDOWS_STANDARD_EVIDENCE_COMMAND,
@@ -67,7 +72,7 @@ WINDOWS_PROCESS_SERVICE_GAP_COMMANDS: tuple[str, ...] = (
 WINDOWS_EVIDENCE_MODEL_DIRECTIVE = (
     "This is a Windows host with local read-only evidence. Answer the "
     "operator's question strictly from the windows_evidence facts (host, "
-    "memory, disk, processes, services, limitations) using the real numbers "
+    "memory, volumes, processes, services, events, network, limitations) using the real numbers "
     "provided. If a fact is not in the packet, say that the current evidence "
     "packet lacks it and point to the safe read-only shellforgeai windows "
     "commands; never invent processes, services, or metrics. Do not mention "
@@ -205,6 +210,16 @@ def _services_context(services_payload: dict[str, Any], limit: int) -> dict[str,
     }
 
 
+def _bounded_component(payload: dict[str, Any], *, entries_key: str) -> dict[str, Any]:
+    """Project an existing native component without retaining its raw packet."""
+    return {
+        "available": payload.get("status") == "ok",
+        "summary": deepcopy(payload.get("summary") or {}),
+        "entries": deepcopy(payload.get(entries_key) or []),
+        "limitations": [str(item) for item in (payload.get("limitations") or [])][:4],
+    }
+
+
 def build_windows_evidence_context(
     info: PlatformInfo | None = None,
     *,
@@ -234,6 +249,17 @@ def build_windows_evidence_context(
     services_payload = _safe_payload(
         lambda: windows_services_payload(info, max_services=max(service_limit, 1))
     )
+    events_payload = _safe_payload(
+        lambda: windows_events_payload(info, limit=WINDOWS_CONTEXT_EVENT_LIMIT, since_hours=24)
+    )
+    network_payload = _safe_payload(
+        lambda: windows_network_payload(
+            info, max_interfaces=WINDOWS_CONTEXT_NETWORK_INTERFACE_LIMIT
+        )
+    )
+    volumes_payload = _safe_payload(
+        lambda: windows_volumes_payload(info, limit=max(disk_root_limit, 1))
+    )
 
     host_block = status_payload.get("host") or {}
     platform_block = status_payload.get("platform") or {}
@@ -247,6 +273,9 @@ def build_windows_evidence_context(
     disk = _disk_context(status_payload, disks_payload, disk_root_limit)
     processes = _processes_context(processes_payload, process_limit)
     services = _services_context(services_payload, service_limit)
+    events = _bounded_component(events_payload, entries_key="events")
+    network = _bounded_component(network_payload, entries_key="interfaces")
+    volumes = _bounded_component(volumes_payload, entries_key="volumes")
 
     limitations = [
         LOAD_AVERAGE_UNAVAILABLE_MARKER,
@@ -262,6 +291,23 @@ def build_windows_evidence_context(
         evidence_gaps.append("process detail is not present in this evidence packet")
     if not services.get("available"):
         evidence_gaps.append("service detail is not present in this evidence packet")
+    if not events.get("available"):
+        evidence_gaps.append("bounded Windows event-history metadata is not present")
+    if not network.get("available"):
+        evidence_gaps.append("Windows interface/address metadata is not present")
+    if not volumes.get("available"):
+        evidence_gaps.append("Windows local volume metadata is not present")
+    limitations.extend(
+        [
+            "Native CPU utilization and per-process CPU attribution are not collected.",
+            "Disk I/O latency, queue depth, and IOPS are not collected.",
+            "Network interface/address metadata does not prove end-to-end health; "
+            "active connections, route-table detail, packet loss, and end-to-end DNS "
+            "reachability are not collected.",
+            "Service recovery configuration and named-service expectations are not "
+            "collected; stopped services can be normal.",
+        ]
+    )
 
     return {
         "platform": "windows",
@@ -284,6 +330,9 @@ def build_windows_evidence_context(
         "disk": disk,
         "processes": processes,
         "services": services,
+        "events": events,
+        "network": network,
+        "volumes": volumes,
         "limitations": list(dict.fromkeys(limitations)),
         "evidence_gaps": evidence_gaps,
         "safe_next_commands": list(WINDOWS_EVIDENCE_SAFE_NEXT_COMMANDS),
@@ -352,6 +401,14 @@ def _services_fact_line(services: dict[str, Any]) -> str | None:
     )
 
 
+def _component_fact_line(label: str, component: dict[str, Any]) -> str | None:
+    if not component.get("available"):
+        return None
+    summary = component.get("summary") or {}
+    values = "; ".join(f"{key}={value}" for key, value in list(summary.items())[:8])
+    return f"{label}: {values or 'native bounded metadata collected'} (Windows read-only)"
+
+
 def windows_evidence_prompt_facts(packet: dict[str, Any]) -> list[dict[str, str]]:
     """Compact tool/status/summary rows so key Windows facts survive truncation."""
     host = packet.get("host") or {}
@@ -371,6 +428,9 @@ def windows_evidence_prompt_facts(packet: dict[str, Any]) -> list[dict[str, str]
         ("windows.disks", _disk_fact_line(packet.get("disk") or {})),
         ("windows.processes", _processes_fact_line(packet.get("processes") or {})),
         ("windows.services", _services_fact_line(packet.get("services") or {})),
+        ("windows.events", _component_fact_line("events", packet.get("events") or {})),
+        ("windows.network", _component_fact_line("network", packet.get("network") or {})),
+        ("windows.volumes", _component_fact_line("volumes", packet.get("volumes") or {})),
     ):
         if line:
             rows.append({"tool": tool, "status": "ok", "summary": line})

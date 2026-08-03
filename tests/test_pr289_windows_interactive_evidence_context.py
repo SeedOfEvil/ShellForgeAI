@@ -28,6 +28,7 @@ network/model calls, no mutation.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -296,7 +297,7 @@ def test_context_builder_includes_windows_evidence_facts(monkeypatch: Any) -> No
     assert "Load average is not available on Windows" in limitations
     assert "Inodes are not available on Windows" in limitations
     assert "Linux-only collectors skipped on Windows" in limitations
-    assert packet["evidence_gaps"] == []
+    assert packet["evidence_gaps"] == ["bounded Windows event-history metadata is not present"]
 
 
 def test_context_builder_fails_soft_per_component(monkeypatch: Any) -> None:
@@ -521,6 +522,7 @@ def test_thin_evidence_prompt_tells_model_about_gaps(windows_interactive: Any) -
 def test_slow_prompt_uses_real_memory_and_disk_facts(
     windows_interactive: Any,
 ) -> None:
+    _pin_context_builders(windows_interactive)
     windows_interactive.setattr("shellforgeai.core.diagnose.detect_platform", lambda: WINDOWS_INFO)
     windows_interactive.setattr(
         "shellforgeai.core.collectors.detect_platform", lambda: WINDOWS_INFO
@@ -538,10 +540,19 @@ def test_slow_prompt_uses_real_memory_and_disk_facts(
         "shellforgeai.interactive.repl.windows_memory_payload", _fake_memory_payload
     )
 
-    def _fail_provider(*_: Any) -> Any:
-        raise AssertionError("Windows slow route must not call the model provider")
+    class _Provider:
+        def complete(self, request: Any) -> Any:
+            return SimpleNamespace(
+                ok=True,
+                text=(
+                    "The bounded native memory and volume facts are the current "
+                    "performance evidence."
+                ),
+            )
 
-    windows_interactive.setattr("shellforgeai.interactive.repl.build_provider", _fail_provider)
+    windows_interactive.setattr(
+        "shellforgeai.interactive.repl.build_provider", lambda *_: _Provider()
+    )
     res = runner.invoke(
         app,
         ["interactive", "--yes-trust", "--no-trust-cache"],
@@ -554,10 +565,10 @@ def test_slow_prompt_uses_real_memory_and_disk_facts(
     assert "available=6.4GiB/8.0GiB" in out
     assert "Memory summary unavailable" not in out
     # Real disk/root facts from the reused Windows payloads.
-    assert "root_free=156.0GiB/256.0GiB" in out
+    assert "free=156.0GiB/256.0GiB" in out
     # Honest limitation, Windows-native framing, no Docker.
     assert "Load average is not available on Windows" in out
-    assert "Windows host" in out
+    assert "## Windows evidence" in out
     assert "docker" not in out.lower()
     assert "Understood" not in out
     assert "AGENTS.md" not in out
