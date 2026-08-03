@@ -3544,11 +3544,11 @@ def start_interactive(
         if routed.name == "/help":
             topic = routed.args.strip().lower()
             if not topic:
-                console.print(render_quick_help(operator_contract))
+                console.print(render_quick_help(operator_contract), markup=False)
             elif topic == "advanced":
-                console.print(render_advanced_help())
+                console.print(render_advanced_help(), markup=False)
             else:
-                console.print(HELP_USAGE)
+                console.print(HELP_USAGE, markup=False)
             continue
         if routed.name == "/examples":
             console.print("""Diagnostics:

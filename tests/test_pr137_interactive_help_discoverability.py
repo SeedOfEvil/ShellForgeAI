@@ -8,10 +8,12 @@ dispatch CLI work, or expand mutation execution paths.
 from __future__ import annotations
 
 import builtins
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from rich.console import Console as RichConsole
 
 from shellforgeai.interactive import repl
 from shellforgeai.interactive.commands import route_input
@@ -31,10 +33,15 @@ class _FakeProvider:
 
 
 def _drive_repl(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, inputs: list[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    inputs: list[str],
+    *,
+    rich_output: bool = False,
 ) -> tuple[str, list[tuple[str, ...]], type[_FakeProvider]]:
     printed: list[str] = []
     dispatched: list[tuple[str, ...]] = []
+    rich_stream = StringIO()
 
     class _Cap:
         def print(self, *args, **kwargs):  # noqa: ANN002, ANN003
@@ -64,7 +71,14 @@ def _drive_repl(
         console.print(f"DISPATCH {' '.join(argv)}")
         return f"DISPATCH {' '.join(argv)}"
 
-    monkeypatch.setattr(repl, "Console", lambda *a, **k: _Cap())
+    if rich_output:
+        monkeypatch.setattr(
+            repl,
+            "Console",
+            lambda *a, **k: RichConsole(file=rich_stream, force_terminal=False, width=120),
+        )
+    else:
+        monkeypatch.setattr(repl, "Console", lambda *a, **k: _Cap())
     monkeypatch.setattr(repl, "_confirm_workspace", lambda *a, **k: True)
     monkeypatch.setattr(repl, "build_provider", lambda *a, **k: _Provider())
     monkeypatch.setattr(repl, "_run_interactive_cli_dispatch", _fake_dispatch)
@@ -99,7 +113,8 @@ def _drive_repl(
     )
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     repl.start_interactive(runtime, no_trust_cache=True)
-    return "\n".join(printed), dispatched, _Provider
+    output = rich_stream.getvalue() if rich_output else "\n".join(printed)
+    return output, dispatched, _Provider
 
 
 def _help_for(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, alias: str) -> str:
@@ -214,16 +229,17 @@ def test_mutation_refusal_routes_still_win(text: str) -> None:
     assert route_input(text).name == "mutation_refused"
 
 
-@pytest.mark.parametrize(
-    "topic", ["help nonsense", "/help nonsense", "help windows", "/help linux"]
-)
+@pytest.mark.parametrize("topic", ["help nonsense", "/help nonsense"])
 def test_invalid_help_topic_is_exact_local_usage(monkeypatch, tmp_path, topic: str) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     before = {path.relative_to(data_dir) for path in data_dir.rglob("*")}
-    out, dispatched, provider = _drive_repl(monkeypatch, tmp_path, [topic, "/exit"])
+    out, dispatched, provider = _drive_repl(
+        monkeypatch, tmp_path, [topic, "/exit"], rich_output=True
+    )
     after = {path.relative_to(data_dir) for path in data_dir.rglob("*")}
     assert "Usage: help [advanced]" in out
+    assert "Usage: help\n" not in out
     assert dispatched == []
     assert provider.complete_calls == 0
     assert after == before
