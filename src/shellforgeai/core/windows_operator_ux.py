@@ -251,6 +251,7 @@ _SERVICE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
 def _services(text: str) -> bool:
     exact = {
         "are the services healthy",
+        "are any services unhealthy",
         "how do the services look",
         "any failed or unhealthy services",
     }
@@ -261,6 +262,7 @@ _DISK_CAPACITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(pattern)
     for pattern in (
         r"how is disk capacity",
+        r"am i running out of disk space",
         r"are any drives low on space",
         r"how much free space is available",
         r"how does [a-z] look",
@@ -279,6 +281,7 @@ _NETWORK_HEALTH_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
     for pattern in (
         r"how does the network look",
         r"is networking healthy",
+        r"is networking okay",
         r"do you see a network problem",
         r"are the windows network interfaces healthy",
         r"(?:windows )?network (?:health|status)",
