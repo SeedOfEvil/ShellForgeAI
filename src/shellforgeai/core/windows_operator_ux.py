@@ -12,6 +12,7 @@ WINDOWS_OPERATOR_INTENT_PERFORMANCE: Final = "windows_performance"
 WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL: Final = "windows_strongest_signal"
 WINDOWS_OPERATOR_INTENT_HANDOFF: Final = "windows_handoff"
 WINDOWS_OPERATOR_INTENT_SERVICES: Final = "windows_services"
+WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH: Final = "windows_failure_health"
 WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL: Final = "windows_mutation_refusal"
 
 WINDOWS_STANDARD_EVIDENCE_COMMAND: Final = "shellforgeai windows evidence --profile standard --json"
@@ -233,6 +234,27 @@ def _services(text: str) -> bool:
     return any(pattern.fullmatch(text) for pattern in _SERVICE_PATTERNS)
 
 
+_FAILURE_HEALTH_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"is anything crashing(?: on (?:this |the )?windows host)?",
+        r"are any (?:processes|services) crashing(?: on (?:this |the )?windows host)?",
+        r"do you see any crash signals(?: on (?:this |the )?windows host)?",
+        r"do you see any (?:failures or crashes|crashes)(?: on windows)?",
+        r"is anything failing or crashing(?: on (?:this |the )?windows host)?",
+        r"is anything crashing on (?:this |the )?windows host",
+    )
+)
+
+
+def _failure_health(text: str) -> bool:
+    """Match only bounded host crash-health questions, never Docker targets."""
+    docker_terms = ("docker", "container", "containers", "compose")
+    if any(_has_word(text, term) for term in docker_terms):
+        return False
+    return any(pattern.fullmatch(text) for pattern in _FAILURE_HEALTH_PATTERNS)
+
+
 def _mutation(text: str, explicit_windows: bool) -> bool:
     actions = (
         "clean up",
@@ -243,13 +265,27 @@ def _mutation(text: str, explicit_windows: bool) -> bool:
         "kill",
         "terminate",
         "fix it",
+        "fix anything",
         "remediate",
         "roll back",
         "rollback",
         "recover",
         "apply",
     )
-    targets = ("windows", "service", "services", "process", "processes", "cleanup", "clean up")
+    targets = (
+        "windows",
+        "service",
+        "services",
+        "process",
+        "processes",
+        "crash",
+        "crashing",
+        "fail",
+        "failing",
+        "failed",
+        "cleanup",
+        "clean up",
+    )
     return any(a in text for a in actions) and (explicit_windows or any(t in text for t in targets))
 
 
@@ -286,19 +322,25 @@ def classify_windows_interactive_intent(
     mutation refusal and every existing read-only intent keep their exact
     priority and the top-level ``ask`` contract is untouched. Only text the
     shared classifier leaves unclassified is tested against the bounded
-    read-only Windows service inventory/health predicate.
+    read-only Windows service inventory/health and crash-health predicates.
     """
     shared = classify_windows_operator_intent(text, host_system=host_system)
     if shared is not None:
         return shared
     normalized = normalize_windows_operator_text(text)
-    if not normalized or not _services(normalized):
+    if not normalized:
         return None
     host_is_windows = host_system.casefold() == "windows"
     explicit = _explicit_windows(normalized)
     if not _scoped(normalized, host_is_windows, explicit):
         return None
-    return WindowsOperatorRoute(WINDOWS_OPERATOR_INTENT_SERVICES, host_is_windows, explicit)
+    if _services(normalized):
+        return WindowsOperatorRoute(WINDOWS_OPERATOR_INTENT_SERVICES, host_is_windows, explicit)
+    if _failure_health(normalized):
+        return WindowsOperatorRoute(
+            WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH, host_is_windows, explicit
+        )
+    return None
 
 
 def windows_operator_safe_commands(intent: str) -> tuple[str, ...]:

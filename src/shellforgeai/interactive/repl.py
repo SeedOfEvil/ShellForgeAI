@@ -72,6 +72,7 @@ from shellforgeai.core.windows_evidence_context import (
     windows_evidence_prompt_facts,
 )
 from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
     WINDOWS_OPERATOR_INTENT_HANDOFF,
     WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
     WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
@@ -1144,6 +1145,101 @@ def _render_retained_analytical_followup(
     if kind == "strongest_signal" and _has_substantive_response(clean):
         first = next((line.strip(" -*") for line in clean.splitlines() if line.strip()), "")
         ctx.retain_selected_signal(first)
+
+
+_WINDOWS_CRASH_HISTORY_LIMITATION = (
+    "Historical crash confirmation is unavailable from this point-in-time snapshot; "
+    "Event Log, crash-record, dump, and service-recovery history were not collected."
+)
+
+
+def _handle_windows_failure_health_route(
+    console: Console, runtime: RuntimeContext, question: str
+) -> LatestDiagnosisContext:
+    """Collect once, render first, and synchronously assess bounded Windows evidence."""
+    packet = build_windows_evidence_context()
+    rows = windows_evidence_prompt_facts(packet)
+    facts = [str(row.get("summary")) for row in rows if row.get("status") == "ok"][:8]
+    packet_limitations = [
+        str(item)
+        for item in (packet.get("limitations") or [])
+        if "inode" not in str(item).lower() and "linux-only" not in str(item).lower()
+    ][:3]
+    packet_limitations.extend(str(item) for item in (packet.get("evidence_gaps") or [])[:3])
+    limitations = [_WINDOWS_CRASH_HISTORY_LIMITATION, *packet_limitations]
+    ctx = LatestDiagnosisContext(
+        session_id=runtime.session.session_id,
+        created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        target="windows-local-read-only",
+        diagnosis_kind=WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
+        platform="windows",
+        collection_id=(
+            f"{runtime.session.session_id}:{WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH}:"
+            "windows-local-read-only"
+        ),
+        evidence_highlights=facts,
+        deterministic_facts=facts,
+        limitations=limitations[:4],
+        safe_next_commands=list(packet.get("safe_next_commands") or [])[:4],
+        source_command=question,
+        deterministic_only=True,
+        model_assessment_status="pending",
+        facts={"visibility": "windows-local-read-only"},
+    )
+    stage = EvidenceFirstResponse(
+        platform="Windows",
+        evidence_label="Windows local read-only evidence",
+        evidence_source="ShellForgeAI Windows collectors",
+        intent="bounded crash-health question",
+        evidence_available=bool(facts),
+        findings=tuple(facts),
+        limitations=tuple(ctx.limitations),
+        safe_next_commands=tuple(ctx.safe_next_commands),
+    )
+    console.print(render_evidence_first(stage))
+    output_file = getattr(console, "file", None)
+    if output_file is not None and hasattr(output_file, "flush"):
+        output_file.flush()
+    model_context = {
+        "identity": "Windows host with local read-only evidence",
+        "windows_evidence": packet,
+        "evidence": rows,
+        "windows_evidence_directive": WINDOWS_EVIDENCE_MODEL_DIRECTIVE,
+        "crash_history_limitation": _WINDOWS_CRASH_HISTORY_LIMITATION,
+    }
+    try:
+        provider = build_provider(runtime.settings)
+        response = provider.complete(
+            ModelRequest(
+                prompt=build_windows_evidence_model_prompt(question, model_context, mode="full"),
+                model=runtime.settings.model.model,
+                provider=runtime.settings.model.provider,
+                timeout_seconds=runtime.settings.model.timeout_seconds,
+                metadata={"command_kind": "windows_failure_health"},
+            )
+        )
+    except Exception as exc:
+        console.print(render_model_unavailable(type(exc).__name__))
+        ctx.model_assessment_status = "unavailable"
+        return ctx
+    clean = _sanitize_provider_error(str(getattr(response, "text", "")))
+    if (
+        not getattr(response, "ok", True)
+        or not _has_substantive_response(clean)
+        or _is_bad_model_assessment(clean)
+        or is_rejected_windows_model_answer(clean)
+    ):
+        reason = (
+            "rejected_windows_model_answer"
+            if clean and is_rejected_windows_model_answer(clean)
+            else "provider_failure"
+        )
+        console.print(render_model_unavailable(reason))
+        ctx.model_assessment_status = "unavailable"
+        return ctx
+    console.print(render_model_assessment(clean))
+    ctx.model_assessment_status = "available"
+    return ctx
 
 
 def _summary_for_check(c) -> str:
@@ -3145,6 +3241,15 @@ def start_interactive(
                         session_summary=session_summary,
                     )
                 console.print(rendered)
+                continue
+            if (
+                shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH
+                and shared_windows_route.host_is_windows
+            ):
+                latest_context = _handle_windows_failure_health_route(console, runtime, user_input)
+                update_grounding_from_latest_context(grounding, latest_context)
+                _record_latest_context_in_session_summary(session_summary, latest_context)
+                pending_followup = None
                 continue
             if (
                 shared_windows_route.intent

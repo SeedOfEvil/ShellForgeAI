@@ -11,18 +11,23 @@
   service evidence identity across interactive follow-ups and summaries.
   Command-suggestion validation moves to PR331, bounded evidence-first
   timing/progressive synthesis moves to PR332. PR333 is the bounded,
-  session-local analytical evidence-continuity handoff; short golden-path and
-  advanced-help work moves to PR334 or later.
+  session-local analytical evidence-continuity handoff.
 - Model-assisted operator paths present a bounded, authoritative deterministic
   evidence stage before synchronous synthesis. The supplemental assessment is
   clearly separated; its failure does not erase evidence. A five-second
   first-evidence target is measured without collector cancellation, token
   streaming, or background provider work. Golden-path and advanced-help work
-  remain deferred to PR334 or later.
+  remain deferred to PR335 or later.
 - PR333 reuses only the latest bounded evidence packet for a narrow class of
   analytical interactive follow-ups. Deterministic facts and model-derived
   findings retain separate provenance; no persistent conversational memory is
   introduced.
+- PR334 is the narrow Windows interactive crash-health routing-correctness
+  change. Bounded crash-health questions on a native Windows host reuse the
+  existing Windows evidence-first and retained analytical-context machinery;
+  explicit Docker targets and Linux behavior remain unchanged. It adds no new
+  collector or persistent conversational memory. Golden-path and advanced-help
+  work remains deferred to PR335 or later.
 
 The approved-change work now includes point-in-time live current-state
 revalidation for one exact PR323-linked Windows runtime-reconcile plan. It does
