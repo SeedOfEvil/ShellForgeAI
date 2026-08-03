@@ -1211,6 +1211,10 @@ def route_input(text: str) -> RoutedCommand:
         return RoutedCommand(name="/exit")
     if exact_session in {"help", "?", "commands", "what can i do?"}:
         return RoutedCommand(name="/help")
+    if exact_session == "help advanced":
+        return RoutedCommand(name="/help", args="advanced")
+    if exact_session.startswith("help "):
+        return RoutedCommand(name="/help", args=raw[5:].strip())
     if exact_session == "pending":
         return RoutedCommand(name="/pending")
     if exact_session in {"restart compose", "compose restart"}:

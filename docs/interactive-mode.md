@@ -201,22 +201,33 @@ Debug
 
 ## Interactive help
 
-Type `help`, `/help`, `?`, `commands`, or `what can I do?` inside the REPL to
-show a short operator help screen. The help lists exact interactive-supported
-forms for fast status (`status`, `status --brief`, `status --json`, `ops report --brief`, `v1 check quick`, `doctor`),
-V2 verification (`verify`, `verify --json`, `verify --target <target>`),
-V2 handoff (`handoff`, `handoff --json`, `handoff --save`, `handoff summary`),
-Docker triage (`triage docker detail <target>`), reports/artifacts (`ops report
-history --limit 5`, `ops report compare-latest`), safe remediation readiness
-(`remediation eligibility --target <target> --explain`), and session follow-ups
-(`what happened in this session?`, `what did you find?`, `get that info`, `dig deeper`, `pending`, `summary`, `exit`).
+Type `help`, `/help`, `?`, `commands`, or `what can I do?` inside the REPL for
+platform-aware quick help. The renderer uses the immutable platform operator
+contract already built for the session; it does not probe the host. Linux shows
+a concise Linux/Docker read-only investigation journey and safe status/triage
+forms. Windows shows the native Windows health, crash, performance, services,
+disk, network, and strongest-signal journey plus Windows evidence/status forms,
+without presenting Linux collector vocabulary as locally applicable. macOS and
+unknown platforms receive an honest limited-support guide centered on runtime
+status, explicit explanation/review, `shellforgeai platform doctor --json`,
+`/pending`, and `/summary`.
 
-The help also has a refused-here section for mutation-shaped examples such as
-Docker/Compose restart, cleanup execute, remediation execute, rollback execute,
-and `rm -rf /`. Those examples are shown only as not-run/refused examples.
-Interactive mode is not a shell; no Docker/Compose/remediation/cleanup command
-runs from natural language, and mutation requires governed explicit workflows.
+Type `help advanced` or `/help advanced` for the bounded full reference. It
+groups session controls, status/evidence, platform-specific diagnostics, the V2
+read-only lifecycle, reports/artifacts, and governed workflows. Execution-capable
+recipe forms appear only in the strongly labeled governed section, retain their
+exact `--confirm` marker, and cannot be invoked through natural language.
+Unsupported topics such as `help windows` or `/help nonsense` return exactly
+`Usage: help [advanced]`; no topic-specific help exists.
 
+All valid and invalid help forms are deterministic local presentation. They make
+no provider, dispatcher, collector, evidence-collection, or command-execution
+call; write no file or artifact; and do not alter retained evidence or pending
+investigation state. Natural-language fixes, Docker/Compose restart, cleanup,
+remediation, recovery, rollback, and arbitrary shell requests remain refused.
+`/examples` remains a separate deterministic screen. The progressive reference
+is curated for interactive work; CLI `--help` remains the exhaustive authority
+for each command family.
 
 ## Session handoff summary
 

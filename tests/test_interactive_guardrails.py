@@ -30,7 +30,7 @@ def test_blocked_shell_input_no_model_call(monkeypatch) -> None:
     )
     assert res.exit_code == 0
     assert "ShellForgeAI interactive mode does not execute shell snippets." in res.stdout
-    assert "Session:" in res.stdout
+    assert "ShellForgeAI quick start — Linux/Docker read-only" in res.stdout
 
 
 def test_explicit_ask_shell_explain_calls_model(monkeypatch) -> None:
@@ -92,7 +92,7 @@ def test_multiline_paste_quarantine_blocks_fragments_and_allows_exit(monkeypatch
     assert res.exit_code == 0
     assert "Multiline shell paste detected." in res.stdout
     assert "Blocked shell paste fragment. No command was executed." in res.stdout
-    assert "Session:" in res.stdout
+    assert "ShellForgeAI quick start — Linux/Docker read-only" in res.stdout
     assert "Goodbye." in res.stdout
     assert called["v"] == 0
     assert not (tmp_path / "artifacts").exists()

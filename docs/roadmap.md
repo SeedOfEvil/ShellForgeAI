@@ -16,8 +16,7 @@
   evidence stage before synchronous synthesis. The supplemental assessment is
   clearly separated; its failure does not erase evidence. A five-second
   first-evidence target is measured without collector cancellation, token
-  streaming, or background provider work. Golden-path and advanced-help work
-  remain deferred to PR335 or later.
+  streaming, or background provider work. The platform-aware quick-start and advanced-help discoverability slice is now complete.
 - PR333 reuses only the latest bounded evidence packet for a narrow class of
   analytical interactive follow-ups. Deterministic facts and model-derived
   findings retain separate provenance; no persistent conversational memory is
@@ -26,8 +25,7 @@
   change. Bounded crash-health questions on a native Windows host reuse the
   existing Windows evidence-first and retained analytical-context machinery;
   explicit Docker targets and Linux behavior remain unchanged. It adds no new
-  collector or persistent conversational memory. Golden-path and advanced-help
-  work remains deferred to PR335 or later.
+  collector or persistent conversational memory. The platform-aware quick-start and advanced-help slice is complete.
 
 The approved-change work now includes point-in-time live current-state
 revalidation for one exact PR323-linked Windows runtime-reconcile plan. It does
@@ -178,7 +176,8 @@ Adjacent native Windows performance, strongest-signal, services, disk/volume, an
 network symptom routes now use the existing bounded standard-evidence components as
 one coherent interactive packet. This adds no collectors or commands. Deeper CPU,
 process attribution, disk-I/O, connection, route, DNS, packet-loss, and service
-recovery metrics remain separately scoped future work; golden-path and advanced-help
-work also remains deferred.
+recovery metrics remain separately scoped future work. The platform-aware quick-start
+and advanced-help slice is complete and changes discoverability only: it adds no routes,
+collectors, commands, provider behavior, persistence, or execution.
 
 ShellForgeAI remains one CLI-first operator interface with the complete lifecycle: Understand → Investigate → Diagnose → Propose → Obtain approval → Implement → Verify → Report. It can implement approved bounded changes through supported capabilities, verify outcomes with fresh evidence, and report facts, receipts, and remaining risk without becoming a dashboard, control plane, generic shell, or broad orchestration platform.

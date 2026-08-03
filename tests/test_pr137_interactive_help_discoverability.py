@@ -15,6 +15,7 @@ import pytest
 
 from shellforgeai.interactive import repl
 from shellforgeai.interactive.commands import route_input
+from shellforgeai.interactive.help import render_advanced_help
 from shellforgeai.llm.schemas import ModelResponse
 
 
@@ -113,8 +114,8 @@ def test_interactive_help_aliases_render_without_dispatch_or_model(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, alias: str
 ) -> None:
     out = _help_for(monkeypatch, tmp_path, alias)
-    assert "ShellForgeAI interactive help" in out
-    assert "Fast status:" in out
+    assert "ShellForgeAI quick start" in out
+    assert "Safe explicit commands:" in out
     assert "Safety:" in out
 
 
@@ -125,44 +126,40 @@ def test_help_aliases_route_to_slash_help(alias: str) -> None:
 
 
 def test_help_lists_supported_safe_interactive_forms(monkeypatch, tmp_path) -> None:
-    out = _help_for(monkeypatch, tmp_path, "help")
+    out = _help_for(monkeypatch, tmp_path, "help advanced")
     for expected in [
-        "ops report --brief",
-        "ops report",
-        "ops report --json",
+        "ops report [--brief|--json]",
         "v1 check quick",
         "v1 check --profile quick --json",
         "doctor",
         "model doctor",
-        "triage docker detail <target>",
         "triage docker detail <target> --json",
         "diagnose <target>",
         "ops report --save",
         "ops report history --limit 5",
         "ops report compare-latest",
-        "remediation self-test quick",
-        "remediation eligibility --target <target> --explain",
-        "remediation eligibility --target <target> --explain --json",
-        "what did you find?",
-        "get that info",
-        "dig deeper",
-        "no novel, what is on fire?",
-        "quick status only",
+        "recipes preflight",
+        "recipes execute <id> --confirm",
+        "recipes receipt recovery-execute <id> --confirm",
+        "handoff history",
+        "Refused natural-language actions",
     ]:
         assert expected in out
 
 
 def test_help_includes_safety_note_and_refused_examples_only(monkeypatch, tmp_path) -> None:
-    out = _help_for(monkeypatch, tmp_path, "commands")
-    assert "Interactive mode is not a shell." in out
-    assert "No Docker/Compose/remediation/cleanup command runs from natural language." in out
-    assert "Mutation requires governed explicit workflows." in out
-    assert "Refused here (not run):" in out
+    out = _help_for(monkeypatch, tmp_path, "help advanced")
+    assert "Interactive mode is not a shell" in out
+    assert "Natural language cannot invoke governed execution" in out
+    assert "Governed explicit workflows" in out
+    assert "Refused natural-language actions" in out
 
-    refused_section = out.split("Refused here (not run):", maxsplit=1)[1].split(
-        "Safety:", maxsplit=1
+    refused_section = out.split(
+        "Refused natural-language actions (examples only; not run):", maxsplit=1
+    )[1].split("Safety:", maxsplit=1)[0]
+    available_section = out.split(
+        "Refused natural-language actions (examples only; not run):", maxsplit=1
     )[0]
-    available_section = out.split("Refused here (not run):", maxsplit=1)[0]
 
     for refused in [
         "docker restart <container>",
@@ -189,7 +186,7 @@ def test_help_output_is_bounded_and_local_non_mutating(monkeypatch, tmp_path) ->
     before_paths = {path.relative_to(data_dir) for path in data_dir.rglob("*")}
     out = _help_for(monkeypatch, tmp_path, "?")
     after_paths = {path.relative_to(data_dir) for path in data_dir.rglob("*")}
-    assert len(out.splitlines()) <= 65
+    assert len(out.splitlines()) <= 40
     assert "DISPATCH" not in out
     assert after_paths == before_paths
 
@@ -215,3 +212,29 @@ def test_unknown_command_behavior_remains_safe(monkeypatch, tmp_path) -> None:
 )
 def test_mutation_refusal_routes_still_win(text: str) -> None:
     assert route_input(text).name == "mutation_refused"
+
+
+@pytest.mark.parametrize(
+    "topic", ["help nonsense", "/help nonsense", "help windows", "/help linux"]
+)
+def test_invalid_help_topic_is_exact_local_usage(monkeypatch, tmp_path, topic: str) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    before = {path.relative_to(data_dir) for path in data_dir.rglob("*")}
+    out, dispatched, provider = _drive_repl(monkeypatch, tmp_path, [topic, "/exit"])
+    after = {path.relative_to(data_dir) for path in data_dir.rglob("*")}
+    assert "Usage: help [advanced]" in out
+    assert dispatched == []
+    assert provider.complete_calls == 0
+    assert after == before
+
+
+def test_advanced_help_forms_render_identically_without_side_effects(monkeypatch, tmp_path) -> None:
+    plain = _help_for(monkeypatch, tmp_path, "help advanced")
+    slash = _help_for(monkeypatch, tmp_path, "/help advanced")
+    # Ignore banner object identity and the common exit line.
+    assert (
+        plain.split("ShellForgeAI advanced interactive help", 1)[1]
+        == slash.split("ShellForgeAI advanced interactive help", 1)[1]
+    )
+    assert len(render_advanced_help().splitlines()) <= 100
