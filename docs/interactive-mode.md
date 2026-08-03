@@ -707,6 +707,26 @@ Model synthesis projects that unchanged raw packet into a Windows-native prompt 
 For installed Windows use, `sfai.cmd ask` and `sfai.cmd interactive` can be launched from normal operator directories such as `C:\Windows\System32`. The wrapper supplies `SHELLFORGEAI_RUNTIME_ROOT` based on its own `bin` directory, so ask, interactive, and `model doctor` share the same runtime/profile/model context without requiring `cd` into the source tree. When Codex authentication is available through the inherited tester-scoped `CODEX_HOME`, available bounded Windows evidence is passed to the model; when it is not available, the evidence summary is still returned with a precise safe diagnostic and read-only next steps.
 
 
+## Bounded analytical evidence continuity
+
+An interactive session retains one latest bounded evidence context in memory. The
+context is session-local and nonpersistent: it is not a transcript, general
+conversational memory, or cross-session memory. It contains only compact collected
+facts, limitations, safe read-only next checks, and at most one separately marked
+model-derived selected signal.
+
+Narrow analytical follow-ups asking for the strongest CPU, memory, disk/volume, or
+process signal, and asking for the best next check based on evidence already
+collected, reuse that packet without recollecting the same snapshot. Retained
+deterministic evidence is rendered and flushed first through the evidence-first
+presentation; synchronous model assessment remains supplemental. A newer collection
+replaces the packet, while a session, platform, target, or collection mismatch
+invalidates reuse. Provider failure or Windows response rejection leaves the
+deterministic evidence intact and does not retain the failed or rejected response.
+
+This handoff adds no token streaming, background work, autonomous execution, command
+execution, or mutation. Natural-language mutation refusal remains authoritative.
+
 ## In-flight model-call progress and cleanup
 
 Interactive model calls use the same provider lifecycle as `ask`: concise progress is written outside the final answer stream, while JSON/diagnostic modes remain structured. On timeout, cancellation, input close, `exit`, or an exception after provider spawn, ShellForgeAI closes provider stdin and performs bounded cleanup of only the owned provider child tree for that invocation. Mutation and remediation requests remain refused rather than routed to execution.

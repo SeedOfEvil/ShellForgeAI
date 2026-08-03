@@ -28,6 +28,7 @@ from shellforgeai.core.command_suggestions import (
 _MAX_HIGHLIGHTS = 8
 _MAX_FINDINGS = 8
 _MAX_SUMMARY_LEN = 280
+_MAX_FACTS = 8
 
 
 class LatestDiagnosisContext(BaseModel):
@@ -50,6 +51,19 @@ class LatestDiagnosisContext(BaseModel):
     deterministic_only: bool = True
     model_assessment_status: str | None = None
     facts: dict[str, Any] = Field(default_factory=dict)
+    platform: str = "unknown"
+    collection_id: str = ""
+    deterministic_facts: list[str] = Field(default_factory=list)
+    derived_findings: list[str] = Field(default_factory=list)
+    selected_signal: str | None = None
+
+    def retain_selected_signal(self, signal: str | None) -> None:
+        """Retain one explicitly model-derived signal, never as evidence."""
+        clean = " ".join((signal or "").split())[:_MAX_SUMMARY_LEN]
+        if not clean:
+            return
+        self.selected_signal = clean
+        self.derived_findings = [clean]
 
 
 def _safe_next_commands(target: str | None) -> list[str]:
@@ -155,7 +169,24 @@ def build_latest_diagnosis_context(
         deterministic_only=deterministic_only,
         model_assessment_status=model_assessment_status,
         facts=compact_facts,
+        platform="windows" if target == "windows-local-read-only" else "linux",
+        collection_id=f"{session_id}:{diagnosis_kind}:{target}"[:_MAX_SUMMARY_LEN],
+        deterministic_facts=[
+            " ".join(str(item).split())[:_MAX_SUMMARY_LEN]
+            for item in evidence_highlights
+            if str(item).strip()
+        ][:_MAX_FACTS],
     )
+
+
+def valid_retained_context(
+    ctx: LatestDiagnosisContext | None, *, session_id: str, platform_name: str
+) -> bool:
+    """Reject stale or structurally invalid retained evidence without recollecting."""
+    if ctx is None or ctx.session_id != session_id or not ctx.collection_id:
+        return False
+    expected = platform_name.strip().lower()
+    return ctx.platform in {expected, "windows" if expected.startswith("win") else "linux"}
 
 
 # --- follow-up intent recognition ----------------------------------------
