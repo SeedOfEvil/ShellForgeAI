@@ -72,9 +72,11 @@ from shellforgeai.core.windows_evidence_context import (
     windows_evidence_prompt_facts,
 )
 from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_OPERATOR_INTENT_DISK_CAPACITY,
     WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
     WINDOWS_OPERATOR_INTENT_HANDOFF,
     WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
+    WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH,
     WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
     WINDOWS_OPERATOR_INTENT_PERFORMANCE,
     WINDOWS_OPERATOR_INTENT_SERVICES,
@@ -1062,6 +1064,20 @@ def _analytical_followup_kind(text: str) -> str | None:
         term in normalized for term in ("cpu", "memory", "disk", "volume", "process")
     ):
         return "strongest_signal"
+    route = _windows_route(text)
+    if (
+        route is not None
+        and route.host_is_windows
+        and route.intent
+        in {
+            WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+            WINDOWS_OPERATOR_INTENT_SERVICES,
+            WINDOWS_OPERATOR_INTENT_DISK_CAPACITY,
+            WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH,
+            WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
+        }
+    ):
+        return route.intent
     return None
 
 
@@ -1153,10 +1169,14 @@ _WINDOWS_CRASH_HISTORY_LIMITATION = (
 )
 
 
-def _handle_windows_failure_health_route(
-    console: Console, runtime: RuntimeContext, question: str
+def _handle_windows_symptom_route(
+    console: Console,
+    runtime: RuntimeContext,
+    question: str,
+    *,
+    intent: str,
 ) -> LatestDiagnosisContext:
-    """Collect once, render first, and synchronously assess bounded Windows evidence."""
+    """Collect one coherent packet, render it first, then assess one symptom family."""
     packet = build_windows_evidence_context()
     rows = windows_evidence_prompt_facts(packet)
     facts = [str(row.get("summary")) for row in rows if row.get("status") == "ok"][:8]
@@ -1166,17 +1186,16 @@ def _handle_windows_failure_health_route(
         if "inode" not in str(item).lower() and "linux-only" not in str(item).lower()
     ][:3]
     packet_limitations.extend(str(item) for item in (packet.get("evidence_gaps") or [])[:3])
-    limitations = [_WINDOWS_CRASH_HISTORY_LIMITATION, *packet_limitations]
+    limitations = list(packet_limitations)
+    if intent == WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH:
+        limitations.insert(0, _WINDOWS_CRASH_HISTORY_LIMITATION)
     ctx = LatestDiagnosisContext(
         session_id=runtime.session.session_id,
         created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         target="windows-local-read-only",
-        diagnosis_kind=WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
+        diagnosis_kind=intent,
         platform="windows",
-        collection_id=(
-            f"{runtime.session.session_id}:{WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH}:"
-            "windows-local-read-only"
-        ),
+        collection_id=(f"{runtime.session.session_id}:{intent}:windows-local-read-only"),
         evidence_highlights=facts,
         deterministic_facts=facts,
         limitations=limitations[:4],
@@ -1184,13 +1203,13 @@ def _handle_windows_failure_health_route(
         source_command=question,
         deterministic_only=True,
         model_assessment_status="pending",
-        facts={"visibility": "windows-local-read-only"},
+        facts={"visibility": "windows-local-read-only", "windows_packet": packet},
     )
     stage = EvidenceFirstResponse(
         platform="Windows",
         evidence_label="Windows local read-only evidence",
         evidence_source="ShellForgeAI Windows collectors",
-        intent="bounded crash-health question",
+        intent=intent,
         evidence_available=bool(facts),
         findings=tuple(facts),
         limitations=tuple(ctx.limitations),
@@ -1205,7 +1224,7 @@ def _handle_windows_failure_health_route(
         "windows_evidence": packet,
         "evidence": rows,
         "windows_evidence_directive": WINDOWS_EVIDENCE_MODEL_DIRECTIVE,
-        "crash_history_limitation": _WINDOWS_CRASH_HISTORY_LIMITATION,
+        "route_intent": intent,
     }
     try:
         provider = build_provider(runtime.settings)
@@ -1215,7 +1234,7 @@ def _handle_windows_failure_health_route(
                 model=runtime.settings.model.model,
                 provider=runtime.settings.model.provider,
                 timeout_seconds=runtime.settings.model.timeout_seconds,
-                metadata={"command_kind": "windows_failure_health"},
+                metadata={"command_kind": intent},
             )
         )
     except Exception as exc:
@@ -1240,6 +1259,15 @@ def _handle_windows_failure_health_route(
     console.print(render_model_assessment(clean))
     ctx.model_assessment_status = "available"
     return ctx
+
+
+def _handle_windows_failure_health_route(
+    console: Console, runtime: RuntimeContext, question: str
+) -> LatestDiagnosisContext:
+    """Compatibility seam for the established PR334 crash-health route."""
+    return _handle_windows_symptom_route(
+        console, runtime, question, intent=WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH
+    )
 
 
 def _summary_for_check(c) -> str:
@@ -3234,13 +3262,14 @@ def start_interactive(
                     )
                     console.print(render_windows_operator_guidance(shared_windows_route))
                     continue
-                with console.status("Collecting Windows read-only service evidence..."):
-                    rendered, latest_context = _handle_windows_services_interactive_route(
-                        runtime=runtime,
-                        grounding=grounding,
-                        session_summary=session_summary,
-                    )
-                console.print(rendered)
+                latest_context = _handle_windows_symptom_route(
+                    console,
+                    runtime,
+                    user_input,
+                    intent=WINDOWS_OPERATOR_INTENT_SERVICES,
+                )
+                update_grounding_from_latest_context(grounding, latest_context)
+                _record_latest_context_in_session_summary(session_summary, latest_context)
                 continue
             if (
                 shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH
@@ -3290,8 +3319,20 @@ def start_interactive(
             if shared_windows_route.intent in {
                 WINDOWS_OPERATOR_INTENT_PERFORMANCE,
                 WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
-                WINDOWS_OPERATOR_INTENT_HANDOFF,
+                WINDOWS_OPERATOR_INTENT_DISK_CAPACITY,
+                WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH,
             }:
+                latest_context = _handle_windows_symptom_route(
+                    console,
+                    runtime,
+                    user_input,
+                    intent=shared_windows_route.intent,
+                )
+                update_grounding_from_latest_context(grounding, latest_context)
+                _record_latest_context_in_session_summary(session_summary, latest_context)
+                pending_followup = None
+                continue
+            if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_HANDOFF:
                 with console.status("Collecting Windows read-only evidence..."):
                     rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
                 pending_followup = None

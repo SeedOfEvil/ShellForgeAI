@@ -12,6 +12,8 @@ WINDOWS_OPERATOR_INTENT_PERFORMANCE: Final = "windows_performance"
 WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL: Final = "windows_strongest_signal"
 WINDOWS_OPERATOR_INTENT_HANDOFF: Final = "windows_handoff"
 WINDOWS_OPERATOR_INTENT_SERVICES: Final = "windows_services"
+WINDOWS_OPERATOR_INTENT_DISK_CAPACITY: Final = "windows_disk_capacity"
+WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH: Final = "windows_network_health"
 WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH: Final = "windows_failure_health"
 WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL: Final = "windows_mutation_refusal"
 
@@ -64,9 +66,20 @@ _COMMANDS_BY_INTENT: Final[dict[str, tuple[str, ...]]] = {
     ),
     WINDOWS_OPERATOR_INTENT_SERVICES: (
         WINDOWS_SERVICES_COMMAND,
+        WINDOWS_STANDARD_EVIDENCE_COMMAND,
         WINDOWS_EVENTS_COMMAND,
         WINDOWS_STATUS_COMMAND,
         WINDOWS_DOCTOR_COMMAND,
+    ),
+    WINDOWS_OPERATOR_INTENT_DISK_CAPACITY: (
+        WINDOWS_STANDARD_EVIDENCE_COMMAND,
+        WINDOWS_VOLUMES_COMMAND,
+        WINDOWS_STATUS_COMMAND,
+    ),
+    WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH: (
+        WINDOWS_STANDARD_EVIDENCE_COMMAND,
+        WINDOWS_NETWORK_COMMAND,
+        WINDOWS_STATUS_COMMAND,
     ),
     WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL: (
         WINDOWS_STANDARD_EVIDENCE_COMMAND,
@@ -83,6 +96,8 @@ _HEADINGS: Final[dict[str, str]] = {
     WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL: "## Windows CPU/memory/disk/process comparison",
     WINDOWS_OPERATOR_INTENT_HANDOFF: "## Windows current-host handoff",
     WINDOWS_OPERATOR_INTENT_SERVICES: "## Windows services guidance",
+    WINDOWS_OPERATOR_INTENT_DISK_CAPACITY: "## Windows volume capacity guidance",
+    WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH: "## Windows network guidance",
 }
 
 
@@ -166,6 +181,9 @@ def _performance(text: str) -> bool:
         phrase in text
         for phrase in (
             "system feels slow",
+            "why does this system feel slow",
+            "why is this windows host slow",
+            "system feels sluggish",
             "system feels a bit slow",
             "feels slow",
             "weird latency",
@@ -231,7 +249,48 @@ _SERVICE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
 
 
 def _services(text: str) -> bool:
-    return any(pattern.fullmatch(text) for pattern in _SERVICE_PATTERNS)
+    exact = {
+        "are the services healthy",
+        "are any services unhealthy",
+        "how do the services look",
+        "any failed or unhealthy services",
+    }
+    return text in exact or any(pattern.fullmatch(text) for pattern in _SERVICE_PATTERNS)
+
+
+_DISK_CAPACITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"how is disk capacity",
+        r"am i running out of disk space",
+        r"are any drives low on space",
+        r"how much free space is available",
+        r"how does [a-z] look",
+        r"are any windows volumes full",
+        r"(?:windows )?(?:disk|drive|volume) (?:capacity|space|health)",
+    )
+)
+
+
+def _disk_capacity(text: str) -> bool:
+    return any(pattern.fullmatch(text) for pattern in _DISK_CAPACITY_PATTERNS)
+
+
+_NETWORK_HEALTH_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"how does the network look",
+        r"is networking healthy",
+        r"is networking okay",
+        r"do you see a network problem",
+        r"are the windows network interfaces healthy",
+        r"(?:windows )?network (?:health|status)",
+    )
+)
+
+
+def _network_health(text: str) -> bool:
+    return any(pattern.fullmatch(text) for pattern in _NETWORK_HEALTH_PATTERNS)
 
 
 _FAILURE_HEALTH_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
@@ -256,6 +315,8 @@ def _failure_health(text: str) -> bool:
 
 
 def _mutation(text: str, explicit_windows: bool) -> bool:
+    if text in {"fix it", "fix it now", "apply the fix"}:
+        return True
     actions = (
         "clean up",
         "cleanup",
@@ -267,6 +328,7 @@ def _mutation(text: str, explicit_windows: bool) -> bool:
         "fix it",
         "fix anything",
         "remediate",
+        "repair",
         "roll back",
         "rollback",
         "recover",
@@ -285,6 +347,10 @@ def _mutation(text: str, explicit_windows: bool) -> bool:
         "failed",
         "cleanup",
         "clean up",
+        "disk",
+        "drive",
+        "volume",
+        "network",
     )
     return any(a in text for a in actions) and (explicit_windows or any(t in text for t in targets))
 
@@ -336,6 +402,14 @@ def classify_windows_interactive_intent(
         return None
     if _services(normalized):
         return WindowsOperatorRoute(WINDOWS_OPERATOR_INTENT_SERVICES, host_is_windows, explicit)
+    if _disk_capacity(normalized):
+        return WindowsOperatorRoute(
+            WINDOWS_OPERATOR_INTENT_DISK_CAPACITY, host_is_windows, explicit
+        )
+    if _network_health(normalized):
+        return WindowsOperatorRoute(
+            WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH, host_is_windows, explicit
+        )
     if _failure_health(normalized):
         return WindowsOperatorRoute(
             WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH, host_is_windows, explicit
