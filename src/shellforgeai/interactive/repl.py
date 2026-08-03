@@ -56,6 +56,7 @@ from shellforgeai.core.latest_context import (
     is_mutation_followup,
     no_latest_context_reply,
     render_latest_context_pending,
+    valid_retained_context,
 )
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.platform_operator_contract import (
@@ -583,6 +584,7 @@ def _is_machine_health_question(text: str) -> bool:
             "host health",
             "computer health",
             "machine health",
+            "unexplained failures",
         ]
     )
 
@@ -1048,6 +1050,100 @@ def _confirm_workspace(
             console.print("Workspace not trusted. Exiting interactive mode.")
             return False
         console.print("Please answer y or n. Commands are accepted after trust is set.")
+
+
+def _analytical_followup_kind(text: str) -> str | None:
+    """Recognize only PR333's bounded evidence-reuse questions."""
+    normalized = " ".join(text.lower().split()).strip("?.!,")
+    if "based on evidence already collected" in normalized:
+        return "next_check"
+    if "strongest" in normalized and any(
+        term in normalized for term in ("cpu", "memory", "disk", "volume", "process")
+    ):
+        return "strongest_signal"
+    return None
+
+
+def _retained_analytical_prompt(question: str, ctx: LatestDiagnosisContext, kind: str) -> str:
+    facts = ctx.deterministic_facts or ctx.evidence_highlights
+    payload = {
+        "platform": ctx.platform,
+        "target": ctx.target,
+        "collection_id": ctx.collection_id,
+        "deterministic_evidence": facts[:8],
+        "limitations": ctx.limitations[:4],
+        "safe_read_only_next_checks": ctx.safe_next_commands[:4],
+        "previous_model_derived_selected_signal": ctx.selected_signal,
+        "provenance": {
+            "deterministic_evidence": "authoritative collected facts",
+            "selected_signal": "supplemental previous model assessment",
+        },
+    }
+    directive = (
+        "Use only these bounded facts. Deterministic evidence is authoritative. "
+        "Do not invent unavailable evidence or recommend mutation. Use platform-native "
+        "terminology. Recommend a read-only check of a recorded gap, not a repeat of "
+        "the same snapshot."
+    )
+    return build_contextual_prompt(
+        question,
+        {"intent": kind, "retained_evidence": payload, "directive": directive},
+        mode="standard",
+    )
+
+
+def _render_retained_analytical_followup(
+    console: Console,
+    runtime: RuntimeContext,
+    ctx: LatestDiagnosisContext,
+    question: str,
+    kind: str,
+) -> None:
+    """Render retained evidence, then synchronously synthesize one assessment."""
+    facts = tuple(ctx.deterministic_facts or ctx.evidence_highlights)
+    stage = EvidenceFirstResponse(
+        platform="Windows" if ctx.platform == "windows" else "Linux",
+        evidence_label="Retained latest bounded evidence",
+        evidence_source=f"ShellForgeAI collection {ctx.collection_id}",
+        intent=kind,
+        evidence_available=bool(facts),
+        findings=facts,
+        limitations=tuple(ctx.limitations),
+        safe_next_commands=tuple(ctx.safe_next_commands),
+    )
+    console.print(render_evidence_first(stage))
+    output_file = getattr(console, "file", None)
+    if output_file is not None and hasattr(output_file, "flush"):
+        output_file.flush()
+    try:
+        provider = build_provider(runtime.settings)
+        request = ModelRequest(
+            prompt=_retained_analytical_prompt(question, ctx, kind),
+            model=runtime.settings.model.model,
+            provider=runtime.settings.model.provider,
+            timeout_seconds=runtime.settings.model.timeout_seconds,
+            metadata={"command_kind": "analytical_followup", "intent": kind},
+        )
+        # Analytical continuity deliberately uses the established blocking
+        # completion API. It never streams or starts background provider work.
+        provider_response = provider.complete(request)
+    except Exception as exc:
+        console.print(render_model_unavailable(type(exc).__name__))
+        return
+    if not getattr(provider_response, "ok", True):
+        console.print(render_model_unavailable("provider_failure"))
+        return
+    clean = _sanitize_provider_error(str(getattr(provider_response, "text", "")))
+    if not _has_substantive_response(clean):
+        console.print(render_model_unavailable("empty_model_answer"))
+        return
+    if ctx.platform == "windows" and is_rejected_windows_model_answer(clean):
+        console.print(render_model_unavailable("rejected_windows_model_answer"))
+        return
+    console.print(render_model_assessment(clean))
+    if kind == "strongest_signal" and _has_substantive_response(clean):
+        first = next((line.strip(" -*") for line in clean.splitlines() if line.strip()), "")
+        ctx.retain_selected_signal(first)
 
 
 def _summary_for_check(c) -> str:
@@ -3002,6 +3098,16 @@ def start_interactive(
             CodexProvider.cleanup_active_processes()
             console.print("\nInterrupted safely. REPL is still healthy.")
             continue
+        analytical_kind = _analytical_followup_kind(user_input)
+        if analytical_kind and valid_retained_context(
+            latest_context,
+            session_id=runtime.session.session_id,
+            platform_name=platform.system(),
+        ):
+            _render_retained_analytical_followup(
+                console, runtime, latest_context, user_input, analytical_kind
+            )
+            continue
         shared_windows_route = _windows_route(user_input)
         if shared_windows_route is not None and not (
             is_shell_fragment_line(user_input) or looks_like_shell_command(user_input)
@@ -4317,6 +4423,34 @@ No command was executed.""")
             context["evidence"] = windows_evidence_prompt_facts(windows_packet)
             context["evidence_label"] = "Windows local read-only evidence"
             context["windows_evidence_directive"] = WINDOWS_EVIDENCE_MODEL_DIRECTIVE
+            windows_rows = windows_evidence_prompt_facts(windows_packet)
+            latest_context = LatestDiagnosisContext(
+                session_id=runtime.session.session_id,
+                created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                target="windows-local-read-only",
+                diagnosis_kind="windows_analytical",
+                platform="windows",
+                collection_id=(
+                    f"{runtime.session.session_id}:windows_analytical:windows-local-read-only"
+                ),
+                evidence_highlights=[
+                    str(row.get("summary")) for row in windows_rows if row.get("status") == "ok"
+                ][:8],
+                deterministic_facts=[
+                    str(row.get("summary")) for row in windows_rows if row.get("status") == "ok"
+                ][:8],
+                limitations=[
+                    str(item)
+                    for item in (windows_packet.get("limitations") or [])
+                    if "inode" not in str(item).lower() and "linux-only" not in str(item).lower()
+                ][:4]
+                + [str(item) for item in (windows_packet.get("evidence_gaps") or [])][:4],
+                safe_next_commands=list(windows_packet.get("safe_next_commands") or [])[:4],
+                source_command=user_input,
+                deterministic_only=True,
+                model_assessment_status="pending",
+                facts={"visibility": "windows-local-read-only"},
+            )
         if windows_packet is None and _is_machine_health_question(user_input):
             with console.status("Collecting evidence..."):
                 checks = _collect_machine_health()
