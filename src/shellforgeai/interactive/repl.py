@@ -91,6 +91,7 @@ from shellforgeai.core.windows_operator_ux import (
     windows_operator_safe_commands,
 )
 from shellforgeai.interactive.banner import build_banner
+from shellforgeai.interactive.help import HELP_USAGE, render_advanced_help, render_quick_help
 from shellforgeai.knowledge.search import search_local
 from shellforgeai.llm.codex import CodexProvider, classify_model_failure
 from shellforgeai.llm.manager import build_provider
@@ -491,71 +492,6 @@ def _render_windows_read_only_intent(
         f"{_WINDOWS_REMOTE_MGMT_LABEL}, remoting, "
         "or mutation was executed."
     )
-
-
-INTERACTIVE_HELP_TEXT = f"""ShellForgeAI interactive help
-
-Session:
-  help / /help / ? / commands
-  pending / /pending / summary / /summary / summary --json / exit / /exit
-
-Fast status:
-  status [--brief|--json]
-  ops report / ops report --brief / ops report --json
-  v1 check quick / v1 check --profile quick --json
-  doctor / model doctor
-V2 golden path:
-  status / triage / propose [--brief|--json]
-  recipes [--json] / recipes inspect <id> / safe-actions [--target <target>]
-  recipes eligibility --recipe docker.disposable_restart --target <target>
-  recipes preflight --recipe docker.disposable_restart --target <target> [--json|--save]
-  recipes preflight validate <id> / recipes execute <id> --confirm [--json]
-  recipes receipt validate <id> [--json] / recipes receipt verify <id> [--json]
-  recipes receipt explain/integrity/audit/history/inspect/export/export-validate/compare [--json]
-  recipes receipt rollback-preview <id> / recovery-execute <id> --confirm / recovery-status <id>
-  apply-preview [--brief|--json] / verify [--brief|--json]
-  verify --receipt <id> [--json] / handoff [--brief|--json|--save]
-  triage/propose/verify/handoff --target <target> [--json] / handoff summary
-  full path: status -> triage -> propose -> apply-preview -> verify -> handoff
-
-Triage/detail:
-  triage [--brief|--json] / triage --target <target>
-  triage docker [--brief|--json]
-  triage docker detail <target> --json
-  diagnose <target>
-
-Reports/artifacts:
-  ops report --save
-  ops report history --limit 5
-  ops report compare-latest [--json]
-  handoff --save / handoff validate / handoff export / handoff export-validate
-  handoff history / handoff compare / handoff compare-latest
-
-V1/readiness:
-  remediation self-test quick / remediation self-test --profile quick --json
-  remediation eligibility --target <target> --explain
-  remediation eligibility --target <target> --explain --json
-Follow-ups/session:
-  /summary
-  what happened in this session?
-  what did you find? / get that info / dig deeper / proceed
-  pending / /pending
-  exit / /exit
-
-Pressure mode: no novel, what is on fire? / quick status only
-
-Refused here (not run):
-  {_REFUSED_DOCKER_RESTART}
-  {_REFUSED_COMPOSE_RESTART}
-  {_REFUSED_CLEANUP_EXECUTE}
-  {_REFUSED_REMEDIATION_EXECUTE}
-  {_REFUSED_ROLLBACK_EXECUTE}
-  rm -rf /
-
-Safety:
-  Interactive mode is not a shell.
-  No Docker/Compose/remediation/cleanup command runs from natural language.
-  Mutation requires governed explicit workflows. Natural language cannot execute recipes."""
 
 
 def _ensure_artifact_dir(runtime: RuntimeContext) -> None:
@@ -3606,7 +3542,13 @@ def start_interactive(
             paste_guard_active = False
             continue
         if routed.name == "/help":
-            console.print(INTERACTIVE_HELP_TEXT)
+            topic = routed.args.strip().lower()
+            if not topic:
+                console.print(render_quick_help(operator_contract), markup=False)
+            elif topic == "advanced":
+                console.print(render_advanced_help(), markup=False)
+            else:
+                console.print(HELP_USAGE, markup=False)
             continue
         if routed.name == "/examples":
             console.print("""Diagnostics:
