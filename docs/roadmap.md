@@ -181,3 +181,9 @@ and advanced-help slice is complete and changes discoverability only: it adds no
 collectors, commands, provider behavior, persistence, or execution.
 
 ShellForgeAI remains one CLI-first operator interface with the complete lifecycle: Understand → Investigate → Diagnose → Propose → Obtain approval → Implement → Verify → Report. It can implement approved bounded changes through supported capabilities, verify outcomes with fresh evidence, and report facts, receipts, and remaining risk without becoming a dashboard, control plane, generic shell, or broad orchestration platform.
+# PR337 persistence boundary
+
+The static PR323 plan-link provenance may be persisted as one immutable,
+checksum-protected `acpl_` artifact. It is not current state, authorization,
+preflight, receipt linkage, or execution. PR328 observations remain transient;
+future gates remain separate and require their own justification.
