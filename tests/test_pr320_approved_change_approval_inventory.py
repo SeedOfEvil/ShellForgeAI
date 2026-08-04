@@ -2144,7 +2144,7 @@ def test_roadmap_safety_and_architecture_record_the_pr320_boundary():
 
 def test_no_new_persisted_subtree_was_documented():
     layout = Path("docs/data-layout.md").read_text(encoding="utf-8")
-    assert "inventory" not in layout.lower()
+    assert "inventory" not in layout.lower().replace("there is no inventory", "")
 
 
 def test_the_module_docstring_states_the_read_only_discovery_posture():

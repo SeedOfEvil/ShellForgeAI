@@ -121,3 +121,25 @@ def test_v1_safe_command_spine_present() -> None:
     corpus = "\n".join(_read(path) for path in DOC_FILES)
     for command in SAFE_COMMANDS:
         assert command in corpus, f"missing canonical safe command: {command}"
+
+
+def test_pr337_plan_link_artifact_data_layout_contract() -> None:
+    text = _read(Path("docs/data-layout.md"))
+    for needle in (
+        "approved_change_plan_links",
+        "acpl_<64 lowercase hex>",
+        "approved-change-plan-link.json",
+        "exact-id-only",
+        "there is no inventory",
+        "latest",
+        "current",
+        "the full saved plan packet is not persisted",
+        "persistence is not authentication",
+        "not approval freshness",
+        "not authorization",
+        "not an execution preflight",
+        "not receipt linkage",
+        "grants no execution eligibility",
+        "pr313 execution is not invoked",
+    ):
+        assert needle in text, f"docs/data-layout.md missing PR337 contract: {needle}"

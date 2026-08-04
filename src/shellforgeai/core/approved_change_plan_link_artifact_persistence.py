@@ -23,6 +23,8 @@ from pydantic import BaseModel, ConfigDict
 from shellforgeai.core.approved_change_approval_persistence import (
     PERSISTED_DIRECTORY_MODE,
     PERSISTED_FILE_MODE,
+    AtomicNoReplaceOutcome,
+    CleanupStatus,
     _check_child_containment,
     _fsync_directory,
     _is_reparse_stat,
@@ -81,6 +83,45 @@ class _FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class _PlanLinkArtifactSafetyLedger(_FrozenModel):
+    """Typed permanent PR337 non-authority and non-action ledger."""
+
+    plan_packet_persisted: Literal[False] = False
+    plan_packet_freshly_revalidated: Literal[False] = False
+    authenticated_identity_evaluated: Literal[False] = False
+    approval_freshness_evaluated: Literal[False] = False
+    authorization_evaluated: Literal[False] = False
+    preflight_evaluated: Literal[False] = False
+    current_state_revalidation_evaluated: Literal[False] = False
+    pr304_evidence_freshness_evaluated: Literal[False] = False
+    receipt_created: Literal[False] = False
+    receipt_linked: Literal[False] = False
+    execution_allowed: Literal[False] = False
+    execution_available: Literal[False] = False
+    execution_status: Literal["not_executed"] = "not_executed"
+    host_configuration_mutation_performed: Literal[False] = False
+    file_create_executed: Literal[False] = False
+    file_replace_executed: Literal[False] = False
+    backup_created: Literal[False] = False
+    atomic_runtime_replace_executed: Literal[False] = False
+    parent_directory_create_executed: Literal[False] = False
+    compensation_executed: Literal[False] = False
+    service_control_executed: Literal[False] = False
+    process_termination_executed: Literal[False] = False
+    registry_modified: Literal[False] = False
+    powershell_executed: Literal[False] = False
+    winrm_used: Literal[False] = False
+    qga_used: Literal[False] = False
+    remote_execution: Literal[False] = False
+    subprocess_executed: Literal[False] = False
+    shell_executed: Literal[False] = False
+    natural_language_execution: Literal[False] = False
+    network_call: Literal[False] = False
+    model_called: Literal[False] = False
+    secret_read: Literal[False] = False
+    auth_cache_read: Literal[False] = False
+
+
 class ApprovedChangePlanLinkArtifact(_FrozenModel):
     """The non-circular canonical payload persisted by PR337."""
 
@@ -126,6 +167,19 @@ def canonical_approved_change_plan_link_artifact_bytes(
     return canonical_approved_change_plan_link_artifact_json(artifact).encode("utf-8")
 
 
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _load_strict_json(raw: bytes) -> Any:
+    return json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=_strict_json_object)
+
+
 def compute_approved_change_plan_link_artifact_identity_sha256(
     artifact: ApprovedChangePlanLinkArtifact | Mapping[str, Any],
 ) -> str:
@@ -138,7 +192,7 @@ def derive_approved_change_plan_link_artifact_id(identity_sha256: str) -> str:
     return f"{PLAN_LINK_ARTIFACT_ID_PREFIX}{identity_sha256}"
 
 
-class ApprovedChangePlanLinkArtifactValidationResult(_FrozenModel):
+class ApprovedChangePlanLinkArtifactValidationResult(_PlanLinkArtifactSafetyLedger):
     status: Literal[
         "plan_link_artifact_valid",
         "plan_link_artifact_invalid",
@@ -253,7 +307,7 @@ def validate_approved_change_plan_link_artifact(
     )
 
 
-class ApprovedChangePlanLinkArtifactConstructionResult(_FrozenModel):
+class ApprovedChangePlanLinkArtifactConstructionResult(_PlanLinkArtifactSafetyLedger):
     status: Literal[
         "plan_link_artifact_constructed",
         "plan_link_not_available",
@@ -317,7 +371,7 @@ def construct_approved_change_plan_link_artifact(
     )
 
 
-class ApprovedChangePlanLinkArtifactLoadResult(_FrozenModel):
+class ApprovedChangePlanLinkArtifactLoadResult(_PlanLinkArtifactSafetyLedger):
     status: Literal[
         "plan_link_artifact_loaded",
         "plan_link_artifact_not_found",
@@ -335,7 +389,6 @@ class ApprovedChangePlanLinkArtifactLoadResult(_FrozenModel):
     mutation_performed: Literal[False] = False
     filesystem_accessed: bool = False
     plan_link_artifact_persisted: bool = False
-    execution_status: Literal["not_executed"] = "not_executed"
 
 
 def _load(status: str, **kwargs: Any) -> ApprovedChangePlanLinkArtifactLoadResult:
@@ -422,7 +475,7 @@ def load_persisted_approved_change_plan_link_artifact(
         if info.st_size > MAX_PERSISTED_PLAN_LINK_ARTIFACT_BYTES:
             raise OSError("artifact file exceeds the bounded size limit")
         raw = _read_bounded(path, info.st_size)
-        payload = json.loads(raw.decode("utf-8", errors="strict"))
+        payload = _load_strict_json(raw)
         artifact = ApprovedChangePlanLinkArtifact.model_validate(payload)
     except Exception as exc:
         return _load(
@@ -456,7 +509,7 @@ def load_persisted_approved_change_plan_link_artifact(
     )
 
 
-class ApprovedChangePlanLinkArtifactPublicationResult(_FrozenModel):
+class ApprovedChangePlanLinkArtifactPublicationResult(_PlanLinkArtifactSafetyLedger):
     status: Literal[
         "plan_link_artifact_published",
         "plan_link_artifact_already_present",
@@ -487,21 +540,91 @@ class ApprovedChangePlanLinkArtifactPublicationResult(_FrozenModel):
     approval_selected: Literal[False] = False
     approval_created: Literal[False] = False
     approval_persisted: Literal[False] = False
-    current_state_revalidation_evaluated: Literal[False] = False
-    authorization_evaluated: Literal[False] = False
-    preflight_evaluated: Literal[False] = False
-    receipt_created: Literal[False] = False
-    receipt_linked: Literal[False] = False
-    host_configuration_mutation_performed: Literal[False] = False
-    execution_allowed: Literal[False] = False
-    execution_available: Literal[False] = False
-    execution_status: Literal["not_executed"] = "not_executed"
+    temporary_directory_created: bool = False
+    temporary_directory_cleaned: bool = False
+    cleanup_status: CleanupStatus = "not_required"
+    residual_temporary_directory: str = ""
+    atomic_publish_outcome: Literal[
+        "not_attempted", "published", "destination_exists", "rejected", "unsupported", "failed"
+    ] = "not_attempted"
 
 
 def _published(status: str, **kwargs: Any) -> ApprovedChangePlanLinkArtifactPublicationResult:
     if "errors" in kwargs:
         kwargs["errors"] = tuple(sorted(set(kwargs["errors"])))
     return ApprovedChangePlanLinkArtifactPublicationResult(status=status, **kwargs)
+
+
+def _cleanup_invocation_temporary_directory(
+    temporary: Path | None, prepared_file: Path | None
+) -> tuple[CleanupStatus, bool, str, list[str]]:
+    """Clean only this invocation's unpublished PR337 temporary directory."""
+    if temporary is None:
+        return "not_required", False, "", []
+    residual = temporary.name
+    errors: list[str] = []
+    try:
+        info = os.lstat(temporary)
+    except OSError:
+        return "completed", True, "", []
+    if not stat.S_ISDIR(info.st_mode) or _is_reparse_stat(info, temporary):
+        return (
+            "incomplete",
+            False,
+            residual,
+            ["the temporary path is no longer a real directory owned by this invocation"],
+        )
+    if prepared_file is not None and prepared_file.parent == temporary:
+        try:
+            finfo = os.lstat(prepared_file)
+            if stat.S_ISREG(finfo.st_mode) and not _is_reparse_stat(finfo, prepared_file):
+                os.unlink(prepared_file)
+            else:
+                errors.append("the tracked temporary file is no longer a real regular file")
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            errors.append(f"the tracked temporary file could not be removed: {exc}")
+    try:
+        remaining = sorted(entry.name for entry in os.scandir(temporary))
+    except OSError as exc:
+        return (
+            "incomplete",
+            False,
+            residual,
+            [
+                *errors,
+                f"the temporary directory could not be listed: {exc}",
+            ],
+        )
+    if remaining:
+        return (
+            "incomplete",
+            False,
+            residual,
+            [
+                *errors,
+                "the temporary directory holds entries this invocation did not create",
+            ],
+        )
+    try:
+        os.rmdir(temporary)
+    except OSError as exc:
+        return (
+            "incomplete",
+            False,
+            residual,
+            [
+                *errors,
+                f"the empty temporary directory could not be removed: {exc}",
+            ],
+        )
+    return (
+        ("incomplete" if errors else "completed"),
+        not errors,
+        "" if not errors else residual,
+        errors,
+    )
 
 
 def publish_approved_change_plan_link_artifact(
@@ -515,6 +638,10 @@ def publish_approved_change_plan_link_artifact(
     confirm_plan_link_artifact_identity_sha256: str,
 ) -> ApprovedChangePlanLinkArtifactPublicationResult:
     """Construct PR323 exactly once, confirm PR337, then atomically publish."""
+    temporary: Path | None = None
+    path: Path | None = None
+    temporary_created = False
+    atomic_outcome: AtomicNoReplaceOutcome | None = None
     link_result = link_persisted_approved_change_to_windows_runtime_reconcile_plan(
         approval_artifact_id,
         plan_packet,
@@ -633,6 +760,7 @@ def publish_approved_change_plan_link_artifact(
             )
         temporary = root / f"{TEMPORARY_DIRECTORY_PREFIX}{secrets.token_hex(8)}"
         os.mkdir(temporary, PERSISTED_DIRECTORY_MODE)
+        temporary_created = True
         path = temporary / APPROVED_CHANGE_PLAN_LINK_FILENAME
         try:
             fd = os.open(
@@ -655,24 +783,26 @@ def publish_approved_change_plan_link_artifact(
             observed = _read_bounded(path, len(data))
             if observed != data:
                 raise OSError("prepared bytes differ")
-            payload = ApprovedChangePlanLinkArtifact.model_validate(json.loads(observed))
+            payload = ApprovedChangePlanLinkArtifact.model_validate(_load_strict_json(observed))
             if not validate_approved_change_plan_link_artifact(
                 payload, artifact_id=artifact_id
             ).artifact_valid:
                 raise OSError("prepared artifact failed validation")
             _fsync_directory(temporary)
             outcome = atomic_no_replace_approval_directory_publish(temporary, final)
+            atomic_outcome = outcome
             if outcome.outcome == "destination_exists":
                 loaded = load_persisted_approved_change_plan_link_artifact(
                     checked.path, artifact_id
+                )
+                cleanup_status, cleaned, residual, cleanup_errors = (
+                    _cleanup_invocation_temporary_directory(temporary, path)
                 )
                 if (
                     loaded.status == "plan_link_artifact_loaded"
                     and loaded.artifact is not None
                     and canonical_approved_change_plan_link_artifact_bytes(loaded.artifact) == data
                 ):
-                    os.unlink(path)
-                    os.rmdir(temporary)
                     return _published(
                         "plan_link_artifact_already_present",
                         artifact_id=artifact_id,
@@ -685,10 +815,62 @@ def publish_approved_change_plan_link_artifact(
                         plan_link_evaluated=True,
                         plan_linked=True,
                         plan_link_artifact_persisted=True,
+                        temporary_directory_created=temporary_created,
+                        temporary_directory_cleaned=cleaned,
+                        cleanup_status=cleanup_status,
+                        residual_temporary_directory=residual,
+                        atomic_publish_outcome=outcome.outcome,
+                        errors=cleanup_errors,
                     )
-                raise FileExistsError("atomic publication found a conflicting destination")
+                return _published(
+                    "plan_link_artifact_conflict"
+                    if cleanup_status != "incomplete"
+                    else "plan_link_artifact_publication_blocked",
+                    artifact_id=artifact_id,
+                    artifact_identity_sha256=identity,
+                    confirmation_matched=True,
+                    errors=[
+                        "atomic publication found a conflicting destination",
+                        *cleanup_errors,
+                    ],
+                    filesystem_accessed=True,
+                    plan_validated=True,
+                    plan_identity_confirmed=True,
+                    plan_link_evaluated=True,
+                    plan_linked=True,
+                    temporary_directory_created=temporary_created,
+                    temporary_directory_cleaned=cleaned,
+                    cleanup_status=cleanup_status,
+                    residual_temporary_directory=residual,
+                    atomic_publish_outcome=outcome.outcome,
+                )
             if outcome.outcome != "published":
-                raise OSError(f"atomic no-replace publication failed closed: {outcome.outcome}")
+                cleanup_status, cleaned, residual, cleanup_errors = (
+                    _cleanup_invocation_temporary_directory(temporary, path)
+                )
+                return _published(
+                    "plan_link_artifact_publication_blocked",
+                    artifact_id=artifact_id,
+                    artifact_identity_sha256=identity,
+                    confirmation_matched=True,
+                    errors=[
+                        f"atomic no-replace publication failed closed: {outcome.outcome}",
+                        *([outcome.detail] if outcome.detail else []),
+                        *cleanup_errors,
+                    ],
+                    filesystem_accessed=True,
+                    plan_validated=True,
+                    plan_identity_confirmed=True,
+                    plan_link_evaluated=True,
+                    plan_linked=True,
+                    mutation_performed=True,
+                    artifact_write_performed=True,
+                    temporary_directory_created=temporary_created,
+                    temporary_directory_cleaned=cleaned,
+                    cleanup_status=cleanup_status,
+                    residual_temporary_directory=residual,
+                    atomic_publish_outcome=outcome.outcome,
+                )
             _fsync_directory(root)
             loaded = load_persisted_approved_change_plan_link_artifact(checked.path, artifact_id)
             if loaded.status != "plan_link_artifact_loaded":
@@ -725,15 +907,20 @@ def publish_approved_change_plan_link_artifact(
                 plan_link_evaluated=True,
                 plan_linked=True,
                 plan_link_artifact_persisted=True,
+                temporary_directory_created=temporary_created,
+                temporary_directory_cleaned=False,
+                cleanup_status="not_required",
+                atomic_publish_outcome=outcome.outcome,
             )
         except Exception:
-            if temporary.exists() and not _path_exists_without_following(final):
-                try:
-                    if path.exists():
-                        os.unlink(path)
-                    os.rmdir(temporary)
-                except OSError:
-                    pass
+            cleanup_status, cleaned, residual, cleanup_errors = (
+                _cleanup_invocation_temporary_directory(temporary, path)
+            )
+            if cleanup_status == "incomplete":
+                raise OSError(
+                    "publication failed and invocation temporary cleanup is incomplete: "
+                    + "; ".join(cleanup_errors)
+                ) from None
             raise
     except Exception as exc:
         return _published(
@@ -749,4 +936,8 @@ def publish_approved_change_plan_link_artifact(
             plan_identity_confirmed=True,
             plan_link_evaluated=True,
             plan_linked=True,
+            temporary_directory_created=temporary_created,
+            temporary_directory_cleaned=False,
+            cleanup_status="not_required" if not temporary_created else "completed",
+            atomic_publish_outcome=atomic_outcome.outcome if atomic_outcome else "not_attempted",
         )
