@@ -53,3 +53,8 @@ Every successful construction, publication, no-op, and load reports permanent
 non-authority warnings. PR328 current-state observations remain transient and
 are neither invoked nor persisted. PR313 execution is never invoked. No CLI,
 interactive, or natural-language route publishes this artifact.
+
+
+## PR338 consumption
+
+A PR337 `acpl_` artifact may be consumed by the PR338 read-only persisted plan-link current-state operation. That consumption does not change the PR337 schema, canonical bytes, identity, ID derivation, fixed layout, publisher, or exact-ID loader. Artifact persistence remains provenance only; it is not current-state freshness, authorization, approval freshness, execution preflight, receipt linkage, or execution eligibility.

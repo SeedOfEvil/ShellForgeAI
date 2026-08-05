@@ -252,3 +252,8 @@ The approved-change persistence layer includes a fixed, atomic no-replace
 `approved_change_plan_links` subtree for exact PR323 link provenance. Its
 distinct `acpl_` identity covers canonical payload bytes and grants no runtime
 authority. Current-state revalidation remains a separate transient operation.
+
+
+## Persisted plan-link current-state consumer
+
+PR338 adds a local read-only API that consumes one exact PR337 `acpl_` artifact and one caller-supplied saved plan. It validates the plan through the maintained PR305/PR313 contract, validates the embedded PR323 link, compares persisted provenance to the supplied plan, gates governed-root inspection to native Windows, and then uses the shared PR328 live-state evaluator for the fixed two-file scope. It adds no CLI, interactive, provider/model, network, authorization, preflight, receipt, or execution path.

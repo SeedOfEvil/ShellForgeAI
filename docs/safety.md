@@ -1295,3 +1295,8 @@ Persisting an exact approved-change plan link is a narrow ShellForgeAI-owned
 artifact write, not host configuration mutation. It authenticates nobody,
 authorizes nothing, performs no current-state check or preflight, creates no
 receipt, and grants no execution eligibility or availability.
+
+
+## PR338 safety posture
+
+Persisted plan-link current-state revalidation is read-only and point-in-time. It requires an exact `acpl_` ID plus exact artifact and plan confirmations, loads only through the PR337 exact-ID loader, and touches governed roots only after provenance and structural comparisons pass and native Windows is confirmed. It persists no current-state result or plan packet, makes no freshness or authorization claim, creates or links no receipt, grants no execution eligibility, and never invokes PR313 execution, shell/subprocess, PowerShell, WinRM, QGA, provider/model, network, credential, or auth-cache access.
