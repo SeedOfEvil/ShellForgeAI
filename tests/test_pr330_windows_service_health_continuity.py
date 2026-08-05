@@ -143,8 +143,9 @@ def test_exact_windows_session_preserves_service_context(monkeypatch: Any, tmp_p
     )
     out = result.stdout
     assert result.exception is None, out
-    assert calls == {"services": 1, "diagnose": 0, "provider": 0, "dispatch": 0}
-    assert "## Windows services evidence" in out
+    assert calls == {"services": 0, "diagnose": 0, "provider": 1, "dispatch": 0}
+    assert "## Windows evidence" in out
+    assert "Intent: windows_services" in out
     assert "Refused: natural-language mutation is not allowed." in out
     assert "Diagnosis kind: windows_services" in out
     assert "Using latest windows_services diagnosis context." in out

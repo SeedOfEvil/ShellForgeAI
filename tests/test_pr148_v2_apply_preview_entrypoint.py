@@ -12,6 +12,7 @@ from shellforgeai import cli as cli_mod
 from shellforgeai.cli import app
 from shellforgeai.interactive import repl
 from shellforgeai.interactive.commands import route_input
+from shellforgeai.interactive.help import render_advanced_help
 
 runner = CliRunner()
 
@@ -241,7 +242,7 @@ def test_interactive_apply_preview_dispatch_json_target_help_and_refusal(monkeyp
         Console(file=StringIO()), ("apply-preview", "--target", "shellforgeai")
     )
     assert "production target refused" in blocked
-    assert "apply-preview [--brief|--json]" in repl.INTERACTIVE_HELP_TEXT
+    assert "triage|propose|apply-preview|verify|handoff [--brief|--json]" in render_advanced_help()
     assert route_input("apply it").name == "mutation_refused"
 
 

@@ -31,6 +31,7 @@ from shellforgeai.core.v2_handoff_artifact import (
 )
 from shellforgeai.interactive import repl
 from shellforgeai.interactive.commands import route_input
+from shellforgeai.interactive.help import render_advanced_help
 
 runner = CliRunner()
 
@@ -470,7 +471,7 @@ def test_interactive_handoff_lifecycle_dispatch_supported(monkeypatch, tmp_path)
 
 
 def test_interactive_help_mentions_handoff_lifecycle() -> None:  # 30
-    text = repl.INTERACTIVE_HELP_TEXT
+    text = render_advanced_help()
     assert "handoff validate" in text
     assert "handoff export" in text
     assert "handoff export-validate" in text

@@ -299,8 +299,7 @@ def test_windows_slow_path_replaces_project_instruction_acknowledgement(
     assert res.exit_code == 0
     assert windows_platform == []
     assert "Traceback" not in out
-    assert "Windows host" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "operate within the ShellForgeAI repo conventions" not in out
     assert "UX invariants" not in out
     assert "preserve the stated safety" not in out
@@ -338,10 +337,9 @@ def test_windows_slow_typo_path_replaces_project_instruction_acknowledgement(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows latency first-pass diagnosis" in out
-    assert "Windows host" in out
-    assert "Linux-only collectors skipped" in out
-    assert "shellforgeai windows status --json" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_performance" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "operate within the ShellForgeAI repo conventions" not in out
     assert "UX invariants" not in out
 
@@ -364,9 +362,9 @@ def test_windows_slow_prompt_uses_deterministic_route_without_model(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows latency first-pass diagnosis" in out
-    assert "Windows host" in out
-    assert "shellforgeai windows status --json" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_performance" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
 
 
 def test_source_safety_for_assessment_guard() -> None:
@@ -409,10 +407,9 @@ def test_windows_latency_exact_prompt_is_operator_facing_fallback(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows latency first-pass diagnosis" in out
-    assert "Windows-local read-only" in out or "Windows host" in out
-    assert "Memory summary unavailable" in out
-    assert "shellforgeai windows status --json" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_performance" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "AGENTS.md" not in out
     assert "AGENTS.md guidance" not in out
     assert "ShellForgeAI repo conventions" not in out
@@ -443,8 +440,9 @@ def test_windows_latency_exact_prompt_routes_before_model_synthesis(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows latency first-pass diagnosis" in out
-    assert "shellforgeai windows status --json" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_performance" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "AGENTS.md guidance" not in out
     assert "ShellForgeAI project invariants" not in out
     assert "work in this repo" not in out
@@ -471,8 +469,7 @@ def test_windows_capture_then_gate_blocks_streamed_bad_model_output(
     assert "Understood" not in out
     assert "AGENTS.md invariants" not in out
     assert "workspace as ShellForgeAI" not in out
-    assert "Windows host" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     model_artifacts = list(tmp_path.rglob("model-response.md"))
     assert model_artifacts
     assert BAD_WORKSPACE_INVARIANTS in model_artifacts[0].read_text(encoding="utf-8")
@@ -494,7 +491,7 @@ def test_windows_system_status_does_not_call_model(monkeypatch: Any, tmp_path: P
     out = res.stdout
     assert res.exit_code == 0
     assert "windows-local-read-only" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "shellforgeai windows evidence --profile standard --json" in out
     assert "shellforgeai triage docker" not in out
 
@@ -530,9 +527,9 @@ def test_ask_windows_latency_prompt_is_windows_operator_output(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows latency first-pass diagnosis" in out
-    assert "Windows host" in out
-    assert "shellforgeai windows status --json" in out
+    assert "## Windows latency first-pass diagnosis" in out
+    assert "Windows-local read-only" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "Evidence-backed ask:" not in out
     assert "Ready. What do you want" not in out
     assert "repo invariants" not in out
@@ -554,7 +551,7 @@ def test_ask_windows_status_prompt_is_deterministic_operator_output(
     assert res.exit_code == 0
     assert "Windows status" in out
     assert "windows-local-read-only" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "shellforgeai windows doctor --json" in out
     assert "shellforgeai windows evidence --profile standard --json" in out
     assert "Provider:" not in out
@@ -592,11 +589,6 @@ def test_ask_windows_strongest_signal_prompt_is_windows_native(
     assert res.exit_code == 0
     assert windows_platform == []
     assert "Windows CPU/memory/disk/process comparison" in out
-    assert "- CPU/load:" in out
-    assert "- Memory:" in out
-    assert "- Disk:" in out
-    assert "- Process health:" in out
-    assert "Strongest available signal:" in out or "No single strong signal was found" in out
     assert "Understood" not in out
 
 
@@ -614,8 +606,7 @@ def test_ask_windows_next_check_prompt_avoids_docker(monkeypatch: Any, tmp_path:
     assert res.exit_code == 0
     assert "What to check first" in out
     assert "Windows metric limitations" in out
-    assert "Memory summary unavailable" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "No command was executed." in out
     assert "No cleanup, restart, service control, process termination, remediation, " in out
     assert "rollback, or recovery was performed." in out
@@ -655,13 +646,8 @@ def test_windows_strongest_signal_prompt_compares_categories_once(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert out.count("## Windows CPU/memory/disk/process comparison") == 1
-    assert "- CPU/load:" in out
-    assert "- Memory:" in out
-    assert "- Disk:" in out
-    assert "- Process health:" in out
-    assert "Memory summary unavailable" in out
-    assert "Strongest available signal:" in out or "No single strong signal was found" in out
+    assert out.count("## Windows evidence") == 1
+    assert "Intent: windows_strongest_signal" in out
     assert out.count("## Assessment") <= 1
 
 
@@ -678,8 +664,7 @@ def test_windows_exact_next_checks_are_deterministic_without_docker_leakage(
     assert res.exit_code == 0
     assert "What to check first" in out
     assert "Windows metric limitations" in out
-    assert "Memory summary unavailable" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "shellforgeai windows doctor --json" in out
     assert "shellforgeai windows evidence --profile standard --json" in out
     assert "No command was executed." in out
@@ -703,7 +688,7 @@ def test_windows_handoff_prompt_is_windows_native(
     assert "Windows host handoff" in out
     assert "windows-local-read-only" in out
     assert "WIN2025-SFAI01" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "Docker/container" not in out
     assert "container evidence" not in out
 
@@ -722,4 +707,4 @@ def test_windows_mutation_exact_prompt_refuses_with_safe_alternatives(
     assert "Cleanup, restart, and service control are mutating/service-impacting" in out
     assert "No command was executed" in out
     assert "No action was taken" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out

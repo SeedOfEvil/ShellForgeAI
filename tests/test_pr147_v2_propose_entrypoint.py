@@ -11,6 +11,7 @@ from shellforgeai import cli as cli_mod
 from shellforgeai.cli import app
 from shellforgeai.interactive import repl
 from shellforgeai.interactive.commands import route_input
+from shellforgeai.interactive.help import render_advanced_help
 
 runner = CliRunner()
 
@@ -269,7 +270,7 @@ def test_interactive_propose_dispatch_help_and_refusals(monkeypatch, tmp_path: P
         Console(file=StringIO()), ("propose", "--target", "sfai-crashloop")
     )
     assert "Target: sfai-crashloop" in detail
-    assert "propose [--brief|--json]" in repl.INTERACTIVE_HELP_TEXT
+    assert "triage|propose|apply-preview|verify|handoff [--brief|--json]" in render_advanced_help()
     assert route_input("execute proposal").name == "mutation_refused"
     assert route_input("run the plan").name == "mutation_refused"
 

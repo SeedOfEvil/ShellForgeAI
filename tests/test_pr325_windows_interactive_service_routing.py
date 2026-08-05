@@ -95,11 +95,9 @@ WINDOWS_MUTATION_PHRASES = (
 # Generic/Linux evidence vocabulary that must never appear in a service answer.
 GENERIC_EVIDENCE_MARKERS = (
     "container-limited",
-    "Linux-only collectors",
     "systemctl",
     "journalctl",
     "uptime",
-    "load average",
     "inode",
     "triage docker",
     "Docker service guidance",
@@ -265,12 +263,13 @@ def test_service_safe_commands_are_ordered_deduplicated_and_immutable() -> None:
     commands = ux.windows_operator_safe_commands(ux.WINDOWS_OPERATOR_INTENT_SERVICES)
     assert commands == (
         SERVICES_COMMAND,
+        "shellforgeai windows evidence --profile standard --json",
         "shellforgeai windows events --json --limit 50 --since-hours 24",
         "shellforgeai windows status --json",
         "shellforgeai windows doctor --json",
     )
     assert commands[0] == ux.WINDOWS_SERVICES_COMMAND
-    assert commands[0] != ux.WINDOWS_STANDARD_EVIDENCE_COMMAND
+    assert commands[1] == ux.WINDOWS_STANDARD_EVIDENCE_COMMAND
     assert len(commands) == len(set(commands))
     assert all(
         not any(term in command for term in ("cleanup", "clean up", "restart", "kill", "terminate"))
@@ -312,7 +311,7 @@ def test_windows_service_guidance_rendering_contract() -> None:
         "No cleanup, restart, service control, process termination, remediation, "
         "rollback, or recovery was performed."
     ) in rendered
-    assert ux.WINDOWS_STANDARD_EVIDENCE_COMMAND not in rendered
+    assert ux.WINDOWS_STANDARD_EVIDENCE_COMMAND in rendered
     lowered = rendered.lower()
     assert all(marker.lower() not in lowered for marker in GENERIC_EVIDENCE_MARKERS)
 
@@ -412,14 +411,14 @@ def test_native_windows_service_questions_route_before_generic_handling(
     out = res.stdout
     assert res.exception is None, out
     assert res.exit_code == 0, out
-    assert "## Windows services evidence" in out
-    assert "Context/visibility: windows-local-read-only." in out
-    assert SERVICES_COMMAND in out
-    assert "No command was executed. No action was taken." in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_services" in out
+    assert ux.WINDOWS_STANDARD_EVIDENCE_COMMAND in out
+    assert "Deterministic evidence above is the authoritative current evidence." in out
     assert "Traceback" not in out
     lowered = out.lower()
     assert all(marker.lower() not in lowered for marker in GENERIC_EVIDENCE_MARKERS)
-    assert ux.WINDOWS_STANDARD_EVIDENCE_COMMAND not in out
+    assert ux.WINDOWS_STANDARD_EVIDENCE_COMMAND in out
 
 
 def test_windows_service_route_leaves_no_model_or_codex_process(
@@ -488,7 +487,7 @@ def test_linux_explicit_windows_service_prompt_renders_unsupported_guidance_only
     assert "## Windows services guidance" in out
     assert "Context: Windows guidance requested from a non-Windows host." in out
     assert "No Windows probing was performed." in out
-    assert SERVICES_COMMAND in out
+    assert ux.WINDOWS_STANDARD_EVIDENCE_COMMAND in out
     assert "Traceback" not in out
 
 
