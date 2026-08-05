@@ -267,6 +267,19 @@
       "tests/test_pr310_legacy_proposal_compatibility.py",
       "tests/test_pr309_approved_change_contract.py"
     ]},
+    {"pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py", "lane": "full", "full_pytest_default": true, "reason": "governed Stage B plan-link-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_plan_links subtree, atomic no-replace publication, invocation-bounded temporary cleanup, and exact-ID read-only loader; no CLI, natural-language, inventory, authorization, preflight, receipt, host-configuration, or execution surface)", "tests": [
+      "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
+      "tests/test_pr323_approved_change_plan_link.py",
+      "tests/test_pr322_approved_change_capability_binding.py",
+      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+      "tests/test_pr317_approved_change_artifact_persistence.py",
+      "tests/test_pr328_approved_change_plan_current_state.py",
+      "tests/test_pr157_validation_lane_optimizer.py",
+      "tests/test_pr110_v1_docs_contract.py",
+      "tests/test_pr112_v1_demo_contract.py",
+      "tests/test_pr119_v1_release_candidate_docs.py",
+      "tests/test_pr143_command_surface_audit.py"
+    ]},
     {"pattern": "src/shellforgeai/core/windows_runtime_reconcile_plan_contract.py", "lane": "full", "reason": "pure maintained Windows runtime-reconcile plan contract changed (the single home of the PR305 saved-packet acceptance rules, the destination-parent contract, the narrower PR313 executable-plan contract, the exact fixed two-file allowlist, the accepted ready/no_change statuses, and the canonical plan JSON/SHA-256 identity that scripts/windows_runtime_reconcile_acceptance.py, the PR313 execution lane, and the PR323 plan link all delegate to; pure constants, canonicalization, identity, and structural validation only, with no filesystem, current-state, preparation, backup, atomic-replacement, compensation, receipt, verification, subprocess, shell, network, clock, environment, or mutation path)", "tests": [
       "tests/test_pr323_approved_change_plan_link.py",
       "tests/test_pr313_windows_runtime_reconcile_execute.py",

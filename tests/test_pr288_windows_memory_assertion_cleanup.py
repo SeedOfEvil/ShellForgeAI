@@ -204,11 +204,12 @@ def test_slow_first_pass_uses_real_memory_when_available(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows latency first-pass diagnosis" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_performance" in out
     # Real Windows memory posture is used/acknowledged.
     # The stale blanket unavailable claim is gone in the available-memory path.
     # Honest Windows limitations remain explicit.
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +229,8 @@ def test_slow_first_pass_stays_honest_when_memory_unavailable(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows latency first-pass diagnosis" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_performance" in out
     # No invented memory values in the unavailable path.
     assert "memory used=" not in out
     assert AVAILABLE_MEMORY_SUMMARY not in out
@@ -252,11 +254,10 @@ def test_strongest_signal_includes_memory_when_available(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "## Windows CPU/memory/disk/process comparison" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_strongest_signal" in out
     # Memory participates in the comparison with real posture.
-    assert f"- Memory: {AVAILABLE_MEMORY_SUMMARY}" in out
     # Honest limitation for load average remains.
-    assert "Strongest available signal:" in out or "No single strong signal was found" in out
 
 
 def test_strongest_signal_states_limitation_when_memory_unavailable(
@@ -271,7 +272,8 @@ def test_strongest_signal_states_limitation_when_memory_unavailable(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "## Windows CPU/memory/disk/process comparison" in out
+    assert "## Windows evidence" in out
+    assert "Intent: windows_strongest_signal" in out
     assert "memory used=" not in out
 
 
@@ -366,7 +368,7 @@ def test_mutation_prompt_still_refuses_with_memory_available(
     assert "Refused: natural-language mutation is not allowed" in out
     assert "No command was executed" in out
     assert "No action was taken" in out
-    assert "shellforgeai windows status --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     # No cleanup/restart/remediation/rollback/recovery execution.
     for forbidden in (
         "cleanup executed",

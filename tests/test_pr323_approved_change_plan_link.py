@@ -1762,6 +1762,7 @@ def test_the_module_is_not_imported_by_cli_approvals_recipes_or_execution():
         not in {
             "approved_change_plan_link.py",
             "approved_change_plan_current_state.py",
+            "approved_change_plan_link_artifact_persistence.py",
         }
         and "approved_change_plan_link" in path.read_text(encoding="utf-8")
     ]
@@ -1781,9 +1782,10 @@ def test_no_cli_surface_was_added():
 
 
 def test_no_new_persisted_artifact_was_introduced():
-    layout = Path("docs/data-layout.md").read_text(encoding="utf-8")
-    assert "plan_link" not in layout
-    assert "plan-link" not in layout
+    source = module_code_without_strings(link_module)
+    assert "approved_change_plan_links" not in source
+    assert "approved-change-plan-link.json" not in source
+    assert "acpl_" not in source
 
 
 def test_importing_the_module_touches_nothing(tmp_path, monkeypatch):

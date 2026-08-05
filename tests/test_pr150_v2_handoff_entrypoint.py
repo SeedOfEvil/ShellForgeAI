@@ -14,6 +14,7 @@ from shellforgeai.cli import app
 from shellforgeai.core.v2_handoff_artifact import resolve_handoff_dir, save_v2_handoff
 from shellforgeai.interactive import repl
 from shellforgeai.interactive.commands import route_input
+from shellforgeai.interactive.help import render_advanced_help
 
 runner = CliRunner()
 
@@ -411,10 +412,10 @@ def test_interactive_handoff_save_works(monkeypatch, tmp_path):  # 36
 def test_interactive_next_operator_routes_to_handoff():  # 37
     assert route_input("what should I tell the next operator?").argv == ("handoff",)
     assert route_input("give me a handoff").argv == ("handoff",)
-    assert "handoff [--brief|--json|--save]" in repl.INTERACTIVE_HELP_TEXT
+    assert "handoff --save" in render_advanced_help()
     assert (
         "status -> triage -> propose -> apply-preview -> verify -> handoff"
-        in repl.INTERACTIVE_HELP_TEXT
+        in render_advanced_help()
     )
 
 

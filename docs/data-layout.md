@@ -37,6 +37,9 @@ outside `<data_dir>` are never written or deleted by the runtime.
   approved_change_approvals/<approval-artifact-id>/
                                   PR319 published approval artifacts
                                   (exactly one canonical file each)
+  approved_change_plan_links/acpl_<64 lowercase hex>/
+                                  PR337 persisted approved-change plan-link
+                                  artifacts (exactly one canonical file each)
 ```
 
 ## Reviewed-change artifact bundles (PR317)
@@ -78,6 +81,27 @@ See [Approved Change Artifact Persistence](APPROVED_CHANGE_ARTIFACT_PERSISTENCE.
 - PR319 never deletes a published approval artifact and never writes to the PR317 bundle subtree. Retention, cleanup, and deletion of approval artifacts are **unsupported** and remain deferred.
 
 See [Approved Change Approval Artifact Persistence](APPROVED_CHANGE_APPROVAL_ARTIFACT_PERSISTENCE.md) for the full contract.
+
+## Approved-change plan-link artifacts (PR337)
+
+```
+<data_dir>/approved_change_plan_links/acpl_<64 lowercase hex>/
+  approved-change-plan-link.json
+```
+
+- The fixed root is `approved_change_plan_links`; callers cannot supply an alternate root, destination directory, filename, alias, or path.
+- The exact artifact ID is `acpl_` plus the full 64-character lowercase hexadecimal PR337 artifact identity SHA-256.
+- The fixed filename is `approved-change-plan-link.json`; each artifact directory contains exactly one canonical file and no extras.
+- Stored bytes are canonical UTF-8 JSON bytes with sorted keys, compact separators, no BOM, and no trailing newline.
+- Publication is atomic no-replace: it never overwrites, repairs, quarantines, deletes, merges, or renames an existing destination. A byte-identical existing artifact is an existing-identical no-op; conflicting or unsafe destinations fail closed.
+- Loading is exact-ID-only. There is no inventory, `latest`, `current`, "most recent", preferred, prefix, fuzzy, path, or automatic selection behavior.
+- The full saved plan packet is not persisted. The artifact stores only the exact maintained PR323 plan-link payload and minimum duplicated identities needed to validate that association.
+- PR328 current-state observations are not invoked, persisted, loaded, or treated as part of this artifact.
+- Persistence is not authentication, not approval freshness, not authorization, not an execution preflight, not receipt linkage, and grants no execution eligibility or availability.
+- PR313 execution is not invoked.
+- Deletion and retention of PR337 artifacts remain unsupported unless a separately governed future contract adds them.
+
+See [Approved Change Plan-Link Artifact Persistence](APPROVED_CHANGE_PLAN_LINK_ARTIFACT_PERSISTENCE.md) for the full contract.
 
 Names may vary slightly across versions; treat the table below as the
 canonical lifecycle. Code under `src/shellforgeai/core/` is the source of

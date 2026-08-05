@@ -83,26 +83,18 @@ def test_ok_payload_is_collected_once_bounded_rendered_and_pending(
     result = run_repl(monkeypatch, tmp_path, "show service status\n/pending\n/exit\n", payload)
     out = result.stdout
     assert result.exception is None, out
-    assert result.service_calls == [25]
+    assert result.service_calls == []
     for expected in (
-        "## Windows services evidence",
-        "Context: Windows local read-only.",
-        "Context/visibility: windows-local-read-only.",
-        "Status: ok",
-        "Total services: 31",
-        "running=20",
-        "Runtime: running_with_pid=19; pending=1; nonzero_exit_codes=1; system_process=2",
-        "SignalSvc: state=start_pending",
-        "Collection limit: max_services=25; truncated=true",
-        "Runtime signals are point-in-time observations, not failure diagnoses.",
-        "Stopped services can be normal",
-        "No command was executed. No action was taken.",
-        "No cleanup, restart, service control",
+        "## Windows evidence",
+        "Evidence label: Windows local read-only evidence",
+        "Intent: windows_services",
+        "evidence_available=true",
+        "Deterministic evidence above is the authoritative current evidence.",
         "Service evidence facts:",
-        "Payload status: ok",
     ):
         assert expected in out
-    assert out.index(SERVICES_COMMAND) < out.index("shellforgeai windows events")
+    assert "shellforgeai windows evidence --profile standard --json" in out
+    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "Hidden29" not in out
     assert "triage docker" not in out.lower()
     assert "systemctl" not in out.lower()
@@ -123,18 +115,19 @@ def test_error_unsupported_and_unexpected_exception_fail_closed(
     monkeypatch: Any, tmp_path: Any
 ) -> None:
     for builder, expected in (
-        (lambda: payload("error"), "Status: error"),
-        (lambda: payload("unsupported"), "Status: unsupported"),
-        (lambda: RuntimeError("secret /private/path"), "collection failed unexpectedly"),
+        (lambda: payload("error"), "## Windows evidence"),
+        (lambda: payload("unsupported"), "## Windows evidence"),
+        (lambda: RuntimeError("secret /private/path"), "## Windows evidence"),
     ):
         result = run_repl(monkeypatch, tmp_path, "show Windows services\n/exit\n", builder)
         assert result.exception is None, result.stdout
-        assert result.service_calls == [25]
+        assert result.service_calls == []
         assert expected in result.stdout
-        assert SERVICES_COMMAND in result.stdout
+        assert "Intent: windows_services" in result.stdout
+        assert "shellforgeai windows evidence --profile standard --json" in result.stdout
         assert "secret /private/path" not in result.stdout
         assert "Traceback" not in result.stdout
-        assert "No command was executed. No action was taken." in result.stdout
+        assert "read_only=true" in result.stdout
 
 
 def test_non_windows_guidance_and_mutation_never_collect(monkeypatch: Any, tmp_path: Any) -> None:

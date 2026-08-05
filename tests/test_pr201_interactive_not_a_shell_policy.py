@@ -175,7 +175,7 @@ def test_ops_report_json_payload_is_read_only_no_mutation() -> None:
 
 def test_safe_command_help_still_works(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     out, dispatched, provider = _drive_repl(monkeypatch, tmp_path, ["help", "/exit"])
-    assert "Session:" in out
+    assert "ShellForgeAI quick start" in out
     assert "Interactive mode is not a shell." in out
     assert dispatched == []
     assert provider.complete_calls == 0

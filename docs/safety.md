@@ -1289,3 +1289,9 @@ PR323 adds **no mutation surface at all**. It adds exactly one immutable in-memo
 **The pure extraction changed no behaviour.** Moving the PR305 acceptance rules, the PR313 executable-plan contract, and the canonical plan identity into `core/windows_runtime_reconcile_plan_contract.py` is delegation-only: no execution, filesystem mutation, current-state revalidation, receipt, backup, or compensation logic moved, the allowlist was not broadened, and the canonical plan identity did not change. The maintained PR304, PR305, and PR313 suites pass unchanged as the regression proof.
 
 Existing safety boundaries are unchanged: the Docker disposable-restart lane, the receipt recovery lane, cleanup refusal, remediation refusal, the PR313 Windows reconciliation lane, and natural-language mutation refusal all keep their current gates.
+# Plan-link artifact boundary
+
+Persisting an exact approved-change plan link is a narrow ShellForgeAI-owned
+artifact write, not host configuration mutation. It authenticates nobody,
+authorizes nothing, performs no current-state check or preflight, creates no
+receipt, and grants no execution eligibility or availability.

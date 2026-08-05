@@ -239,6 +239,6 @@ def test_interactive_routing_and_help_mentions_rollback_preview() -> None:
     assert optional.name == "cli_dispatch"
     assert optional.argv == ("rollback-preview", "--receipt", "receipt_abc", "--json")
     assert route_input("rollback now").name == "mutation_refused"
-    from shellforgeai.interactive.repl import INTERACTIVE_HELP_TEXT
+    from shellforgeai.interactive.help import render_advanced_help
 
-    assert "rollback-preview" in INTERACTIVE_HELP_TEXT
+    assert "rollback-preview" in render_advanced_help()

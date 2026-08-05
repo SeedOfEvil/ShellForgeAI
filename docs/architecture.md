@@ -246,3 +246,9 @@ posture.
 - Refuse natural-language mutation. The only execution paths are the
   explicit CLI lanes above.
 - Boring on purpose. Small sharp tool, not a broad control plane.
+# Persisted plan-link provenance
+
+The approved-change persistence layer includes a fixed, atomic no-replace
+`approved_change_plan_links` subtree for exact PR323 link provenance. Its
+distinct `acpl_` identity covers canonical payload bytes and grants no runtime
+authority. Current-state revalidation remains a separate transient operation.

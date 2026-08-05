@@ -134,6 +134,43 @@ def test_13_unknown_source_file_targeted_with_warning():
     assert p["warnings"], "unmapped source module should warn"
 
 
+def test_pr337_plan_link_artifact_persistence_selects_explicit_full_lane():
+    p = plan(
+        ["src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py"], pr_number=337
+    )
+    assert p["selected_lane"] == "full"
+    assert p["full_pytest_required"] is True
+    assert not any("unmapped" in warning.lower() for warning in p["warnings"])
+    expected = {
+        "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr328_approved_change_plan_current_state.py",
+        "tests/test_pr157_validation_lane_optimizer.py",
+        "tests/test_pr110_v1_docs_contract.py",
+    }
+    assert expected.issubset(set(p["recommended_tests"]))
+
+
+def test_pr337_plan_link_artifact_human_matrix_row_is_synchronized():
+    matrix = json.loads(MATRIX.read_text(encoding="utf-8"))
+    [rule] = [
+        rule
+        for rule in matrix["rules"]
+        if rule["pattern"]
+        == "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py"
+    ]
+    docs = (REPO_ROOT / "docs" / "VALIDATION_MATRIX.md").read_text(encoding="utf-8")
+    assert rule["lane"] == "full"
+    assert "approved_change_plan_links" in rule["reason"]
+    assert rule["pattern"] in docs
+    assert "| full |" in docs
+    assert "approved_change_plan_links" in docs
+    assert "invocation-bounded temporary cleanup" in docs
+
+
 # --------------------------------------------------------------------------- #
 # Commands and tests (required tests 14-20)
 # --------------------------------------------------------------------------- #
