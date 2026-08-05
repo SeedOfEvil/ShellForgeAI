@@ -47,3 +47,8 @@ authorization, preflight, shell, subprocess, PowerShell, WinRM, QGA, service,
 registry, network, model, credential, backup, temporary-file, replacement, or
 parent-creation activity. This operation is not authorization and is not an
 execution preflight.
+
+
+## PR338 persisted-artifact provenance path
+
+PR328 reconstruction-based current-state revalidation remains supported with the same public entrypoint, statuses, mappings, warnings, and safety ledger. PR338 adds a second provenance-acquisition path: `revalidate_persisted_plan_link_artifact_current_state(...)` loads one exact PR337 `acpl_` artifact through the maintained exact-ID loader, confirms its artifact identity, validates its embedded PR323 link, compares that persisted link to the caller-supplied validated plan, and only then reuses the same live-state evaluator. Neither path is authorization, approval freshness, PR304 evidence freshness, execution preflight, receipt linkage, or execution, and neither persists current-state observations.

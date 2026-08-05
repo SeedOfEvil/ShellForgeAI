@@ -187,3 +187,8 @@ The static PR323 plan-link provenance may be persisted as one immutable,
 checksum-protected `acpl_` artifact. It is not current state, authorization,
 preflight, receipt linkage, or execution. PR328 observations remain transient;
 future gates remain separate and require their own justification.
+
+
+## PR338 current-state revalidation link
+
+The Stage B chain now has a read-only point-in-time consumer: persisted approval → capability binding → canonical plan link → persisted `acpl_` link artifact → live current-state revalidation. PR304 evidence freshness, authenticated identity, approval freshness, authorization, execution preflight, receipt linkage, and execution remain deferred and incomplete.
