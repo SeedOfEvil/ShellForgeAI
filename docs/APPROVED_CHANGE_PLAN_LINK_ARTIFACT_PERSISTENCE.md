@@ -58,3 +58,7 @@ interactive, or natural-language route publishes this artifact.
 ## PR338 consumption
 
 A PR337 `acpl_` artifact may be consumed by the PR338 read-only persisted plan-link current-state operation. That consumption does not change the PR337 schema, canonical bytes, identity, ID derivation, fixed layout, publisher, or exact-ID loader. Artifact persistence remains provenance only; it is not current-state freshness, authorization, approval freshness, execution preflight, receipt linkage, or execution eligibility.
+
+## In-memory PR304 evidence association
+
+An exact loaded `acpl_` artifact may be associated in memory with the identity of one exact ordered PR304 two-packet evidence set after the supplied plan and every identity confirmation validate. This does not change the PR337 artifact schema, canonical bytes, identity, publisher, exact-ID loader, or layout. The association is not persisted and makes neither the artifact nor the evidence a freshness, authorization, preflight, receipt, eligibility, or execution signal.

@@ -257,3 +257,7 @@ authority. Current-state revalidation remains a separate transient operation.
 ## Persisted plan-link current-state consumer
 
 PR338 adds a local read-only API that consumes one exact PR337 `acpl_` artifact and one caller-supplied saved plan. It validates the plan through the maintained PR305/PR313 contract, validates the embedded PR323 link, compares persisted provenance to the supplied plan, gates governed-root inspection to native Windows, and then uses the shared PR328 live-state evaluator for the fixed two-file scope. It adds no CLI, interactive, provider/model, network, authorization, preflight, receipt, or execution path.
+
+### Exact runtime-integrity evidence association
+
+The reviewed-change chain can now proceed from exact approval provenance through capability binding, plan link, persisted `acpl_` provenance, and point-in-time governed-file state to a separate in-memory identity association with an exact ordered PR304 source-root/System32 evidence pair. The PR304 validator is pure; the acceptance CLI delegates to it. This stage stops before future freshness evaluation, authenticated identity, authorization, execution preflight, receipts, and execution.

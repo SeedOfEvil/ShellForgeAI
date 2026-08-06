@@ -267,6 +267,15 @@
       "tests/test_pr310_legacy_proposal_compatibility.py",
       "tests/test_pr309_approved_change_contract.py"
     ]},
+    {"pattern": "src/shellforgeai/core/windows_runtime_integrity_contract.py", "lane": "targeted_runtime", "reason": "pure read-only PR304 packet validation, canonical packet identity, and exact ordered two-packet evidence-set contract changed", "tests": [
+      "tests/test_pr339_approved_change_pr304_evidence_binding.py",
+      "tests/test_pr304_windows_runtime_integrity.py"
+    ]},
+    {"pattern": "src/shellforgeai/core/approved_change_pr304_evidence_binding.py", "lane": "targeted_runtime", "reason": "read-only exact PR337 plan-link provenance to exact validated PR304 evidence-set binding changed; no persistence, freshness, current-state, authorization, preflight, receipt, or execution", "tests": [
+      "tests/test_pr339_approved_change_pr304_evidence_binding.py",
+      "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
+      "tests/test_pr323_approved_change_plan_link.py"
+    ]},
     {"pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py", "lane": "full", "full_pytest_default": true, "reason": "governed Stage B plan-link-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_plan_links subtree, atomic no-replace publication, invocation-bounded temporary cleanup, and exact-ID read-only loader; no CLI, natural-language, inventory, authorization, preflight, receipt, host-configuration, or execution surface)", "tests": [
       "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
       "tests/test_pr323_approved_change_plan_link.py",

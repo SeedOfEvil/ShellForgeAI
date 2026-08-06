@@ -1300,3 +1300,7 @@ receipt, and grants no execution eligibility or availability.
 ## PR338 safety posture
 
 Persisted plan-link current-state revalidation is read-only and point-in-time. It requires an exact `acpl_` ID plus exact artifact and plan confirmations, loads only through the PR337 exact-ID loader, and touches governed roots only after provenance and structural comparisons pass and native Windows is confirmed. It persists no current-state result or plan packet, makes no freshness or authorization claim, creates or links no receipt, grants no execution eligibility, and never invokes PR313 execution, shell/subprocess, PowerShell, WinRM, QGA, provider/model, network, credential, or auth-cache access.
+
+### Evidence identity is not freshness
+
+The exact PR304 two-packet evidence association validates structure, stable-field consistency, exact canonical identities, and persisted plan-link provenance only. Roles are caller-assigned and unauthenticated; packet status is an evidence fact. No packet, evidence set, or binding is persisted, and no current-state, freshness, authorization, preflight, receipt, eligibility, or execution operation is invoked. TOCTOU remains unresolved.
