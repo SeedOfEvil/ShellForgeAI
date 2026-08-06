@@ -70,3 +70,7 @@ Actual Windows acceptance should run the helper through the embedded Python with
 ## Limitations and non-goals
 
 PR304 does not provide an installer, updater, frozen package, wrapper repair, PATH modification, cleanup workflow, or product CLI command. Packaging and install decisions remain deferred; this preflight is the read-only observation stage that can be used before later packaging/install work.
+
+## Pure validation and exact evidence-set identity
+
+The saved-artifact acceptance CLI delegates packet validation and stable-field comparison to the pure maintained core contract. Its arguments, human and JSON result shapes, accepted/rejected semantics, and exit codes are unchanged. The core may also prepare one exact ordered pair of caller-supplied mappings—source-root first and System32 second—and derive packet and evidence-set SHA-256 identities without reading files. It does not collect or persist packets, authenticate the caller-assigned roles, inspect timestamps, or decide freshness.

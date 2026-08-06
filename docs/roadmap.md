@@ -192,3 +192,5 @@ future gates remain separate and require their own justification.
 ## PR338 current-state revalidation link
 
 The Stage B chain now has a read-only point-in-time consumer: persisted approval → capability binding → canonical plan link → persisted `acpl_` link artifact → live current-state revalidation. PR304 evidence freshness, authenticated identity, approval freshness, authorization, execution preflight, receipt linkage, and execution remain deferred and incomplete.
+
+The Stage B provenance chain now supports a deterministic in-memory association from an exact persisted `acpl_` plan link and exact plan to an exact ordered PR304 source-root/System32 evidence-set identity. Stage B remains incomplete: separately reviewed freshness, authenticated identity, authorization, execution preflight, receipt, and execution authorities remain future work.
