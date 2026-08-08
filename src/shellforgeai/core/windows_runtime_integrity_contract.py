@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
 MODE = "windows_runtime_integrity"
+CLOCK_SOURCE = "local_system_utc_plus_monotonic"
+MAX_CAPTURE_DURATION_MS = 600_000
+_UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 ALLOWED_STATUS = frozenset({"ok", "attention", "blocked", "unsupported"})
 ALLOWED_CHECK = frozenset({"pass", "attention", "blocked", "not_requested", "unsupported"})
 FALSE_KEYS = (
@@ -63,7 +68,9 @@ STABLE_PATHS = (
 )
 EVIDENCE_WARNINGS = (
     "evidence-set identity is not evidence freshness",
-    "packet timestamps are not added or trusted by this operation",
+    "collector-owned capture chronology is not authenticated or externally trusted",
+    "local system UTC may be wrong and no clock synchronization is checked",
+    "monotonic duration proves only local elapsed collection duration",
     "state may already have changed",
     "packet role labels are caller-assigned and not authenticated",
     "PR304 packet status is an evidence fact, not authorization",
@@ -81,6 +88,11 @@ class Pr304PacketValidationResult(_Frozen):
     packet_identity_sha256: str = ""
     packet_status: str = ""
     platform_system: str = ""
+    capture_chronology_available: bool = False
+    capture_chronology_valid: bool = False
+    capture_started_at_utc: str = ""
+    capture_completed_at_utc: str = ""
+    capture_duration_ms: int | None = None
     errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = EVIDENCE_WARNINGS
     read_only: Literal[True] = True
@@ -93,6 +105,11 @@ class Pr304EvidenceObservation(_Frozen):
     packet_mode: Literal["windows_runtime_integrity"] = MODE
     packet_status: str
     platform_system: str
+    capture_chronology_available: bool
+    capture_chronology_valid: bool
+    capture_started_at_utc: str = ""
+    capture_completed_at_utc: str = ""
+    capture_duration_ms: int | None = None
 
 
 class Pr304RuntimeIntegrityEvidenceSet(_Frozen):
@@ -108,6 +125,12 @@ class Pr304RuntimeIntegrityEvidenceSet(_Frozen):
     stable_field_comparison_evaluated: Literal[True] = True
     stable_fields_consistent: bool
     stable_field_mismatches: tuple[str, ...] = ()
+    capture_chronology_evaluated: Literal[True] = True
+    capture_chronology_available: bool
+    capture_chronology_valid: bool
+    earliest_capture_started_at_utc: str = ""
+    latest_capture_completed_at_utc: str = ""
+    combined_capture_span_ms: int | None = None
 
 
 class Pr304EvidenceSetPreparationResult(_Frozen):
@@ -169,11 +192,54 @@ def _expected_status(payload: Mapping[str, Any]) -> str:
     return "ok"
 
 
+def _parse_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str) or _UTC_PATTERN.fullmatch(value) is None:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError:
+        return None
+
+
+def _observation_errors(payload: Mapping[str, Any]) -> list[str]:
+    observation = payload.get("observation")
+    if observation is None:
+        return []  # Explicit compatibility path for exact pre-PR340 packets.
+    if not isinstance(observation, Mapping):
+        return ["observation must be an object"]
+    required = {
+        "capture_started_at_utc",
+        "capture_completed_at_utc",
+        "capture_duration_ms",
+        "clock_source",
+    }
+    errors: list[str] = []
+    if set(observation) != required:
+        errors.append("observation must contain exactly the required fields")
+    started = _parse_utc(observation.get("capture_started_at_utc"))
+    completed = _parse_utc(observation.get("capture_completed_at_utc"))
+    if started is None:
+        errors.append("capture_started_at_utc must be canonical UTC")
+    if completed is None:
+        errors.append("capture_completed_at_utc must be canonical UTC")
+    if started is not None and completed is not None and completed < started:
+        errors.append("capture completion must not precede capture start")
+    duration = observation.get("capture_duration_ms")
+    if isinstance(duration, bool) or not isinstance(duration, int):
+        errors.append("capture_duration_ms must be an integer")
+    elif duration < 0 or duration > MAX_CAPTURE_DURATION_MS:
+        errors.append(f"capture_duration_ms must be between 0 and {MAX_CAPTURE_DURATION_MS}")
+    if observation.get("clock_source") != CLOCK_SOURCE:
+        errors.append(f"clock_source must be {CLOCK_SOURCE}")
+    return errors
+
+
 def packet_validation_errors(
     payload: Mapping[str, Any], expect_status: str | None = None
 ) -> list[str]:
     """Return the maintained PR304 errors in their legacy deterministic order."""
     errors: list[str] = []
+    errors.extend(_observation_errors(payload))
     if payload.get("schema_version") != 1:
         errors.append("schema_version must be 1")
     if payload.get("mode") != MODE:
@@ -250,6 +316,9 @@ def validate_windows_runtime_integrity_packet(
         )
     errors = packet_validation_errors(payload, expect_status)
     platform = payload.get("platform", {})
+    observation = payload.get("observation")
+    chronology_available = isinstance(observation, Mapping)
+    chronology_valid = chronology_available and not _observation_errors(payload)
     return Pr304PacketValidationResult(
         status="packet_invalid" if errors else "packet_valid",
         packet_valid=not errors,
@@ -258,6 +327,15 @@ def validate_windows_runtime_integrity_packet(
         platform_system=platform.get("system")
         if isinstance(platform, Mapping) and isinstance(platform.get("system"), str)
         else "",
+        capture_chronology_available=chronology_available,
+        capture_chronology_valid=chronology_valid,
+        capture_started_at_utc=observation.get("capture_started_at_utc", "")
+        if isinstance(observation, Mapping)
+        else "",
+        capture_completed_at_utc=observation.get("capture_completed_at_utc", "")
+        if isinstance(observation, Mapping)
+        else "",
+        capture_duration_ms=observation.get("capture_duration_ms") if chronology_valid else None,
         errors=_sorted(errors),
     )
 
@@ -308,21 +386,55 @@ def prepare_pr304_runtime_integrity_evidence_set(
             errors=_sorted(errors),
         )
     mismatches = compare_stable_fields([source_root_packet, system32_packet])
+    chronology_available = (
+        source.capture_chronology_available and system32.capture_chronology_available
+    )
+    chronology_valid = source.capture_chronology_valid and system32.capture_chronology_valid
+    starts = (
+        [source.capture_started_at_utc, system32.capture_started_at_utc] if chronology_valid else []
+    )
+    completions = (
+        [source.capture_completed_at_utc, system32.capture_completed_at_utc]
+        if chronology_valid
+        else []
+    )
+    earliest = min(starts) if starts else ""
+    latest = max(completions) if completions else ""
+    span_ms = (
+        int((_parse_utc(latest) - _parse_utc(earliest)).total_seconds() * 1000)
+        if chronology_valid
+        else None
+    )
     evidence = Pr304RuntimeIntegrityEvidenceSet(
         source_root_observation=Pr304EvidenceObservation(
             role="source_root_observation",
             packet_identity_sha256=source.packet_identity_sha256,
             packet_status=source.packet_status,
             platform_system=source.platform_system,
+            capture_chronology_available=source.capture_chronology_available,
+            capture_chronology_valid=source.capture_chronology_valid,
+            capture_started_at_utc=source.capture_started_at_utc,
+            capture_completed_at_utc=source.capture_completed_at_utc,
+            capture_duration_ms=source.capture_duration_ms,
         ),
         system32_observation=Pr304EvidenceObservation(
             role="system32_observation",
             packet_identity_sha256=system32.packet_identity_sha256,
             packet_status=system32.packet_status,
             platform_system=system32.platform_system,
+            capture_chronology_available=system32.capture_chronology_available,
+            capture_chronology_valid=system32.capture_chronology_valid,
+            capture_started_at_utc=system32.capture_started_at_utc,
+            capture_completed_at_utc=system32.capture_completed_at_utc,
+            capture_duration_ms=system32.capture_duration_ms,
         ),
         stable_fields_consistent=not mismatches,
         stable_field_mismatches=_sorted(mismatches),
+        capture_chronology_available=chronology_available,
+        capture_chronology_valid=chronology_valid,
+        earliest_capture_started_at_utc=earliest,
+        latest_capture_completed_at_utc=latest,
+        combined_capture_span_ms=span_ms,
     )
     identity = compute_evidence_set_identity_sha256(evidence)
     return Pr304EvidenceSetPreparationResult(

@@ -1304,3 +1304,5 @@ Persisted plan-link current-state revalidation is read-only and point-in-time. I
 ### Evidence identity is not freshness
 
 The exact PR304 two-packet evidence association validates structure, stable-field consistency, exact canonical identities, and persisted plan-link provenance only. Roles are caller-assigned and unauthenticated; packet status is an evidence fact. No packet, evidence set, or binding is persisted, and no current-state, freshness, authorization, preflight, receipt, eligibility, or execution operation is invoked. TOCTOU remains unresolved.
+
+New PR304 packets record fixed-format local-system UTC start/completion values plus integer elapsed milliseconds from a local monotonic clock. The 600,000 ms validation ceiling detects structural corruption only; it is not an age limit. Neither clock is authenticated, external synchronization is not checked, no network time lookup or correction occurs, and state may change immediately after capture. Reading these clocks is observational and read-only; it grants no new authority and does not invoke execution.
