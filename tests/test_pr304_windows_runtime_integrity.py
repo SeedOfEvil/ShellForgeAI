@@ -63,6 +63,9 @@ def patch_windows(monkeypatch, helper, site_roots=()):
 
 def packet_ok(tmp_path, monkeypatch):
     helper = load(HELPER)
+    monkeypatch.setattr(helper, "_utc_now", lambda: "2026-08-08T18:45:30.123456Z")
+    monotonic_values = iter((1_000_000_000, 1_025_000_000))
+    monkeypatch.setattr(helper, "_monotonic_ns", lambda: next(monotonic_values))
     root = runtime(tmp_path)
     durable = root / "bin" / "sfai.cmd"
     canonical = tmp_path / "sfai.cmd"

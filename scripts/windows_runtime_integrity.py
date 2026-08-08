@@ -13,8 +13,10 @@ import shlex
 import site
 import sys
 import sysconfig
+import time
 from collections import Counter
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +74,16 @@ MARKERS = {
     "errorlevel": "%ERRORLEVEL%",
 }
 ALLOWED_CHECK = {"pass", "attention", "blocked", "not_requested", "unsupported"}
+CLOCK_SOURCE = "local_system_utc_plus_monotonic"
+
+
+def _utc_now() -> str:
+    """Return the collector's local wall clock in canonical UTC form."""
+    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _monotonic_ns() -> int:
+    return time.monotonic_ns()
 
 
 def _path(value: str | None) -> Path | None:
@@ -533,6 +545,8 @@ def _status(checks: list[dict[str, Any]], system: str) -> str:
 
 
 def build_packet(args: argparse.Namespace) -> dict[str, Any]:
+    capture_started_at_utc = _utc_now()
+    capture_started_monotonic_ns = _monotonic_ns()
     checks: list[dict[str, Any]] = []
     system = platform.system().lower()
     platform_block = _platform_block()
@@ -639,6 +653,15 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
         embedded, expected_py = _embedded(runtime, wrapper_path, checks)
         entrypoint = _entrypoint(entry, expected_py, checks)
         residue = _residue(checks)
+    capture_completed_monotonic_ns = _monotonic_ns()
+    capture_completed_at_utc = _utc_now()
+    observation = {
+        "capture_started_at_utc": capture_started_at_utc,
+        "capture_completed_at_utc": capture_completed_at_utc,
+        "capture_duration_ms": (capture_completed_monotonic_ns - capture_started_monotonic_ns)
+        // 1_000_000,
+        "clock_source": CLOCK_SOURCE,
+    }
     summary = _summarize(checks)
     first = " ".join(
         shlex.quote(part)
@@ -663,6 +686,7 @@ def build_packet(args: argparse.Namespace) -> dict[str, Any]:
         "schema_version": 1,
         "mode": "windows_runtime_integrity",
         "status": _status(checks, system),
+        "observation": observation,
         "platform": platform_block,
         "invocation": invocation,
         "python_runtime": py,
