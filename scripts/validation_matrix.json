@@ -282,6 +282,10 @@
       "tests/test_pr339_approved_change_pr304_evidence_binding.py",
       "tests/test_pr157_validation_lane_optimizer.py"
     ]},
+    {"pattern": "src/shellforgeai/core/windows_process_identity_evidence.py", "lane": "full", "full_pytest_default": true, "reason": "new read-only native Windows current-process primary-token OS identity trust primitive using TokenUser SID and TokenStatistics AuthenticationId; no human identity, approval binding, authorization, persistence, preflight, receipt, or execution", "tests": [
+      "tests/test_pr342_windows_process_identity_evidence.py",
+      "tests/test_pr157_validation_lane_optimizer.py"
+    ]},
     {"pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py", "lane": "full", "full_pytest_default": true, "reason": "governed Stage B plan-link-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_plan_links subtree, atomic no-replace publication, invocation-bounded temporary cleanup, and exact-ID read-only loader; no CLI, natural-language, inventory, authorization, preflight, receipt, host-configuration, or execution surface)", "tests": [
       "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
       "tests/test_pr323_approved_change_plan_link.py",
