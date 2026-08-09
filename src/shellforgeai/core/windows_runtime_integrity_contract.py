@@ -201,6 +201,11 @@ def _parse_utc(value: Any) -> datetime | None:
         return None
 
 
+def parse_pr304_canonical_utc(value: Any) -> datetime | None:
+    """Parse only the maintained PR304 fixed-microsecond UTC representation."""
+    return _parse_utc(value)
+
+
 def _observation_errors(payload: Mapping[str, Any]) -> list[str]:
     observation = payload.get("observation")
     if observation is None:

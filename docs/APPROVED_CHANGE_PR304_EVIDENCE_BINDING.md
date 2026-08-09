@@ -19,3 +19,8 @@ Results distinguish invalid evidence, inconsistent stable fields, evidence confi
 Every result is immutable and reports a permanent false safety ledger: no persistence or publication, current-state or freshness evaluation, authenticated identity, approval freshness, authorization, preflight, receipt, execution eligibility, model/network/credential access, subprocess/shell/PowerShell/WinRM/QGA, or host mutation. PR313 execution is not invoked and natural language cannot reach the operation.
 
 New packet identities naturally include the collector-owned capture block because identity remains SHA-256 of canonical exact packet JSON; no timeless identity exists. The evidence set exposes each packet's bounded chronology and, when both are available and valid, the earliest start, latest completion, and combined endpoint span. Source-root and System32 collection is sequential, so capture fields are deliberately excluded from stable-field equality and need not overlap. Roles and local wall-clock values remain unauthenticated, monotonic duration is local-process-only, freshness is not evaluated, state may already have changed, and exact confirmations do not cure TOCTOU.
+
+PR339 remains a provenance-binding authority only. The separate downstream
+[PR304 evidence freshness](APPROVED_CHANGE_PR304_EVIDENCE_FRESHNESS.md)
+evaluation does not enter or change PR339 canonical binding bytes or identity.
+Fresh evidence is not authorized evidence.
