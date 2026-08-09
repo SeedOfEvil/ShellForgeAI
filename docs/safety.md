@@ -1270,6 +1270,15 @@ PR323 adds **no mutation surface at all**. It adds exactly one immutable in-memo
 
 **Linking is not current-state preflight.** No live staged source, durable runtime root, `System32` location, destination parent, or file hash is inspected, no PR304 evidence freshness is validated, and no precondition is proved to still hold. Every result reports `current_state_preflight_evaluated=false` and `preflight_evaluated=false`.
 
+**Windows process-token identity is evidence, not authority to act.** The
+Windows-only collector queries only the current process primary token with
+`TOKEN_QUERY`. Its native SID identifies the represented security principal;
+its AuthenticationId LUID identifies the associated logon session. Neither
+proves a physical human, MFA, domain or credential freshness, group/role
+membership, elevation, authorization, approval binding, preflight, or execution
+eligibility. It performs no name lookup, network access, persistence, or
+mutation.
+
 **PR313 execution is never invoked.** No PR313 execute, current-state revalidation, preparation, backup, atomic-replacement, compensation, receipt, or verification function is imported or reached, and no recipe or executor is called. Only the pure plan-contract seam — constants, canonicalization, SHA-256 identity, and structural validation — is used.
 
 **Only `ready` and `no_change` plans link.** A `no_change` packet is still the exact validated plan identity for the observed state, and it grants no execution eligibility. `blocked`, `unsupported`, malformed, structurally inconsistent, wrong-mode, wrong-recipe, reordered- or widened-allowlist, extra-operation, wrong-parent-contract-version, invalid-hash, and unsafe-safety packets all fail closed with no link.

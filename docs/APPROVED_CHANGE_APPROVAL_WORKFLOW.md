@@ -2,6 +2,11 @@
 
 PR318 adds exactly one read-only Stage B operation. It answers exactly one question:
 
+The caller-provided `approved_by` remains self-asserted metadata. Native Windows
+process-token identity evidence does not change the PR318/PR319 models or
+canonical bytes and is not bound or compared to `approved_by`; any such binding
+requires a future separately reviewed authority.
+
 > Given one exact persisted PR317 bundle, an explicit confirmation of that exact bundle identity, an explicit confirmation of the exact PR309 subject SHA-256, and explicit approval metadata, how is one `ApprovalAttestation` and one `ApprovedChangeContract` constructed in memory and verified against that exact subject?
 
 The module `src/shellforgeai/core/approved_change_approval_workflow.py` is that operation and nothing else.
