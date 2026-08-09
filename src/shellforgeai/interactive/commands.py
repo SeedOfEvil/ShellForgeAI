@@ -1129,6 +1129,51 @@ def _dispatch_dangerous_command(raw: str) -> RoutedCommand | None:
     return None
 
 
+_ANALYTICAL_SEMICOLON_PROSE_STARTS = (
+    "and explain ",
+    "then explain ",
+    "explain ",
+    "identify ",
+    "describe ",
+    "tell me ",
+    "say ",
+    "do not ",
+    "use ",
+    "without ",
+    "from ",
+    "which ",
+    "what ",
+    "why ",
+)
+
+
+def _analytical_semicolon_suffixes_are_prose(raw: str) -> bool:
+    """Allow only clearly prose clauses after an analytical semicolon.
+
+    Known command forms reuse the maintained dangerous-command and not-a-shell
+    authorities. Everything else must begin with an explicitly analytical
+    prose frame, so an ambiguous suffix fails closed instead of reaching
+    evidence collection or a model.
+    """
+
+    suffixes = raw.split(";")[1:]
+    if not suffixes:
+        return False
+    for suffix in suffixes:
+        clause = suffix.strip()
+        if not clause or _has_shell_metacharacters(clause):
+            return False
+        if _dispatch_dangerous_command(clause) is not None:
+            return False
+        tokens = _split_command_style(clause)
+        if not tokens or tokens[0].lower() in _NOT_A_SHELL_COMMANDS:
+            return False
+        lowered = clause.lower()
+        if not lowered.startswith(_ANALYTICAL_SEMICOLON_PROSE_STARTS):
+            return False
+    return True
+
+
 def _dispatch_shell_shaped_command(raw: str) -> RoutedCommand | None:
     """Refuse not-a-shell input: shell command invocations and metacharacters.
 
@@ -1153,6 +1198,7 @@ def _dispatch_shell_shaped_command(raw: str) -> RoutedCommand | None:
         ";" in raw
         and not any(token in raw for token in _SHELL_METACHARACTERS if token != ";")
         and is_read_only_analytical_ranking(raw)
+        and _analytical_semicolon_suffixes_are_prose(raw)
     )
     if _has_shell_metacharacters(raw) and not prose_ranking_semicolon:
         return RoutedCommand(name="shell_refused", args=raw)
