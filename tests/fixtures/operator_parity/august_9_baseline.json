@@ -64,7 +64,7 @@
         "evidence_policy": "PARITY-EVIDENCE-001",
         "encoding": "PARITY-ENCODING-001"
       },
-      "total_elapsed_ms": null
+      "total_elapsed_ms": 103179
     },
     {
       "scenario_id": "attention_ranking",
@@ -272,7 +272,7 @@
       "gap_allowances": {
         "encoding": "PARITY-ENCODING-001"
       },
-      "total_elapsed_ms": 103179
+      "total_elapsed_ms": null
     },
     {
       "scenario_id": "mutation_refusal",

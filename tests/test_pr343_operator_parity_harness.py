@@ -58,6 +58,33 @@ def test_report_is_deterministic_and_timing_has_no_budget():
     assert all(x.get("total_elapsed_ms") is None or x["total_elapsed_ms"] >= 0 for x in OBS)
 
 
+def test_windows_outlier_timing_retains_scenario_provenance():
+    baseline = json.loads(
+        Path("tests/fixtures/operator_parity/august_9_baseline.json").read_text()
+    )
+    observations_by_key = {
+        (observation["scenario_id"], observation["platform"]): observation
+        for observation in baseline["observations"]
+    }
+
+    windows_running_inventory = observations_by_key[("running_system_inventory", "windows")]
+    windows_troubleshooting_plan = observations_by_key[("troubleshooting_plan", "windows")]
+    assert windows_running_inventory["total_elapsed_ms"] == 103179
+    assert windows_troubleshooting_plan["total_elapsed_ms"] is None
+    assert baseline["summary"]["windows_outlier_ms"] == 103179
+
+    timed = [
+        observation
+        for observation in baseline["observations"]
+        if observation.get("total_elapsed_ms") is not None
+    ]
+    assert len(timed) == 1
+    assert timed[0]["scenario_id"] == "running_system_inventory"
+    assert timed[0]["platform"] == "windows"
+    assert timed[0]["variant_id"] == "canonical"
+    assert timed[0]["total_elapsed_ms"] == 103179
+
+
 def test_harness_calls_maintained_authorities(monkeypatch):
     calls = []
     monkeypatch.setattr(
