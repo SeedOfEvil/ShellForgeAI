@@ -30,9 +30,9 @@ platform-native read-only evidence; it never requires identical collectors.
 These are deliberately separate layers. **Target** is the north star.
 **Observed baseline** is a normalized, non-sensitive record of the August 9,
 2026 Linux/Windows comparison. **Known gaps** are stable, explicitly scoped debt
-allowances; they never redefine the target. Prompt 2 therefore remains read-only
-analysis even though both baselines refused it. Resolving a gap requires target
-behavior and removal of its allowance.
+allowances; they never redefine the target. Prompt 2 is routed as shared read-only analysis; its former intent allowance has
+been retired. Resolving any remaining gap requires target behavior and removal of
+its allowance.
 
 `baseline_guard` accepts target behavior or a dimension-specific declared gap and
 fails undeclared deviations. `strict_parity` ignores allowances and reports every
@@ -52,7 +52,8 @@ the maintained `route_input` and `route_ask_intent` authorities. Fixture audits
 perform no routing, evidence collection, network access, or provider call. The
 harness contains no phrase tables or alternative production router.
 
-V1 changes no runtime routing, safety gate, collector selection, provider
+V1 uses the shared runtime router to distinguish evidence-grounded analytical
+ranking from explicit action requests. It changes no collector selection, provider
 orchestration, rendering/refusal text, encoding, timing, or session continuity.
 It adds no shell/subprocess execution, mutation, remediation, cleanup, restart,
 rollback, recovery, credential access, deployment, or external-host testing.

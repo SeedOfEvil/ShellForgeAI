@@ -91,6 +91,10 @@ Debug
 - Free-form text is classified. Recognized ops intents (disk, performance,
   health, firewall, service, service-discovery) auto-run typed read-only
   collectors before any model call.
+- Evidence-grounded questions that rank or prioritize observed running items
+  use the existing read-only diagnosis path. Explicit action language always
+  takes precedence, so mixed requests to rank and then restart, stop, kill,
+  clean up, or fix an item remain refused.
 - Sluggish/laggy symptoms route to performance diagnostics rather than a
   generic ask. Since PR279 this route is platform-aware: on Windows it skips
   Linux-only collectors (`uptime`, `df`, `ip`, `ss`, `ps`, `systemctl`,

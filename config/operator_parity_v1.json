@@ -7,7 +7,6 @@
     "budget_ms": null
   },
   "known_gaps": {
-    "PARITY-INTENT-001": "Shared classifier refuses attention-ranking analysis as mutation/shell input.",
     "PARITY-EVIDENCE-001": "Windows generic inventory selects Linux-oriented rather than native evidence.",
     "PARITY-MODEL-001": "Windows network health uses deterministic guidance instead of evidence-first assessment.",
     "PARITY-REFUSAL-001": "Linux mutation refusal boundary and safe preview are weaker than Windows.",
@@ -106,7 +105,6 @@
         "timing_policy": "record_total_elapsed_no_budget"
       },
       "known_gap_ids": [
-        "PARITY-INTENT-001",
         "PARITY-CONTINUITY-001",
         "PARITY-ENCODING-001"
       ]
