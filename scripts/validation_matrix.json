@@ -2,9 +2,21 @@
   "schema_version": 1,
   "title": "ShellForgeAI validation lane impact map",
   "description": "Maps changed-file patterns to a validation lane and a recommended regression test group. This is read-only planning data consumed by scripts/validate_pr.py (PR157). It does not run anything by itself. Editing this file is itself a Lane C (full) change because it affects broad validation confidence.",
-  "lane_order": ["fast", "targeted_runtime", "full"],
-  "lane_letter": {"fast": "A", "targeted_runtime": "B", "full": "C"},
-  "runtime_class": {"fast": "short", "targeted_runtime": "medium", "full": "long"},
+  "lane_order": [
+    "fast",
+    "targeted_runtime",
+    "full"
+  ],
+  "lane_letter": {
+    "fast": "A",
+    "targeted_runtime": "B",
+    "full": "C"
+  },
+  "runtime_class": {
+    "fast": "short",
+    "targeted_runtime": "medium",
+    "full": "long"
+  },
   "lanes": {
     "fast": {
       "label": "Lane A: fast default",
@@ -57,450 +69,977 @@
     }
   },
   "rules": [
-    {"pattern": "docs/**", "lane": "fast", "reason": "documentation-only change", "tests": [
-      "tests/test_pr110_v1_docs_contract.py",
-      "tests/test_pr112_v1_demo_contract.py",
-      "tests/test_pr114_v1_command_surface.py",
-      "tests/test_pr119_v1_release_candidate_docs.py",
-      "tests/test_pr143_command_surface_audit.py"
-    ]},
-    {"pattern": "README.md", "lane": "fast", "reason": "README documentation change", "tests": [
-      "tests/test_pr110_v1_docs_contract.py",
-      "tests/test_pr114_v1_command_surface.py"
-    ]},
-    {"pattern": "OPS.md", "lane": "fast", "reason": "OPS runbook documentation change", "tests": [
-      "tests/test_pr110_v1_docs_contract.py"
-    ]},
-    {"pattern": "CHANGELOG.md", "lane": "fast", "reason": "changelog documentation change", "tests": [
-      "tests/test_pr120_v1_release_notes.py"
-    ]},
-    {"pattern": "HOMELAB.md", "lane": "fast", "reason": "documentation change", "tests": []},
-    {"pattern": "AGENTS.md", "lane": "fast", "reason": "documentation change", "tests": []},
-    {"pattern": "SHELLFORGE.md", "lane": "fast", "reason": "documentation change", "tests": []},
-    {"pattern": "examples/**", "lane": "fast", "reason": "example fixture/doc change", "tests": []},
-    {"pattern": "LICENSE", "lane": "fast", "reason": "license text change", "tests": []},
-    {"pattern": ".gitignore", "lane": "fast", "reason": "ignore-rule change", "tests": []},
-    {"pattern": ".env.example", "lane": "fast", "reason": "env example documentation change", "tests": []},
-    {"pattern": "*.md", "lane": "fast", "reason": "markdown documentation change", "tests": []},
-
-    {"pattern": "src/shellforgeai/core/ask_routing.py", "lane": "targeted_runtime", "reason": "ask routing changed", "tests": [
-      "tests/test_pr105_ask_ops_report_routing.py",
-      "tests/test_pr106_ask_mutation_refusal_routing.py",
-      "tests/test_pr42_ask_routing_hardening.py",
-      "tests/test_pr131_*",
-      "tests/test_pr134_*",
-      "tests/test_pr135_*",
-      "tests/test_pr156_*"
-    ]},
-    {"pattern": "src/shellforgeai/core/intent_nuance.py", "lane": "targeted_runtime", "reason": "intent parsing nuance changed", "tests": [
-      "tests/test_pr131_*",
-      "tests/test_pr134_*",
-      "tests/test_pr135_*"
-    ]},
-    {"pattern": "src/shellforgeai/core/recipe_registry.py", "lane": "targeted_runtime", "reason": "read-only recipe registry logic changed", "tests": [
-      "tests/test_pr154_v2_recipe_registry.py",
-      "tests/test_pr155_v2_recipe_preflight.py",
-      "tests/test_pr156_recipe_preflight_ask_target_extraction.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/recipe_preflight.py", "lane": "targeted_runtime", "reason": "read-only recipe preflight logic changed", "tests": [
-      "tests/test_pr155_v2_recipe_preflight.py",
-      "tests/test_pr156_recipe_preflight_ask_target_extraction.py",
-      "tests/test_pr99_remediation_self_test.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/*handoff*", "lane": "targeted_runtime", "reason": "read-only handoff artifact logic changed", "tests": [
-      "tests/test_pr150_v2_handoff_entrypoint.py",
-      "tests/test_pr152_v2_handoff_artifact_workflow.py",
-      "tests/test_pr153_v2_handoff_history_compare.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/ops_report_artifact.py", "lane": "targeted_runtime", "reason": "ops report artifact read/validate/export behavior changed", "tests": [
-      "tests/test_pr104_ops_report.py",
-      "tests/test_pr107_ops_report_artifacts.py",
-      "tests/test_pr108_ops_report_compare.py",
-      "tests/test_pr109_ops_report_history_compare_latest.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/interactive_summary_artifact.py", "lane": "targeted_runtime", "reason": "interactive summary artifact read/validate/export behavior changed", "tests": [
-      "tests/test_pr140_interactive_summary_artifact.py",
-      "tests/test_pr141_interactive_summary_history_compare.py",
-      "tests/test_pr142_interactive_summary_compare_export.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/triage_ranking.py", "lane": "targeted_runtime", "reason": "read-only triage ranking/detail changed", "tests": [
-      "tests/test_pr81_triage_ranking.py",
-      "tests/test_pr82_broad_ask_triage.py",
-      "tests/test_pr83_triage_detail.py",
-      "tests/test_pr146_triage_ux_consistency.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/diagnose.py", "lane": "targeted_runtime", "reason": "read-only diagnose evidence/classification changed", "tests": [
-      "tests/test_pr101_diagnose_triage_cohesion.py",
-      "tests/test_context_first_routing.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/followup_grounding.py", "lane": "targeted_runtime", "reason": "session-local follow-up grounding changed", "tests": [
-      "tests/test_pr132_followup_grounding.py",
-      "tests/test_pr124_followup_resolution.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_supplemental_context.py", "lane": "targeted_runtime", "reason": "inert Stage B reviewed supplemental-context contract, canonical hashing, or validation changed (no CLI, persistence, mutation, or execution surface)", "tests": [
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_subject_construction.py", "lane": "targeted_runtime", "reason": "inert Stage B in-memory reviewed subject construction, field-authority evidence, or canonical construction-evidence hashing changed (no CLI, persistence, mutation, capability binding, or execution surface)", "tests": [
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_artifact_bundle.py", "lane": "targeted_runtime", "reason": "inert Stage B in-memory reviewed-change artifact-bundle contract, canonical bundle bytes, manifest, or non-circular bundle identity changed (no filesystem, writer, loader, CLI, persistence, mutation, capability binding, or execution surface)", "tests": [
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_artifact_persistence.py", "lane": "full", "reason": "governed Stage B artifact-bundle publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_artifacts subtree, atomic no-replace publication, bounded cleanup, and read-only loader; no CLI, natural-language, approval, capability, receipt, host-configuration, or execution surface)", "tests": [
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_approval_workflow.py", "lane": "targeted_runtime", "reason": "read-only Stage B approval-binding operation changed (explicit approve decision plus exact bundle-identity and subject-hash confirmations over one persisted bundle loaded through the maintained PR317 exact-ID loader; in-memory attestation and contract only, with no filesystem write, approval persistence, capability-support evaluation, preflight, receipt linkage, CLI, natural-language, or execution surface)", "tests": [
-      "tests/test_pr318_approved_change_approval_workflow.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_approval_artifact.py", "lane": "targeted_runtime", "reason": "inert Stage B canonical approval-artifact contract, non-circular approval-artifact identity, aca_ artifact ID, builder, or validator changed (built only from one fully successful PR318 approval result; no filesystem, writer, loader, CLI, natural-language, persistence, mutation, new approval, capability binding, preflight, receipt, or execution surface)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr322_approved_change_capability_binding.py",
-      "tests/test_pr321_approved_change_capability_support.py",
-      "tests/test_pr320_approved_change_approval_inventory.py",
-      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
-      "tests/test_pr318_approved_change_approval_workflow.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_approval_persistence.py", "lane": "full", "reason": "governed Stage B approval-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_approvals subtree, atomic no-replace publication, bounded cleanup, and an exact-ID read-only loader that revalidates the PR309 approval binding and the exact read-only PR317 source bundle; no CLI, natural-language, new approval, mutable approval state, overwrite, revocation, capability, receipt, host-configuration, or execution surface)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr322_approved_change_capability_binding.py",
-      "tests/test_pr321_approved_change_capability_support.py",
-      "tests/test_pr320_approved_change_approval_inventory.py",
-      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
-      "tests/test_pr318_approved_change_approval_workflow.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_approval_inventory.py", "lane": "targeted_runtime", "reason": "bounded read-only Stage B approval-artifact inventory changed (one direct-child-only, no-follow scan of the fixed <data_dir>/approved_change_approvals root under a fixed maintained entry bound, validating exact aca_ candidates only through the maintained PR319 exact-ID loader and returning immutable summaries sorted lexicographically by artifact ID plus explicit anomalies; no filesystem write, persisted index, pointer, approval selection, latest/current resolution, capability-support evaluation, capability binding, preflight, receipt, CLI, natural-language, or execution surface)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr322_approved_change_capability_binding.py",
-      "tests/test_pr321_approved_change_capability_support.py",
-      "tests/test_pr320_approved_change_approval_inventory.py",
-      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
-      "tests/test_pr318_approved_change_approval_workflow.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_capability_support.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change capability-support declaration and evaluation changed (one immutable source-maintained catalog with a deterministic SHA-256 identity declaring exactly windows.runtime_reconcile for approved-change contract validation only, plus one read-only evaluator that requires an exact catalog-identity confirmation before any filesystem access, loads one exact persisted PR319 approval artifact through the maintained exact-ID loader, and decides support only through the maintained PR309 validate_approved_change_contract; no catalog persistence, dynamic discovery, recipe-registry-derived support, caller-supplied capability set, approval selection, latest/current resolution, in-module capability binding, PR313 integration, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface; the maintained declaration's capability_binding_available field states only that the separate read-only PR322 in-memory binding operation exists)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr322_approved_change_capability_binding.py",
-      "tests/test_pr321_approved_change_capability_support.py",
-      "tests/test_pr320_approved_change_approval_inventory.py",
-      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
-      "tests/test_pr318_approved_change_approval_workflow.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_capability_binding.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change capability binding changed (one immutable source-maintained lane declaration for the named PR313 governed Windows two-file runtime-reconciliation lane with a deterministic SHA-256 identity, plus one read-only operation that requires exact PR321 catalog-identity and lane-declaration-identity confirmations before any filesystem access, confirms support only through the maintained PR321 evaluator, obtains exact binding metadata only through the maintained PR319 exact-ID loader, and constructs exactly one in-memory binding with a non-circular deterministic identity; no binding persistence, publication, or loading, dynamic lane discovery, caller-supplied declaration, approval selection, latest/current resolution, target/procedure/evidence/current-state compatibility evaluation, PR313 invocation, PR304/PR305 validation, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr322_approved_change_capability_binding.py",
-      "tests/test_pr321_approved_change_capability_support.py",
-      "tests/test_pr320_approved_change_approval_inventory.py",
-      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
-      "tests/test_pr318_approved_change_approval_workflow.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_plan_link.py", "lane": "targeted_runtime", "reason": "typed read-only Stage B approved-change plan link changed (one immutable in-memory plan link whose non-circular deterministic SHA-256 identity names the exact PR322 binding identity and the exact PR305/PR313 canonical plan SHA-256, plus one read-only operation that validates one explicitly supplied parsed plan mapping through the maintained plan-contract seam, requires exact canonical plan-SHA, PR321 catalog-identity, and PR322 lane-declaration-identity confirmations before any filesystem access, obtains its binding only through the maintained PR322 operation called exactly once, accepts only ready or no_change plans, and compares only maintained typed capability/lane/mode/recipe/allowlist/parent-contract/status facts; no plan-link persistence, publication, or loading, caller-supplied binding, contract, artifact, catalog, lane declaration, plan path, or output path, approval selection, latest/current resolution, plan-packet or host-path disclosure, target/procedure/evidence semantic evaluation, live staged-source, durable-runtime, or System32 inspection, current-state revalidation, PR313 execution, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr322_approved_change_capability_binding.py",
-      "tests/test_pr321_approved_change_capability_support.py",
-      "tests/test_pr320_approved_change_approval_inventory.py",
-      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
-      "tests/test_pr318_approved_change_approval_workflow.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr316_approved_change_artifact_bundle.py",
-      "tests/test_pr315_approved_change_subject_construction.py",
-      "tests/test_pr314_approved_change_supplemental_context.py",
-      "tests/test_pr311_approved_change_construction_policy.py",
-      "tests/test_pr310_legacy_proposal_compatibility.py",
-      "tests/test_pr309_approved_change_contract.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/windows_runtime_integrity_contract.py", "lane": "targeted_runtime", "reason": "pure read-only PR304 packet validation, canonical packet identity, and exact ordered two-packet evidence-set contract changed", "tests": [
-      "tests/test_pr339_approved_change_pr304_evidence_binding.py",
-      "tests/test_pr304_windows_runtime_integrity.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_pr304_evidence_binding.py", "lane": "targeted_runtime", "reason": "read-only exact PR337 plan-link provenance to exact validated PR304 evidence-set binding changed; no persistence, freshness, current-state, authorization, preflight, receipt, or execution", "tests": [
-      "tests/test_pr339_approved_change_pr304_evidence_binding.py",
-      "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
-      "tests/test_pr323_approved_change_plan_link.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_pr304_evidence_freshness.py", "lane": "full", "full_pytest_default": true, "reason": "read-only PR304 temporal freshness trust decision with fixed source-maintained policy, exact identity confirmations, and untrusted evaluator-local UTC; no persistence, current-state, authorization, preflight, receipt, or execution", "tests": [
-      "tests/test_pr341_approved_change_pr304_evidence_freshness.py",
-      "tests/test_pr340_pr304_capture_chronology.py",
-      "tests/test_pr339_approved_change_pr304_evidence_binding.py",
-      "tests/test_pr157_validation_lane_optimizer.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/windows_process_identity_evidence.py", "lane": "full", "full_pytest_default": true, "reason": "new read-only native Windows current-process primary-token OS identity trust primitive using TokenUser SID and TokenStatistics AuthenticationId; no human identity, approval binding, authorization, persistence, preflight, receipt, or execution", "tests": [
-      "tests/test_pr342_windows_process_identity_evidence.py",
-      "tests/test_pr157_validation_lane_optimizer.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py", "lane": "full", "full_pytest_default": true, "reason": "governed Stage B plan-link-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_plan_links subtree, atomic no-replace publication, invocation-bounded temporary cleanup, and exact-ID read-only loader; no CLI, natural-language, inventory, authorization, preflight, receipt, host-configuration, or execution surface)", "tests": [
-      "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr322_approved_change_capability_binding.py",
-      "tests/test_pr319_approved_change_approval_artifact_persistence.py",
-      "tests/test_pr317_approved_change_artifact_persistence.py",
-      "tests/test_pr328_approved_change_plan_current_state.py",
-      "tests/test_pr157_validation_lane_optimizer.py",
-      "tests/test_pr110_v1_docs_contract.py",
-      "tests/test_pr112_v1_demo_contract.py",
-      "tests/test_pr119_v1_release_candidate_docs.py",
-      "tests/test_pr143_command_surface_audit.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/windows_runtime_reconcile_plan_contract.py", "lane": "full", "reason": "pure maintained Windows runtime-reconcile plan contract changed (the single home of the PR305 saved-packet acceptance rules, the destination-parent contract, the narrower PR313 executable-plan contract, the exact fixed two-file allowlist, the accepted ready/no_change statuses, and the canonical plan JSON/SHA-256 identity that scripts/windows_runtime_reconcile_acceptance.py, the PR313 execution lane, and the PR323 plan link all delegate to; pure constants, canonicalization, identity, and structural validation only, with no filesystem, current-state, preparation, backup, atomic-replacement, compensation, receipt, verification, subprocess, shell, network, clock, environment, or mutation path)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr313_windows_runtime_reconcile_execute.py",
-      "tests/test_pr313_windows_runtime_reconcile_receipt.py",
-      "tests/test_pr313_windows_runtime_reconcile_verify.py",
-      "tests/test_pr305_windows_runtime_reconcile.py",
-      "tests/test_pr304_windows_runtime_integrity.py"
-    ]},
-    {"pattern": "src/shellforgeai/interactive/**", "lane": "targeted_runtime", "reason": "interactive UX/command dispatch changed", "tests": [
-      "tests/test_pr122_*",
-      "tests/test_pr124_*",
-      "tests/test_pr128_*",
-      "tests/test_pr129_*",
-      "tests/test_pr130_*",
-      "tests/test_pr132_*",
-      "tests/test_pr136_*",
-      "tests/test_pr137_*",
-      "tests/test_pr138_*",
-      "tests/test_pr139_*",
-      "tests/test_pr140_*",
-      "tests/test_pr141_*",
-      "tests/test_pr142_*"
-    ]},
-    {"pattern": "src/shellforgeai/cli.py", "lane": "targeted_runtime", "reason": "command surface wiring changed (broad router rewrites should use --profile full)", "tests": [
-      "tests/test_cli.py",
-      "tests/test_pr114_v1_command_surface.py",
-      "tests/test_pr143_command_surface_audit.py",
-      "tests/test_pr184_cli_command_surface_golden.py"
-    ]},
-    {"pattern": "src/shellforgeai/commands/**", "lane": "targeted_runtime", "reason": "CLI command module (handler extraction) changed; run the command-surface guardrail", "tests": [
-      "tests/test_pr182_cli_module_scaffold_status_doctor.py",
-      "tests/test_pr183_cli_module_split_ops_triage.py",
-      "tests/test_pr184_cli_command_surface_golden.py"
-    ]},
-    {"pattern": "tests/golden/cli_command_surface_pr184.json", "lane": "targeted_runtime", "reason": "golden CLI command-surface fixture changed", "tests": [
-      "tests/test_pr184_cli_command_surface_golden.py"
-    ]},
-    {"pattern": "tests/helpers/cli_surface.py", "lane": "targeted_runtime", "reason": "command-surface guardrail helper changed", "tests": [
-      "tests/test_pr184_cli_command_surface_golden.py"
-    ]},
-    {"pattern": "scripts/cli_surface_snapshot.py", "lane": "fast", "reason": "read-only command-surface snapshot aid changed", "tests": [
-      "tests/test_pr184_cli_command_surface_golden.py"
-    ]},
-    {"pattern": "src/shellforgeai/app.py", "lane": "targeted_runtime", "reason": "application wiring changed", "tests": [
-      "tests/test_cli.py"
-    ]},
-    {"pattern": "src/shellforgeai/render/**", "lane": "targeted_runtime", "reason": "read-only rendering/output shape changed", "tests": [
-      "tests/test_pr126_concise_operator_output.py",
-      "tests/test_pr22_json_stdout_validity.py"
-    ]},
-
-    {"pattern": "src/shellforgeai/core/*remediation*", "lane": "full", "reason": "remediation execution / disposable executor changed", "tests": [
-      "tests/test_pr89_disposable_remediation.py",
-      "tests/test_pr91_*",
-      "tests/test_pr92_*",
-      "tests/test_pr93_*",
-      "tests/test_pr95_*",
-      "tests/test_pr96_*",
-      "tests/test_pr97_*",
-      "tests/test_pr99_*"
-    ]},
-    {"pattern": "src/shellforgeai/core/*rollback*", "lane": "full", "reason": "rollback execution / preview changed", "tests": [
-      "tests/test_pr93_remediation_rollback.py",
-      "tests/test_pr94_rollback_execute.py",
-      "tests/test_pr65_compose_rollback_preview.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/*restart*", "lane": "full", "reason": "restart execution behavior changed", "tests": [
-      "tests/test_pr47_lab_restart.py",
-      "tests/test_pr50_restart_proposal_builder.py",
-      "tests/test_pr51_restart_plan.py",
-      "tests/test_pr52_restart_mission.py",
-      "tests/test_pr62_compose_propose_restart.py",
-      "tests/test_pr63_compose_restart_preflight.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/*mission*", "lane": "full", "reason": "mission execution behavior changed", "tests": [
-      "tests/test_pr52_restart_mission.py",
-      "tests/test_pr53_mission_execute.py",
-      "tests/test_pr54_mission_report.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/*cleanup*", "lane": "full", "reason": "cleanup execution behavior changed", "tests": [
-      "tests/test_pr55_cleanup_workflow.py",
-      "tests/test_pr74_cleanup_review.py",
-      "tests/test_pr75_cleanup_prepare.py",
-      "tests/test_pr76_cleanup_execute_readiness.py",
-      "tests/test_pr77_cleanup_execute_polish.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/apply_bundle.py", "lane": "full", "reason": "apply bundle execution changed", "tests": [
-      "tests/test_pr33_apply_preflight.py",
-      "tests/test_pr37_action_compiler.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/approvals.py", "lane": "full", "reason": "approval / mutation gate changed", "tests": [
-      "tests/test_pr32_approvals.py",
-      "tests/test_pr46_mutation_gate.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/guards.py", "lane": "full", "reason": "core safety guard / refusal logic changed", "tests": [
-      "tests/test_pr46_mutation_gate.py",
-      "tests/test_pr42_ask_routing_hardening.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/disposable_*", "lane": "full", "reason": "disposable execution behavior changed", "tests": [
-      "tests/test_pr67_disposable_compose_harness.py",
-      "tests/test_pr68_disposable_compose_restart_proof.py",
-      "tests/test_pr89_disposable_remediation.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/windows_runtime_reconcile_execution.py", "lane": "full", "reason": "governed Windows two-file runtime reconciliation execution changed (bounded local mutation; its plan constants, canonical plan identity, and executable-plan contract are delegated to the pure core/windows_runtime_reconcile_plan_contract.py seam)", "tests": [
-      "tests/test_pr323_approved_change_plan_link.py",
-      "tests/test_pr313_windows_runtime_reconcile_execute.py",
-      "tests/test_pr313_windows_runtime_reconcile_receipt.py",
-      "tests/test_pr313_windows_runtime_reconcile_verify.py",
-      "tests/test_pr304_windows_runtime_integrity.py",
-      "tests/test_pr305_windows_runtime_reconcile.py",
-      "tests/test_pr312_v1_cross_cwd_resource_resolution.py",
-      "tests/test_pr154_v2_recipe_registry.py",
-      "tests/test_pr167_v2_recipe_execute_disposable_restart.py",
-      "tests/test_pr174_v2_recipe_receipt_integrity.py"
-    ]},
-    {"pattern": "src/shellforgeai/core/compose_context.py", "lane": "full", "reason": "compose behavior context changed", "tests": [
-      "tests/test_pr56_compose_context.py",
-      "tests/test_pr57_compose_ask_routing.py",
-      "tests/test_pr58_compose_restart_enrichment.py"
-    ]},
-    {"pattern": "src/shellforgeai/policy/**", "lane": "full", "reason": "policy / safety engine changed", "tests": [
-      "tests/test_policy.py",
-      "tests/test_pr46_mutation_gate.py"
-    ]},
-    {"pattern": "src/shellforgeai/tools/**", "lane": "full", "reason": "tool execution surface changed", "tests": [
-      "tests/test_investigation_tools.py",
-      "tests/test_tools_files.py",
-      "tests/test_tools_host.py",
-      "tests/test_tools_systemd.py"
-    ]},
-    {"pattern": "src/shellforgeai/util/subprocess.py", "lane": "full", "reason": "subprocess execution wrapper changed", "tests": [
-      "tests/test_investigation_tools.py"
-    ]},
-
-    {"pattern": "Dockerfile", "lane": "full", "reason": "container image definition changed", "tests": []},
-    {"pattern": "*.Dockerfile", "lane": "full", "reason": "container image definition changed", "tests": []},
-    {"pattern": "pyproject.toml", "lane": "full", "reason": "packaging / dependency / test config changed", "tests": [
-      "tests/test_cli.py",
-      "tests/test_config.py"
-    ]},
-    {"pattern": "requirements*", "lane": "full", "reason": "dependency manifest changed", "tests": []},
-    {"pattern": "compose.yaml", "lane": "full", "reason": "compose definition changed", "tests": [
-      "tests/test_compose_runtime_hygiene.py"
-    ]},
-    {"pattern": "compose.yml", "lane": "full", "reason": "compose definition changed", "tests": [
-      "tests/test_compose_runtime_hygiene.py"
-    ]},
-    {"pattern": "docker-compose*", "lane": "full", "reason": "compose definition changed", "tests": [
-      "tests/test_compose_runtime_hygiene.py"
-    ]},
-    {"pattern": "Makefile", "lane": "full", "reason": "build entrypoint changed", "tests": []},
-    {"pattern": "config/**", "lane": "full", "reason": "runtime configuration changed", "tests": [
-      "tests/test_config.py",
-      "tests/test_profiles.py"
-    ]},
-    {"pattern": ".github/**", "lane": "full", "reason": "CI / workflow infrastructure changed", "tests": []},
-
-    {"pattern": "scripts/v1_validate.sh", "lane": "full", "reason": "V1 validation helper changed (broad confidence)", "tests": [
-      "tests/test_pr113_v1_validation_hardening.py",
-      "tests/test_pr118_v1_validate_packet_lane.py"
-    ]},
-    {"pattern": "scripts/validate_pr.py", "lane": "full", "reason": "validation lane optimizer changed (broad confidence)", "tests": [
-      "tests/test_pr157_validation_lane_optimizer.py"
-    ]},
-    {"pattern": "scripts/validation_matrix.json", "lane": "full", "reason": "validation impact map changed (broad confidence)", "tests": [
-      "tests/test_pr157_validation_lane_optimizer.py"
-    ]},
-    {"pattern": "scripts/sfai_docker01_pr_lane.py", "lane": "full", "reason": "Docker01 PR deploy lane helper changed", "tests": [
-      "tests/test_pr157_validation_lane_optimizer.py",
-      "tests/test_pr161_docker01_validation_manifest.py",
-      "tests/test_pr176_validation_heartbeat_incomplete.py",
-      "tests/test_pr179_validation_container_fallback_packet.py"
-    ]},
-    {"pattern": "scripts/validation_heartbeat.py", "lane": "full", "reason": "validation heartbeat/checkpoint helper changed (broad confidence)", "tests": [
-      "tests/test_pr176_validation_heartbeat_incomplete.py"
-    ]},
-    {"pattern": "scripts/validation_env_preflight.py", "lane": "full", "reason": "validation environment preflight changed (broad confidence)", "tests": [
-      "tests/test_pr178_validation_env_preflight.py"
-    ]},
-    {"pattern": "scripts/validation_container_fallback.py", "lane": "full", "reason": "validation container fallback packet generator changed (broad confidence)", "tests": [
-      "tests/test_pr179_validation_container_fallback_packet.py"
-    ]},
-    {"pattern": "scripts/validation_status.py", "lane": "full", "reason": "validation evidence status viewer changed (broad confidence)", "tests": [
-      "tests/test_pr177_validation_status_viewer.py",
-      "tests/test_pr178_validation_env_preflight.py",
-      "tests/test_pr179_validation_container_fallback_packet.py"
-    ]},
-    {"pattern": "scripts/run_full_pytest.py", "lane": "full", "reason": "Lane C full pytest runner changed (broad confidence)", "tests": [
-      "tests/test_pr160_full_validation_runner_streaming.py",
-      "tests/test_pr176_validation_heartbeat_incomplete.py"
-    ]},
-    {"pattern": "scripts/windows_smoke_acceptance.py", "lane": "targeted_runtime", "reason": "local saved-JSON Windows smoke acceptance helper changed", "tests": ["tests/test_pr263_windows_smoke_acceptance.py", "tests/test_pr262_windows_read_only_status.py", "tests/test_pr261_windows_read_only_doctor.py", "tests/test_pr259_platform_detection.py"]},
-    {"pattern": "scripts/windows_interactive_acceptance.py", "lane": "targeted_runtime", "reason": "local saved-transcript Windows interactive acceptance helper changed", "tests": ["tests/test_pr280_windows_interactive_acceptance.py", "tests/test_pr279_windows_interactive_platform_aware_performance.py", "tests/test_pr278_collectors_json_null_parsing.py"]},
-    {"pattern": "scripts/windows_runtime_reconcile_preflight.py", "lane": "full", "reason": "PR305 preview packet and exact destination-parent contract changed (feeds bounded local mutation)", "tests": ["tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr305_windows_runtime_reconcile.py", "tests/test_pr304_windows_runtime_integrity.py"]},
-    {"pattern": "scripts/windows_runtime_reconcile_acceptance.py", "lane": "full", "reason": "PR305 acceptance and destination-parent contract validation changed (the rules now live in the pure core/windows_runtime_reconcile_plan_contract.py seam that this script, the PR313 execution lane, and the PR323 plan link all delegate to)", "tests": ["tests/test_pr323_approved_change_plan_link.py", "tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr305_windows_runtime_reconcile.py", "tests/test_pr304_windows_runtime_integrity.py"]},
-    {"pattern": "scripts/windows_runtime_reconcile_execute.py", "lane": "full", "reason": "governed Windows two-file runtime reconciliation execute helper changed (bounded local mutation)", "tests": ["tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr304_windows_runtime_integrity.py", "tests/test_pr305_windows_runtime_reconcile.py"]},
-    {"pattern": "scripts/windows_runtime_reconcile_receipt_acceptance.py", "lane": "full", "reason": "Windows runtime reconciliation execution receipt validator changed", "tests": ["tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr313_windows_runtime_reconcile_execute.py", "tests/test_pr174_v2_recipe_receipt_integrity.py"]},
-    {"pattern": "scripts/windows_runtime_reconcile_verify.py", "lane": "full", "reason": "Windows runtime reconciliation post-change verification helper changed", "tests": ["tests/test_pr313_windows_runtime_reconcile_verify.py", "tests/test_pr313_windows_runtime_reconcile_receipt.py", "tests/test_pr304_windows_runtime_integrity.py"]},
-    {"pattern": "scripts/**", "lane": "full", "reason": "operator/validation script changed", "tests": []},
-
-    {"pattern": "tests/conftest.py", "lane": "full", "reason": "shared test harness changed (broad confidence)", "tests": []},
-    {"pattern": "tests/**", "lane": "fast", "reason": "tests-only change (no product runtime change); changed tests are run directly", "tests": []}
+    {
+      "pattern": "config/operator_parity_v1.json",
+      "lane": "full",
+      "reason": "versioned cross-platform parity regression contract changed",
+      "tests": [
+        "tests/test_pr343_operator_parity_contract.py",
+        "tests/test_pr343_operator_parity_harness.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/operator_parity_contract.py",
+      "lane": "full",
+      "reason": "operator-parity audit infrastructure changed",
+      "tests": [
+        "tests/test_pr343_operator_parity_contract.py",
+        "tests/test_pr343_operator_parity_harness.py"
+      ]
+    },
+    {
+      "pattern": "scripts/operator_parity_harness.py",
+      "lane": "full",
+      "reason": "operator-parity deterministic audit harness changed",
+      "tests": [
+        "tests/test_pr343_operator_parity_harness.py"
+      ]
+    },
+    {
+      "pattern": "tests/fixtures/operator_parity/**",
+      "lane": "full",
+      "reason": "normalized parity audit baseline changed",
+      "tests": [
+        "tests/test_pr343_operator_parity_harness.py"
+      ]
+    },
+    {
+      "pattern": "tests/test_pr343_*",
+      "lane": "full",
+      "reason": "permanent operator-parity harness coverage changed",
+      "tests": [
+        "tests/test_pr343_operator_parity_contract.py",
+        "tests/test_pr343_operator_parity_harness.py"
+      ]
+    },
+    {
+      "pattern": "docs/**",
+      "lane": "fast",
+      "reason": "documentation-only change",
+      "tests": [
+        "tests/test_pr110_v1_docs_contract.py",
+        "tests/test_pr112_v1_demo_contract.py",
+        "tests/test_pr114_v1_command_surface.py",
+        "tests/test_pr119_v1_release_candidate_docs.py",
+        "tests/test_pr143_command_surface_audit.py"
+      ]
+    },
+    {
+      "pattern": "README.md",
+      "lane": "fast",
+      "reason": "README documentation change",
+      "tests": [
+        "tests/test_pr110_v1_docs_contract.py",
+        "tests/test_pr114_v1_command_surface.py"
+      ]
+    },
+    {
+      "pattern": "OPS.md",
+      "lane": "fast",
+      "reason": "OPS runbook documentation change",
+      "tests": [
+        "tests/test_pr110_v1_docs_contract.py"
+      ]
+    },
+    {
+      "pattern": "CHANGELOG.md",
+      "lane": "fast",
+      "reason": "changelog documentation change",
+      "tests": [
+        "tests/test_pr120_v1_release_notes.py"
+      ]
+    },
+    {
+      "pattern": "HOMELAB.md",
+      "lane": "fast",
+      "reason": "documentation change",
+      "tests": []
+    },
+    {
+      "pattern": "AGENTS.md",
+      "lane": "fast",
+      "reason": "documentation change",
+      "tests": []
+    },
+    {
+      "pattern": "SHELLFORGE.md",
+      "lane": "fast",
+      "reason": "documentation change",
+      "tests": []
+    },
+    {
+      "pattern": "examples/**",
+      "lane": "fast",
+      "reason": "example fixture/doc change",
+      "tests": []
+    },
+    {
+      "pattern": "LICENSE",
+      "lane": "fast",
+      "reason": "license text change",
+      "tests": []
+    },
+    {
+      "pattern": ".gitignore",
+      "lane": "fast",
+      "reason": "ignore-rule change",
+      "tests": []
+    },
+    {
+      "pattern": ".env.example",
+      "lane": "fast",
+      "reason": "env example documentation change",
+      "tests": []
+    },
+    {
+      "pattern": "*.md",
+      "lane": "fast",
+      "reason": "markdown documentation change",
+      "tests": []
+    },
+    {
+      "pattern": "src/shellforgeai/core/ask_routing.py",
+      "lane": "targeted_runtime",
+      "reason": "ask routing changed",
+      "tests": [
+        "tests/test_pr105_ask_ops_report_routing.py",
+        "tests/test_pr106_ask_mutation_refusal_routing.py",
+        "tests/test_pr42_ask_routing_hardening.py",
+        "tests/test_pr131_*",
+        "tests/test_pr134_*",
+        "tests/test_pr135_*",
+        "tests/test_pr156_*"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/intent_nuance.py",
+      "lane": "targeted_runtime",
+      "reason": "intent parsing nuance changed",
+      "tests": [
+        "tests/test_pr131_*",
+        "tests/test_pr134_*",
+        "tests/test_pr135_*"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/recipe_registry.py",
+      "lane": "targeted_runtime",
+      "reason": "read-only recipe registry logic changed",
+      "tests": [
+        "tests/test_pr154_v2_recipe_registry.py",
+        "tests/test_pr155_v2_recipe_preflight.py",
+        "tests/test_pr156_recipe_preflight_ask_target_extraction.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/recipe_preflight.py",
+      "lane": "targeted_runtime",
+      "reason": "read-only recipe preflight logic changed",
+      "tests": [
+        "tests/test_pr155_v2_recipe_preflight.py",
+        "tests/test_pr156_recipe_preflight_ask_target_extraction.py",
+        "tests/test_pr99_remediation_self_test.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/*handoff*",
+      "lane": "targeted_runtime",
+      "reason": "read-only handoff artifact logic changed",
+      "tests": [
+        "tests/test_pr150_v2_handoff_entrypoint.py",
+        "tests/test_pr152_v2_handoff_artifact_workflow.py",
+        "tests/test_pr153_v2_handoff_history_compare.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/ops_report_artifact.py",
+      "lane": "targeted_runtime",
+      "reason": "ops report artifact read/validate/export behavior changed",
+      "tests": [
+        "tests/test_pr104_ops_report.py",
+        "tests/test_pr107_ops_report_artifacts.py",
+        "tests/test_pr108_ops_report_compare.py",
+        "tests/test_pr109_ops_report_history_compare_latest.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/interactive_summary_artifact.py",
+      "lane": "targeted_runtime",
+      "reason": "interactive summary artifact read/validate/export behavior changed",
+      "tests": [
+        "tests/test_pr140_interactive_summary_artifact.py",
+        "tests/test_pr141_interactive_summary_history_compare.py",
+        "tests/test_pr142_interactive_summary_compare_export.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/triage_ranking.py",
+      "lane": "targeted_runtime",
+      "reason": "read-only triage ranking/detail changed",
+      "tests": [
+        "tests/test_pr81_triage_ranking.py",
+        "tests/test_pr82_broad_ask_triage.py",
+        "tests/test_pr83_triage_detail.py",
+        "tests/test_pr146_triage_ux_consistency.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/diagnose.py",
+      "lane": "targeted_runtime",
+      "reason": "read-only diagnose evidence/classification changed",
+      "tests": [
+        "tests/test_pr101_diagnose_triage_cohesion.py",
+        "tests/test_context_first_routing.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/followup_grounding.py",
+      "lane": "targeted_runtime",
+      "reason": "session-local follow-up grounding changed",
+      "tests": [
+        "tests/test_pr132_followup_grounding.py",
+        "tests/test_pr124_followup_resolution.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_supplemental_context.py",
+      "lane": "targeted_runtime",
+      "reason": "inert Stage B reviewed supplemental-context contract, canonical hashing, or validation changed (no CLI, persistence, mutation, or execution surface)",
+      "tests": [
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_subject_construction.py",
+      "lane": "targeted_runtime",
+      "reason": "inert Stage B in-memory reviewed subject construction, field-authority evidence, or canonical construction-evidence hashing changed (no CLI, persistence, mutation, capability binding, or execution surface)",
+      "tests": [
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_artifact_bundle.py",
+      "lane": "targeted_runtime",
+      "reason": "inert Stage B in-memory reviewed-change artifact-bundle contract, canonical bundle bytes, manifest, or non-circular bundle identity changed (no filesystem, writer, loader, CLI, persistence, mutation, capability binding, or execution surface)",
+      "tests": [
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_artifact_persistence.py",
+      "lane": "full",
+      "reason": "governed Stage B artifact-bundle publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_artifacts subtree, atomic no-replace publication, bounded cleanup, and read-only loader; no CLI, natural-language, approval, capability, receipt, host-configuration, or execution surface)",
+      "tests": [
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_approval_workflow.py",
+      "lane": "targeted_runtime",
+      "reason": "read-only Stage B approval-binding operation changed (explicit approve decision plus exact bundle-identity and subject-hash confirmations over one persisted bundle loaded through the maintained PR317 exact-ID loader; in-memory attestation and contract only, with no filesystem write, approval persistence, capability-support evaluation, preflight, receipt linkage, CLI, natural-language, or execution surface)",
+      "tests": [
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_approval_artifact.py",
+      "lane": "targeted_runtime",
+      "reason": "inert Stage B canonical approval-artifact contract, non-circular approval-artifact identity, aca_ artifact ID, builder, or validator changed (built only from one fully successful PR318 approval result; no filesystem, writer, loader, CLI, natural-language, persistence, mutation, new approval, capability binding, preflight, receipt, or execution surface)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr321_approved_change_capability_support.py",
+        "tests/test_pr320_approved_change_approval_inventory.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_approval_persistence.py",
+      "lane": "full",
+      "reason": "governed Stage B approval-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_approvals subtree, atomic no-replace publication, bounded cleanup, and an exact-ID read-only loader that revalidates the PR309 approval binding and the exact read-only PR317 source bundle; no CLI, natural-language, new approval, mutable approval state, overwrite, revocation, capability, receipt, host-configuration, or execution surface)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr321_approved_change_capability_support.py",
+        "tests/test_pr320_approved_change_approval_inventory.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_approval_inventory.py",
+      "lane": "targeted_runtime",
+      "reason": "bounded read-only Stage B approval-artifact inventory changed (one direct-child-only, no-follow scan of the fixed <data_dir>/approved_change_approvals root under a fixed maintained entry bound, validating exact aca_ candidates only through the maintained PR319 exact-ID loader and returning immutable summaries sorted lexicographically by artifact ID plus explicit anomalies; no filesystem write, persisted index, pointer, approval selection, latest/current resolution, capability-support evaluation, capability binding, preflight, receipt, CLI, natural-language, or execution surface)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr321_approved_change_capability_support.py",
+        "tests/test_pr320_approved_change_approval_inventory.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_capability_support.py",
+      "lane": "targeted_runtime",
+      "reason": "typed read-only Stage B approved-change capability-support declaration and evaluation changed (one immutable source-maintained catalog with a deterministic SHA-256 identity declaring exactly windows.runtime_reconcile for approved-change contract validation only, plus one read-only evaluator that requires an exact catalog-identity confirmation before any filesystem access, loads one exact persisted PR319 approval artifact through the maintained exact-ID loader, and decides support only through the maintained PR309 validate_approved_change_contract; no catalog persistence, dynamic discovery, recipe-registry-derived support, caller-supplied capability set, approval selection, latest/current resolution, in-module capability binding, PR313 integration, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface; the maintained declaration's capability_binding_available field states only that the separate read-only PR322 in-memory binding operation exists)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr321_approved_change_capability_support.py",
+        "tests/test_pr320_approved_change_approval_inventory.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_capability_binding.py",
+      "lane": "targeted_runtime",
+      "reason": "typed read-only Stage B approved-change capability binding changed (one immutable source-maintained lane declaration for the named PR313 governed Windows two-file runtime-reconciliation lane with a deterministic SHA-256 identity, plus one read-only operation that requires exact PR321 catalog-identity and lane-declaration-identity confirmations before any filesystem access, confirms support only through the maintained PR321 evaluator, obtains exact binding metadata only through the maintained PR319 exact-ID loader, and constructs exactly one in-memory binding with a non-circular deterministic identity; no binding persistence, publication, or loading, dynamic lane discovery, caller-supplied declaration, approval selection, latest/current resolution, target/procedure/evidence/current-state compatibility evaluation, PR313 invocation, PR304/PR305 validation, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr321_approved_change_capability_support.py",
+        "tests/test_pr320_approved_change_approval_inventory.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_plan_link.py",
+      "lane": "targeted_runtime",
+      "reason": "typed read-only Stage B approved-change plan link changed (one immutable in-memory plan link whose non-circular deterministic SHA-256 identity names the exact PR322 binding identity and the exact PR305/PR313 canonical plan SHA-256, plus one read-only operation that validates one explicitly supplied parsed plan mapping through the maintained plan-contract seam, requires exact canonical plan-SHA, PR321 catalog-identity, and PR322 lane-declaration-identity confirmations before any filesystem access, obtains its binding only through the maintained PR322 operation called exactly once, accepts only ready or no_change plans, and compares only maintained typed capability/lane/mode/recipe/allowlist/parent-contract/status facts; no plan-link persistence, publication, or loading, caller-supplied binding, contract, artifact, catalog, lane declaration, plan path, or output path, approval selection, latest/current resolution, plan-packet or host-path disclosure, target/procedure/evidence semantic evaluation, live staged-source, durable-runtime, or System32 inspection, current-state revalidation, PR313 execution, authenticated identity, authorization, preflight, receipt, filesystem write, CLI, natural-language, or execution surface)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr321_approved_change_capability_support.py",
+        "tests/test_pr320_approved_change_approval_inventory.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr316_approved_change_artifact_bundle.py",
+        "tests/test_pr315_approved_change_subject_construction.py",
+        "tests/test_pr314_approved_change_supplemental_context.py",
+        "tests/test_pr311_approved_change_construction_policy.py",
+        "tests/test_pr310_legacy_proposal_compatibility.py",
+        "tests/test_pr309_approved_change_contract.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/windows_runtime_integrity_contract.py",
+      "lane": "targeted_runtime",
+      "reason": "pure read-only PR304 packet validation, canonical packet identity, and exact ordered two-packet evidence-set contract changed",
+      "tests": [
+        "tests/test_pr339_approved_change_pr304_evidence_binding.py",
+        "tests/test_pr304_windows_runtime_integrity.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_pr304_evidence_binding.py",
+      "lane": "targeted_runtime",
+      "reason": "read-only exact PR337 plan-link provenance to exact validated PR304 evidence-set binding changed; no persistence, freshness, current-state, authorization, preflight, receipt, or execution",
+      "tests": [
+        "tests/test_pr339_approved_change_pr304_evidence_binding.py",
+        "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
+        "tests/test_pr323_approved_change_plan_link.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_pr304_evidence_freshness.py",
+      "lane": "full",
+      "full_pytest_default": true,
+      "reason": "read-only PR304 temporal freshness trust decision with fixed source-maintained policy, exact identity confirmations, and untrusted evaluator-local UTC; no persistence, current-state, authorization, preflight, receipt, or execution",
+      "tests": [
+        "tests/test_pr341_approved_change_pr304_evidence_freshness.py",
+        "tests/test_pr340_pr304_capture_chronology.py",
+        "tests/test_pr339_approved_change_pr304_evidence_binding.py",
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/windows_process_identity_evidence.py",
+      "lane": "full",
+      "full_pytest_default": true,
+      "reason": "new read-only native Windows current-process primary-token OS identity trust primitive using TokenUser SID and TokenStatistics AuthenticationId; no human identity, approval binding, authorization, persistence, preflight, receipt, or execution",
+      "tests": [
+        "tests/test_pr342_windows_process_identity_evidence.py",
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py",
+      "lane": "full",
+      "full_pytest_default": true,
+      "reason": "governed Stage B plan-link-artifact publication boundary changed (bounded explicit-confirmed ARTIFACT_WRITE beneath the fixed <data_dir>/approved_change_plan_links subtree, atomic no-replace publication, invocation-bounded temporary cleanup, and exact-ID read-only loader; no CLI, natural-language, inventory, authorization, preflight, receipt, host-configuration, or execution surface)",
+      "tests": [
+        "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr322_approved_change_capability_binding.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr317_approved_change_artifact_persistence.py",
+        "tests/test_pr328_approved_change_plan_current_state.py",
+        "tests/test_pr157_validation_lane_optimizer.py",
+        "tests/test_pr110_v1_docs_contract.py",
+        "tests/test_pr112_v1_demo_contract.py",
+        "tests/test_pr119_v1_release_candidate_docs.py",
+        "tests/test_pr143_command_surface_audit.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/windows_runtime_reconcile_plan_contract.py",
+      "lane": "full",
+      "reason": "pure maintained Windows runtime-reconcile plan contract changed (the single home of the PR305 saved-packet acceptance rules, the destination-parent contract, the narrower PR313 executable-plan contract, the exact fixed two-file allowlist, the accepted ready/no_change statuses, and the canonical plan JSON/SHA-256 identity that scripts/windows_runtime_reconcile_acceptance.py, the PR313 execution lane, and the PR323 plan link all delegate to; pure constants, canonicalization, identity, and structural validation only, with no filesystem, current-state, preparation, backup, atomic-replacement, compensation, receipt, verification, subprocess, shell, network, clock, environment, or mutation path)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr313_windows_runtime_reconcile_execute.py",
+        "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+        "tests/test_pr313_windows_runtime_reconcile_verify.py",
+        "tests/test_pr305_windows_runtime_reconcile.py",
+        "tests/test_pr304_windows_runtime_integrity.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/interactive/**",
+      "lane": "targeted_runtime",
+      "reason": "interactive UX/command dispatch changed",
+      "tests": [
+        "tests/test_pr122_*",
+        "tests/test_pr124_*",
+        "tests/test_pr128_*",
+        "tests/test_pr129_*",
+        "tests/test_pr130_*",
+        "tests/test_pr132_*",
+        "tests/test_pr136_*",
+        "tests/test_pr137_*",
+        "tests/test_pr138_*",
+        "tests/test_pr139_*",
+        "tests/test_pr140_*",
+        "tests/test_pr141_*",
+        "tests/test_pr142_*"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/cli.py",
+      "lane": "targeted_runtime",
+      "reason": "command surface wiring changed (broad router rewrites should use --profile full)",
+      "tests": [
+        "tests/test_cli.py",
+        "tests/test_pr114_v1_command_surface.py",
+        "tests/test_pr143_command_surface_audit.py",
+        "tests/test_pr184_cli_command_surface_golden.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/commands/**",
+      "lane": "targeted_runtime",
+      "reason": "CLI command module (handler extraction) changed; run the command-surface guardrail",
+      "tests": [
+        "tests/test_pr182_cli_module_scaffold_status_doctor.py",
+        "tests/test_pr183_cli_module_split_ops_triage.py",
+        "tests/test_pr184_cli_command_surface_golden.py"
+      ]
+    },
+    {
+      "pattern": "tests/golden/cli_command_surface_pr184.json",
+      "lane": "targeted_runtime",
+      "reason": "golden CLI command-surface fixture changed",
+      "tests": [
+        "tests/test_pr184_cli_command_surface_golden.py"
+      ]
+    },
+    {
+      "pattern": "tests/helpers/cli_surface.py",
+      "lane": "targeted_runtime",
+      "reason": "command-surface guardrail helper changed",
+      "tests": [
+        "tests/test_pr184_cli_command_surface_golden.py"
+      ]
+    },
+    {
+      "pattern": "scripts/cli_surface_snapshot.py",
+      "lane": "fast",
+      "reason": "read-only command-surface snapshot aid changed",
+      "tests": [
+        "tests/test_pr184_cli_command_surface_golden.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/app.py",
+      "lane": "targeted_runtime",
+      "reason": "application wiring changed",
+      "tests": [
+        "tests/test_cli.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/render/**",
+      "lane": "targeted_runtime",
+      "reason": "read-only rendering/output shape changed",
+      "tests": [
+        "tests/test_pr126_concise_operator_output.py",
+        "tests/test_pr22_json_stdout_validity.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/*remediation*",
+      "lane": "full",
+      "reason": "remediation execution / disposable executor changed",
+      "tests": [
+        "tests/test_pr89_disposable_remediation.py",
+        "tests/test_pr91_*",
+        "tests/test_pr92_*",
+        "tests/test_pr93_*",
+        "tests/test_pr95_*",
+        "tests/test_pr96_*",
+        "tests/test_pr97_*",
+        "tests/test_pr99_*"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/*rollback*",
+      "lane": "full",
+      "reason": "rollback execution / preview changed",
+      "tests": [
+        "tests/test_pr93_remediation_rollback.py",
+        "tests/test_pr94_rollback_execute.py",
+        "tests/test_pr65_compose_rollback_preview.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/*restart*",
+      "lane": "full",
+      "reason": "restart execution behavior changed",
+      "tests": [
+        "tests/test_pr47_lab_restart.py",
+        "tests/test_pr50_restart_proposal_builder.py",
+        "tests/test_pr51_restart_plan.py",
+        "tests/test_pr52_restart_mission.py",
+        "tests/test_pr62_compose_propose_restart.py",
+        "tests/test_pr63_compose_restart_preflight.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/*mission*",
+      "lane": "full",
+      "reason": "mission execution behavior changed",
+      "tests": [
+        "tests/test_pr52_restart_mission.py",
+        "tests/test_pr53_mission_execute.py",
+        "tests/test_pr54_mission_report.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/*cleanup*",
+      "lane": "full",
+      "reason": "cleanup execution behavior changed",
+      "tests": [
+        "tests/test_pr55_cleanup_workflow.py",
+        "tests/test_pr74_cleanup_review.py",
+        "tests/test_pr75_cleanup_prepare.py",
+        "tests/test_pr76_cleanup_execute_readiness.py",
+        "tests/test_pr77_cleanup_execute_polish.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/apply_bundle.py",
+      "lane": "full",
+      "reason": "apply bundle execution changed",
+      "tests": [
+        "tests/test_pr33_apply_preflight.py",
+        "tests/test_pr37_action_compiler.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/approvals.py",
+      "lane": "full",
+      "reason": "approval / mutation gate changed",
+      "tests": [
+        "tests/test_pr32_approvals.py",
+        "tests/test_pr46_mutation_gate.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/guards.py",
+      "lane": "full",
+      "reason": "core safety guard / refusal logic changed",
+      "tests": [
+        "tests/test_pr46_mutation_gate.py",
+        "tests/test_pr42_ask_routing_hardening.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/disposable_*",
+      "lane": "full",
+      "reason": "disposable execution behavior changed",
+      "tests": [
+        "tests/test_pr67_disposable_compose_harness.py",
+        "tests/test_pr68_disposable_compose_restart_proof.py",
+        "tests/test_pr89_disposable_remediation.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/windows_runtime_reconcile_execution.py",
+      "lane": "full",
+      "reason": "governed Windows two-file runtime reconciliation execution changed (bounded local mutation; its plan constants, canonical plan identity, and executable-plan contract are delegated to the pure core/windows_runtime_reconcile_plan_contract.py seam)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr313_windows_runtime_reconcile_execute.py",
+        "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+        "tests/test_pr313_windows_runtime_reconcile_verify.py",
+        "tests/test_pr304_windows_runtime_integrity.py",
+        "tests/test_pr305_windows_runtime_reconcile.py",
+        "tests/test_pr312_v1_cross_cwd_resource_resolution.py",
+        "tests/test_pr154_v2_recipe_registry.py",
+        "tests/test_pr167_v2_recipe_execute_disposable_restart.py",
+        "tests/test_pr174_v2_recipe_receipt_integrity.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/core/compose_context.py",
+      "lane": "full",
+      "reason": "compose behavior context changed",
+      "tests": [
+        "tests/test_pr56_compose_context.py",
+        "tests/test_pr57_compose_ask_routing.py",
+        "tests/test_pr58_compose_restart_enrichment.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/policy/**",
+      "lane": "full",
+      "reason": "policy / safety engine changed",
+      "tests": [
+        "tests/test_policy.py",
+        "tests/test_pr46_mutation_gate.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/tools/**",
+      "lane": "full",
+      "reason": "tool execution surface changed",
+      "tests": [
+        "tests/test_investigation_tools.py",
+        "tests/test_tools_files.py",
+        "tests/test_tools_host.py",
+        "tests/test_tools_systemd.py"
+      ]
+    },
+    {
+      "pattern": "src/shellforgeai/util/subprocess.py",
+      "lane": "full",
+      "reason": "subprocess execution wrapper changed",
+      "tests": [
+        "tests/test_investigation_tools.py"
+      ]
+    },
+    {
+      "pattern": "Dockerfile",
+      "lane": "full",
+      "reason": "container image definition changed",
+      "tests": []
+    },
+    {
+      "pattern": "*.Dockerfile",
+      "lane": "full",
+      "reason": "container image definition changed",
+      "tests": []
+    },
+    {
+      "pattern": "pyproject.toml",
+      "lane": "full",
+      "reason": "packaging / dependency / test config changed",
+      "tests": [
+        "tests/test_cli.py",
+        "tests/test_config.py"
+      ]
+    },
+    {
+      "pattern": "requirements*",
+      "lane": "full",
+      "reason": "dependency manifest changed",
+      "tests": []
+    },
+    {
+      "pattern": "compose.yaml",
+      "lane": "full",
+      "reason": "compose definition changed",
+      "tests": [
+        "tests/test_compose_runtime_hygiene.py"
+      ]
+    },
+    {
+      "pattern": "compose.yml",
+      "lane": "full",
+      "reason": "compose definition changed",
+      "tests": [
+        "tests/test_compose_runtime_hygiene.py"
+      ]
+    },
+    {
+      "pattern": "docker-compose*",
+      "lane": "full",
+      "reason": "compose definition changed",
+      "tests": [
+        "tests/test_compose_runtime_hygiene.py"
+      ]
+    },
+    {
+      "pattern": "Makefile",
+      "lane": "full",
+      "reason": "build entrypoint changed",
+      "tests": []
+    },
+    {
+      "pattern": "config/**",
+      "lane": "full",
+      "reason": "runtime configuration changed",
+      "tests": [
+        "tests/test_config.py",
+        "tests/test_profiles.py"
+      ]
+    },
+    {
+      "pattern": ".github/**",
+      "lane": "full",
+      "reason": "CI / workflow infrastructure changed",
+      "tests": []
+    },
+    {
+      "pattern": "scripts/v1_validate.sh",
+      "lane": "full",
+      "reason": "V1 validation helper changed (broad confidence)",
+      "tests": [
+        "tests/test_pr113_v1_validation_hardening.py",
+        "tests/test_pr118_v1_validate_packet_lane.py"
+      ]
+    },
+    {
+      "pattern": "scripts/validate_pr.py",
+      "lane": "full",
+      "reason": "validation lane optimizer changed (broad confidence)",
+      "tests": [
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
+      "pattern": "scripts/validation_matrix.json",
+      "lane": "full",
+      "reason": "validation impact map changed (broad confidence)",
+      "tests": [
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
+      "pattern": "scripts/sfai_docker01_pr_lane.py",
+      "lane": "full",
+      "reason": "Docker01 PR deploy lane helper changed",
+      "tests": [
+        "tests/test_pr157_validation_lane_optimizer.py",
+        "tests/test_pr161_docker01_validation_manifest.py",
+        "tests/test_pr176_validation_heartbeat_incomplete.py",
+        "tests/test_pr179_validation_container_fallback_packet.py"
+      ]
+    },
+    {
+      "pattern": "scripts/validation_heartbeat.py",
+      "lane": "full",
+      "reason": "validation heartbeat/checkpoint helper changed (broad confidence)",
+      "tests": [
+        "tests/test_pr176_validation_heartbeat_incomplete.py"
+      ]
+    },
+    {
+      "pattern": "scripts/validation_env_preflight.py",
+      "lane": "full",
+      "reason": "validation environment preflight changed (broad confidence)",
+      "tests": [
+        "tests/test_pr178_validation_env_preflight.py"
+      ]
+    },
+    {
+      "pattern": "scripts/validation_container_fallback.py",
+      "lane": "full",
+      "reason": "validation container fallback packet generator changed (broad confidence)",
+      "tests": [
+        "tests/test_pr179_validation_container_fallback_packet.py"
+      ]
+    },
+    {
+      "pattern": "scripts/validation_status.py",
+      "lane": "full",
+      "reason": "validation evidence status viewer changed (broad confidence)",
+      "tests": [
+        "tests/test_pr177_validation_status_viewer.py",
+        "tests/test_pr178_validation_env_preflight.py",
+        "tests/test_pr179_validation_container_fallback_packet.py"
+      ]
+    },
+    {
+      "pattern": "scripts/run_full_pytest.py",
+      "lane": "full",
+      "reason": "Lane C full pytest runner changed (broad confidence)",
+      "tests": [
+        "tests/test_pr160_full_validation_runner_streaming.py",
+        "tests/test_pr176_validation_heartbeat_incomplete.py"
+      ]
+    },
+    {
+      "pattern": "scripts/windows_smoke_acceptance.py",
+      "lane": "targeted_runtime",
+      "reason": "local saved-JSON Windows smoke acceptance helper changed",
+      "tests": [
+        "tests/test_pr263_windows_smoke_acceptance.py",
+        "tests/test_pr262_windows_read_only_status.py",
+        "tests/test_pr261_windows_read_only_doctor.py",
+        "tests/test_pr259_platform_detection.py"
+      ]
+    },
+    {
+      "pattern": "scripts/windows_interactive_acceptance.py",
+      "lane": "targeted_runtime",
+      "reason": "local saved-transcript Windows interactive acceptance helper changed",
+      "tests": [
+        "tests/test_pr280_windows_interactive_acceptance.py",
+        "tests/test_pr279_windows_interactive_platform_aware_performance.py",
+        "tests/test_pr278_collectors_json_null_parsing.py"
+      ]
+    },
+    {
+      "pattern": "scripts/windows_runtime_reconcile_preflight.py",
+      "lane": "full",
+      "reason": "PR305 preview packet and exact destination-parent contract changed (feeds bounded local mutation)",
+      "tests": [
+        "tests/test_pr313_windows_runtime_reconcile_execute.py",
+        "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+        "tests/test_pr313_windows_runtime_reconcile_verify.py",
+        "tests/test_pr305_windows_runtime_reconcile.py",
+        "tests/test_pr304_windows_runtime_integrity.py"
+      ]
+    },
+    {
+      "pattern": "scripts/windows_runtime_reconcile_acceptance.py",
+      "lane": "full",
+      "reason": "PR305 acceptance and destination-parent contract validation changed (the rules now live in the pure core/windows_runtime_reconcile_plan_contract.py seam that this script, the PR313 execution lane, and the PR323 plan link all delegate to)",
+      "tests": [
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr313_windows_runtime_reconcile_execute.py",
+        "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+        "tests/test_pr313_windows_runtime_reconcile_verify.py",
+        "tests/test_pr305_windows_runtime_reconcile.py",
+        "tests/test_pr304_windows_runtime_integrity.py"
+      ]
+    },
+    {
+      "pattern": "scripts/windows_runtime_reconcile_execute.py",
+      "lane": "full",
+      "reason": "governed Windows two-file runtime reconciliation execute helper changed (bounded local mutation)",
+      "tests": [
+        "tests/test_pr313_windows_runtime_reconcile_execute.py",
+        "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+        "tests/test_pr313_windows_runtime_reconcile_verify.py",
+        "tests/test_pr304_windows_runtime_integrity.py",
+        "tests/test_pr305_windows_runtime_reconcile.py"
+      ]
+    },
+    {
+      "pattern": "scripts/windows_runtime_reconcile_receipt_acceptance.py",
+      "lane": "full",
+      "reason": "Windows runtime reconciliation execution receipt validator changed",
+      "tests": [
+        "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+        "tests/test_pr313_windows_runtime_reconcile_execute.py",
+        "tests/test_pr174_v2_recipe_receipt_integrity.py"
+      ]
+    },
+    {
+      "pattern": "scripts/windows_runtime_reconcile_verify.py",
+      "lane": "full",
+      "reason": "Windows runtime reconciliation post-change verification helper changed",
+      "tests": [
+        "tests/test_pr313_windows_runtime_reconcile_verify.py",
+        "tests/test_pr313_windows_runtime_reconcile_receipt.py",
+        "tests/test_pr304_windows_runtime_integrity.py"
+      ]
+    },
+    {
+      "pattern": "scripts/**",
+      "lane": "full",
+      "reason": "operator/validation script changed",
+      "tests": []
+    },
+    {
+      "pattern": "tests/conftest.py",
+      "lane": "full",
+      "reason": "shared test harness changed (broad confidence)",
+      "tests": []
+    },
+    {
+      "pattern": "tests/**",
+      "lane": "fast",
+      "reason": "tests-only change (no product runtime change); changed tests are run directly",
+      "tests": []
+    }
   ],
   "source_fallback": {
     "pattern": "src/**/*.py",

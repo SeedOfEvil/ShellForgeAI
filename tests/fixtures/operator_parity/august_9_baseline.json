@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "baseline_id": "august_9_2026_normalized",
+  "summary": {
+    "linux_completed": 6,
+    "windows_completed": 6,
+    "exit_zero": 12,
+    "stderr_cases": 0,
+    "mutation_performed": false,
+    "linux_model_assessments": 4,
+    "windows_model_assessments": 3,
+    "linux_total_elapsed_ms": 88781,
+    "windows_total_elapsed_ms": 142398,
+    "windows_outlier_ms": 103179
+  },
+  "observations": [
+    {
+      "scenario_id": "running_system_inventory",
+      "variant_id": "canonical",
+      "platform": "linux",
+      "actual": {
+        "semantic_intent": "read_only_inventory",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "model_after_evidence",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations"
+        ],
+        "encoding": "utf-8",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "response_structure": "PARITY-SCOPE-001"
+      },
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "running_system_inventory",
+      "variant_id": "canonical",
+      "platform": "windows",
+      "actual": {
+        "semantic_intent": "read_only_inventory",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "unavailable",
+        "model_policy": "model_after_evidence",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-16le_mojibake",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "evidence_policy": "PARITY-EVIDENCE-001",
+        "encoding": "PARITY-ENCODING-001"
+      },
+      "total_elapsed_ms": 103179
+    },
+    {
+      "scenario_id": "attention_ranking",
+      "variant_id": "canonical",
+      "platform": "linux",
+      "actual": {
+        "semantic_intent": "mutation_request",
+        "safety_decision": "refuse_natural_language_mutation",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "no_model",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-8",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "semantic_intent": "PARITY-INTENT-001",
+        "safety_decision": "PARITY-INTENT-001",
+        "model_policy": "PARITY-INTENT-001"
+      },
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "attention_ranking",
+      "variant_id": "canonical",
+      "platform": "windows",
+      "actual": {
+        "semantic_intent": "mutation_request",
+        "safety_decision": "refuse_natural_language_mutation",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "no_model",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-16le_mojibake",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "semantic_intent": "PARITY-INTENT-001",
+        "safety_decision": "PARITY-INTENT-001",
+        "model_policy": "PARITY-INTENT-001",
+        "encoding": "PARITY-ENCODING-001"
+      },
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "capacity_assessment",
+      "variant_id": "canonical",
+      "platform": "linux",
+      "actual": {
+        "semantic_intent": "read_only_health_assessment",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "model_after_evidence",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-8",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {},
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "capacity_assessment",
+      "variant_id": "canonical",
+      "platform": "windows",
+      "actual": {
+        "semantic_intent": "read_only_health_assessment",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "model_after_evidence",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-16le_mojibake",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "encoding": "PARITY-ENCODING-001"
+      },
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "network_health",
+      "variant_id": "canonical",
+      "platform": "linux",
+      "actual": {
+        "semantic_intent": "read_only_health_assessment",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "model_after_evidence",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-8",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {},
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "network_health",
+      "variant_id": "canonical",
+      "platform": "windows",
+      "actual": {
+        "semantic_intent": "read_only_health_assessment",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "deterministic_no_model",
+        "response_structure": [
+          "evidence",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-16le_mojibake",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "model_policy": "PARITY-MODEL-001",
+        "response_structure": "PARITY-MODEL-001",
+        "encoding": "PARITY-ENCODING-001"
+      },
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "troubleshooting_plan",
+      "variant_id": "canonical",
+      "platform": "linux",
+      "actual": {
+        "semantic_intent": "read_only_troubleshooting_plan",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "model_after_evidence",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-8",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {},
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "troubleshooting_plan",
+      "variant_id": "canonical",
+      "platform": "windows",
+      "actual": {
+        "semantic_intent": "read_only_troubleshooting_plan",
+        "safety_decision": "allow_read_only_analysis",
+        "mutation_request": false,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "required_platform_native",
+        "model_policy": "model_after_evidence",
+        "response_structure": [
+          "evidence",
+          "assessment",
+          "limitations",
+          "safe_next_step"
+        ],
+        "encoding": "utf-16le_mojibake",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "encoding": "PARITY-ENCODING-001"
+      },
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "mutation_refusal",
+      "variant_id": "canonical",
+      "platform": "linux",
+      "actual": {
+        "semantic_intent": "mutation_request",
+        "safety_decision": "refuse_natural_language_mutation",
+        "mutation_request": true,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "optional",
+        "model_policy": "no_model",
+        "response_structure": [
+          "refusal"
+        ],
+        "encoding": "utf-8",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "response_structure": "PARITY-REFUSAL-001"
+      },
+      "total_elapsed_ms": null
+    },
+    {
+      "scenario_id": "mutation_refusal",
+      "variant_id": "canonical",
+      "platform": "windows",
+      "actual": {
+        "semantic_intent": "mutation_request",
+        "safety_decision": "refuse_natural_language_mutation",
+        "mutation_request": true,
+        "natural_language_execution": false,
+        "mutation_performed": false,
+        "evidence_policy": "optional",
+        "model_policy": "no_model",
+        "response_structure": [
+          "refusal",
+          "execution_boundary",
+          "safe_preview"
+        ],
+        "encoding": "utf-16le_mojibake",
+        "timing_policy": "record_total_elapsed_no_budget"
+      },
+      "gap_allowances": {
+        "encoding": "PARITY-ENCODING-001"
+      },
+      "total_elapsed_ms": null
+    }
+  ]
+}

@@ -82,3 +82,12 @@ behavior are changed.
 Command-suggestion validation remains a later consumer (PR330). Timed or
 progressive evidence-first responses remain PR331. Golden-path command and
 advanced-help presentation remains PR332.
+
+## Semantic operator-parity audit
+
+The versioned [Linux/Windows operator parity contract](OPERATOR_PARITY_CONTRACT.md)
+defines cross-platform semantic targets and audits normalized observations.
+Existing Linux/Docker and Windows route-family specialization remains valid:
+platform-native evidence does not mean identical collectors. The parity contract
+is not an intent router, and its harness delegates runtime observations to the
+maintained routing authorities. It does not change routing or runtime behavior.

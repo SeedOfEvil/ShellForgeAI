@@ -812,3 +812,11 @@ The native Windows current-process token identity module maps explicitly to
 `TokenStatistics.AuthenticationId` evidence form a new OS identity trust
 primitive. Its focused recommendation is the PR342 identity suite plus
 validation-lane coverage; it adds no approval binding or authorization.
+
+### Operator-parity contract and harness
+
+Changes to `config/operator_parity_v1.json`, the pure parity contract module, the
+offline harness, normalized baseline fixture, or PR343 parity tests select **Lane
+C / full**. Focused validation covers contract strictness and deterministic
+baseline/strict evaluation; the maintained full runner supplies broad confidence.
+No lane invokes a live provider, network, or external host for this audit.

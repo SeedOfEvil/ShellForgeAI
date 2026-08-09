@@ -181,3 +181,6 @@ pytest -q
 ```
 
 For command-surface changes, run the focused command-surface tests documented in [CLI reference](docs/cli.md). This README is product-facing; deeper safety catalogues, platform notes, and historical PR chronology live in the linked reference documents.
+
+The repository's versioned Linux/Windows semantic parity target and offline audit
+workflow are documented in [docs/OPERATOR_PARITY_CONTRACT.md](docs/OPERATOR_PARITY_CONTRACT.md).
