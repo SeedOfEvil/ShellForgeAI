@@ -741,6 +741,12 @@ Linux-tool unavailable rows. Later bounded analytical questions reuse the
 session-local packet without recollection, while explicit Docker, container, and
 Compose targets retain Docker routing.
 
+Bounded requests to assess, evaluate, or review network health from available
+observations—including requests to separate confirmed facts from unknowns and name
+a safe read-only next check—use this same evidence-first assessment path. Targeted
+DNS, host/port, listener, firewall, Docker, Compose, container, and Linux questions
+retain their specialized routing.
+
 The deterministic packet is rendered and flushed before synchronous model
 synthesis. Provider failure or rejected Windows output cannot erase or duplicate
 that evidence. The packet states its limits: CPU utilization and per-process CPU,

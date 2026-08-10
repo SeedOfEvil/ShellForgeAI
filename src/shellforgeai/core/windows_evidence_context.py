@@ -472,6 +472,11 @@ def project_windows_evidence_for_model(packet: dict[str, Any]) -> dict[str, Any]
     disk = projected.get("disk")
     if isinstance(disk, dict):
         disk.pop("inode_limitation", None)
+    network = packet.get("network") or {}
+    projected["network"] = {
+        "available": bool(network.get("available")),
+        "summary": deepcopy(network.get("summary") or {}),
+    }
     projected["limitations"] = [
         item
         for item in packet.get("limitations") or []
