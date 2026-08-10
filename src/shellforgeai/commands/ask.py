@@ -110,6 +110,7 @@ def register(app: typer.Typer) -> None:
             classify_windows_operator_intent,
             render_windows_operator_guidance,
         )
+        from shellforgeai.interactive.commands import route_input
         from shellforgeai.llm.prompts import (
             build_contextual_prompt,
             build_windows_evidence_model_prompt,
@@ -117,6 +118,12 @@ def register(app: typer.Typer) -> None:
         from shellforgeai.llm.schemas import ModelRequest
 
         cli = _cli()
+        if route_input(question).name == "shell_refused":
+            cli.console.print(
+                "Refused: ShellForgeAI ask is not a shell.\n"
+                "No command was executed. No evidence was collected. No action was taken."
+            )
+            return
         windows_route = None
         if not no_evidence:
             windows_route = classify_windows_operator_intent(

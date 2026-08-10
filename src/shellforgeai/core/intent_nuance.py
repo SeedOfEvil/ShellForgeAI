@@ -35,6 +35,78 @@ COMMAND_HELP = "command_help"
 PLAN_HELP = "plan_help"
 CLEANUP_REVIEW_HELP = "cleanup_review_help"
 MUTATION_REQUEST = "mutation_request"
+
+
+_ANALYTICAL_RANKING_CUES = (
+    "rank",
+    "prioritize",
+    "prioritise",
+    "attention first",
+    "inspect first",
+    "deserve attention",
+    "deserves attention",
+    "deserving of attention",
+    "most noteworthy",
+    "stand out",
+    "stands out",
+)
+_OBSERVED_RUNNING_CUES = (
+    "running",
+    "observed",
+    "evidence",
+    "process",
+    "service",
+    "component",
+    "item",
+)
+_RANKED_TARGET_CUES = (
+    "top suspect",
+    "top issue",
+    "worst item",
+    "worst one",
+    "first one",
+    "highest cpu",
+    "most suspicious",
+    "unhealthy service",
+    "biggest offender",
+    "top offender",
+)
+_EXPLICIT_ACTION_RE = re.compile(
+    r"\b(?:restart|reboot|start|stop|kill|delete|remove|fix|remediat\w*|"
+    r"clean\s*up|cleanup|prune|apply|execute|rollback|recover|install|uninstall)\b",
+    re.IGNORECASE,
+)
+
+
+def is_read_only_analytical_ranking(text: str) -> bool:
+    """Return whether *text* asks only to rank observed running evidence.
+
+    This narrow semantic family is analytical, not an instruction to act.
+    Any explicit action verb wins, including in a mixed rank-and-act prompt.
+    """
+
+    low = _normalize(text)
+    if not low or _EXPLICIT_ACTION_RE.search(low):
+        return False
+    return any(cue in low for cue in _ANALYTICAL_RANKING_CUES) and any(
+        cue in low for cue in _OBSERVED_RUNNING_CUES
+    )
+
+
+def has_analytical_ranking_action(text: str) -> bool:
+    """Detect explicit action attached to ranking language or a ranked target."""
+
+    low = _normalize(text)
+    analytical_frame = any(cue in low for cue in _ANALYTICAL_RANKING_CUES)
+    ranked_target = any(cue in low for cue in _RANKED_TARGET_CUES)
+    return bool(
+        low
+        and not _has_help_frame(low)
+        and _EXPLICIT_ACTION_RE.search(low)
+        and (analytical_frame or ranked_target)
+    )
+
+
 AMBIGUOUS_EXECUTE = "ambiguous_execute"
 NONE = "none"
 

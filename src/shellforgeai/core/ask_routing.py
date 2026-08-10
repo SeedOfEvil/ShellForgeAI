@@ -731,8 +731,11 @@ def route_ask_intent(text: str) -> AskRoute:
     if not raw:
         return AskRoute(mode=PLAIN)
 
-    mutation = is_mutation_request(raw)
     routed = route_input(raw)
+    mutation = is_mutation_request(raw) or routed.name in {
+        "mutation_refused",
+        "logs_mutation_refused",
+    }
     net_reach = is_network_reachability_intent(raw)
     fix_plan = is_fix_plan_intent(raw)
 

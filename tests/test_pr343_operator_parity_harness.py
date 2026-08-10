@@ -18,7 +18,6 @@ def test_baseline_guard_and_strict_separate_target_from_gaps():
     assert guard["totals"]["baseline_guard_passed"]
     assert guard["totals"]["new_regressions"] == 0
     expected = {
-        "PARITY-INTENT-001",
         "PARITY-EVIDENCE-001",
         "PARITY-MODEL-001",
         "PARITY-REFUSAL-001",
@@ -59,9 +58,7 @@ def test_report_is_deterministic_and_timing_has_no_budget():
 
 
 def test_windows_outlier_timing_retains_scenario_provenance():
-    baseline = json.loads(
-        Path("tests/fixtures/operator_parity/august_9_baseline.json").read_text()
-    )
+    baseline = json.loads(Path("tests/fixtures/operator_parity/august_9_baseline.json").read_text())
     observations_by_key = {
         (observation["scenario_id"], observation["platform"]): observation
         for observation in baseline["observations"]

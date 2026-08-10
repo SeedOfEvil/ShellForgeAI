@@ -47,7 +47,7 @@ shellforgeai ask "what is on fire in Docker right now?"
 shellforgeai ask "what should I inspect first?" --explain-evidence
 ```
 
-Recognized operator questions route through deterministic read-only evidence before any synthesis. Mutation-shaped asks are refused and redirected to a safe read-only next command or review surface.
+Recognized ranking questions use read-only evidence; explicit action always wins. Mutation-shaped asks are refused and redirected to a safe read-only next command or review surface.
 
 For model-assisted operator questions, ShellForgeAI flushes a concise bounded
 evidence answer first, then calls the configured provider synchronously and
