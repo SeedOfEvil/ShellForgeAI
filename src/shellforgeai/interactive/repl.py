@@ -72,6 +72,7 @@ from shellforgeai.core.windows_evidence_context import (
     windows_evidence_prompt_facts,
 )
 from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_INVENTORY_CONTAINER_LIMITATION,
     WINDOWS_OPERATOR_INTENT_DISK_CAPACITY,
     WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
     WINDOWS_OPERATOR_INTENT_HANDOFF,
@@ -79,6 +80,7 @@ from shellforgeai.core.windows_operator_ux import (
     WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH,
     WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
     WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+    WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY,
     WINDOWS_OPERATOR_INTENT_SERVICES,
     WINDOWS_OPERATOR_INTENT_STATUS,
     WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
@@ -1114,6 +1116,11 @@ def _handle_windows_symptom_route(
 ) -> LatestDiagnosisContext:
     """Collect one coherent packet, render it first, then assess one symptom family."""
     packet = build_windows_evidence_context()
+    if intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY:
+        packet = dict(packet)
+        packet["limitations"] = list(packet.get("limitations") or []) + [
+            WINDOWS_INVENTORY_CONTAINER_LIMITATION
+        ]
     rows = windows_evidence_prompt_facts(packet)
     facts = [str(row.get("summary")) for row in rows if row.get("status") == "ok"][:8]
     packet_limitations = [
@@ -1123,6 +1130,11 @@ def _handle_windows_symptom_route(
     ][:3]
     packet_limitations.extend(str(item) for item in (packet.get("evidence_gaps") or [])[:3])
     limitations = list(packet_limitations)
+    if (
+        intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY
+        and WINDOWS_INVENTORY_CONTAINER_LIMITATION not in limitations
+    ):
+        limitations.insert(0, WINDOWS_INVENTORY_CONTAINER_LIMITATION)
     if intent == WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH:
         limitations.insert(0, _WINDOWS_CRASH_HISTORY_LIMITATION)
     ctx = LatestDiagnosisContext(
@@ -1178,6 +1190,12 @@ def _handle_windows_symptom_route(
         ctx.model_assessment_status = "unavailable"
         return ctx
     clean = _sanitize_provider_error(str(getattr(response, "text", "")))
+    if intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY:
+        _ensure_artifact_dir(runtime)
+        (runtime.session.artifact_dir / "model-response.md").write_text(clean, encoding="utf-8")
+        (runtime.session.artifact_dir / "windows-evidence-context.json").write_text(
+            json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8"
+        )
     if (
         not getattr(response, "ok", True)
         or not _has_substantive_response(clean)
@@ -1190,6 +1208,8 @@ def _handle_windows_symptom_route(
             else "provider_failure"
         )
         console.print(render_model_unavailable(reason))
+        if intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY:
+            console.print(render_windows_evidence_answer(question, packet))
         ctx.model_assessment_status = "unavailable"
         return ctx
     console.print(render_model_assessment(clean))
@@ -3206,6 +3226,20 @@ def start_interactive(
                 )
                 update_grounding_from_latest_context(grounding, latest_context)
                 _record_latest_context_in_session_summary(session_summary, latest_context)
+                continue
+            if (
+                shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY
+                and shared_windows_route.host_is_windows
+            ):
+                latest_context = _handle_windows_symptom_route(
+                    console,
+                    runtime,
+                    user_input,
+                    intent=WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY,
+                )
+                update_grounding_from_latest_context(grounding, latest_context)
+                _record_latest_context_in_session_summary(session_summary, latest_context)
+                pending_followup = None
                 continue
             if (
                 shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH

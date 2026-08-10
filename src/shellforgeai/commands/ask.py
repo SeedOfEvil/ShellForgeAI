@@ -101,10 +101,12 @@ def register(app: typer.Typer) -> None:
         )
         from shellforgeai.core.runbook import build_runbook, render_runbook_md
         from shellforgeai.core.windows_operator_ux import (
+            WINDOWS_INVENTORY_CONTAINER_LIMITATION,
             WINDOWS_OPERATOR_INTENT_HANDOFF,
             WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
             WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
             WINDOWS_OPERATOR_INTENT_PERFORMANCE,
+            WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY,
             WINDOWS_OPERATOR_INTENT_STATUS,
             WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
             classify_windows_operator_intent,
@@ -251,6 +253,15 @@ def register(app: typer.Typer) -> None:
                     cli.console.print(render_docker_evidence_explainability(None), end="")
                 return
         route = AskRoute(mode=PLAIN) if no_evidence else route_ask_intent(question)
+        # Generic Windows inventory uses the already-bounded native Windows
+        # packet below, not the Linux-oriented diagnose target selected by the
+        # cross-platform fallback router.
+        if (
+            windows_route is not None
+            and windows_route.host_is_windows
+            and windows_route.intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY
+        ):
+            route = AskRoute(mode=PLAIN, intent_label="Windows running-system inventory")
         if not no_evidence and route.mode == EVIDENCE_BACKED:
             operator_contract = build_platform_operator_contract()
             if not operator_contract.local_evidence_available:
@@ -272,6 +283,14 @@ def register(app: typer.Typer) -> None:
             )
 
             windows_packet = build_windows_evidence_context()
+            if (
+                windows_route is not None
+                and windows_route.intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY
+            ):
+                windows_packet = dict(windows_packet)
+                windows_packet["limitations"] = list(windows_packet.get("limitations") or []) + [
+                    WINDOWS_INVENTORY_CONTAINER_LIMITATION
+                ]
             try:
                 # PR289 — record the exact Windows evidence packet passed into
                 # model context so QA acceptance can verify grounding from the
@@ -295,6 +314,13 @@ def register(app: typer.Typer) -> None:
             prompt_context["windows_evidence"] = windows_packet
             prompt_context["windows_evidence_directive"] = WINDOWS_EVIDENCE_MODEL_DIRECTIVE
             prompt_context["evidence_label"] = "Windows local read-only evidence"
+            if (
+                windows_route is not None
+                and windows_route.intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY
+            ):
+                prompt_context["inventory_visibility_limit"] = (
+                    WINDOWS_INVENTORY_CONTAINER_LIMITATION
+                )
             windows_rows = windows_evidence_prompt_facts(windows_packet)
             existing_rows = prompt_context.get("evidence")
             if isinstance(existing_rows, list):
@@ -485,6 +511,12 @@ def register(app: typer.Typer) -> None:
                     str(item)
                     for item in (windows_packet.get("limitations") or [])
                     if "inode" not in str(item).lower() and "linux-only" not in str(item).lower()
+                )
+                + (
+                    (WINDOWS_INVENTORY_CONTAINER_LIMITATION,)
+                    if windows_route is not None
+                    and windows_route.intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY
+                    else ()
                 ),
                 safe_next_commands=tuple(windows_packet.get("safe_next_commands") or ()),
             )
