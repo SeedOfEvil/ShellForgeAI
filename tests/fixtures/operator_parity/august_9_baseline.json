@@ -200,9 +200,10 @@
         "natural_language_execution": false,
         "mutation_performed": false,
         "evidence_policy": "required_platform_native",
-        "model_policy": "deterministic_no_model",
+        "model_policy": "model_after_evidence",
         "response_structure": [
           "evidence",
+          "assessment",
           "limitations",
           "safe_next_step"
         ],
@@ -210,8 +211,6 @@
         "timing_policy": "record_total_elapsed_no_budget"
       },
       "gap_allowances": {
-        "model_policy": "PARITY-MODEL-001",
-        "response_structure": "PARITY-MODEL-001",
         "encoding": "PARITY-ENCODING-001"
       },
       "total_elapsed_ms": null

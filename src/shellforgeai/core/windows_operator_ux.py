@@ -183,12 +183,14 @@ def _next_check(text: str) -> bool:
         "what next",
         "what exactly should i check next if this is a windows host",
     }
-    return (
-        text in exact
-        or any(phrase in text for phrase in exact)
-        or (
-            ("what should" in text or "what do" in text)
-            and ("check first" in text or "check next" in text)
+    return text in exact or (
+        not _network_health(text)
+        and (
+            any(phrase in text for phrase in exact)
+            or (
+                ("what should" in text or "what do" in text)
+                and ("check first" in text or "check next" in text)
+            )
         )
     )
 
@@ -302,6 +304,33 @@ _NETWORK_HEALTH_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
         r"do you see a network problem",
         r"are the windows network interfaces healthy",
         r"(?:windows )?network (?:health|status)",
+        (
+            r"assess network health from the available evidence distinguish confirmed facts "
+            r"from unknowns and give one safe read only next check"
+        ),
+        (
+            r"evaluate network health using available evidence separate facts from unknowns "
+            r"and recommend one read only check"
+        ),
+        (
+            r"from the network observations state what is confirmed and unresolved then "
+            r"provide a single safe non mutating next check"
+        ),
+        r"assess the network using the evidence we have and tell me what is known versus unknown",
+        r"evaluate this host s network health from observed facts",
+        (
+            r"what can we actually confirm about network health and what read only check "
+            r"should come next"
+        ),
+        r"review the network evidence and separate confirmed facts from unresolved questions",
+        (
+            r"using the available network observations assess what is known and what remains "
+            r"uncertain"
+        ),
+        (
+            r"what does the current network evidence confirm what is unknown and what should "
+            r"i safely check next"
+        ),
     )
 )
 
@@ -366,7 +395,14 @@ def _running_inventory(text: str) -> bool:
 
 
 def _mutation(text: str, explicit_windows: bool) -> bool:
-    if text in {"fix it", "fix it now", "apply the fix"}:
+    if text in {
+        "fix it",
+        "fix it now",
+        "apply the fix",
+        "fix the network",
+        "fix network",
+        "fix dns",
+    }:
         return True
     actions = (
         "clean up",
