@@ -16,6 +16,12 @@ WINDOWS_OPERATOR_INTENT_DISK_CAPACITY: Final = "windows_disk_capacity"
 WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH: Final = "windows_network_health"
 WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH: Final = "windows_failure_health"
 WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL: Final = "windows_mutation_refusal"
+WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY: Final = "windows_running_inventory"
+
+WINDOWS_INVENTORY_CONTAINER_LIMITATION: Final = (
+    "Container inventory is not collected by the Windows evidence packet; container "
+    "visibility is unavailable and must not be inferred from process or service names."
+)
 
 WINDOWS_STANDARD_EVIDENCE_COMMAND: Final = "shellforgeai windows evidence --profile standard --json"
 WINDOWS_STATUS_COMMAND: Final = "shellforgeai windows status --json"
@@ -87,6 +93,11 @@ _COMMANDS_BY_INTENT: Final[dict[str, tuple[str, ...]]] = {
         WINDOWS_DOCTOR_COMMAND,
         WINDOWS_SERVICES_COMMAND,
     ),
+    WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY: (
+        WINDOWS_STANDARD_EVIDENCE_COMMAND,
+        WINDOWS_PROCESSES_COMMAND,
+        WINDOWS_SERVICES_COMMAND,
+    ),
 }
 
 _HEADINGS: Final[dict[str, str]] = {
@@ -128,9 +139,15 @@ def _scoped(text: str, host_is_windows: bool, explicit_windows: bool) -> bool:
         return True
     if not host_is_windows:
         return False
-    docker_terms = ("docker", "container", "containers", "compose")
+    docker_terms = ("docker", "compose")
     linux_terms = ("linux", "systemd", "journal", "iptables", "nftables")
-    return not any(term in text for term in docker_terms + linux_terms)
+    if any(term in text for term in docker_terms + linux_terms):
+        return False
+    mentions_container = _has_word(text, "container") or _has_word(text, "containers")
+    host_inventory = any(
+        _has_word(text, term) for term in ("process", "processes", "service", "services")
+    )
+    return not mentions_container or host_inventory
 
 
 def _status(text: str) -> bool:
@@ -314,6 +331,40 @@ def _failure_health(text: str) -> bool:
     return any(pattern.fullmatch(text) for pattern in _FAILURE_HEALTH_PATTERNS)
 
 
+def _running_inventory(text: str) -> bool:
+    """Recognize bounded, host-wide running-component inventory questions."""
+    inventory_terms = (
+        "inventory",
+        "what is running",
+        "what is currently running",
+        "what processes services and containers",
+        "running processes and services",
+        "active components",
+        "what is active",
+        "overview of running processes and services",
+    )
+    evidence_terms = ("evidence", "observed", "actually see", "cannot observe", "visibility")
+    component_terms = ("process", "processes", "service", "services", "component", "components")
+    host_terms = ("system", "host", "machine", "windows")
+    has_inventory_shape = any(term in text for term in inventory_terms)
+    has_scope = (
+        "inventory" in text
+        or any(term in text for term in host_terms)
+        or any(term in text for term in component_terms)
+    )
+    has_grounding = any(term in text for term in evidence_terms)
+    return (
+        has_inventory_shape
+        and has_scope
+        and (
+            has_grounding
+            or "what is running" in text
+            or "running processes and services" in text
+            or "active components" in text
+        )
+    )
+
+
 def _mutation(text: str, explicit_windows: bool) -> bool:
     if text in {"fix it", "fix it now", "apply the fix"}:
         return True
@@ -351,6 +402,8 @@ def _mutation(text: str, explicit_windows: bool) -> bool:
         "drive",
         "volume",
         "network",
+        "unhealthy",
+        "anything",
     )
     return any(a in text for a in actions) and (explicit_windows or any(t in text for t in targets))
 
@@ -373,6 +426,7 @@ def classify_windows_operator_intent(text: str, *, host_system: str) -> WindowsO
         (WINDOWS_OPERATOR_INTENT_PERFORMANCE, _performance),
         (WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL, _strongest),
         (WINDOWS_OPERATOR_INTENT_HANDOFF, _handoff),
+        (WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY, _running_inventory),
     ):
         if predicate(normalized):
             return WindowsOperatorRoute(intent, host_is_windows, explicit)

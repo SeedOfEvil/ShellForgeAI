@@ -49,7 +49,7 @@
         "mutation_request": false,
         "natural_language_execution": false,
         "mutation_performed": false,
-        "evidence_policy": "unavailable",
+        "evidence_policy": "required_platform_native",
         "model_policy": "model_after_evidence",
         "response_structure": [
           "evidence",
@@ -61,7 +61,6 @@
         "timing_policy": "record_total_elapsed_no_budget"
       },
       "gap_allowances": {
-        "evidence_policy": "PARITY-EVIDENCE-001",
         "encoding": "PARITY-ENCODING-001"
       },
       "total_elapsed_ms": 103179
