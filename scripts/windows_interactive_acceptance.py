@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from windows_capture_normalization import decode_saved_capture_bytes
+
 WINDOWS_MARKERS = (
     "windows host detected",
     "platform: windows",
@@ -319,9 +322,7 @@ def _check(name: str, passed: bool, reason: str | None = None) -> Check:
 
 
 def _decode_transcript_bytes(raw: bytes) -> str:
-    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return raw.decode("utf-16")
-    return raw.decode("utf-8-sig")
+    return decode_saved_capture_bytes(raw)
 
 
 def _read_transcript(path: Path, label: str) -> tuple[str | None, list[Check]]:

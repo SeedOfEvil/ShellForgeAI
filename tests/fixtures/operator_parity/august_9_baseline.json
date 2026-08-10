@@ -57,12 +57,10 @@
           "limitations",
           "safe_next_step"
         ],
-        "encoding": "utf-16le_mojibake",
+        "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "encoding": "PARITY-ENCODING-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": 103179
     },
     {
@@ -107,12 +105,10 @@
           "limitations",
           "safe_next_step"
         ],
-        "encoding": "utf-16le_mojibake",
+        "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "encoding": "PARITY-ENCODING-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": null
     },
     {
@@ -157,12 +153,10 @@
           "limitations",
           "safe_next_step"
         ],
-        "encoding": "utf-16le_mojibake",
+        "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "encoding": "PARITY-ENCODING-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": null
     },
     {
@@ -207,12 +201,10 @@
           "limitations",
           "safe_next_step"
         ],
-        "encoding": "utf-16le_mojibake",
+        "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "encoding": "PARITY-ENCODING-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": null
     },
     {
@@ -257,12 +249,10 @@
           "limitations",
           "safe_next_step"
         ],
-        "encoding": "utf-16le_mojibake",
+        "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "encoding": "PARITY-ENCODING-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": null
     },
     {
@@ -305,12 +295,10 @@
           "execution_boundary",
           "safe_preview"
         ],
-        "encoding": "utf-16le_mojibake",
+        "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "encoding": "PARITY-ENCODING-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": null
     }
   ]

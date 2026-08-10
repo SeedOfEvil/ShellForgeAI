@@ -9,7 +9,6 @@
   "known_gaps": {
     "PARITY-REFUSAL-001": "Linux mutation refusal boundary and safe preview are weaker than Windows.",
     "PARITY-SCOPE-001": "Linux scope inference and measurement-induced self-observation lack provenance hygiene.",
-    "PARITY-ENCODING-001": "Redirected Windows evidence can contain UTF-16LE/CP437/UTF-8 mojibake.",
     "PARITY-LATENCY-001": "Windows baseline includes a large informational elapsed-time outlier.",
     "PARITY-CONTINUITY-001": "Prior-session evidence is not retained on a later turn on either platform."
   },
@@ -56,7 +55,6 @@
       },
       "known_gap_ids": [
         "PARITY-SCOPE-001",
-        "PARITY-ENCODING-001",
         "PARITY-LATENCY-001",
         "PARITY-CONTINUITY-001"
       ]
@@ -102,8 +100,7 @@
         "timing_policy": "record_total_elapsed_no_budget"
       },
       "known_gap_ids": [
-        "PARITY-CONTINUITY-001",
-        "PARITY-ENCODING-001"
+        "PARITY-CONTINUITY-001"
       ]
     },
     {
@@ -147,7 +144,6 @@
         "timing_policy": "record_total_elapsed_no_budget"
       },
       "known_gap_ids": [
-        "PARITY-ENCODING-001",
         "PARITY-LATENCY-001",
         "PARITY-CONTINUITY-001"
       ]
@@ -193,7 +189,6 @@
         "timing_policy": "record_total_elapsed_no_budget"
       },
       "known_gap_ids": [
-        "PARITY-ENCODING-001",
         "PARITY-LATENCY-001",
         "PARITY-CONTINUITY-001"
       ]
@@ -240,8 +235,7 @@
       },
       "known_gap_ids": [
         "PARITY-LATENCY-001",
-        "PARITY-CONTINUITY-001",
-        "PARITY-ENCODING-001"
+        "PARITY-CONTINUITY-001"
       ]
     },
     {
@@ -285,8 +279,7 @@
       },
       "known_gap_ids": [
         "PARITY-REFUSAL-001",
-        "PARITY-CONTINUITY-001",
-        "PARITY-ENCODING-001"
+        "PARITY-CONTINUITY-001"
       ]
     }
   ]
