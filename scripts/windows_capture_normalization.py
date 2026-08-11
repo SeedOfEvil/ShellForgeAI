@@ -78,6 +78,8 @@ def normalize_saved_capture(
     destination = Path(destination_path)
     if source.resolve() == destination.resolve():
         raise CaptureNormalizationError("normalized destination must differ from raw source")
+    if destination.exists() and source.samefile(destination):
+        raise CaptureNormalizationError("normalized destination must not alias raw source")
     if content_kind not in {"text", "json"}:
         raise CaptureNormalizationError("unsupported content kind")
 

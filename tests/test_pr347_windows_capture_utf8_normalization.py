@@ -159,3 +159,20 @@ def test_raw_artifact_cannot_be_used_as_destination(tmp_path):
     with pytest.raises(CaptureNormalizationError, match="must differ"):
         normalize_saved_capture(source, source)
     assert source.read_bytes() == b"safe"
+
+
+def test_hardlink_alias_cannot_be_used_as_destination(tmp_path):
+    source = tmp_path / "capture.txt"
+    destination = tmp_path / "normalized.txt"
+    raw = codecs.BOM_UTF16_LE + "immutable café 雪".encode("utf-16-le")
+    source.write_bytes(raw)
+    destination.hardlink_to(source)
+    raw_sha256 = hashlib.sha256(raw).hexdigest()
+
+    with pytest.raises(CaptureNormalizationError, match="must not alias"):
+        normalize_saved_capture(source, destination)
+
+    assert source.read_bytes() == raw
+    assert destination.read_bytes() == raw
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == raw_sha256
+    assert hashlib.sha256(destination.read_bytes()).hexdigest() == raw_sha256
