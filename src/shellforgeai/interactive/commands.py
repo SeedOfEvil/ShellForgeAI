@@ -1237,6 +1237,13 @@ def _normalize_intent_text(text: str) -> str:
     return lowered
 
 
+def _is_imperative_service_restart_request(text: str) -> bool:
+    """Recognize the bounded ``perform service restart(s)`` imperative."""
+
+    normalized = _normalize_intent_text(text)
+    return re.match(r"^perform service restarts?\b", normalized) is not None
+
+
 def route_input(text: str) -> RoutedCommand:
     raw = text.strip()
     if not raw:
@@ -1326,6 +1333,8 @@ def route_input(text: str) -> RoutedCommand:
     shell_shaped_dispatch = _dispatch_shell_shaped_command(raw)
     if shell_shaped_dispatch is not None:
         return shell_shaped_dispatch
+    if _is_imperative_service_restart_request(raw):
+        return RoutedCommand(name="mutation_refused", args=raw)
     if _is_command_like_unknown(raw):
         return RoutedCommand(name="unknown_command", args=raw, argv=suggest_safe_commands(raw))
 
