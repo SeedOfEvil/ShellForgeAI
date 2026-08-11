@@ -20,7 +20,6 @@ def test_baseline_guard_and_strict_separate_target_from_gaps():
     expected = {
         "PARITY-REFUSAL-001",
         "PARITY-SCOPE-001",
-        "PARITY-ENCODING-001",
     }
     assert {g for c in strict["cases"] for g in c["active_gap_ids"]} == expected
     assert strict["totals"]["strict_failures"] > 0

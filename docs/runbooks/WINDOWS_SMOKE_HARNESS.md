@@ -28,6 +28,16 @@ use QEMU Guest Agent, or run host-management tools.
 
 ## Operator acceptance pattern
 
+Raw saved captures are forensic evidence and must not be rewritten. For parity
+or cross-platform QA, use `scripts/windows_capture_normalization.py` to create a
+distinct, non-aliased BOM-less UTF-8 representation. The destination must not be
+the raw path, a symlink to it, or a hardlink to the same file. The normalizer accepts strict UTF-8,
+UTF-8 with a BOM, and BOM-marked UTF-16LE/UTF-16BE automatically; legacy CP437
+requires explicit caller metadata. Its provenance links separate raw and
+normalized SHA256 values. A decode, malformed-JSON, or known-mojibake failure
+leaves the raw artifact untouched and does not attempt repair. Existing smoke
+and transcript validators continue to accept supported raw captures directly.
+
 1. Take a VM snapshot before staging a PR source tree.
 2. Stage the exact PR source under
    `C:\Tools\ShellForgeAI\src\ShellForgeAI-pr<PR_NUMBER>`.

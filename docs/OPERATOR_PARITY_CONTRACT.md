@@ -39,9 +39,14 @@ fails undeclared deviations. `strict_parity` ignores allowances and reports ever
 target mismatch. Wildcards and automatic baseline regeneration are prohibited.
 The harness emits deterministic, sorted UTF-8 JSON without timestamps.
 
-The target encoding is UTF-8. Current Windows redirection mojibake remains
-`PARITY-ENCODING-001`. `total_elapsed_ms` is informational; the contract records
-it with `budget_ms: null`, so neither a performance SLO nor ratio is enforced.
+The target encoding is UTF-8. Saved Windows captures retain their original bytes
+as immutable evidence, while parity consumes a distinct, strictly decoded,
+BOM-less UTF-8 representation produced by the local capture-ingestion helper.
+That representation preserves the decoded Unicode exactly and records both raw
+and normalized SHA256 values; it never repairs mojibake. This boundary retires
+`PARITY-ENCODING-001` without changing PowerShell redirection. `total_elapsed_ms`
+is informational; the contract records it with `budget_ms: null`, so neither a
+performance SLO nor ratio is enforced.
 The baseline retains only normalized facts, including the approximately 88.781s
 Linux total, 142.398s Windows total, and 103.179s Windows outlier.
 
