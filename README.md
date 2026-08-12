@@ -79,6 +79,12 @@ This is the guarded review path: propose a next step, preview the execution boun
 
 ## Operating model
 
+Host-wide running-system inventory asks use a bounded Linux evidence route that
+separates process, service, and Docker/container visibility. Process counts are
+point-in-time `ps` observations (including possible collector activity), service
+visibility is non-exhaustive, and unavailable container visibility is reported
+explicitly rather than inferred.
+
 ## How it works
 
 **Observe → Rank → Explain → Report → Review → Governed action → Verify → Receipt**

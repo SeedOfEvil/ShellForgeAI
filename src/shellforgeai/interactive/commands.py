@@ -1244,6 +1244,17 @@ def _is_imperative_service_restart_request(text: str) -> bool:
     return re.match(r"^perform service restarts?\b", normalized) is not None
 
 
+def _is_running_system_inventory(text: str) -> bool:
+    """Match the bounded host-wide process/service/container inventory family."""
+
+    normalized = _normalize_intent_text(text)
+    categories = all(word in normalized for word in ("process", "service", "container"))
+    evidence_shape = any(word in normalized for word in ("evidence", "observed facts"))
+    scope_shape = any(word in normalized for word in ("inventory", "overview", "summarize"))
+    limits_shape = any(word in normalized for word in ("limit", "visibility", "supported"))
+    return categories and evidence_shape and scope_shape and limits_shape
+
+
 def route_input(text: str) -> RoutedCommand:
     raw = text.strip()
     if not raw:
@@ -1558,6 +1569,8 @@ def route_input(text: str) -> RoutedCommand:
         return RoutedCommand(name="mutation_refused", args=raw)
     if any(phrase in lowered or phrase in raw_lower for phrase in _BRIEF_OPS_REPORT_PHRASES):
         return RoutedCommand(name="cli_dispatch", args=raw, argv=("status", "--brief"))
+    if _is_running_system_inventory(raw):
+        return RoutedCommand(name="diagnose", args="running_inventory")
     storage_perf_intents = [
         "i think my disk is slow",
         "disk is slow",

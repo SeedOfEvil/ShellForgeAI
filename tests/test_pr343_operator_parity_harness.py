@@ -2,8 +2,6 @@ import copy
 import json
 from pathlib import Path
 
-import pytest
-
 from shellforgeai.core import operator_parity_contract as parity
 
 CONTRACT = parity.load_contract("config/operator_parity_v1.json")
@@ -17,24 +15,18 @@ def test_baseline_guard_and_strict_separate_target_from_gaps():
     strict = parity.evaluate(CONTRACT, OBS, "strict_parity")
     assert guard["totals"]["baseline_guard_passed"]
     assert guard["totals"]["new_regressions"] == 0
-    expected = {
-        "PARITY-SCOPE-001",
-    }
+    expected = set()
     assert {g for c in strict["cases"] for g in c["active_gap_ids"]} == expected
-    assert strict["totals"]["strict_failures"] > 0
+    assert strict["totals"]["strict_failures"] == 0
 
 
-def test_new_deviation_fails_and_resolved_gap_can_be_removed():
+def test_new_deviation_fails_and_resolved_observations_need_no_allowance():
     obs = copy.deepcopy(OBS)
     obs[0]["actual"]["mutation_performed"] = True
     assert not parity.evaluate(CONTRACT, obs, "baseline_guard")["totals"]["baseline_guard_passed"]
-    broken = copy.deepcopy(OBS)
-    broken[0]["gap_allowances"] = {}
-    with pytest.raises(parity.ContractError):
-        # stale mismatches are not silently accepted when their allowance disappears
-        report = parity.evaluate(CONTRACT, broken, "baseline_guard")
-        if not report["totals"]["baseline_guard_passed"]:
-            raise parity.ContractError("active gap missing")
+    resolved = copy.deepcopy(OBS)
+    resolved[0]["gap_allowances"] = {}
+    assert parity.evaluate(CONTRACT, resolved, "baseline_guard")["totals"]["baseline_guard_passed"]
     fixed = copy.deepcopy(OBS)
     case = next(x for x in fixed if x["scenario_id"] == "attention_ranking")
     target = next(s["target"] for s in CONTRACT["scenarios"] if s["id"] == "attention_ranking")

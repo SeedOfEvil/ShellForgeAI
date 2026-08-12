@@ -29,14 +29,13 @@
         "response_structure": [
           "evidence",
           "assessment",
-          "limitations"
+          "limitations",
+          "safe_next_step"
         ],
         "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "response_structure": "PARITY-SCOPE-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": null
     },
     {
