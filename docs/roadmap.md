@@ -73,7 +73,7 @@ ShellForgeAI's active roadmap is forward-looking. The permanent final-state prod
 
 - Establish the canonical lifecycle and final-state implementation boundary in [North Star](north-star.md).
 - Keep document ownership clear: Product Status owns current maturity, V1 Scope owns the released V1 contract, Safety owns current safety and mutation rules, and this Roadmap owns staged delivery.
-- Add a documentation drift guard without changing runtime behavior.
+- [x] Maintain a semantic documentation drift guard without changing runtime behavior.
 
 ## Stage B — Approved-change contract: in progress
 
