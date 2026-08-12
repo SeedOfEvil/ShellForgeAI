@@ -2718,6 +2718,9 @@ def test_the_modules_are_not_imported_by_cli_approvals_recipes_or_execution():
         "approved_change_capability_support.py",
         "approved_change_capability_binding.py",
         "approved_change_plan_link_artifact_persistence.py",
+        # PR352 consumes only this maintained exact-ID loader to associate one
+        # validated artifact with already-created process identity evidence.
+        "approved_change_windows_identity_binding.py",
     }
     roots = [Path("src/shellforgeai/cli"), Path("src/shellforgeai/core")]
     for target in ("approved_change_approval_artifact", "approved_change_approval_persistence"):
