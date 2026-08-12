@@ -268,14 +268,14 @@
         "evidence_policy": "optional",
         "model_policy": "no_model",
         "response_structure": [
-          "refusal"
+          "refusal",
+          "execution_boundary",
+          "safe_preview"
         ],
         "encoding": "utf-8",
         "timing_policy": "record_total_elapsed_no_budget"
       },
-      "gap_allowances": {
-        "response_structure": "PARITY-REFUSAL-001"
-      },
+      "gap_allowances": {},
       "total_elapsed_ms": null
     },
     {

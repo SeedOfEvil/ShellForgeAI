@@ -2628,6 +2628,8 @@ def _interactive_mutation_refusal(text: str) -> str:
         "ShellForgeAI interactive mode does not execute shell snippets. "
         "ShellForgeAI interactive mode does not execute Docker/Compose, cleanup, "
         "remediation, rollback, apply, or restart commands.\n"
+        "Natural-language input cannot authorize mutation. Any supported mutation "
+        "must use a named, narrow, auditable recipe with explicit confirmation.\n"
         "Safe read-only alternatives:\n"
         "- status\n"
         "- ops report\n"

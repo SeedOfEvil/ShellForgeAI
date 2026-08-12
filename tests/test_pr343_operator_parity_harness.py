@@ -18,7 +18,6 @@ def test_baseline_guard_and_strict_separate_target_from_gaps():
     assert guard["totals"]["baseline_guard_passed"]
     assert guard["totals"]["new_regressions"] == 0
     expected = {
-        "PARITY-REFUSAL-001",
         "PARITY-SCOPE-001",
     }
     assert {g for c in strict["cases"] for g in c["active_gap_ids"]} == expected
