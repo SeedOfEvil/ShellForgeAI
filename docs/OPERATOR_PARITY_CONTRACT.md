@@ -33,8 +33,12 @@ These are deliberately separate layers. **Target** is the north star.
 allowances; they never redefine the target. Prompt 2 is routed as shared read-only analysis; its former intent allowance has
 been retired. Linux mutation refusals now provide the target refusal, explicit
 execution boundary, and suggested-only safe preview, so their former response
-allowance is also retired. Resolving any remaining gap requires target behavior
-and removal of its allowance.
+allowance is also retired. Linux running-system inventory now uses a dedicated,
+bounded evidence route: process measurements disclose point-in-time `ps` observer
+effects without adjusted counts, service visibility is explicitly non-exhaustive,
+and unavailable Docker visibility is stated rather than inferred. Its former scope
+allowance is retired. Resolving any remaining gap requires target behavior and
+removal of its allowance.
 
 `baseline_guard` accepts target behavior or a dimension-specific declared gap and
 fails undeclared deviations. `strict_parity` ignores allowances and reports every
@@ -72,4 +76,5 @@ python scripts/operator_parity_harness.py --mode baseline_guard
 python scripts/operator_parity_harness.py --mode strict_parity
 ```
 
-Strict mode currently exits nonzero by design while declared debt remains.
+Strict behavioral parity currently exits zero. The informational latency and
+continuity declarations remain tracked without weakening a behavioral target.

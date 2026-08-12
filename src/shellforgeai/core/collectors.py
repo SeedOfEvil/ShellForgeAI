@@ -346,6 +346,24 @@ def collect_service_evidence(context, service_name: str, since: str = "30m") -> 
     return _dedupe_items(items)
 
 
+def collect_running_inventory_evidence(context) -> list[EvidenceItem]:
+    """Compose the maintained bounded process, service, and container views."""
+
+    items = collect_service_evidence(context, "service-discovery")
+    items.extend(collect_docker_evidence(context))
+    for item in items:
+        if item.source in {"process.snapshot", "process.top"}:
+            item.metadata.update(
+                {
+                    "observation_scope": "point_in_time",
+                    "collector": "ps",
+                    "observer_effect": True,
+                    "count_adjusted": False,
+                }
+            )
+    return _dedupe_items(items)
+
+
 def collect_disk_evidence(context) -> list[EvidenceItem]:
     items = [
         _to_item(host.host_info(), EvidenceCategory.host, "Host information"),

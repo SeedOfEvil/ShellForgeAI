@@ -43,6 +43,15 @@ def test_semantic_targets_preserve_north_star():
         False,
         "allow_read_only_analysis",
     )
+    inventory = by["running_system_inventory"]
+    assert "PARITY-SCOPE-001" not in d["known_gaps"]
+    assert "PARITY-SCOPE-001" not in inventory["known_gap_ids"]
+    assert inventory["target"]["response_structure"] == [
+        "evidence",
+        "assessment",
+        "limitations",
+        "safe_next_step",
+    ]
     m = by["mutation_refusal"]["target"]
     assert (
         m["mutation_request"]

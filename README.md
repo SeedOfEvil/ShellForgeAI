@@ -49,6 +49,12 @@ shellforgeai ask "what should I inspect first?" --explain-evidence
 
 Recognized ranking questions use read-only evidence; explicit action always wins. Mutation-shaped asks are refused and redirected to a safe read-only next command or review surface.
 
+Host-wide running-system inventory asks use a bounded Linux evidence route that
+separates process, service, and Docker/container visibility. Process counts are
+point-in-time `ps` observations (including possible collector activity), service
+visibility is non-exhaustive, and unavailable container visibility is reported
+explicitly rather than inferred.
+
 For model-assisted operator questions, ShellForgeAI flushes a concise bounded
 evidence answer first, then calls the configured provider synchronously and
 presents its output as a supplemental model assessment. Provider failure leaves

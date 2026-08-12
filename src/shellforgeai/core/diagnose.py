@@ -23,6 +23,7 @@ from shellforgeai.core.collectors import (
     collect_package_evidence,
     collect_path_ownership_evidence,
     collect_performance_evidence,
+    collect_running_inventory_evidence,
     collect_service_evidence,
     collect_ssh_evidence,
     collect_windows_performance_evidence,
@@ -640,6 +641,8 @@ def diagnose_target(
         # collectors; return bounded read-only Windows evidence instead.
         return _windows_performance_diagnosis(context, target, ttype, warnings, platform_info)
     items = collect_host_evidence(context)
+    if canonical_target == "running_inventory":
+        items.extend(collect_running_inventory_evidence(context))
     log_targets = {
         "logs",
         "errors",

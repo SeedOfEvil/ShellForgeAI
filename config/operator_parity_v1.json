@@ -7,7 +7,6 @@
     "budget_ms": null
   },
   "known_gaps": {
-    "PARITY-SCOPE-001": "Linux scope inference and measurement-induced self-observation lack provenance hygiene.",
     "PARITY-LATENCY-001": "Windows baseline includes a large informational elapsed-time outlier.",
     "PARITY-CONTINUITY-001": "Prior-session evidence is not retained on a later turn on either platform."
   },
@@ -53,7 +52,6 @@
         "timing_policy": "record_total_elapsed_no_budget"
       },
       "known_gap_ids": [
-        "PARITY-SCOPE-001",
         "PARITY-LATENCY-001",
         "PARITY-CONTINUITY-001"
       ]

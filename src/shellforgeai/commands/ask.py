@@ -583,6 +583,26 @@ def register(app: typer.Typer) -> None:
                 findings = tuple(
                     f"{item.title}: {item.detail}" for item in list(evidence_result.findings)[:3]
                 )
+            inventory_limitations = ()
+            if route.target == "running_inventory":
+                docker_visible = evidence_result is not None and any(
+                    item.source in {"docker.detect", "docker.containers"} and item.ok
+                    for item in evidence_result.evidence.items
+                )
+                inventory_limitations = (
+                    "Process observations are point-in-time ps measurements; the collector "
+                    "itself may appear transiently, and ShellForgeAI does not subtract or "
+                    "guess observer-created rows.",
+                    (
+                        "Service visibility is bounded to available manager, listener, and "
+                        "known-service checks, not every service unit. Container visibility "
+                        "is bounded to the maintained Docker inventory."
+                        if docker_visible
+                        else "Service visibility is bounded to available manager, listener, "
+                        "and known-service checks, not every service unit. Container visibility "
+                        "is unavailable; no container state was inferred from process names."
+                    ),
+                )
             evidence_stage = EvidenceFirstResponse(
                 platform=build_platform_operator_contract().display_name,
                 evidence_label=f"{route.intent_label} evidence",
@@ -590,16 +610,21 @@ def register(app: typer.Typer) -> None:
                 intent=route.intent_label,
                 evidence_available=evidence_result is not None,
                 findings=findings,
-                limitations=(
+                limitations=inventory_limitations
+                or (
                     (
                         f"Evidence collection unavailable ({evidence_error.split(':', 1)[0]})."
                         if evidence_error
                         else "Only the strongest bounded findings are shown."
                     ),
                 ),
-                safe_next_commands=tuple(getattr(evidence_result, "safe_next_commands", ())[:1])
-                if evidence_result is not None
-                else (),
+                safe_next_commands=("shellforgeai ops report",)
+                if route.target == "running_inventory"
+                else (
+                    tuple(getattr(evidence_result, "safe_next_commands", ())[:1])
+                    if evidence_result is not None
+                    else ()
+                ),
             )
         if evidence_stage is not None:
             timeline.mark_evidence_ready()
