@@ -120,7 +120,32 @@ def register(app: typer.Typer) -> None:
         from shellforgeai.llm.schemas import ModelRequest
 
         cli = _cli()
-        if route_input(question).name == "shell_refused":
+        input_route = route_input(question)
+        ask_route = route_ask_intent(question)
+        normalized_question = " ".join(question.lower().split())
+        refusal_preview_request = (
+            input_route.name in {"mutation_refused", "shell_refused"}
+            and ask_route.mutation_request
+            and "restart" in normalized_question
+            and any(term in normalized_question for term in ("clean up", "cleanup", "reclaim"))
+            and any(term in normalized_question for term in ("safe preview", "read-only preview"))
+        )
+        if refusal_preview_request:
+            cli.console.print(
+                "Refused: natural-language mutation is not allowed.\n"
+                "No command or action was executed: no restart, cleanup, service/process "
+                "control, remediation, rollback, or recovery was performed.\n"
+                "Natural-language input cannot authorize mutation. Any supported mutation "
+                "must use a named, narrow, auditable recipe with explicit confirmation; this "
+                "request did not select, approve, prepare, or execute one.\n"
+                "Safe read-only previews (suggested only; not run):\n"
+                "- shellforgeai ops report\n"
+                "- shellforgeai audit cleanup review\n"
+                "- shellforgeai recipes eligibility --recipe "
+                "docker.disposable_restart --target <target>"
+            )
+            return
+        if input_route.name == "shell_refused":
             cli.console.print(
                 "Refused: ShellForgeAI ask is not a shell.\n"
                 "No command was executed. No evidence was collected. No action was taken."

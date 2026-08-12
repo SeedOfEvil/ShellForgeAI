@@ -31,8 +31,10 @@ These are deliberately separate layers. **Target** is the north star.
 **Observed baseline** is a normalized, non-sensitive record of the August 9,
 2026 Linux/Windows comparison. **Known gaps** are stable, explicitly scoped debt
 allowances; they never redefine the target. Prompt 2 is routed as shared read-only analysis; its former intent allowance has
-been retired. Resolving any remaining gap requires target behavior and removal of
-its allowance.
+been retired. Linux mutation refusals now provide the target refusal, explicit
+execution boundary, and suggested-only safe preview, so their former response
+allowance is also retired. Resolving any remaining gap requires target behavior
+and removal of its allowance.
 
 `baseline_guard` accepts target behavior or a dimension-specific declared gap and
 fails undeclared deviations. `strict_parity` ignores allowances and reports every
