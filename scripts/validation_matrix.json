@@ -528,6 +528,21 @@
       ]
     },
     {
+      "pattern": "src/shellforgeai/core/approved_change_windows_identity_binding.py",
+      "lane": "full",
+      "full_pytest_default": true,
+      "reason": "read-only exact PR342 Windows process-token identity evidence to exact PR319 durable approval-artifact provenance binding changed; no human authentication, approved_by comparison, freshness, authorization, persistence, preflight, receipt, or execution",
+      "tests": [
+        "tests/test_pr352_approved_change_windows_identity_binding.py",
+        "tests/test_pr342_windows_process_identity_evidence.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr309_approved_change_contract.py",
+        "tests/test_pr339_approved_change_pr304_evidence_binding.py",
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
       "pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py",
       "lane": "full",
       "full_pytest_default": true,
