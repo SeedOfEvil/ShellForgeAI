@@ -543,6 +543,22 @@
       ]
     },
     {
+      "pattern": "src/shellforgeai/core/approved_change_approval_assertion_age.py",
+      "lane": "full",
+      "full_pytest_default": true,
+      "reason": "read-only approval assertion chronology/age trust primitive using self-asserted approval time and untrusted evaluator-local UTC; no freshness, authorization, preflight, receipt, persistence, or execution decision",
+      "tests": [
+        "tests/test_pr353_approved_change_approval_assertion_age.py",
+        "tests/test_pr319_approved_change_approval_artifact_persistence.py",
+        "tests/test_pr318_approved_change_approval_workflow.py",
+        "tests/test_pr309_approved_change_contract.py",
+        "tests/test_pr352_approved_change_windows_identity_binding.py",
+        "tests/test_pr341_approved_change_pr304_evidence_freshness.py",
+        "tests/test_pr351_product_document_drift_guard.py",
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
       "pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py",
       "lane": "full",
       "full_pytest_default": true,
