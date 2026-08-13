@@ -1764,6 +1764,7 @@ def test_the_module_is_not_imported_by_cli_approvals_recipes_or_execution():
             "approved_change_plan_current_state.py",
             "approved_change_plan_link_artifact_persistence.py",
             "approved_change_pr304_evidence_binding.py",
+            "approved_change_persisted_plan_link_current_state_evidence.py",
         }
         and "approved_change_plan_link" in path.read_text(encoding="utf-8")
     ]

@@ -506,6 +506,20 @@
       ]
     },
     {
+      "pattern": "src/shellforgeai/core/approved_change_persisted_plan_link_current_state_evidence.py",
+      "lane": "targeted_runtime",
+      "reason": "read-only canonical identity for one exact maintained PR338 current-state-confirmed result; no independent filesystem evaluation, freshness, authorization, preflight, receipt, persistence, or execution",
+      "tests": [
+        "tests/test_pr355_approved_change_persisted_plan_link_current_state_evidence.py",
+        "tests/test_pr338_persisted_plan_link_current_state.py",
+        "tests/test_pr328_approved_change_plan_current_state.py",
+        "tests/test_pr337_approved_change_plan_link_artifact_persistence.py",
+        "tests/test_pr323_approved_change_plan_link.py",
+        "tests/test_pr351_product_document_drift_guard.py",
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
       "pattern": "src/shellforgeai/core/approved_change_pr304_evidence_freshness.py",
       "lane": "full",
       "full_pytest_default": true,
