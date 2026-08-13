@@ -559,6 +559,19 @@
       ]
     },
     {
+      "pattern": "src/shellforgeai/core/approved_change_approval_assertion_recency.py",
+      "lane": "full",
+      "full_pytest_default": true,
+      "reason": "read-only fixed policy classification over exact PR353 approval assertion chronology; no clock, filesystem, identity authentication, authorization, preflight, receipt, persistence, or execution",
+      "tests": [
+        "tests/test_pr354_approved_change_approval_assertion_recency.py",
+        "tests/test_pr353_approved_change_approval_assertion_age.py",
+        "tests/test_pr341_approved_change_pr304_evidence_freshness.py",
+        "tests/test_pr351_product_document_drift_guard.py",
+        "tests/test_pr157_validation_lane_optimizer.py"
+      ]
+    },
+    {
       "pattern": "src/shellforgeai/core/approved_change_plan_link_artifact_persistence.py",
       "lane": "full",
       "full_pytest_default": true,
