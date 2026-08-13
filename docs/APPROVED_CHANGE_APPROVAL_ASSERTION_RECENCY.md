@@ -37,6 +37,14 @@ identity before the fixed policy is constructed or evaluated. The maintained
 PR354 policy identity must then also be explicitly confirmed. Both digest
 confirmations use constant-time comparisons and fail closed.
 
+Identity confirmation proves the exact PR353 evaluation bytes, not their
+internal chronology truth by itself. Before applying the policy, PR354 parses
+both canonical UTC timestamps and independently verifies that reference time is
+not earlier than asserted time, their exact integer-microsecond delta equals
+`age_microseconds`, and `age_milliseconds_ceiling` is the correct presentation
+of that exact age. Contradictory facts receive no recency classification or
+recency-evaluation identity; PR354 rejects rather than repairs them.
+
 An eligible successful PR353 chronology must report its successful outcome,
 `clock_consistent=true`, and a present, non-negative exact age. A PR353
 `approval_assertion_clock_inconsistent` outcome receives the deterministic

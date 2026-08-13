@@ -11,6 +11,7 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -242,6 +243,24 @@ def _result(status: Status, reason: str, *, errors=(), **values: Any):
     )
 
 
+def _parse_pr353_canonical_utc(value: str) -> datetime:
+    """Parse only the exact canonical UTC text emitted by PR353."""
+    if not isinstance(value, str):
+        raise ValueError("PR353 timestamp must be canonical UTC text")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise ValueError("PR353 timestamp must use YYYY-MM-DDTHH:MM:SS.ffffffZ") from exc
+    if parsed.strftime("%Y-%m-%dT%H:%M:%S.%fZ") != value:
+        raise ValueError("PR353 timestamp must use YYYY-MM-DDTHH:MM:SS.ffffffZ")
+    return parsed
+
+
+def _elapsed_microseconds(start: datetime, end: datetime) -> int:
+    delta = end - start
+    return delta.days * 86_400_000_000 + delta.seconds * 1_000_000 + delta.microseconds
+
+
 def evaluate_approval_assertion_recency(
     approval_assertion_age_evaluation: ApprovedChangeApprovalAssertionAgeEvaluation
     | Mapping[str, Any],
@@ -335,15 +354,37 @@ def evaluate_approval_assertion_recency(
             "PR353 chronology is clock-inconsistent and cannot receive a recency classification",
             **base,
         )
-    if (
-        model.chronology_outcome != "approval_assertion_age_evaluated"
-        or not model.clock_consistent
-        or model.age_microseconds is None
-        or model.age_microseconds < 0
-    ):
+    if model.chronology_outcome != "approval_assertion_age_evaluated":
         return _result(
             "approval_assertion_recency_evaluation_failed",
             "PR353 chronology is not eligible for recency classification",
+            **base,
+        )
+
+    try:
+        asserted = _parse_pr353_canonical_utc(model.approval_asserted_at_utc)
+        reference = _parse_pr353_canonical_utc(model.evaluator_reference_utc)
+    except ValueError as exc:
+        return _result(
+            "approval_assertion_recency_evaluation_failed",
+            "PR353 chronology timestamps are not canonical UTC",
+            errors=[str(exc)],
+            **base,
+        )
+    recomputed_age = _elapsed_microseconds(asserted, reference)
+    chronology_consistent = (
+        model.clock_consistent
+        and reference >= asserted
+        and model.age_microseconds is not None
+        and model.age_microseconds >= 0
+        and recomputed_age == model.age_microseconds
+        and model.age_milliseconds_ceiling == (model.age_microseconds + 999) // 1000
+    )
+    if not chronology_consistent:
+        return _result(
+            "approval_assertion_recency_evaluation_failed",
+            "PR353 chronology facts contradict one another and cannot receive a recency "
+            "classification",
             **base,
         )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -11,12 +12,22 @@ from pydantic import ValidationError
 from shellforgeai.core import approved_change_approval_assertion_age as age
 from shellforgeai.core import approved_change_approval_assertion_recency as recency
 
+ASSERTED = datetime(2026, 8, 1, tzinfo=UTC)
+
+
+def canonical(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
 
 def age_evaluation(
     age_microseconds: int | None = 0,
     *,
     age_milliseconds_ceiling: int | None = None,
     consistent: bool = True,
+    asserted: datetime = ASSERTED,
+    reference: datetime | None = None,
+    asserted_text: str | None = None,
+    reference_text: str | None = None,
 ):
     if age_milliseconds_ceiling is None and age_microseconds is not None:
         age_milliseconds_ceiling = (age_microseconds + 999) // 1000
@@ -25,12 +36,18 @@ def age_evaluation(
         if consistent
         else "approval_assertion_clock_inconsistent"
     )
+    if reference is None:
+        reference = (
+            asserted + timedelta(microseconds=age_microseconds)
+            if age_microseconds is not None
+            else asserted - timedelta(microseconds=1)
+        )
     return age.ApprovedChangeApprovalAssertionAgeEvaluation(
         approval_artifact_id="aca_" + "a" * 64,
         approval_artifact_identity_sha256="a" * 64,
         subject_sha256="b" * 64,
-        approval_asserted_at_utc="2026-08-12T12:00:00.000000Z",
-        evaluator_reference_utc="2026-08-13T12:00:00.000000Z",
+        approval_asserted_at_utc=asserted_text or canonical(asserted),
+        evaluator_reference_utc=reference_text or canonical(reference),
         clock_consistent=consistent,
         age_microseconds=age_microseconds,
         age_milliseconds_ceiling=age_milliseconds_ceiling,
@@ -157,8 +174,8 @@ def test_exact_microsecond_boundary(microseconds, within):
 
 
 def test_ceiling_milliseconds_do_not_control_boundary():
-    # Both presentations say 86,400,001 ms; exact microseconds alone decide.
-    within = evaluate(age_evaluation(86_400_000_000, age_milliseconds_ceiling=86_400_001))
+    # Distinct correct ceiling values do not replace the exact-microsecond comparison.
+    within = evaluate(age_evaluation(86_400_000_000, age_milliseconds_ceiling=86_400_000))
     outside = evaluate(age_evaluation(86_400_000_001, age_milliseconds_ceiling=86_400_001))
     assert within.approval_assertion_within_age_window
     assert outside.approval_assertion_outside_age_window
@@ -170,6 +187,61 @@ def test_clock_inconsistent_chronology_is_unavailable_not_classified():
     assert not result.recency_evaluated
     assert not result.approval_assertion_within_age_window
     assert not result.approval_assertion_outside_age_window
+
+
+def assert_chronology_failure(result):
+    assert result.approval_assertion_age_evaluation_identity_confirmed
+    assert result.status == "approval_assertion_recency_evaluation_failed"
+    assert not result.recency_evaluated
+    assert not result.approval_assertion_recency_evaluated
+    assert not result.approval_assertion_within_age_window
+    assert not result.approval_assertion_outside_age_window
+    assert result.evaluation is None
+    assert result.recency_evaluation_identity_sha256 == ""
+
+
+def test_matching_sha_does_not_bypass_reproduced_ten_day_age_zero_contradiction():
+    model = age_evaluation(
+        0,
+        reference=ASSERTED + timedelta(days=10),
+        age_milliseconds_ceiling=0,
+    )
+    result = evaluate(model)
+    assert age.compute_approval_assertion_age_evaluation_sha256(model) == (
+        result.approval_assertion_age_evaluation_sha256
+    )
+    assert_chronology_failure(result)
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        age_evaluation(1, reference=ASSERTED),
+        age_evaluation(2, reference=ASSERTED + timedelta(microseconds=1)),
+        age_evaluation(1001, age_milliseconds_ceiling=1),
+        age_evaluation(1001, age_milliseconds_ceiling=3),
+    ],
+)
+def test_contradictory_derived_age_or_ceiling_fails_closed(model):
+    assert_chronology_failure(evaluate(model))
+
+
+@pytest.mark.parametrize(
+    ("asserted_text", "reference_text"),
+    [
+        ("2026-08-01T00:00:00Z", "2026-08-01T00:00:00.000000Z"),
+        ("2026-08-01T00:00:00.000000+00:00", "2026-08-01T00:00:00.000000Z"),
+        ("2026-08-01T00:00:00.000000Z", "not-a-timestamp"),
+    ],
+)
+def test_noncanonical_timestamp_text_fails_closed(asserted_text, reference_text):
+    result = evaluate(age_evaluation(0, asserted_text=asserted_text, reference_text=reference_text))
+    assert_chronology_failure(result)
+
+
+def test_age_evaluated_negative_timestamp_delta_fails_closed():
+    model = age_evaluation(0, reference=ASSERTED - timedelta(microseconds=1))
+    assert_chronology_failure(evaluate(model))
 
 
 def test_recency_identity_is_deterministic_non_circular_and_fact_sensitive():
