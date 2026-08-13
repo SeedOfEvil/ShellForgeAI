@@ -15,6 +15,11 @@ top-level match and every mapping. Incomplete, duplicate, reordered, unmatched,
 or operation-contradictory mappings fail closed with no evidence and no
 identity. Every non-confirmed PR338 status likewise produces neither.
 
+PR355 reports whether maintained PR338 governed current-state revalidation was
+evaluated, but intentionally does not expose a generic filesystem-access flag:
+PR338 may perform persisted-artifact loading before governed-root revalidation
+begins, and its phase flags are not generic filesystem telemetry.
+
 ## Canonical content
 
 The record binds the schema and evidence types; source operation and status;

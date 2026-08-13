@@ -123,6 +123,9 @@ def test_success_is_bounded_deterministic_non_circular_and_frozen(monkeypatch):
     assert first.evidence is not None
     assert first.evidence == second.evidence
     assert first.evidence_identity_sha256 == second.evidence_identity_sha256
+    assert first.evidence_identity_sha256 == (
+        "1b46b5b6d359f2f2ceff46fcfae1bea5786ba9b83c4f580d43c0193162f01957"
+    )
     canonical = evidence.canonical_persisted_plan_link_current_state_evidence_json(first.evidence)
     assert (
         evidence.compute_persisted_plan_link_current_state_evidence_sha256(first.evidence)
@@ -138,6 +141,90 @@ def test_success_is_bounded_deterministic_non_circular_and_frozen(monkeypatch):
         )
     with pytest.raises(ValidationError):
         first.evidence.plan_sha256 = "0" * 64
+
+
+def test_result_contract_has_no_generic_filesystem_telemetry(monkeypatch):
+    result, _ = invoke(monkeypatch)
+
+    assert (
+        "filesystem_accessed"
+        not in evidence.ApprovedChangePersistedPlanLinkCurrentStateEvidenceResult.model_fields
+    )
+    assert "filesystem_accessed" not in result.model_dump()
+
+
+@pytest.mark.parametrize(
+    ("status", "updates", "expected_status"),
+    [
+        (
+            "plan_link_artifact_confirmation_mismatch",
+            {
+                "plan_link_artifact_load_evaluated": True,
+                "plan_link_artifact_loaded": True,
+                "plan_link_artifact_identity_confirmed": False,
+                "plan_link_validated": False,
+                "plan_link_plan_comparison_evaluated": False,
+                "plan_link_plan_matched": False,
+            },
+            "current_state_evidence_not_confirmed",
+        ),
+        (
+            "persisted_link_plan_mismatch",
+            {
+                "plan_link_artifact_load_evaluated": True,
+                "plan_link_artifact_loaded": True,
+                "plan_link_artifact_identity_confirmed": True,
+                "plan_link_validated": True,
+                "plan_link_plan_comparison_evaluated": True,
+                "plan_link_plan_matched": False,
+            },
+            "current_state_evidence_not_confirmed",
+        ),
+        (
+            "plan_link_artifact_not_available",
+            {
+                "plan_link_artifact_load_evaluated": True,
+                "plan_link_artifact_loaded": False,
+                "plan_link_artifact_identity_confirmed": False,
+                "plan_link_validated": False,
+                "plan_link_plan_comparison_evaluated": False,
+                "plan_link_plan_matched": False,
+            },
+            "current_state_evidence_not_confirmed",
+        ),
+        (
+            "unsupported",
+            {
+                "plan_link_artifact_load_evaluated": True,
+                "plan_link_artifact_loaded": True,
+                "plan_link_artifact_identity_confirmed": True,
+                "plan_link_validated": True,
+                "plan_link_plan_comparison_evaluated": True,
+                "plan_link_plan_matched": True,
+            },
+            "current_state_evidence_unavailable",
+        ),
+    ],
+)
+def test_loader_phase_early_outcomes_expose_no_generic_filesystem_claim(
+    monkeypatch, status, updates, expected_status
+):
+    upstream = confirmed(
+        status=status,
+        current_state_revalidation_evaluated=False,
+        current_state_matched=False,
+        mappings=(),
+        **updates,
+    )
+
+    result, calls = invoke(monkeypatch, upstream)
+
+    assert len(calls) == 1
+    assert result.status == expected_status
+    assert not result.current_state_revalidation_evaluated
+    assert result.evidence is None
+    assert result.evidence_identity_sha256 == ""
+    assert "filesystem_accessed" not in result.model_dump()
 
 
 @pytest.mark.parametrize(

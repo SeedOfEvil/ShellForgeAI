@@ -115,7 +115,6 @@ class ApprovedChangePersistedPlanLinkCurrentStateEvidenceResult(_Frozen):
     current_state_revalidation_evaluated: bool = False
     current_state_matched: bool = False
     current_state_evidence_constructed: bool = False
-    filesystem_accessed: bool = False
     mutation_performed: Literal[False] = False
     artifact_write_performed: Literal[False] = False
     publication_performed: Literal[False] = False
@@ -259,7 +258,6 @@ def construct_persisted_plan_link_current_state_evidence(
         source_status=result.status,
         current_state_revalidation_evaluated=result.current_state_revalidation_evaluated,
         current_state_matched=result.current_state_matched,
-        filesystem_accessed=result.current_state_revalidation_evaluated,
     )
     if result.status != "current_state_confirmed":
         return ApprovedChangePersistedPlanLinkCurrentStateEvidenceResult(
