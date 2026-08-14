@@ -2,6 +2,12 @@
 
 # CLI reference
 
+## Recommended workflow
+
+The primary command experience supports **Observe → Investigate → Diagnose → Plan → Recommend → Validate → Report → Handoff**. No-subcommand interactive mode and the established non-interactive commands remain supported. Recognized operator intents use typed evidence before optional model synthesis; unknown slash commands remain deterministic and never call the model.
+
+Recommendation validation evaluates the procedure, prerequisites, verification criteria, and rollback/recovery guidance without executing it. Confirm-gated execution/remediation commands listed in this reference are bounded governed compatibility/testing surfaces outside the recommended workflow, not removed or deprecated.
+
 ShellForgeAI is exposed as `shellforgeai` and `sfai`.
 
 ## CLI internals (staged command-module split)

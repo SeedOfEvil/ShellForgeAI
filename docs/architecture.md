@@ -1,5 +1,15 @@
 # Architecture
 
+## Primary operator-guidance pipeline
+
+The active product architecture follows this one-way pipeline:
+
+**interface → platform routing → typed collectors → evidence and provenance → deterministic assessment and ranking → evidence-grounded model synthesis → solution/runbook generation → reports and handoff → validation and policy**
+
+The interface accepts CLI or interactive intent. Platform routing selects only supported, bounded collectors. Collector outputs become an explicit evidence bundle with provenance and unavailable states. Deterministic assessment and ranking run before optional model synthesis. Synthesis explains that evidence and composes an operator-ready solution or runbook; it does not execute tools. Reports and handoffs preserve the diagnosis, procedure, verification criteria, recovery guidance, limitations, and safe next steps. Validation checks the recommendation, prerequisites, verification criteria, rollback/recovery guidance, and policy compliance without executing the procedure.
+
+The primary workflow therefore ends with an operator-ready handoff. Existing confirm-gated execution and remediation implementations remain bounded governed compatibility/testing surfaces outside this pipeline. Their command-specific gates remain unchanged.
+
 The approved-change chain separates structural and live facts: PR323 associates
 one approved capability binding with one validated saved plan, while the
 read-only current-state revalidation API compares that exact link with only the

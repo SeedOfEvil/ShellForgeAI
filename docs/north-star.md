@@ -1,83 +1,36 @@
 # North Star
 
-This document is the canonical permanent final-state product contract for ShellForgeAI. Current maturity, current V1 scope, and current safety rules remain defined in [Product Status](PRODUCT_STATUS.md), [V1 Scope](v1-scope.md), and [Safety](safety.md); the staged path is tracked in [Roadmap](roadmap.md).
+This is ShellForgeAI's canonical permanent product contract. [Product Status](PRODUCT_STATUS.md) owns current maturity, [V1 Scope](v1-scope.md) owns released scope, and [Safety](safety.md) owns current policy.
 
-## Canonical final-state promise
+## Product promise
 
-ShellForgeAI is one interactive CLI that turns operator intent into an evidence-backed plan, procedure, solution, or fix and, after explicit operator approval, can safely implement that bounded change, verify the outcome, and report it.
+ShellForgeAI turns operator intent and current, typed evidence into an operator-ready solution and handoff through one coherent CLI product.
 
-Implementation is part of the final product promise, but only inside the operator-controlled lifecycle and implementation boundary defined here.
+**Observe → Investigate → Diagnose → Plan → Recommend → Validate → Report → Handoff**
 
-## Operator lifecycle
+1. **Observe:** identify the target, desired outcome, urgency, and constraints.
+2. **Investigate:** collect bounded typed evidence before recommendation and retain provenance.
+3. **Diagnose:** distinguish observed facts, deterministic assessment, likely causes, and uncertainty.
+4. **Plan:** define prerequisites, ordered procedure, expected impact, decision points, and blast radius.
+5. **Recommend:** provide the best-supported solution and explain why it ranks above alternatives.
+6. **Validate:** validate the recommendation and procedure, prerequisites, verification criteria, and rollback or recovery guidance. This stage does not execute the procedure.
+7. **Report:** preserve evidence, diagnosis, recommendation, limitations, and remaining risk.
+8. **Handoff:** give the operator or next reviewer an actionable, reviewable packet with safe next steps.
 
-Understand → Investigate → Diagnose → Propose → Obtain approval → Implement → Verify → Report
+## Operator-ready solution contract
 
-1. **Understand:** establish the operator's intended outcome, target, urgency, and constraints.
-2. **Investigate:** collect bounded, typed, current evidence before recommendation.
-3. **Diagnose:** identify the likely cause and separate facts from uncertainty.
-4. **Propose:** present the specific change, expected impact, procedure, preconditions, verification criteria, and rollback posture.
-5. **Obtain approval:** receive explicit operator approval for that exact bounded change.
-6. **Implement:** execute only through a supported implementation capability whose scope matches the approved proposal.
-7. **Verify:** collect fresh evidence proving success, failure, partial success, inconclusive outcome, or changed conditions.
-8. **Report:** state factually what was attempted, what changed, what did not change, verification results, receipts, and any remaining risk.
+A complete recommendation identifies the exact target and desired outcome; evidence and provenance; diagnosis and uncertainty; prerequisites and current-state assumptions; expected impact and blast radius; ordered procedure and decision points; verification criteria; rollback or recovery guidance; limitations; and audit or handoff artifacts.
 
-## What an approved change must contain
+Validation evaluates whether that guidance is coherent, sufficiently evidenced, feasible for the stated environment, verifiable, and recoverable. It never implies that a recommendation was executed or that an outcome was verified.
 
-An executable approved change must identify, at minimum:
+## Reasoning and trust boundary
 
-- the exact target;
-- the desired outcome;
-- the evidence and diagnosis supporting the proposal;
-- the exact bounded proposed change;
-- the expected impact and blast radius;
-- the ordered procedure;
-- prerequisites and current-state gates;
-- approval identity or explicit confirmation;
-- verification criteria;
-- rollback or recovery awareness;
-- audit and receipt requirements;
-- unsupported or irreversible aspects.
+Platform routing selects supported typed collectors. Evidence and provenance feed deterministic assessment and ranking before evidence-grounded model synthesis. The model explains and composes guidance; ShellForgeAI's runtime executes collectors, and model output never becomes an executable command.
 
-PR308 defines no JSON schema, database object, CLI syntax, executor interface, or mutation engine for this contract.
+The primary workflow ends at operator handoff. Existing confirm-gated execute and remediation utilities remain bounded, governed compatibility/testing surfaces outside the primary recommended workflow. They require their existing explicit policy, approval, identity, current-state, scope, verification, and receipt gates and do not create general execution authority.
 
-## Implementation boundary
+ShellForgeAI remains one coherent CLI product with supported deterministic subcommands: no dashboard, autonomous background control plane, general-purpose shell, arbitrary natural-language execution, broad infrastructure management platform, or competing interface.
 
-Implementation is part of the product promise. ShellForgeAI may implement only the specific solution it developed with the operator, represented as an exact, reviewable, explicitly approved, bounded, and auditable change.
+## Current product relationship
 
-Operator intent, free-form model output, or natural-language approval alone never becomes an executable command. Approval authorizes only a supported implementation capability whose target, scope, impact, procedure, preconditions, verification criteria, and rollback posture match the approved change.
-
-Approval does not bypass capability support, safety gates, target identity, current-state checks, preconditions, state revalidation, scope limits, verification requirements, or audit requirements. Unsupported actions, changed targets, stale evidence, failed preconditions, expanded blast radius, or materially changed conditions block implementation and return the workflow to investigation or proposal.
-
-This boundary does not authorize arbitrary shell, arbitrary PowerShell, arbitrary subprocesses, commands invented by a model, or open-ended natural-language execution.
-
-## Verification and reporting
-
-Implementation is never the final lifecycle stage. Fresh post-change evidence is required before ShellForgeAI reports an outcome. Verification may conclude success, failure, partial success, inconclusive, or blocked.
-
-Reporting must distinguish observed facts from assumptions. The final report must identify the exact approved change, actions attempted, actions completed, verification results, artifacts or receipts, and remaining risk. ShellForgeAI must not claim success when verification is missing, stale, failed, or inconclusive.
-
-Rollback and recovery awareness are permanent requirements. Reversible and irreversible effects must be identified, and a rollback or recovery procedure should be proposed where feasible. Automatic rollback is not guaranteed. Rollback itself requires support, validation, bounded scope, and approval where applicable.
-
-## Permanent product boundaries
-
-ShellForgeAI remains one CLI-first interactive operator product:
-
-- no dashboard;
-- no autonomous background control plane;
-- no general-purpose shell;
-- no arbitrary natural-language execution;
-- no general-purpose remote administration product;
-- no broad infrastructure orchestration or management platform;
-- no competing user interface that fragments the operator lifecycle;
-- no open-ended capability expansion through unrestricted plugins or model-generated execution;
-- no implementation outside specifically supported solution types.
-
-"One interactive CLI" means one coherent ShellForgeAI CLI product, including its interactive operator experience and supported deterministic subcommands. It does not require removing deterministic subcommands, and it does not authorize additional competing product interfaces.
-
-ShellForgeAI may expand implementation capability one reviewed solution type at a time without becoming a general infrastructure platform.
-
-## Current product versus final state
-
-The North Star is a final-state contract, not a claim that every stage is universally implemented today. Current maturity remains defined by [Product Status](PRODUCT_STATUS.md): V1 released, early beta-quality, guarded, and not production-autonomous. Current released scope remains defined by [V1 Scope](v1-scope.md), and current safety and mutation rules remain defined by [Safety](safety.md).
-
-V1 is the released foundation for the final lifecycle, not the complete final-state lifecycle across arbitrary operator-developed solutions.
+This product contract is not a claim that every guidance capability has equal maturity today. V1 is the released foundation, not the complete product trajectory. Linux/Docker is the released core; Windows is validated preview/early support. Delivery priorities are tracked by outcomes in [Roadmap](roadmap.md).

@@ -1,5 +1,13 @@
 # Safety
 
+## Primary guidance boundary
+
+ShellForgeAI is read-only by default and its recommended workflow ends with an operator-ready report and handoff. Recommendation validation checks evidence, procedure prerequisites, verification criteria, and rollback/recovery guidance; it does not run the procedure. Recognized operations intents collect typed read-only evidence before model synthesis, while unknown slash commands do not call the model.
+
+Natural-language mutation requests are refused deterministically. There is no arbitrary shell, arbitrary PowerShell, or arbitrary command execution from prompts, and no autonomous production remediation. `apply` remains validation-only in this alpha.
+
+Existing confirm-gated execute, recovery, and remediation utilities remain explicit, gated, bounded governed compatibility/testing surfaces outside the primary recommended workflow. They retain their narrow capability, target, approval, current-state, policy, verification, receipt, and recovery gates; workspace trust and model output never lift those gates.
+
 Operator-facing command suggestions pass through a deterministic, read-only
 validation boundary before rendering or bounded context retention. The boundary
 checks the packaged Typer/Click command path, arguments, options, maintained
