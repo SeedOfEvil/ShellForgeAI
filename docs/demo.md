@@ -1,13 +1,15 @@
 # 5-Minute Linux/Docker Operator Demo (V1)
 
-## What this demo proves
+## Outcomes demonstrated
 
 - ShellForgeAI can inspect a Linux/Docker scene safely with read-only defaults.
 - The V1 command spine is real, current, and evidence-first.
 - Operator artifacts can be produced, saved, compared, and handed off.
 - Deterministic ask routing can summarize incidents and refuse mutation.
+- Ranked evidence becomes an operator-ready recommendation with prerequisites,
+  verification criteria, rollback/recovery guidance, and a report handoff.
 
-## What this demo does not do
+## Safety boundary
 
 - It does not restart production services.
 - It does not run `shellforgeai remediation execute --confirm` (gated/non-goal for this demo).
@@ -72,6 +74,10 @@ Use saved reports as handoff-ready evidence:
 - `shellforgeai ops report compare-latest`
 
 Share the latest saved report plus compare output with the next operator.
+Recommendation validation in this path checks the proposed procedure,
+prerequisites, verification criteria, and rollback/recovery guidance; it does
+not execute remediation. Existing confirm-gated utilities are governed
+compatibility/testing surfaces outside this recommended demo.
 
 ## Mutation refusal demo
 

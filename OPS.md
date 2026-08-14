@@ -1,5 +1,11 @@
 # OPS
 
+## Recommended operator workflow
+
+Use **Observe → Investigate → Diagnose → Plan → Recommend → Validate → Report → Handoff**. Begin with `status`, `triage`, or an evidence-backed `ask`; preserve the result with `ops report --save`; finish with `handoff --save`. Validation means checking the recommended procedure, prerequisites, verification criteria, and rollback/recovery guidance—not executing it.
+
+Confirm-gated recipe, execution, recovery, and remediation commands documented below remain bounded governed compatibility/testing surfaces. They are outside the recommended workflow and keep all existing target, confirmation, current-state, policy, verification, and receipt gates. See [Command Surface Audit](docs/COMMAND_SURFACE_AUDIT.md) and [V1 Release Candidate](docs/V1_RELEASE_CANDIDATE.md).
+
 ## V2 2AM golden path
 
 1. `shellforgeai status` — read-only concise status; no model call and no mutation.

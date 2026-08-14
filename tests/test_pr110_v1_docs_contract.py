@@ -44,8 +44,9 @@ def test_v1_docs_exist() -> None:
 def test_readme_contains_v1_shape() -> None:
     text = _read(Path("README.md"))
     for needle in (
-        "what this is",
-        "what this is not",
+        "evidence-backed operator guidance",
+        "operator-ready guidance",
+        "evidence and model reasoning",
         "shellforgeai doctor",
         "shellforgeai ops report",
         "shellforgeai triage docker detail",
@@ -59,7 +60,7 @@ def test_v1_scope_contains_contract_sections() -> None:
     text = _read(Path("docs/v1-scope.md"))
     for needle in (
         "v1 core capabilities",
-        "v1 non-goals",
+        "v1 operator contract",
         "read-only by default",
         "mutation boundaries",
         "no autonomous production remediation",

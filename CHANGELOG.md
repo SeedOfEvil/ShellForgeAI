@@ -4,6 +4,10 @@ All notable changes to ShellForgeAI are documented in this file.
 
 ## [Unreleased]
 
+### Product contract
+
+- Active documentation now centers the primary workflow on evidence-backed diagnosis, operator-ready procedures, recommendation validation, reports, and handoff. Validation checks guidance and recovery criteria rather than executing it. Existing confirm-gated execution/remediation utilities remain bounded governed compatibility/testing surfaces outside that workflow.
+
 ### Windows interactive performance platform-awareness (PR279)
 
 - The interactive slow-system/performance diagnosis route (for example

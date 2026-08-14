@@ -1,5 +1,9 @@
 # Windows/PowerShell V1
 
+Windows is validated preview/early support; Linux/Docker remains the released V1 core. Windows operator paths use the same evidence-backed guidance contract: platform routing, bounded local typed collectors, provenance, deterministic assessment, optional grounded synthesis, operator-ready procedures, non-executing recommendation validation, and report/handoff.
+
+The Windows confirm-gated runtime-reconciliation utility remains a bounded governed compatibility/testing surface outside the primary recommended workflow. Its existing identity, plan, current-state, containment, confirmation, verification, and receipt requirements remain unchanged.
+
 ## Status
 
 Windows support is preview/early support. It provides local, read-only evidence commands, deterministic operator guidance, and validated Windows Server 2025 workflows without changing ShellForgeAI's overall product maturity: V1 released; early beta-quality; guarded and not production-autonomous. Linux/Docker remains the primary V1 lane.

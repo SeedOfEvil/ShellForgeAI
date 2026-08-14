@@ -8,8 +8,8 @@ README = Path("README.md")
 SAFETY = Path("docs/safety.md")
 
 REQUIRED_SECTIONS = [
-    "## What this demo proves",
-    "## What this demo does not do",
+    "## Outcomes demonstrated",
+    "## Safety boundary",
     "## Prerequisites",
     "## 5-minute path",
     "## Expected suspects",

@@ -1,89 +1,34 @@
 # V1 Scope and Release Contract
 
-## V1 contract
+ShellForgeAI V1 is released. V1 is the released foundation, not the complete product trajectory described by the [North Star](north-star.md). Linux/Docker is the primary supported V1 lane; Windows remains validated preview/early support.
 
-Authoritative release promotion checklist: [`docs/V1_RELEASE_CANDIDATE.md`](V1_RELEASE_CANDIDATE.md).
+## V1 operator contract
 
-ShellForgeAI V1 is released, early beta-quality, guarded, and not production-autonomous. Linux/Docker is the primary supported V1 lane. V1 is the released foundation, not the complete final-state lifecycle. The permanent final-state contract is defined in [`docs/north-star.md`](north-star.md).
+The released core supports an evidence-backed path from observation to handoff:
 
-ShellForgeAI V1 is a CLI-first Linux/Docker operator knife. It safely inspects
-Linux/Docker scenes, ranks suspects, creates evidence-backed operator reports,
-saves/validates/exports/compares those reports, routes common operator asks
-deterministically, and refuses or gates mutation.
+- bounded typed Linux/Docker evidence collection and provenance;
+- deterministic assessment, suspect ranking, and diagnosis;
+- optional evidence-grounded model synthesis;
+- operator plans and recommended procedures;
+- validation of prerequisites, verification criteria, and rollback/recovery guidance without executing the recommendation;
+- saved reports, history, comparison, exports, and handoff artifacts.
 
 ## V1 core capabilities
 
-1. Runtime/health
-   - `shellforgeai --version`
-   - `shellforgeai doctor`
-   - `shellforgeai model doctor`
-   - `shellforgeai self-test commands`
-   - `shellforgeai remediation self-test`
-2. Linux/Docker inspection
-   - deterministic Docker triage ranking (`triage docker`)
-   - deterministic triage detail (`triage docker detail <target>`)
-   - diagnose/triage cohesion for container targets
-   - no mutation in inspection lanes
-3. Ops report lifecycle
-   - `shellforgeai ops report`
-   - `shellforgeai ops report --json`
-   - `shellforgeai ops report --save`
-   - `shellforgeai ops report validate`
-   - `shellforgeai ops report history`
-   - `shellforgeai ops report compare`
-   - `shellforgeai ops report compare-latest`
-   - `shellforgeai ops report export`
-   - `shellforgeai ops report export-validate`
-4. Deterministic ask routing
-   - 2AM/operator prompts route to deterministic ops report/triage paths
-   - “what is on fire” style prompts route deterministically
-   - mutation prompts refuse deterministically with safe read-only alternatives
-5. Governed remediation preview/testing
-   - eligibility and explain surfaces
-   - plan/validate/preflight metadata and receipts
-   - self-test coverage for quick/full profiles
-   - disposable proof paths clearly labeled
-   - no casual production remediation in V1
+Core surfaces include `doctor`, `model doctor`, `status`, `diagnose`, `triage docker`, `ask`, `ops report`, `plan`, `apply` validation, `verify`, `handoff`, `audit`, `tools`, `inspect`, and `model`. The auditable inventory and classifications are in [V1 Command Surface](V1_COMMAND_SURFACE.md).
 
-## V1 non-goals
-
-V1 is not an autonomous infra repair agent, production remediation bot, web UI,
-secrets manager, monitoring platform replacement, SIEM replacement, generalized
-knowledge/research engine, or broad “AI can do everything” framework.
-
-V1 does not run arbitrary shell from user prompts, mutate production from
-natural language, or casually prune/delete/restart broad infrastructure.
-
-## Supported environment assumptions
-
-- Linux host or Linux container runtime context.
-- Docker-oriented evidence collection available for container triage/report.
-- No external internet requirement for deterministic safety routes.
-- Model/provider availability is optional for deterministic safety/reporting
-  routes; refusal and deterministic operator paths remain available.
+Canonical safe examples include `shellforgeai ops report`, `shellforgeai ops report --save`, `shellforgeai ops report history`, `shellforgeai ops report compare-latest`, `shellforgeai triage docker detail <target>`, `shellforgeai remediation eligibility --target <target> --explain`, and `shellforgeai remediation self-test --profile quick`.
 
 ## Mutation boundaries
 
 - Read-only by default.
 - Natural-language mutation requests are deterministically refused.
-- Governed mutation lanes are explicit, gated, and documented as disposable
-  proof/testing pathways.
-- Production mutation is not part of the V1 release promise.
-- No autonomous production remediation.
+- `apply` remains validation-only in the alpha workflow.
+- Governed mutation lanes are explicit, gated compatibility/testing surfaces outside the primary recommended workflow.
+- Production mutation is not part of the V1 release promise; there is no autonomous production remediation.
 
-## V1 release acceptance checklist
+Existing confirm-gated execute and recovery utilities remain available under their narrow target, approval, policy, current-state, verification, and receipt contracts. Their existence does not authorize arbitrary shell or model-directed execution.
 
-- README clearly states what ShellForgeAI is and is not.
-- Architecture documents CLI → collectors → triage → ops reports → artifacts → governed remediation.
-- Safety docs state read-only defaults, mutation refusal, and governed gates.
-- Demo docs provide a 5-minute Linux/Docker workflow and mutation refusal demo.
-- Docs use canonical safe commands (`ops report`, `--save`, `history`, `compare-latest`, triage detail, remediation eligibility).
-- Docs avoid casual dangerous commands outside clearly gated sections.
-- Regression tests cover doc presence, V1 command spine, and safety wording.
+## Release acceptance
 
-- Release acceptance includes: `shellforgeai v1 check --profile standard --json` passes.
-
-## Command inventory reference
-
-For the auditable V1 command inventory and safety classification matrix, see
-[`docs/V1_COMMAND_SURFACE.md`](V1_COMMAND_SURFACE.md).
+V1 acceptance preserves evidence-first routing, deterministic slash-command behavior, safe command compatibility, artifact validation, Linux/Docker release checks, and truthful Windows preview labeling. See the [release candidate checklist](V1_RELEASE_CANDIDATE.md), [Safety](safety.md), and [V1 validation](V1_VALIDATION.md).
