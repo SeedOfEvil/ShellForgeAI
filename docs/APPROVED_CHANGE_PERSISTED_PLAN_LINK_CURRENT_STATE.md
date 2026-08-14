@@ -80,3 +80,17 @@ The fixed safety ledger reports read-only behavior and no mutation,
 persistence, receipt, authorization, preflight, service/process/registry
 control, shell/subprocess/PowerShell/WinRM/QGA, provider/model, network,
 credential, or auth-cache access.
+
+## Canonical evidence consumer
+
+The separate current-state evidence seam calls this maintained PR338 operation
+exactly once from the same explicit inputs. Only an internally coherent
+`current_state_confirmed` result can become bounded canonical in-memory evidence
+with a deterministic, non-circular content identity. PR338 remains the sole
+governed-root authority; the consumer performs no second filesystem evaluation.
+It includes relative mappings and PR338 root fingerprints, never absolute roots
+or raw contents. The identity records point-in-time evidence content only: no
+clock or observation timestamp is added, identical content may produce the same
+identity across invocations, and state may become stale immediately. This adds
+no freshness, authentication, authorization, readiness, preflight, receipt,
+persistence, or execution authority.
