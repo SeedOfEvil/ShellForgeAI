@@ -20,9 +20,9 @@ The result is operator-ready guidance: a specific target and desired outcome, ev
 
 ## Evidence and model reasoning
 
-Typed collectors and deterministic assessment establish the factual base. When configured, a model synthesizes that bounded evidence into a clearer explanation and solution; it does not run ShellForgeAI tools or turn free-form text into commands. Provider failure leaves the deterministic evidence available.
+Typed collectors and deterministic assessment establish the factual base. When configured, a model synthesizes that bounded evidence into a clearer explanation and solution while ShellForgeAI retains tool control and keeps free-form text advisory. Provider failure leaves the deterministic evidence available.
 
-ShellForgeAI is read-only by default. Deterministic mutation refusal applies to mutation-shaped asks, unsafe broad mutation is refused, and unknown slash commands never reach a model. Existing confirm-gated execution and remediation utilities remain bounded, governed compatibility/testing surfaces outside the primary recommended workflow; they are not a natural-language mutation agent or production-autonomous operation.
+ShellForgeAI is read-only by default. Deterministic mutation refusal keeps mutation-shaped and unsafe broad asks within operator control, and slash-command routing keeps unknown commands away from the model. Existing confirm-gated execution and remediation utilities remain bounded, governed compatibility/testing surfaces outside the primary recommended workflow, with explicit gates for their narrow test and reference use.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ The installed console commands are `shellforgeai` and `sfai`.
 
 - **Linux/Docker:** primary supported V1 operating lane and release-validation basis.
 - **Windows:** validated preview/early support for bounded local evidence and operator guidance, including Windows Server 2025 workflows. See [Windows/PowerShell V1](docs/WINDOWS_POWERSHELL_V1.md).
-- **Other platforms:** conversation and help remain available, while unsupported operator evidence routes fail closed and direct the operator to platform diagnostics.
+- **Other platforms:** conversation and help remain available; operational evidence routing stays bounded to validated platforms and directs operators to platform diagnostics when a collector lane is unavailable.
 
 ## Documentation
 

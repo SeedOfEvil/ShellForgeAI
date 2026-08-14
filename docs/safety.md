@@ -4,7 +4,7 @@
 
 ShellForgeAI is read-only by default and its recommended workflow ends with an operator-ready report and handoff. Recommendation validation checks evidence, procedure prerequisites, verification criteria, and rollback/recovery guidance; it does not run the procedure. Recognized operations intents collect typed read-only evidence before model synthesis, while unknown slash commands do not call the model.
 
-Natural-language mutation requests are refused deterministically. There is no arbitrary shell, arbitrary PowerShell, or arbitrary command execution from prompts, and no autonomous production remediation. `apply` remains validation-only in this alpha.
+Natural-language mutation requests are refused deterministically. There is no arbitrary shell, arbitrary PowerShell, or arbitrary command execution from prompts, and no autonomous production remediation. `apply` remains validation-only in the released V1 workflow.
 
 Existing confirm-gated execute, recovery, and remediation utilities remain explicit, gated, bounded governed compatibility/testing surfaces outside the primary recommended workflow. They retain their narrow capability, target, approval, current-state, policy, verification, receipt, and recovery gates; workspace trust and model output never lift those gates.
 
@@ -68,9 +68,9 @@ nothing, and points only to `shellforgeai platform doctor --json`. Natural
 language still cannot execute, and maintained mutation refusal remains ahead
 of platform evidence handling with unchanged wording.
 
-## North Star implementation boundary
+## Governed compatibility/testing boundary
 
-Future approved implementation remains subject to the [North Star](north-star.md) contract: supported, typed, bounded implementation of the exact approved solution, not raw natural-language or arbitrary command execution.
+The [North Star](north-star.md) ends at an operator-ready handoff. Existing approved-change, execute, recovery, and remediation utilities are subordinate compatibility/testing and reference surfaces outside the primary recommended workflow. Their named, typed, bounded contracts preserve operator confirmation and policy control without making execution a future product destination.
 
 ## Boundaries
 

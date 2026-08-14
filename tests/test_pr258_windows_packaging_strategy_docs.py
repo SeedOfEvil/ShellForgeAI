@@ -24,38 +24,43 @@ def test_windows_and_packaging_docs_exist() -> None:
     assert PACKAGING_DOC.exists()
 
 
-def test_windows_doc_defines_read_only_local_v1_scope() -> None:
+def test_windows_doc_defines_current_validated_preview_scope() -> None:
     doc = _lower(WINDOWS_DOC)
 
-    assert "windows server 2025 shellforgeai test vm" in doc
+    assert "windows server 2025 is the validated preview environment" in doc
+    assert "current evidence coverage" in doc
+    assert "current command surface" in doc
+    assert "evidence and provenance remain authoritative" in doc
     assert "read-only" in doc
     assert "local host evidence first" in doc
-    assert "powershell version" in doc
-    assert "execution policy" in doc
-    assert "os info" in doc
+    assert "powershell availability" in doc
+    assert "execution-policy context" in doc
+    assert "platform, os, architecture" in doc
     assert "services" in doc and "processes" in doc
     assert "event logs" in doc or "event-log" in doc
     assert "disk" in doc and "network" in doc
 
 
-def test_windows_doc_explicitly_excludes_unsafe_v1_behavior() -> None:
+def test_windows_doc_keeps_operator_control_and_governed_utility_subordinate() -> None:
     doc = _lower(WINDOWS_DOC)
 
-    assert "run arbitrary powershell" in doc or "arbitrary powershell execution" in doc
+    assert "arbitrary powershell execution" in doc
     assert "winrm" in doc
-    assert "remote execution" in doc or "remote fleet management" in doc
-    assert "mutate services" in doc or "no mutation" in doc
-    assert "restart services" in doc
+    assert "remote execution" in doc
+    assert "service restart or mutation" in doc
     assert "remediation" in doc
     assert "rollback" in doc
     assert "recovery" in doc
+    assert "governed compatibility utility" in doc
+    assert "outside the primary recommended workflow" in doc
+    assert "not the current product roadmap or a future execution destination" in doc
 
 
-def test_windows_doc_mentions_platform_detection_and_graceful_unsupported() -> None:
+def test_windows_doc_mentions_platform_detection_and_structured_unavailable_state() -> None:
     doc = _lower(WINDOWS_DOC)
 
-    assert "platform detection" in doc or "platform detector" in doc
-    assert "graceful unsupported" in doc
+    assert "platform detection" in doc
+    assert "structured status" in doc
     assert '"platform": "windows"' in doc
     assert '"read_only": true' in doc
     assert '"mutation_performed": false' in doc
@@ -110,10 +115,6 @@ def test_readme_or_roadmap_pointer_stays_concise_if_present() -> None:
     if "windows/powershell v1" not in combined and "windows read-only doctor" not in combined:
         return
 
-    assert (
-        "planned as read-only local evidence" in combined
-        or "windows read-only doctor prototype" in combined
-    )
+    assert "windows is validated preview/early support" in combined
     assert "linux/docker" in combined
-    assert "safety model remains unchanged" in combined or "read-only" in combined
-    assert "already complete" not in combined
+    assert "read-only" in combined

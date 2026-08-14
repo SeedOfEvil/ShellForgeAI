@@ -8,171 +8,98 @@ The Windows confirm-gated runtime-reconciliation utility remains a bounded gover
 
 Windows support is preview/early support. It provides local, read-only evidence commands, deterministic operator guidance, and validated Windows Server 2025 workflows without changing ShellForgeAI's overall product maturity: V1 released; early beta-quality; guarded and not production-autonomous. Linux/Docker remains the primary V1 lane.
 
-## Goal
+## Operator outcomes
 
-Windows/PowerShell V1 extends ShellForgeAI's evidence-first posture to a local Windows host without turning the product into a PowerShell executor, remote administration tool, fleet manager, or autonomous repair agent.
+The validated Windows preview helps operators identify the local host and runtime
+context, review bounded OS, service, process, disk, memory, network, volume, and
+System event metadata, rank visible signals deterministically, and prepare an
+evidence-backed procedure and handoff. Optional model synthesis remains grounded
+in collected evidence and advisory.
 
-Implemented preview capabilities include local read-only doctor/status/evidence bundles plus bounded services, disks, processes, memory, network, volumes, and System event metadata slices where the host supports them. These commands collect local evidence or return structured unsupported output; they do not perform Windows mutation.
+## Validation and support basis
 
-The preview lane helps answer:
+Windows Server 2025 is the validated preview environment. Support is local-first
+and read-only, with structured platform diagnostics whenever a requested evidence
+lane is unavailable. Linux/Docker remains the released V1 core and release-
+validation basis.
 
-- What Windows host am I on?
-- What PowerShell/runtime context is visible?
-- What OS, service, process, disk, memory, network, volume, and event metadata is available through bounded collectors?
-- What should I inspect first from local host evidence?
+## Current evidence coverage
 
-Future candidate capabilities include additional bounded evidence slices and packaging/runtime reconciliation decisions after validation. Unsupported capabilities include remote/fleet administration, WinRM/PSRemoting lanes, arbitrary PowerShell execution, service/process control, registry/PATH mutation, cleanup, remediation, rollback, recovery, and production Windows mutation.
+Current Windows commands provide bounded local coverage for:
 
-## Target test environment
+- platform, OS, architecture, Python, PowerShell availability, and execution-policy context;
+- host and session basics that omit secrets, tokens, credential stores, and auth caches;
+- service state and bounded runtime signals;
+- process identity summaries without command lines, environments, or process control;
+- disk, physical-memory, network-interface, and volume-capacity evidence; and
+- bounded System event metadata.
 
-The first target is the Windows Server 2025 ShellForgeAI test VM. Work should start on a local test host first, with no production Windows mutation, no production cleanup, and no domain-wide action.
+Collectors return explicit unavailable states instead of fabricating Linux data
+or silently switching platform lanes. Evidence and provenance remain authoritative;
+deterministic assessment precedes optional evidence-grounded model synthesis.
 
-Windows V1 does not include WinRM, PSRemoting, or remote fleet management. The test VM support goal means ShellForgeAI can eventually collect safe local evidence from that VM and report clear unsupported behavior elsewhere; it does not mean ShellForgeAI may mutate the VM or production Windows hosts.
+## Current command surface
 
-## V1 read-only evidence scope
+```bash
+shellforgeai platform doctor --json
+shellforgeai windows doctor --json
+shellforgeai windows status --json
+shellforgeai windows evidence --json
+shellforgeai windows evidence --json --include-services --include-disks --include-processes
+shellforgeai windows services --json
+shellforgeai windows disks --json
+shellforgeai windows memory --json
+shellforgeai windows processes --json --limit 10
+shellforgeai windows network --json
+shellforgeai windows volumes --json
+shellforgeai ask "It is 2AM and this Windows server feels broken. What should I check first?"
+```
 
-The V1 scope is read-only evidence collection only. Candidate local evidence categories are:
-
-- OS info, build, edition, architecture, and install context where available without privileged secret reads.
-- Hostname plus domain or workgroup basics.
-- PowerShell version and compatible host/runtime information.
-- Execution policy as reported by the local PowerShell environment.
-- User and session context without reading secrets, tokens, auth caches, credential stores, or protected material.
-- Service status inventory and summary counts.
-- Process summary with bounded metadata suitable for triage.
-- Disk and filesystem capacity, filesystem type, and basic volume health signals.
-- Network adapter, IP address, gateway, and DNS summary.
-- Windows Update or update-status signals where available through safe read-only local APIs.
-- Recent Windows event logs summarized for critical, error, and warning signals.
-- Firewall profile and status summary when it can be collected safely and read-only.
-- Installed roles and features summary when available read-only and local.
-
-## Explicit non-goals
-
-Windows V1 does not:
-
-- Run arbitrary PowerShell supplied by a user.
-- Execute natural-language commands.
-- Mutate services or restart services.
-- Reboot hosts.
-- Change PowerShell execution policy.
-- Install software.
-- Enable or disable firewall profiles or rules.
-- Change the registry.
-- Change local users or groups.
-- Use WinRM, PSRemoting, remote execution, or remote fleet management.
-- Collect secrets, read auth caches, scrape credentials, or inspect credential stores.
-- Perform remediation, rollback, recovery, production cleanup, or autonomous self-healing.
-
-## Platform detection direction
-
-ShellForgeAI now includes a narrow read-only platform detector and `shellforgeai platform doctor` status command. This foundation recognizes Linux, Windows, Darwin, and unknown platforms using Python standard library metadata only. On Windows, the platform doctor emits a small deterministic evidence block for OS family/name, Windows version/build when available through Python, architecture, Python version/platform, and PowerShell/pwsh availability discovered with safe local path checks. It does not execute PowerShell, WinRM/PSRemoting, Docker, Compose, host probing, service inventory, process inventory, event-log reads, network calls, model calls, secret reads, installs, or mutations.
-
-ShellForgeAI should detect platform early through a read-only, safe platform detector. Linux/Docker lanes must not accidentally run Windows logic, and Windows lanes must not pretend Docker/Linux evidence exists.
-
-On unsupported platforms or unsupported commands, ShellForgeAI should emit a graceful structured message instead of throwing an implementation-specific traceback or silently switching lanes. The current platform doctor reports Linux as the supported Linux/Docker operational lane, Windows as a limited `windows_read_only_doctor_v1` evidence lane, and Darwin/unknown as unsupported for current operational lanes. A platform result can look like:
+The ask path collects typed local Windows evidence first, then produces safe
+operator guidance. Platform detection keeps Linux/Docker and Windows collectors
+separate and gives unavailable operational routes a structured status, detected
+platform, reason, and safe diagnostic next step before any model use. Payloads
+identify Windows and preserve read-only safety state, including:
 
 ```json
 {
   "platform": "windows",
-  "supported": false,
-  "lane": "windows_read_only_doctor_v1",
-  "windows_evidence": {
-    "os_family": "windows",
-    "read_only": true,
-    "mutation_performed": false
-  },
   "read_only": true,
   "mutation_performed": false
 }
 ```
 
-## Graceful unsupported behavior
+## Safety and operator guidance
 
-Unsupported Windows commands, unsupported Linux/Docker commands on Windows, and unsupported platforms should return an explicit unsupported status, the detected platform if known, a short reason, and a safe next inspection command when one exists. Unsupported behavior must remain non-mutating and must not call a model to guess platform-specific actions.
+The Windows preview is local host evidence first. Arbitrary PowerShell execution,
+WinRM/PSRemoting and remote execution, service restart or mutation, registry and
+execution-policy mutation, software installation, credential access, and
+natural-language execution remain outside the evidence-and-guidance surface.
+Recommendations cover prerequisites, operator-run steps, verification, rollback,
+and recovery guidance while leaving action under operator control.
 
-## Future command shape
+## Governed compatibility utility
 
-The platform doctor command is available now. The first Windows-specific prototypes are available as local-only read-only doctor and status reports:
+The confirm-gated Windows runtime-reconciliation utility is a bounded governed
+compatibility/testing and reference subsystem outside the primary recommended
+workflow. It is not a general Windows mutation lane. Its exact two-file scope,
+local-host requirement, accepted evidence and plan binding, containment checks,
+explicit hash confirmation, fresh-state validation, verification, compensation,
+and receipt contracts remain authoritative.
 
-```bash
-shellforgeai platform doctor --json
-shellforgeai platform doctor
-shellforgeai windows doctor --json
-shellforgeai windows doctor
-shellforgeai windows status --json
-shellforgeai windows status
-shellforgeai windows evidence --json
-shellforgeai windows evidence
-shellforgeai windows evidence --json --include-services
-shellforgeai windows evidence --json --include-services --services-limit 25
-shellforgeai windows evidence --json --include-disks
-shellforgeai windows evidence --json --include-disks --disks-limit 5
-shellforgeai windows services --json
-shellforgeai windows services
-shellforgeai windows disks --json
-shellforgeai windows disks
-shellforgeai windows memory --json
-shellforgeai windows memory
-shellforgeai windows processes --json
-shellforgeai windows processes --json --limit 10
-shellforgeai windows processes
-shellforgeai ask "It is 2AM and this Windows server feels broken. What should I check first?"
-```
+## Historical implementation notes
 
-The `ask` example should remain evidence-first: collect typed local Windows evidence first when a Windows lane exists, then synthesize a safe inspection summary. It must not run natural-language commands.
+The following sections preserve implementation sequencing and detailed contracts
+for the validated Windows surfaces. They are historical and technical reference,
+not the current product roadmap or a future execution destination.
 
+### Windows preview implementation sequence
 
-## Windows memory command
-
-`shellforgeai windows memory` and `shellforgeai windows memory --json` expose the existing local read-only Windows physical-memory collector as a dedicated operator command. The command uses the bounded `GlobalMemoryStatusEx` collector already used by ShellForgeAI Windows guidance; it does not execute PowerShell, WinRM/PSRemoting, subprocesses, remote collection, model calls, cleanup, optimization, repair, remediation, or service/process control.
-
-The text view is intentionally short: status, read-only/no-mutation flags, total/used/available physical memory, used percent when available, and bounded warnings for unavailable Windows-only fields such as load average. The JSON view uses the `windows_memory` envelope with `read_only: true`, `mutation_performed: false`, `platform.system: windows`, and a `memory` object containing integer byte fields and numeric percentages when available. Optional/unavailable values are reported as `null` with limitations instead of fabricated zero values. On non-Windows hosts the command returns the same structured unsupported-platform style as the other `shellforgeai windows ...` commands and does not substitute Linux memory collection.
-
-## Interactive performance diagnostics on Windows
-
-Since PR279, interactive slow-system/performance diagnostics (for example "Hey this system feels a bit slow" inside `shellforgeai interactive`) are Windows-aware. On Windows the route skips Linux-only collectors (`uptime`, `df`, `ip`, `ss`, `ps`, `systemctl`, `/proc` reads, `/etc/resolv.conf` reads) and records them as structured `linux_only_collector_skipped` evidence instead of running them or rendering their failures. Missing metrics (load average, `/proc`-based memory totals) render explicit unavailable markers instead of `loadavg=None` or fake `0.0GiB/0.0GiB` values. The bounded read-only summary reuses only the existing stdlib-only `windows status` and `windows disks` payloads and points at safe next commands such as `shellforgeai windows status --json` and `shellforgeai windows processes --json --limit 10`. No PowerShell is executed and no WinRM/PSRemoting is used; the route stays read-only and non-mutating, and it degrades to a deterministic summary when model synthesis is unavailable.
-
-## Safety model
-
-The Windows lane preserves ShellForgeAI's core safety model:
-
-- Read-only by default.
-- Local host evidence first.
-- Mutations only through named, narrow, auditable recipes if any future Windows recipe is approved.
-- Explicit confirmation for any future mutation recipe.
-- No natural-language execution.
-- No broad autonomy.
-- No arbitrary PowerShell execution.
-- No WinRM/remote execution in V1.
-- No remediation, rollback, recovery, production cleanup, secret reads, or auth-cache reads.
-
-## Proposed implementation sequence
-
-1. Add a read-only platform detector and graceful unsupported message contract. (Complete.)
-2. Add a narrow Windows read-only doctor evidence foundation for local OS/Python metadata and shell availability signals without executing PowerShell. (Current platform foundation.)
-3. Add the first `shellforgeai windows doctor` prototype for local, read-only Windows host basics using Python standard library only. It does not execute PowerShell, use WinRM/PSRemoting, mutate the Windows VM, or collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output for this command. (Complete.)
-4. PR262 adds the first `shellforgeai windows status` report for safe stdlib-only host basics: platform metadata, hostname/FQDN, current working directory, Python runtime, and disk-capacity summaries for the current directory and Windows root. It is local-only, does not execute PowerShell, does not use WinRM/PSRemoting, does not mutate the Windows VM, and does not collect services/processes/event logs yet. Linux/Docker behavior remains unchanged and returns structured unsupported output pointing to `shellforgeai platform doctor --json`. Windows Server 2025 VM acceptance should verify `shellforgeai windows status --json` and `shellforgeai windows status`. (Current prototype.)
-5. Windows Server 2025 VM smoke for the local status report. (Complete for the PR262 baseline.)
-6. Use `docs/runbooks/WINDOWS_SMOKE_HARNESS.md` and `scripts/windows_smoke_acceptance.py` to validate saved Windows `status`/`doctor` JSON before expanding Windows evidence collection. The validator is local-only and does not execute ShellForgeAI commands, PowerShell, WinRM/PSRemoting, QGA, subprocesses, network calls, or mutation.
-7. Add `shellforgeai windows evidence` as a bundle/preview command over the existing read-only doctor/status payloads. It reuses those payload builders, adds no new Windows evidence collection, does not execute PowerShell, does not use WinRM/PSRemoting, does not mutate the Windows VM, and leaves services, processes, event logs, firewall, and Windows Update for later separate PRs. Windows Server 2025 acceptance should run `shellforgeai windows evidence --json`, `shellforgeai windows evidence`, `shellforgeai windows status --json`, and `shellforgeai windows doctor --json`. (Current bundle preview.)
-8. PR265 extends the saved-artifact acceptance validator to cover the PR264 evidence bundle as a QA gate before deeper Windows evidence slices; it adds no new collection.
-9. Add the saved evidence packet helper as the handoff/reporting step for saved Windows smoke artifacts. It validates existing artifacts, records hashes/sizes, and emits JSON/Markdown without new collection, PowerShell, WinRM, or mutation.
-10. PR267 adds `shellforgeai windows services` as the first narrow deeper Windows evidence slice: a standalone local read-only service state summary preview. On Windows it enumerates service names, display names, and current states through read-only `ctypes` Service Control Manager enumeration only (`OpenSCManagerW` with enumerate rights, `EnumServicesStatusExW`, `CloseServiceHandle`) and summarizes counts by state with a bounded collection limit. It does not execute PowerShell, does not use WinRM/PSRemoting, does not use subprocess, does not start/stop/restart/control/configure services, does not read service binary paths, service accounts, service configuration, or the registry, and does not mutate the Windows VM. Linux/Docker and unsupported platforms return structured unsupported output pointing to `shellforgeai platform doctor --json`. The services preview is not yet included in `shellforgeai windows evidence`; bundle integration may follow in a later PR only after the standalone services surface is proven safe. (Current services preview.)
-11. PR268 extends the saved-artifact acceptance validator and packet helper with optional `--services-json` support for PR267 `windows_services` artifacts. Services saved-artifact validation is the QA gate before deeper Windows evidence slices; it reads saved local files only and adds no new collection, PowerShell, WinRM, or mutation.
-12. PR269 adds an explicit, bounded, opt-in services component to `shellforgeai windows evidence` via `--include-services` and `--services-limit N`. Services in the evidence bundle are opt-in and bounded: the default bundle stays doctor/status-only, and when `--include-services` is passed the bundle embeds the existing PR267 read-only services collector output with a conservative default limit of 25 (validated range 1-500). This reuses the existing read-only services collector and adds no new Windows collection surface. No PowerShell is executed, no WinRM/PSRemoting is used, no service control/restart/configuration mutation is performed, and no registry or execution-policy change occurs. (Current opt-in bundle component.)
-13. PR270 adds `shellforgeai windows disks [--json] [--limit N]` as the next standalone Windows read-only evidence slice: a local disk/root usage preview. On Windows it discovers local drive roots with `os.listdrives` when available (feature-detected; otherwise it falls back safely to the current drive root only) and reads per-root total/used/free bytes via `shutil.disk_usage`, using the Python standard library only, with a bounded deterministic `--limit` (default 32, range 1-64). It does not scan directories or files, does not read user files, does not read secrets or auth caches, does not execute PowerShell, does not use WinRM/PSRemoting, does not use subprocess, does not collect drive labels, volume serials, BitLocker status, SMART/health status, or file/directory inventory, and does not mutate the Windows VM. Linux/Docker and unsupported platforms return structured unsupported output pointing to `shellforgeai platform doctor --json`. The sequence was standalone disks preview first (PR270), then saved-artifact validator/packet support for disks (PR271), then opt-in evidence bundle integration for disks (PR272).
-14. PR271 extends the saved-artifact acceptance validator and packet helper with optional `--disks-json` support for PR270 `windows_disks` artifacts, accepting unavailable roots only when sanitized as safe disk usage failures. Disks saved-artifact validation and packet support are complete; the helpers read saved local files only and add no new collection, PowerShell, WinRM, or mutation. Deeper disk inspection, disk cleanup, disk repair, and mount/format remain out of scope.
-15. PR272 adds an explicit, bounded, opt-in disks component to `shellforgeai windows evidence` via `--include-disks` and `--disks-limit N`. Disks in the evidence bundle are opt-in and bounded: the default bundle stays doctor/status-only, and when `--include-disks` is passed the bundle embeds the existing PR270 read-only disks payload with the same safe default limit of 32 (validated range 1-64). This reuses the existing read-only disks payload builder and adds no new Windows collection surface. It does not scan directories or files, does not mutate disks (no mount/unmount/format/repair), does not execute PowerShell, does not use WinRM/PSRemoting, and does not perform cleanup, remediation, rollback, or recovery. The saved-artifact validator and packet helper understand evidence bundles with embedded disks, and standalone `windows-disks.json` support from PR271 remains valid. (Current opt-in bundle component.)
-16. PR273 normalizes the Windows disks safety flags: both the standalone `shellforgeai windows disks` payload and the embedded evidence disks component now explicitly report `directory_scan_performed=false`, `file_scan_performed=false`, and `disk_mutation_performed=false` in their safety blocks, matching the top-level PR272 evidence safety block. The saved-artifact validator and packet helper expect the explicit disk safety flags for PR273+ disks artifacts. This is schema consistency only: no new disk collection is added, no directory or file scan is added, no disk mutation is possible, and no PowerShell/WinRM/remoting is used.
-17. PR274 adds `shellforgeai windows processes [--json] [--limit N]` as a standalone local Windows read-only bounded process preview (default limit 50, range 1-200). On Windows it uses Python standard library plus `ctypes` Toolhelp process snapshots to collect only PID, parent PID, image basename/name, and thread count. It does not execute PowerShell, use WinRM/remoting, terminate/control/suspend processes, read command lines, read environments, inspect memory, handles, modules, owners/tokens, or map network connections. Linux/Docker and unsupported platforms return structured unsupported output pointing to `shellforgeai platform doctor --json`. Opt-in evidence bundle inclusion for processes landed separately in PR276; services and disks behavior remains unchanged.
-18. PR275 extends the saved-artifact acceptance validator and packet helper with optional `--processes-json` support for PR274 `windows_processes` artifacts. It validates saved artifacts only: it does not run ShellForgeAI product commands, does not collect new process data, does not add processes to the evidence bundle, does not execute PowerShell, does not use WinRM/remoting, and does not mutate the Windows VM. It validates that process artifacts carry only PID, parent PID, image basename/name, and thread count — never command lines, environments, memory, handles, modules, owners/users, or network connections. Evidence-bundle integration for processes landed separately in PR276.
-19. PR276 adds an explicit, bounded, opt-in processes component to `shellforgeai windows evidence` via `--include-processes` and `--processes-limit N`. Processes in the evidence bundle are opt-in and bounded: the default bundle stays doctor/status-only, and when `--include-processes` is passed the bundle embeds the existing PR274 read-only processes payload with a conservative default limit of 25 (validated range 1-200; `--processes-limit` is valid only with `--include-processes`). This reuses the existing read-only PR274 processes payload builder and adds no new Windows collection surface. It does not collect command lines, does not collect environments, does not read process memory, does not inspect handles/modules/owners/users/tokens, does not map network connections, does not terminate/control processes, does not execute PowerShell, does not use WinRM/remoting, and does not perform cleanup, remediation, rollback, or recovery. The saved-artifact validator and packet helper understand evidence bundles with embedded processes, and standalone `windows-processes.json` support from PR275 remains valid. (Current opt-in bundle component.)
-20. PR287 enriches the local read-only Windows memory and disk evidence with honest Windows-native semantics. A new read-only `windows_memory` collector reports physical memory posture (`available`, `total_bytes`, `available_bytes`, `used_bytes`, `used_percent`, `source`) using the same bounded `ctypes`/`kernel32` pattern as the process/service previews, calling only the documented read-only `GlobalMemoryStatusEx` API; it fails soft with an explicit "Memory summary unavailable from this collector on Windows" limitation when memory cannot be collected, and always marks "Load average is not available on Windows" (no fake Linux load average). `shellforgeai windows status --json` now carries a `memory` block plus a `resource_limitations` load-average marker, and `shellforgeai windows disks --json` adds per-root `used_percent`, a `summary.primary_root_free_bytes`, and an explicit `limitations` list ("Inodes are not available on Windows"; "Linux-only disk inode collectors skipped on Windows") — no inode values are ever reported on Windows. The evidence bundle surfaces the enriched memory/disk facts transitively through its reused status/disks components. Every deterministic Windows operator answer that mentions memory — slow/latency first-pass, CPU/memory/disk/process strongest-signal comparison, the "what to check first" guidance, and the read-only status/intent guidance — reflects real Windows memory posture when the collector reports it available, and only states "Memory summary unavailable from this collector on Windows" when memory is actually unavailable; the load-average and inode markers stay explicit in both cases. All additive: existing JSON fields are preserved. It executes no PowerShell, uses no WinRM/PSRemoting, spawns no shell/subprocess, reads no process memory/secrets/auth caches, makes no network/model calls, and performs no mutation, cleanup, remediation, rollback, recovery, service control, process termination, or registry/execution-policy change.
-21. Add Windows read-only service deep detail (descriptions, dependencies, recovery options) and event-log evidence in separate PRs; firewall and Windows Update evidence also remain future separate PRs.
-22. Packaging/install spike.
-23. Later, only after evidence, tests, and review, consider narrowly scoped Windows recipes if a real operator need exists.
-
+The preview developed incrementally through platform detection, doctor/status and
+evidence bundles, saved-artifact acceptance, services, disks, processes, memory,
+network, volumes, event metadata, interactive routing, and Windows Server 2025
+validation. Historical PR-specific details below remain factual records of those
+additions.
 
 ## Saved interactive transcript acceptance
 
@@ -248,7 +175,7 @@ The collector uses local in-process Python network interface APIs and does not e
 
 PR297 enriches `shellforgeai windows services [--json] [--limit N]` without adding a new command or collection path. The existing local read-only Service Control Manager enumeration (`OpenSCManagerW` enumerate rights, `EnumServicesStatusExW`, `CloseServiceHandle`) now preserves bounded runtime-state fields already present in `SERVICE_STATUS_PROCESS`: process ID, accepted-controls bitmask, Win32 and service-specific exit codes, checkpoint, wait hint, and service flags. JSON service items add `process_id`, `controls_accepted`, `controls_accepted_unknown_mask`, `win32_exit_code`, `service_specific_exit_code`, `checkpoint`, `wait_hint_ms`, `runs_in_system_process`, and ordered `runtime_signals`; `services.runtime_summary` counts these observations across the full enumerated set before item truncation. Text mode stays concise with one runtime summary line and at most ten deterministic pending/nonzero-exit-code preview rows. These are point-in-time observations only: accepted controls are reported, never executed; nonzero exit codes are not automatic failure diagnoses; a PID is reported without opening or inspecting the process; checkpoint and wait hint do not prove progress or a hang. The command still does not collect service binary paths, executable command lines, accounts, descriptions, dependencies, delayed-auto-start or trigger configuration, recovery/failure actions, security descriptors/ACLs, registry configuration, process owner/command line/environment/modules/handles, event logs, restart history, or remote service state, and it does not start, stop, restart, pause, continue, configure, or modify services. Unsupported platforms keep the structured unsupported response and do not substitute Linux collectors.
 
-## Windows durable runtime reconciliation preflight
+## Reference: Windows durable runtime reconciliation preflight
 
 `scripts/windows_runtime_reconcile_preflight.py` is a standalone PR305 governed preview helper for the Windows embedded/durable runtime. It is not a product CLI command and it does not rerun Windows discovery. It consumes one or two saved PR304 `windows_runtime_integrity` packets, validates them with `scripts/windows_runtime_integrity_acceptance.py`, and requires stable identity agreement when two artifacts are supplied; the only allowed difference between the two PR304 packets is invocation context such as current working directory already allowed by the PR304 validator.
 
@@ -263,7 +190,7 @@ The output mode is `windows_runtime_reconcile` for recipe `windows.runtime_recon
 
 The preflight is read-only and preview-only. It never copies, creates, replaces, deletes, renames, backs up, repairs, cleans up, installs, invokes wrappers, executes PowerShell/CMD/WinRM/QGA/WMI/CIM/subprocess/shell, restarts services or processes, mutates the registry/PATH/environment/execution policy, calls a model/network, or reads secrets/auth caches. Saving a ShellForgeAI-owned metadata packet is allowed only with `--out-json`; output is deterministic and overwrite is refused. Known PR304 `~hellforgeai*` invalid-distribution residue remains a deferred warning only and never creates an operation or blocks `ready`/`no_change`.
 
-Future execution is intentionally unavailable. Any later execution PR would need explicit operator confirmation, saved-preflight validation, unchanged evidence/source/destination rechecks, same-directory backup before replacement, atomic replacement, post-copy hash verification, receipt creation, and post-change PR304 runs from both the staged root and `C:\Windows\System32` accepted together.
+The separate governed execute reference retains explicit operator confirmation, saved-preflight validation, unchanged evidence/source/destination rechecks, same-directory backup before replacement, atomic replacement, post-copy hash verification, receipt creation, and post-change PR304 runs from both the staged root and `C:\Windows\System32` accepted together.
 
 Manual validation examples:
 
@@ -272,7 +199,7 @@ python scripts/windows_runtime_reconcile_preflight.py pr304-source.json pr304-sy
 python scripts/windows_runtime_reconcile_acceptance.py pr305-reconcile.json --json
 ```
 
-## Windows durable runtime reconciliation execute lane (PR313)
+## Reference: Windows durable runtime reconciliation execute lane (PR313)
 
 `scripts/windows_runtime_reconcile_execute.py` completes the deliberately deferred PR305 apply lane for exactly one named capability, `windows.runtime_reconcile`. It is the authoritative direct entry point and is invoked with a known exact Python interpreter and an exact source checkout, so repairing the durable wrapper never depends on the durable wrapper. The testable core lives in `src/shellforgeai/core/windows_runtime_reconcile_execution.py`; no product CLI command, `copy`, `repair`, or `apply-files` surface is added, and natural language never reaches this lane.
 

@@ -10,25 +10,18 @@ The interface accepts CLI or interactive intent. Platform routing selects only s
 
 The primary workflow therefore ends with an operator-ready handoff. Existing confirm-gated execution and remediation implementations remain bounded governed compatibility/testing surfaces outside this pipeline. Their command-specific gates remain unchanged.
 
-The approved-change chain separates structural and live facts: PR323 associates
-one approved capability binding with one validated saved plan, while the
-read-only current-state revalidation API compares that exact link with only the
-fixed PR313 two-file filesystem scope at one instant. Authorization and any
-future execution preflight remain later, separate gates. The mutation-capable
-PR313 execution operation is not invoked by current-state revalidation.
+## Governed compatibility/testing subsystems
 
-## V1 architecture contract
+The repository also retains narrow approved-change, execution, reconcile, receipt,
+and remediation implementations. These are subordinate compatibility, testing,
+and reference subsystems outside the primary recommended workflow—not a second product lifecycle or the product destination. Their existing command-specific
+capability, approval, current-state, containment, confirmation, policy,
+verification, recovery, and receipt gates remain authoritative.
 
-CLI → collectors → triage → ops reports → artifacts → governed remediation.
-
-- **CLI entrypoints** perform deterministic routing for explicit subcommands and
-  known safety prompts.
-- **Collectors** are typed read-only evidence collectors.
-- **Triage** ranks suspects deterministically for common Docker/operator scenes.
-- **Ops reports** summarize ranked incidents and safe next commands.
-- **Artifacts** preserve/save/validate/export/compare report outputs.
-- **Governed remediation** remains explicit, gated, and disposable-oriented; not
-  casual production automation.
+The V1 report and artifact spine remains factual implementation support within
+the primary pipeline: CLI routing reaches typed collectors, deterministic triage,
+ops reports, and saved handoff artifacts. Governed mutation utilities branch only
+through their named explicit gates; they are not a peer stage after artifacts.
 
 ### Safety boundaries
 
@@ -89,7 +82,13 @@ synthesis** (LLM providers).
                 └──────────────────────────────────────┘
 ```
 
-## Modules
+## Reference implementation inventory
+
+The detailed inventory below records current implementation ownership. Entries
+for approved-change, execution, reconcile, receipt, and remediation modules are
+reference material for the subordinate governed compatibility/testing subsystems;
+they do not define an alternate active product direction.
+
 
 | Path | Purpose |
 | --- | --- |

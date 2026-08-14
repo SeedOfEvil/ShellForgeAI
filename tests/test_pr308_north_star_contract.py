@@ -64,6 +64,14 @@ def test_reasoning_pipeline_and_model_boundary_are_explicit() -> None:
     ):
         assert concept in architecture
     assert "it does not execute tools" in architecture
+    assert "ends with an operator-ready handoff" in architecture
+    assert "not a second product lifecycle or the product destination" in architecture
+    assert "future execution preflight" not in architecture
+    assert "future approved implementation" not in architecture
+    assert (
+        "cli → collectors → triage → ops reports → artifacts → governed remediation"
+        not in architecture
+    )
 
 
 def test_current_platform_and_maturity_truth_remain() -> None:

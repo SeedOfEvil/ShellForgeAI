@@ -56,6 +56,18 @@ def test_readme_contains_v1_shape() -> None:
         assert needle in text, f"README missing: {needle}"
 
 
+def test_readme_leads_with_affirmative_product_identity() -> None:
+    text = _read(Path("README.md"))
+    identity = text.split("## quick start", maxsplit=1)[0]
+    assert "## what this is not" not in text
+    for phrase in (
+        "shellforgeai is not",
+        "shellforgeai does not support",
+        "unsupported product",
+    ):
+        assert phrase not in identity, f"README identity uses negative framing: {phrase}"
+
+
 def test_v1_scope_contains_contract_sections() -> None:
     text = _read(Path("docs/v1-scope.md"))
     for needle in (

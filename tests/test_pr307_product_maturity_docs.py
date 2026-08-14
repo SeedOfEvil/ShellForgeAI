@@ -30,7 +30,6 @@ README_LINKED_DOCS = [
     Path("docs/safety.md"),
     Path("docs/architecture.md"),
     Path("docs/WINDOWS_POWERSHELL_V1.md"),
-    Path("docs/VALIDATION_MATRIX.md"),
     Path("docs/V1_RELEASE_NOTES.md"),
     Path("docs/roadmap.md"),
     Path("docs/archive/PROJECT_HISTORY.md"),
@@ -46,29 +45,32 @@ def test_product_status_is_canonical_and_complete() -> None:
     assert path.exists()
     text = path.read_text(encoding="utf-8")
     lowered = text.lower()
-    for phrase in ("v1 released", "early beta-quality", "guarded", "not production-autonomous"):
+    for phrase in (
+        "v1 is released",
+        "early beta-quality",
+        "guarded",
+        "not production-autonomous",
+    ):
         assert phrase in lowered
     assert "linux/docker" in lowered and "primary" in lowered and "v1" in lowered
     assert "windows" in lowered and "preview/early support" in lowered
-    assert "does not change the overall product classification" in lowered
+    assert "outside the primary recommended workflow" in lowered
 
 
 def test_readme_status_platforms_and_required_sections() -> None:
     text = read(Path("README.md"))
     lowered = text.lower()
     assert "docs/PRODUCT_STATUS.md" in text
-    assert "v1 released and early beta-quality" in lowered
-    assert "linux/docker is the primary v1 lane" in lowered
-    assert "windows support is preview/early support" in lowered
+    assert "v1 is released and early beta-quality" in lowered
+    assert "linux/docker is the released v1 core" in lowered
+    assert "windows is validated preview/early support" in lowered
     required_sections = [
-        "## what shellforgeai helps you accomplish",
-        "## core workflows",
-        "## how it works",
-        "## guarded by design",
+        "## evidence-backed operator guidance",
+        "## evidence and model reasoning",
         "## install",
         "## quick start",
-        "## where it runs",
-        "## documentation map",
+        "## platforms",
+        "## documentation",
     ]
     for section in required_sections:
         assert section in lowered
@@ -79,6 +81,7 @@ def test_active_docs_do_not_use_stale_overall_alpha_wording() -> None:
         re.compile(r"status:\s*alpha", re.IGNORECASE),
         re.compile(r"currently\s+alpha", re.IGNORECASE),
         re.compile(r"in\s+this\s+alpha", re.IGNORECASE),
+        re.compile(r"alpha\s+workflow", re.IGNORECASE),
         re.compile(r"overall\s+(product\s+)?maturity\s*:\s*alpha", re.IGNORECASE),
     ]
     for path in ACTIVE_DOCS:
