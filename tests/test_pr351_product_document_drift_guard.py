@@ -3,6 +3,16 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+ACTIVE_PRODUCT_DOCS = (
+    "README.md",
+    "docs/architecture.md",
+    "docs/safety.md",
+    "docs/v1-scope.md",
+    "docs/WINDOWS_POWERSHELL_V1.md",
+    "docs/PRODUCT_STATUS.md",
+    "docs/north-star.md",
+    "docs/roadmap.md",
+)
 
 
 def text(path: str) -> str:
@@ -73,3 +83,32 @@ def test_active_contract_preserves_governed_surface_classification() -> None:
         "docs/safety.md",
     ):
         require(path, "compatibility/testing surfaces", "outside the primary recommended workflow")
+
+
+def test_active_docs_reject_stale_execution_destination_language() -> None:
+    forbidden = (
+        "implementation is part of the product promise",
+        "future approved implementation",
+        "future execution preflight",
+        "in this alpha",
+        "alpha workflow",
+    )
+    for path in ACTIVE_PRODUCT_DOCS:
+        document = text(path)
+        for phrase in forbidden:
+            assert phrase not in document, f"{path} retains stale phrase {phrase!r}"
+
+
+def test_architecture_has_one_primary_advisory_pipeline() -> None:
+    require(
+        "docs/architecture.md",
+        "primary operator-guidance pipeline",
+        "ends with an operator-ready handoff",
+        "governed compatibility/testing subsystems",
+        "not a second product lifecycle or the product destination",
+        "outside the primary recommended workflow",
+    )
+    assert (
+        "cli → collectors → triage → ops reports → artifacts → governed remediation"
+        not in text("docs/architecture.md")
+    )

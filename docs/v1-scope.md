@@ -23,7 +23,7 @@ Canonical safe examples include `shellforgeai ops report`, `shellforgeai ops rep
 
 - Read-only by default.
 - Natural-language mutation requests are deterministically refused.
-- `apply` remains validation-only in the alpha workflow.
+- `apply` remains validation-only in the released V1 workflow.
 - Governed mutation lanes are explicit, gated compatibility/testing surfaces outside the primary recommended workflow.
 - Production mutation is not part of the V1 release promise; there is no autonomous production remediation.
 
