@@ -33,5 +33,38 @@ canonical JSON bytes; the digest is not embedded in the payload. Markdown has a
 fixed section order and preserves caller-provided semantic ordering. None of
 these helpers reads a clock, environment, host, network, process, or filesystem.
 
-PR359 owns deterministic producer/adapter work. This contract intentionally
-provides no builder, executor interface, persistence hierarchy, or CLI surface.
+## Deterministic Linux/Docker producer
+
+`build_linux_operator_solution_from_diagnosis()` in
+`shellforgeai.core.operator_solution_builder` is the single Linux/Docker
+producer. Its input authority is an already-completed `DiagnosisResult`; it
+reuses `build_runbook()` over that diagnosis's existing evidence and findings,
+then normalizes the result into the canonical `OperatorSolution`. It does not
+diagnose, collect evidence, call a provider/model, invoke commands, persist an
+artifact, authorize work, or execute a procedure.
+
+Critical and warning findings can become likely causes. Information and
+limitation findings cannot; limitations instead contribute to the visibility
+boundary. Every generated cause, procedure step, and verification criterion
+declares a bounded logical evidence, finding, plan, or runbook reference.
+References never contain raw evidence or whole upstream objects, and the
+producer does not invent source SHA-256 values.
+
+Runbook corrective options supply prerequisites, impact, risk, ordered
+operator-run procedure, rollback, and verification when available. The
+diagnosis proposed plan is a conservative procedure fallback. Distinct options
+for distinct problems form one recommended procedure rather than fabricated
+alternatives. Rollback is present only when selected change guidance owns
+actual rollback instructions; otherwise recovery is explicitly not applicable.
+
+The producer rejects structured Windows diagnoses, unusable/empty evidence,
+destructive fallback plan steps, and diagnosis safety flags that report
+execution or mutation. Windows-native production is deferred to PR361. The
+builder's solution ID is a bounded hash of semantic session, target, and target
+type values. Diagnosis/plan timestamps, random plan IDs, runbook generation
+times, clocks, UUIDs, paths, and runtime environment metadata do not participate
+in the canonical output. Consequently, semantically identical recreated inputs
+produce byte-identical canonical JSON, Markdown, and solution SHA-256.
+
+CLI, artifact persistence, and report/handoff integration remain deferred to
+PR360. This producer adds no executor interface or broader runtime surface.
