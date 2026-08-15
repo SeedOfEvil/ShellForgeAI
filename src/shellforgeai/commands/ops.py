@@ -1,11 +1,48 @@
-# ruff: noqa: F821
 from __future__ import annotations
 
 import functools
 import sys
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
+
+if TYPE_CHECKING:
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from typing import Any
+
+    from rich.console import Console
+
+    from shellforgeai.core.command_suggestions import (
+        remediation_eligibility_explain_command,
+        triage_detail_command,
+    )
+    from shellforgeai.core.config import load_settings
+    from shellforgeai.core.metadata_hygiene import scan_metadata_hygiene
+    from shellforgeai.core.profiles import load_profile
+    from shellforgeai.core.runbook import latest_evidence_artifact
+    from shellforgeai.core.session import build_session_context
+
+    console: Console = Console()
+    session_summary_app: typer.Typer = typer.Typer()
+
+    def _safe_load_json(path: Path, warnings: list[str]) -> dict[str, Any] | None: ...
+
+    def _ts(payload: dict[str, Any], path: Path) -> float: ...
+
+    def _age_seconds(payload: dict[str, Any], path: Path) -> int | None: ...
+
+    def _render_ops_report_brief(payload: dict[str, Any]) -> str: ...
+
+    def _build_ops_report_payload(
+        *,
+        top: int = 5,
+        include_details: bool = False,
+        include_remediation: bool = False,
+        include_timeline: bool = False,
+        include_visibility: bool = False,
+    ) -> dict[str, Any]: ...
 
 
 def _sync_cli_globals() -> None:
