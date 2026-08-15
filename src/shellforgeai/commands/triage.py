@@ -1,11 +1,34 @@
-# ruff: noqa: F821
 from __future__ import annotations
 
 import functools
 import sys
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
+
+if TYPE_CHECKING:
+    import json
+    from pathlib import Path
+    from typing import Any
+
+    from rich.console import Console
+
+    from shellforgeai.core.config import load_settings
+    from shellforgeai.core.context import RuntimeContext
+
+    console: Console = Console()
+
+    def _ctx(ctx: typer.Context) -> RuntimeContext: ...
+
+    def _build_v2_triage_payload(*, top: int = 5) -> dict[str, Any]: ...
+
+    def _render_v2_triage_human(payload: dict[str, Any]) -> str: ...
+
+    def _render_v2_triage_brief(payload: dict[str, Any]) -> str: ...
+
+    def _build_v2_triage_detail_payload(target: str) -> dict[str, Any]: ...
+
+    def _render_v2_triage_detail_human(payload: dict[str, Any]) -> str: ...
 
 
 def _sync_cli_globals() -> None:
