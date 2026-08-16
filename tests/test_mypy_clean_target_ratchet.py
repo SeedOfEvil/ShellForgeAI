@@ -10,6 +10,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CLEAN_TARGETS = (
     Path("src/shellforgeai/commands/ops.py"),
     Path("src/shellforgeai/commands/triage.py"),
+    Path("src/shellforgeai/core/recipe_receipt_audit.py"),
 )
 DIAGNOSTIC_PATTERN = re.compile(r"^(?P<path>.+?):\d+(?::\d+)?: error:", re.MULTILINE)
 

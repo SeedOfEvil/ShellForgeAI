@@ -119,9 +119,8 @@ def _created_sort_key(item: dict[str, Any], path: Path) -> tuple[str, float, str
 
 
 def _verification_status(receipt: dict[str, Any]) -> str:
-    verification = (
-        receipt.get("verification") if isinstance(receipt.get("verification"), dict) else {}
-    )
+    verification_value = receipt.get("verification")
+    verification = verification_value if isinstance(verification_value, dict) else {}
     return str(verification.get("status") or "not_run")
 
 
@@ -134,7 +133,8 @@ def _lineage(receipt: dict[str, Any]) -> dict[str, Any]:
 
 
 def _receipt_summary(receipt: dict[str, Any], path: Path) -> dict[str, Any]:
-    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    safety_value = receipt.get("safety")
+    safety = safety_value if isinstance(safety_value, dict) else {}
     return {
         "receipt_id": str(receipt.get("receipt_id") or path.name),
         "mode": str(receipt.get("mode") or "unknown"),
@@ -221,7 +221,8 @@ def _receipt_type(receipt: dict[str, Any]) -> str:
 
 
 def _safety_flag(receipt: dict[str, Any], key: str) -> bool:
-    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    safety_value = receipt.get("safety")
+    safety = safety_value if isinstance(safety_value, dict) else {}
     return safety.get(key) is True or receipt.get(key) is True
 
 
@@ -706,7 +707,8 @@ def _scan_receipt_integrity(
                 first_safe_command=f"shellforgeai recipes receipt inspect {rid} --json",
             )
         )
-    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    safety_value = receipt.get("safety")
+    safety = safety_value if isinstance(safety_value, dict) else {}
     if not safety:
         findings.append(
             _integrity_finding(
@@ -859,7 +861,8 @@ def receipt_integrity(
         else:
             summary["failed_artifacts"] += 1
         if receipt:
-            safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+            safety_value = receipt.get("safety")
+            safety = safety_value if isinstance(safety_value, dict) else {}
             if (
                 safety.get("production_restart_executed") is True
                 or receipt.get("production_restart_executed") is True
@@ -914,11 +917,8 @@ def receipt_integrity(
         for d in bundle_dirs:
             validation = receipt_audit_bundle_validate(str(d), data_dir)
             manifest, _ = _read_json(d / "manifest.json")
-            filters = (
-                (manifest or {}).get("filters")
-                if isinstance((manifest or {}).get("filters"), dict)
-                else {}
-            )
+            filters_value = (manifest or {}).get("filters")
+            filters = filters_value if isinstance(filters_value, dict) else {}
             if target and str(filters.get("target") or "") != target:
                 continue
             if recipe_id and str(filters.get("recipe_id") or "") != recipe_id:
@@ -1002,7 +1002,8 @@ def receipt_integrity(
 
 
 def _receipt_audit_bundle_summary(audit_payload: dict[str, Any]) -> dict[str, Any]:
-    summary = audit_payload.get("summary") if isinstance(audit_payload.get("summary"), dict) else {}
+    summary_value = audit_payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
     warnings = (
         audit_payload.get("warnings") if isinstance(audit_payload.get("warnings"), list) else []
     )
@@ -1016,8 +1017,10 @@ def _receipt_audit_bundle_summary(audit_payload: dict[str, Any]) -> dict[str, An
 
 
 def _render_audit_bundle_markdown(payload: dict[str, Any]) -> str:
-    filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else {}
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    filters_value = payload.get("filters")
+    filters = filters_value if isinstance(filters_value, dict) else {}
+    summary_value = payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
     warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
     lines = [
         "# Governed Recipe Receipt Audit Bundle",
@@ -1316,11 +1319,8 @@ def receipt_audit_bundle_validate(ref: str, data_dir: Path | str) -> dict[str, A
         checksum_status = "failed"
     else:
         checksum_status = "ok"
-        checksums = (
-            checksums_payload.get("checksums")
-            if isinstance(checksums_payload.get("checksums"), dict)
-            else {}
-        )
+        checksums_value = checksums_payload.get("checksums")
+        checksums = checksums_value if isinstance(checksums_value, dict) else {}
         if not checksums:
             checksum_status = "failed"
             warnings.append("checksums missing")
@@ -1642,14 +1642,16 @@ def receipt_export_validate(ref: str, data_dir: Path | str) -> dict[str, Any]:
     checks["manifest"] = manifest.get("kind") == EXPORT_MANIFEST_KIND and bool(
         manifest.get("source_receipt_id")
     )
-    safety = manifest.get("safety") if isinstance(manifest.get("safety"), dict) else {}
+    safety_value = manifest.get("safety")
+    safety = safety_value if isinstance(safety_value, dict) else {}
     checks["safety"] = (
         safety.get("docker_compose_executed") is False
         and safety.get("shell_true") is False
         and safety.get("arbitrary_command_execution") is False
     )
+    manifest_checksums_value = manifest.get("checksums")
     manifest_checksums = (
-        manifest.get("checksums") if isinstance(manifest.get("checksums"), dict) else {}
+        manifest_checksums_value if isinstance(manifest_checksums_value, dict) else {}
     )
     checks["checksums"] = bool(manifest_checksums)
     for rel, expected in manifest_checksums.items():
@@ -1689,10 +1691,10 @@ def receipt_export_validate(ref: str, data_dir: Path | str) -> dict[str, Any]:
 
 
 def _compare_fields(receipt: dict[str, Any]) -> dict[str, Any]:
-    verification = (
-        receipt.get("verification") if isinstance(receipt.get("verification"), dict) else {}
-    )
-    safety = receipt.get("safety") if isinstance(receipt.get("safety"), dict) else {}
+    verification_value = receipt.get("verification")
+    verification = verification_value if isinstance(verification_value, dict) else {}
+    safety_value = receipt.get("safety")
+    safety = safety_value if isinstance(safety_value, dict) else {}
     return {
         "receipt_id": receipt.get("receipt_id"),
         "mode": receipt.get("mode"),
