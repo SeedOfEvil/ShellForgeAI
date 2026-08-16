@@ -11,6 +11,8 @@ CLEAN_TARGETS = (
     Path("src/shellforgeai/commands/ops.py"),
     Path("src/shellforgeai/commands/triage.py"),
     Path("src/shellforgeai/core/recipe_receipt_audit.py"),
+    Path("src/shellforgeai/core/v2_handoff_artifact.py"),
+    Path("src/shellforgeai/commands/handoff.py"),
 )
 DIAGNOSTIC_PATTERN = re.compile(r"^(?P<path>.+?):\d+(?::\d+)?: error:", re.MULTILINE)
 
