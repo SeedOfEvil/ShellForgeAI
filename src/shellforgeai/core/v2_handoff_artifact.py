@@ -103,8 +103,10 @@ def resolve_handoff_dir(data_dir: Path | str, handoff_id: str) -> Path:
 
 
 def _handoff_markdown(payload: dict[str, Any]) -> str:
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    golden = payload.get("golden_path") if isinstance(payload.get("golden_path"), dict) else {}
+    summary_value = payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
+    golden_value = payload.get("golden_path")
+    golden = golden_value if isinstance(golden_value, dict) else {}
     lines = ["# ShellForgeAI V2 Operator Handoff", ""]
     lines.append(f"- status: {payload.get('status', 'unknown')}")
     lines.append(f"- handoff_id: {payload.get('handoff_id') or 'unsaved'}")
@@ -122,7 +124,8 @@ def _handoff_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- {key}: {summary.get(key)}")
     lines.extend(["", "## V2 golden path"])
     for stage in ("status", "triage", "propose", "apply_preview", "verify"):
-        section = golden.get(stage) if isinstance(golden.get(stage), dict) else {}
+        section_value = golden.get(stage)
+        section = section_value if isinstance(section_value, dict) else {}
         lines.append(f"- {stage}: {section.get('status', 'unknown')}")
     lines.extend(["", "## First safe command"])
     lines.append(f"- {payload.get('first_safe_command') or 'shellforgeai status --json'}")
@@ -651,7 +654,8 @@ def _history_safe_next_commands(has_entries: bool) -> list[str]:
 def _handoff_history_entry(
     payload: dict[str, Any], artifact_dir: Path, data_dir: Path | str
 ) -> dict[str, Any]:
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    summary_value = payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
     validation = validate_v2_handoff(artifact_dir.name, data_dir)
     return {
         "handoff_id": payload.get("handoff_id") or artifact_dir.name,
@@ -748,8 +752,10 @@ def _load_handoff_for_compare(
 
 
 def _scalar_handoff_fields(payload: dict[str, Any]) -> dict[str, Any]:
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    golden = payload.get("golden_path") if isinstance(payload.get("golden_path"), dict) else {}
+    summary_value = payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
+    golden_value = payload.get("golden_path")
+    golden = golden_value if isinstance(golden_value, dict) else {}
     fields: dict[str, Any] = {
         "status": payload.get("status"),
         "current_status": summary.get("current_status"),
@@ -761,7 +767,8 @@ def _scalar_handoff_fields(payload: dict[str, Any]) -> dict[str, Any]:
         "first_safe_command": payload.get("first_safe_command"),
     }
     for stage in ("status", "triage", "propose", "apply_preview", "verify"):
-        section = golden.get(stage) if isinstance(golden.get(stage), dict) else {}
+        section_value = golden.get(stage)
+        section = section_value if isinstance(section_value, dict) else {}
         fields[f"golden_path.{stage}"] = section.get("status")
     return fields
 
@@ -775,8 +782,10 @@ def _handoff_list_fields(payload: dict[str, Any]) -> dict[str, list[Any]]:
 
 
 def _handoff_safety_drift(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
-    b = before.get("safety") if isinstance(before.get("safety"), dict) else {}
-    a = after.get("safety") if isinstance(after.get("safety"), dict) else {}
+    before_safety = before.get("safety")
+    b = before_safety if isinstance(before_safety, dict) else {}
+    after_safety = after.get("safety")
+    a = after_safety if isinstance(after_safety, dict) else {}
     drift: list[dict[str, Any]] = []
     for key in sorted(set(b) | set(a) | set(_validate_safety())):
         if b.get(key) != a.get(key):
@@ -930,7 +939,7 @@ def compare_v2_handoffs(
     shell, or mutates anything.
     """
     before, before_path, before_status = _load_handoff_for_compare(before_ref, data_dir)
-    if before is None:
+    if before is None or before_path is None:
         return _compare_load_failure(
             which="before",
             status=before_status,

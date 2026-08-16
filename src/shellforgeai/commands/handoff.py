@@ -254,7 +254,8 @@ def _build_v2_handoff_payload(
 
 
 def _handoff_stage_phrase(stage: str, golden_path: dict[str, Any], summary: dict[str, Any]) -> str:
-    section = golden_path.get(stage) if isinstance(golden_path.get(stage), dict) else {}
+    section_value = golden_path.get(stage)
+    section = section_value if isinstance(section_value, dict) else {}
     status = str(section.get("status") or "unknown")
     if stage == "status":
         if status == "ok":
@@ -293,8 +294,10 @@ def _handoff_stage_phrase(stage: str, golden_path: dict[str, Any], summary: dict
 
 
 def _render_v2_handoff_human(payload: dict[str, Any]) -> str:
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    golden_path = payload.get("golden_path") if isinstance(payload.get("golden_path"), dict) else {}
+    summary_value = payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
+    golden_path_value = payload.get("golden_path")
+    golden_path = golden_path_value if isinstance(golden_path_value, dict) else {}
     status = str(payload.get("status") or "unknown")
     suspects = int(summary.get("suspects_ranked", 0) or 0)
     header = status.upper() if status == "ok" else status
@@ -339,7 +342,8 @@ def _render_v2_handoff_human(payload: dict[str, Any]) -> str:
 
 
 def _render_v2_handoff_brief(payload: dict[str, Any]) -> str:
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    summary_value = payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
     return (
         f"Handoff: {payload.get('status')}\n"
         f"Risk: {summary.get('risk', 'unknown')}\n"
@@ -383,7 +387,8 @@ def _render_v2_handoff_export_human(payload: dict[str, Any]) -> str:
             lines.append(f"- {warning}")
         lines.append("Safety: artifact export only; no mutation recorded")
         return "\n".join(lines).rstrip() + "\n"
-    export = payload.get("export") if isinstance(payload.get("export"), dict) else {}
+    export_value = payload.get("export")
+    export = export_value if isinstance(export_value, dict) else {}
     header = (
         "Handoff export already exists (reused)"
         if payload.get("existing")
@@ -452,8 +457,10 @@ def _render_v2_handoff_compare_human(
     payload: dict[str, Any], *, include_stable: bool = False
 ) -> str:
     status = str(payload.get("status") or "failed")
-    before = payload.get("before") if isinstance(payload.get("before"), dict) else {}
-    after = payload.get("after") if isinstance(payload.get("after"), dict) else {}
+    before_value = payload.get("before")
+    before = before_value if isinstance(before_value, dict) else {}
+    after_value = payload.get("after")
+    after = after_value if isinstance(after_value, dict) else {}
     is_latest = bool(payload.get("latest")) or payload.get("mode") == "v2_handoff_compare_latest"
     title = "V2 handoff compare-latest" if is_latest else "V2 handoff compare"
     lines = [title, ""]
@@ -468,7 +475,8 @@ def _render_v2_handoff_compare_human(
     lines.append("Handoffs:")
     lines.append(f"- before: {before.get('handoff_id') or before.get('handoff_ref') or 'unknown'}")
     lines.append(f"- after:  {after.get('handoff_id') or after.get('handoff_ref') or 'unknown'}")
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    summary_value = payload.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
     lines.extend(["", "Summary of changes:"])
     for key in ("changed", "new", "resolved_or_missing", "stable", "safety_drift"):
         lines.append(f"- {key.replace('_', ' ')}: {summary.get(key, 0)}")
