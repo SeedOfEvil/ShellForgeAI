@@ -137,9 +137,8 @@ def validate_model_doctor_receipt(receipt_dir: Path) -> dict[str, Any]:
         "manifest lists expected files",
     )
 
-    checksum_files = (
-        checksums.get("files") if isinstance(checksums.get("files"), dict) else checksums
-    )
+    checksum_files_value = checksums.get("files")
+    checksum_files = checksum_files_value if isinstance(checksum_files_value, dict) else checksums
     checksum_names = _listed_files(checksum_files)
     checksum_required = set(REQUIRED_RECEIPT_FILES) - {"checksums.json"}
     checksums_ok = json_parse_ok and checksum_required.issubset(checksum_names)
@@ -189,7 +188,8 @@ def validate_model_doctor_receipt(receipt_dir: Path) -> dict[str, Any]:
     timeout_present = probe_status in {"skipped", "unknown"} or isinstance(
         (json_data.get("probe") or {}).get("timeout_seconds"), int
     )
-    safety_payload = json_data.get("safety") if isinstance(json_data.get("safety"), dict) else {}
+    safety_value = json_data.get("safety")
+    safety_payload = safety_value if isinstance(safety_value, dict) else {}
     safety_ok = bool(
         json_data.get("read_only") is True and json_data.get("mutation_performed") is False
     )
