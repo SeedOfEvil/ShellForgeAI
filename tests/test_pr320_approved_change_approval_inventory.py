@@ -2129,10 +2129,11 @@ def test_the_validation_matrix_maps_the_inventory_module_to_this_suite():
 
 
 def test_roadmap_safety_and_architecture_record_the_pr320_boundary():
-    roadmap = Path("docs/roadmap.md").read_text(encoding="utf-8")
-    assert "PR320" in roadmap
-    assert "APPROVED_CHANGE_APPROVAL_INVENTORY.md" in roadmap
-    assert "Stage B is not complete" in roadmap
+    history = Path("docs/archive/PROJECT_HISTORY.md").read_text(encoding="utf-8")
+    assert "PR320" in history
+    assert "APPROVED_CHANGE_APPROVAL_INVENTORY.md" in history
+    assert "discovery, not selection or authorization" in history
+    assert "no persisted index" in history
 
     safety = Path("docs/safety.md").read_text(encoding="utf-8")
     assert "PR320" in safety

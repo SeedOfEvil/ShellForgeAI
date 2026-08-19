@@ -398,9 +398,37 @@ def test_helper_has_no_shell_true_or_os_system():
 def test_ops_and_roadmap_reference_validation_lanes():
     ops = (REPO_ROOT / "OPS.md").read_text(encoding="utf-8").lower()
     roadmap = (REPO_ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8").lower()
+    history = (REPO_ROOT / "docs" / "archive" / "PROJECT_HISTORY.md").read_text(
+        encoding="utf-8"
+    ).lower()
     assert "validation lane" in ops
     assert "validation_lanes.md" in ops or "validation-lanes" in ops
-    assert "pr157" in roadmap
+    assert "historical implementation chronology" in roadmap
+    assert "project history" in roadmap
+    assert "pr157" in history and "validation-lane optimizer" in history
+
+
+def test_active_roadmap_and_project_history_keep_distinct_ownership():
+    roadmap = (REPO_ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8").lower()
+    history = (REPO_ROOT / "docs" / "archive" / "PROJECT_HISTORY.md").read_text(
+        encoding="utf-8"
+    ).lower()
+
+    assert "forward-looking" in roadmap
+    assert "operator outcomes" in roadmap and "staged delivery" in roadmap
+    assert "historical implementation chronology" in roadmap
+    assert "archive/project_history.md" in roadmap and "project history" in roadmap
+    for historical_milestone in ("pr157", "pr318", "pr319", "pr320"):
+        assert historical_milestone not in roadmap
+    assert "pr143" in roadmap
+
+    assert "project history archive" in history
+    assert "engineering chronology" in history
+    assert "period-accurate status language" in history
+    assert "not the current product classification" in history
+    assert "product status" in history and "current maturity" in history
+    for historical_milestone in ("pr157", "pr318", "pr319", "pr320"):
+        assert historical_milestone in history
 
 
 if __name__ == "__main__":  # pragma: no cover

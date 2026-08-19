@@ -2829,10 +2829,11 @@ def test_the_validation_matrix_maps_both_modules_to_this_suite():
 
 
 def test_roadmap_safety_architecture_and_data_layout_record_the_pr319_boundary():
-    roadmap = Path("docs/roadmap.md").read_text(encoding="utf-8")
-    assert "PR319" in roadmap
-    assert "APPROVED_CHANGE_APPROVAL_ARTIFACT_PERSISTENCE.md" in roadmap
-    assert "Stage B is not complete" in roadmap
+    history = Path("docs/archive/PROJECT_HISTORY.md").read_text(encoding="utf-8")
+    assert "PR319" in history
+    assert "APPROVED_CHANGE_APPROVAL_ARTIFACT_PERSISTENCE.md" in history
+    assert "atomic no-replace publication" in history
+    assert "non-authorizing and non-executable" in history
 
     safety = Path("docs/safety.md").read_text(encoding="utf-8")
     assert "PR319" in safety
