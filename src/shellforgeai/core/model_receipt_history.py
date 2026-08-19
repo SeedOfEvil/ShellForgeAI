@@ -81,14 +81,15 @@ def _created_at(path: Path, payload: dict[str, Any]) -> str:
 
 def _metadata(path: Path, validation: dict[str, Any]) -> dict[str, Any]:
     payload = _read_payload(path)
-    probe = payload.get("probe") if isinstance(payload.get("probe"), dict) else {}
+    probe_value = payload.get("probe")
+    probe = probe_value if isinstance(probe_value, dict) else {}
+    summary_value = validation.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
     return {
         "path": str(path),
         "status": "valid" if validation.get("status") in {"passed", "partial"} else "invalid",
         "created_at": _created_at(path, payload),
-        "probe_status": str(
-            probe.get("status") or validation.get("summary", {}).get("probe_status") or "unknown"
-        ),
+        "probe_status": str(probe.get("status") or summary.get("probe_status") or "unknown"),
         "auth_readiness": str(payload.get("auth_readiness") or "unknown"),
         "model_called": payload.get("model_called") is True,
         "live_probe_performed": payload.get("live_probe_performed") is True,
