@@ -40,6 +40,8 @@ outside `<data_dir>` are never written or deleted by the runtime.
   approved_change_plan_links/acpl_<64 lowercase hex>/
                                   PR337 persisted approved-change plan-link
                                   artifacts (exactly one canonical file each)
+  operator_solutions/osol_<64 lowercase hex>/
+                                  canonical OperatorSolution JSON and Markdown
 ```
 
 ## Reviewed-change artifact bundles (PR317)
@@ -174,3 +176,11 @@ ShellForgeAI never writes to or deletes:
 
 Path safety is enforced before any delete; refusal exits non-zero with no
 mutation.
+
+# Canonical OperatorSolution artifacts
+
+Optional canonical OperatorSolution artifacts use the fixed subtree
+`<data_dir>/operator_solutions/<osol_id>/`. Each exact-content directory contains
+only `operator-solution.json` and `operator-solution.md`; callers cannot select
+alternate paths or filenames. See `OPERATOR_SOLUTION_CONTRACT.md` for identity,
+atomic publication, validation, and non-authority semantics.
