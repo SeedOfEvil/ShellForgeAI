@@ -1673,9 +1673,11 @@ def test_validation_matrix_maps_the_approval_workflow_module_to_this_suite():
 
 
 def test_roadmap_and_safety_record_the_pr318_boundary():
-    roadmap = Path("docs/roadmap.md").read_text(encoding="utf-8")
-    assert "PR318" in roadmap
-    assert "APPROVED_CHANGE_APPROVAL_WORKFLOW.md" in roadmap
+    history = Path("docs/archive/PROJECT_HISTORY.md").read_text(encoding="utf-8")
+    assert "PR318" in history
+    assert "APPROVED_CHANGE_APPROVAL_WORKFLOW.md" in history
+    assert "in-memory only" in history
+    assert "no authorization" in history
     safety = Path("docs/safety.md").read_text(encoding="utf-8")
     assert "PR318" in safety
     architecture = Path("docs/architecture.md").read_text(encoding="utf-8")

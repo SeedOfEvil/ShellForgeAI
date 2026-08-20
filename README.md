@@ -22,7 +22,7 @@ The result is operator-ready guidance: a specific target and desired outcome, ev
 
 Typed collectors and deterministic assessment establish the factual base. When configured, a model synthesizes that bounded evidence into a clearer explanation and solution while ShellForgeAI retains tool control and keeps free-form text advisory. Provider failure leaves the deterministic evidence available.
 
-ShellForgeAI is read-only by default. Deterministic mutation refusal keeps mutation-shaped and unsafe broad asks within operator control, and slash-command routing keeps unknown commands away from the model. Existing confirm-gated execution and remediation utilities remain bounded, governed compatibility/testing surfaces outside the primary recommended workflow, with explicit gates for their narrow test and reference use.
+ShellForgeAI is read-only by default. Mutation is limited to named, narrow, auditable governed recipes and workflows, requires explicit operator confirmation and maintained gates, and remains under operator control. Deterministic mutation refusal rejects unsafe broad or mutation-shaped asks. Free-form natural-language and model output is advisory only and never becomes execution authority. ShellForgeAI never acts as autonomous self-healing infrastructure or autonomously remediates production systems. Existing confirm-gated execution and remediation utilities remain bounded, governed compatibility/testing surfaces outside the primary recommended workflow.
 
 ## Quick start
 

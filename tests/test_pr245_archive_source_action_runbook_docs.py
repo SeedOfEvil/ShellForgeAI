@@ -124,15 +124,16 @@ def test_readme_keeps_capability_first_positioning_and_mutation_refusal():
     # Runbook discoverability now lives in OPS.md and the three docs asserted by
     # test_minimal_docs_reference_runbook_without_new_execution_lane, because PR307
     # deliberately kept deep operational runbooks out of the product-facing README.
-    text = README.read_text()
-    assert "CLI-first Linux/Docker operator tooling" in text
-    assert "evidence-backed" in text
-    assert "named guarded workflows" in text
-    assert "Auditable artifacts:" in text
-    assert "manifests" in text and "receipts" in text
-    assert "Deterministic mutation refusal/routing" in text
-    assert "refuses unsafe broad mutation" in text
-    assert "Mutation-shaped asks are refused" in text
+    text = README.read_text().lower()
+    assert "cli-first operator assistant" in text
+    assert "linux/docker is the released v1 core" in text
+    assert "evidence-backed operator guidance" in text
+    assert sum(term in text for term in ("diagnose", "rank", "validate", "report", "handoff")) >= 4
+    assert "read-only by default" in text
+    assert "named, narrow, auditable governed recipes and workflows" in text
+    assert "explicit operator confirmation" in text and "operator control" in text
+    assert "deterministic mutation refusal" in text and "mutation-shaped asks" in text
+    assert "model output is advisory only" in text and "never becomes execution authority" in text
 
 
 def test_minimal_docs_reference_runbook_without_new_execution_lane():
@@ -140,7 +141,7 @@ def test_minimal_docs_reference_runbook_without_new_execution_lane():
         "OPS.md",
         "docs/VALIDATION_LANES.md",
         "docs/VALIDATION_MATRIX.md",
-        "docs/roadmap.md",
+        "docs/archive/PROJECT_HISTORY.md",
     ]:
         text = (ROOT / rel).read_text()
         assert "ARCHIVE_SOURCE_ACTION_RUNBOOK.md" in text
