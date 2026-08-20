@@ -2,9 +2,9 @@
 
 `shellforgeai.core.operator_solution` defines the versioned, platform-neutral
 North Star endpoint for an evidence-backed operator handoff. Version `v1` is a
-normalized domain contract, not a persisted artifact and not an integration
-with diagnosis, plans, runbooks, reports, handoffs, or the CLI. A later adapter
-may translate those authorities into this contract without embedding them.
+normalized domain contract, not a persisted artifact. Maintained Linux/Docker
+and Windows-native producers translate structured evidence authorities into the
+contract, and the handoff CLI can render it explicitly without embedding them.
 
 The contract captures target and desired outcome; diagnosis, bounded confidence,
 likely-cause inference and uncertainty; logical provenance; prerequisites;
@@ -97,6 +97,20 @@ ordering, incidental metadata, clocks, paths, random values, and runtime state d
 not affect the canonical solution. Equivalent structured inputs therefore yield
 byte-identical canonical JSON, Markdown, and solution SHA-256.
 
-CLI, artifact persistence, and report/handoff integration remain deferred as a
-separate future capability. Neither producer adds an executor interface or a
-broader runtime surface.
+## Canonical handoff rendering
+
+`shellforgeai handoff --operator-solution` renders the maintained canonical
+solution for the current Linux/Docker or native Windows host. Linux uses one
+completed diagnosis and `build_linux_operator_solution_from_diagnosis()`;
+Windows uses one bounded native evidence packet, the maintained handoff route,
+and `build_windows_operator_solution_from_evidence()`. Human output comes from
+the canonical Markdown renderer. Adding `--json` emits the canonical
+`OperatorSolution` JSON directly, without a handoff wrapper.
+
+This mode remains advisory-only and read-only. It does not call a model, execute
+procedure text, mutate a host, or persist a canonical solution. The default
+`shellforgeai handoff` command and its save/validate/export/history/compare V2
+artifact lifecycle remain supported unchanged for compatibility. Canonical
+solution persistence, report integration, and migration or replacement of the
+legacy V2 artifact lifecycle remain deferred. Neither producer or rendering
+mode adds an executor interface.
