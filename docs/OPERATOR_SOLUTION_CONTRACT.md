@@ -59,12 +59,44 @@ actual rollback instructions; otherwise recovery is explicitly not applicable.
 
 The producer rejects structured Windows diagnoses, unusable/empty evidence,
 destructive fallback plan steps, and diagnosis safety flags that report
-execution or mutation. Windows-native production is deferred to PR361. The
-builder's solution ID is a bounded hash of semantic session, target, and target
-type values. Diagnosis/plan timestamps, random plan IDs, runbook generation
+execution or mutation. The builder's solution ID is a bounded hash of semantic session, target, and
+target type values. Diagnosis/plan timestamps, random plan IDs, runbook generation
 times, clocks, UUIDs, paths, and runtime environment metadata do not participate
 in the canonical output. Consequently, semantically identical recreated inputs
 produce byte-identical canonical JSON, Markdown, and solution SHA-256.
 
-CLI, artifact persistence, and report/handoff integration remain deferred to
-PR360. This producer adds no executor interface or broader runtime surface.
+## Deterministic Windows-native producer
+
+`build_windows_operator_solution_from_evidence()` in
+`shellforgeai.core.windows_operator_solution_builder` is the corresponding
+Windows-native producer. It consumes only an already-built bounded packet from
+the structured `windows_evidence_context` contract, an already-classified
+`WindowsOperatorRoute`, and minimal target/session semantics. It neither calls
+the packet builder nor classifies raw operator text. It performs no collection,
+routing, provider/model call, CLI or handoff callback, persistence, host access,
+approval, preflight, authorization, or execution.
+
+Observed Windows memory, disk/volume, process, service, event, and network
+metadata contributes only a concise assessment. The producer does not treat a
+stopped service as a failure, missing metrics as healthy, interface metadata as
+end-to-end network health, or absent event evidence as proof that no crash
+occurred. It creates no likely cause when the bounded packet cannot support one.
+Packet limitations, evidence gaps, unavailable components, and the point-in-time
+boundary remain first-class visibility limits.
+
+The ordered advisory procedure is drawn from the maintained read-only Windows
+safe-command authority for the structured route. Verification requires fresh
+read-only evidence and comparison with the original snapshot. Because the
+procedure is non-mutating, recovery is `not_applicable` and no rollback guidance
+is fabricated. Logical evidence/route provenance contains neither raw payloads
+nor invented hashes.
+
+Stable semantic target, session, route, observations, and visibility inputs
+determine the bounded solution identity. Mapping insertion order, limitation
+ordering, incidental metadata, clocks, paths, random values, and runtime state do
+not affect the canonical solution. Equivalent structured inputs therefore yield
+byte-identical canonical JSON, Markdown, and solution SHA-256.
+
+CLI, artifact persistence, and report/handoff integration remain deferred as a
+separate future capability. Neither producer adds an executor interface or a
+broader runtime surface.
