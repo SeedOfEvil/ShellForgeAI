@@ -203,7 +203,6 @@ def test_windows_collects_and_builds_once_with_maintained_handoff_route(
 @pytest.mark.parametrize(
     "option",
     [
-        "--save",
         "--brief",
         "--from-status",
         "--from-triage",

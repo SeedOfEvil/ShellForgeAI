@@ -108,18 +108,20 @@ the canonical Markdown renderer. Adding `--json` emits the canonical
 `OperatorSolution` JSON directly, without a handoff wrapper.
 
 This mode remains advisory-only and read-only. It does not call a model, execute
-procedure text, mutate a host, or persist a canonical solution. The default
+procedure text, or mutate a host. Adding `--save` publishes the same solution
+once beneath `<data_dir>/operator_solutions/<artifact_id>/`; `--json` and
+`--target` remain supported with save. The default
 `shellforgeai handoff` command and its save/validate/export/history/compare V2
-artifact lifecycle remain supported unchanged for compatibility. Canonical
-solution persistence, report integration, and migration or replacement of the
-legacy V2 artifact lifecycle remain deferred. Neither producer or rendering
-mode adds an executor interface.
+artifact lifecycle remain supported unchanged for compatibility. Report
+integration and migration or replacement of the legacy V2 artifact lifecycle
+remain deferred. Neither producer or rendering mode adds an executor interface.
 
 ## Optional canonical artifact persistence
 
 The core persistence authority can durably publish an **already-validated**
-canonical `OperatorSolution`; it is infrastructure and is not integrated into
-the CLI. `solution_id` remains the producer-owned semantic identity. The
+canonical `OperatorSolution`. The handoff CLI's explicit canonical `--save`
+mode calls this authority exactly once with the same solution it built exactly
+once. `solution_id` remains the producer-owned semantic identity. The
 separate persisted identity is `osol_<64 lowercase hex>`, where the full
 SHA-256 is derived only from the exact UTF-8 bytes returned by
 `canonical_operator_solution_json()`. Time, randomness, paths, host data,
@@ -153,7 +155,8 @@ read-only, non-executed operational safety ledger; storing bytes is not an
 operational mutation described by that ledger.
 
 The canonical contract and Linux/Docker and Windows producers remain unchanged,
-as do canonical handoff rendering and the legacy V2 lifecycle. In particular,
-`shellforgeai handoff --operator-solution --save` remains unsupported. A later
-thin CLI change may call this independently validated authority; that
-integration is not part of the persistence contract here.
+as do canonical handoff rendering and the legacy V2 lifecycle. Save reports
+`published` or `already_present` as success and reports `conflict` or
+`publication_blocked` as a controlled failure. Its bounded result includes the
+artifact identity, fixed relative location, write/no-op state, and the unchanged
+`mutation_performed=false` and `execution_status=not_executed` safety state.

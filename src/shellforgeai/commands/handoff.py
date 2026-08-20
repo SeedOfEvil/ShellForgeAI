@@ -25,6 +25,11 @@ from shellforgeai.core.operator_solution import (
     canonical_operator_solution_json,
     render_operator_solution_markdown,
 )
+from shellforgeai.core.operator_solution_artifact_persistence import (
+    OPERATOR_SOLUTIONS_DIRNAME,
+    OperatorSolutionPublicationResult,
+    publish_operator_solution_artifact,
+)
 from shellforgeai.core.operator_solution_builder import (
     OperatorSolutionBuildError,
     build_linux_operator_solution_from_diagnosis,
@@ -92,6 +97,56 @@ def _render_canonical_handoff(ctx: typer.Context, *, target: str | None, json_ou
         else render_operator_solution_markdown(solution)
     )
     typer.echo(rendered, nl=not rendered.endswith("\n"))
+
+
+def _canonical_save_payload(result: OperatorSolutionPublicationResult) -> dict[str, Any]:
+    """Return the bounded CLI projection of one canonical publication result."""
+    return {
+        "status": result.status,
+        "artifact_id": result.artifact_id,
+        "artifact_path": f"{OPERATOR_SOLUTIONS_DIRNAME}/{result.artifact_id}",
+        "artifact_written": result.status == "published",
+        "existing_identical_no_op": result.status == "already_present",
+        "mutation_performed": False,
+        "execution_status": "not_executed",
+    }
+
+
+def _save_canonical_handoff(ctx: typer.Context, *, target: str | None, json_output: bool) -> None:
+    """Build once and pass that exact canonical solution once to persistence."""
+    try:
+        solution = _canonical_operator_solution(ctx, target)
+    except (
+        OperatorSolutionBuildError,
+        WindowsOperatorSolutionBuildError,
+        ValidationError,
+        CanonicalHandoffError,
+    ) as exc:
+        typer.echo(f"Canonical operator solution could not be produced: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    result = publish_operator_solution_artifact(
+        solution, data_dir=Path(load_settings().app.data_dir)
+    )
+    payload = _canonical_save_payload(result)
+    if json_output:
+        typer.echo(json.dumps(payload, sort_keys=True))
+    else:
+        typer.echo(
+            "\n".join(
+                (
+                    f"Operator solution save: {payload['status']}",
+                    f"Artifact ID: {payload['artifact_id']}",
+                    f"Location: {payload['artifact_path']}",
+                    f"Artifact written: {str(payload['artifact_written']).lower()}",
+                    f"Existing identical no-op: {str(payload['existing_identical_no_op']).lower()}",
+                    "Mutation performed: false",
+                    "Execution status: not_executed",
+                )
+            )
+        )
+    if result.status not in {"published", "already_present"}:
+        raise typer.Exit(1)
 
 
 def _v2_handoff_safety() -> dict[str, Any]:
@@ -613,7 +668,7 @@ def register(handoff_app: typer.Typer) -> None:
             bool,
             typer.Option(
                 "--operator-solution",
-                help="Render the canonical advisory OperatorSolution (no persistence).",
+                help="Render or save the canonical advisory OperatorSolution.",
             ),
         ] = False,
         brief: Annotated[
@@ -666,7 +721,6 @@ def register(handoff_app: typer.Typer) -> None:
         incompatible = [
             name
             for enabled, name in (
-                (save, "--save"),
                 (brief, "--brief"),
                 (from_status, "--from-status"),
                 (from_triage, "--from-triage"),
@@ -684,6 +738,9 @@ def register(handoff_app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
         if operator_solution:
+            if save:
+                _save_canonical_handoff(ctx, target=target, json_output=json_output)
+                return
             _render_canonical_handoff(ctx, target=target, json_output=json_output)
             return
         payload = _build_v2_handoff_payload(
