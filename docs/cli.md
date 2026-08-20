@@ -1671,6 +1671,23 @@ shellforgeai verify --target sfai-crashloop
 
 V2 golden-path sixth (final) command. `shellforgeai handoff` is a deterministic, read-only operator handoff packet. It collects/reuses the deterministic status/triage/propose/apply-preview/verify posture and presents a concise summary an operator can hand to the next shift: current status, risk, suspect count, proposal/apply-preview/verify state, the first safe next command, and what was **not** done. It does **not** execute fixes, create an executable mission, create an apply record or remediation receipt, imply remediation happened, restart anything, run Docker/Compose, call the model/Codex, use shell execution, or assume any action was applied. When no action was applied it states `No applied action was detected or assumed` and `This handoff is a read-only operator summary`.
 
+An explicit cross-platform canonical rendering mode is also available:
+
+```bash
+shellforgeai handoff --operator-solution
+shellforgeai handoff --operator-solution --json
+```
+
+The first command renders the maintained canonical `OperatorSolution` as
+Markdown; `--json` emits its canonical JSON directly. This mode collects bounded
+read-only Linux/Docker or native Windows evidence through maintained authorities
+and remains advisory: it does not call a model, execute its procedure, mutate a
+host, or write an artifact. `--target` is supported. Because canonical
+persistence is not provided, `--save`, `--brief`, and every legacy `--from-*`
+option are incompatible with `--operator-solution` and fail rather than being
+ignored. Default `shellforgeai handoff` and the complete legacy V2 artifact
+lifecycle remain supported unchanged.
+
 - `shellforgeai handoff` reports the handoff status, the per-stage V2 path summary, one first safe command, what was not done, and read-only/no-action safety wording.
 - `shellforgeai handoff --brief` emits a bounded operator view: handoff state, risk, first safe command, and safety.
 - `shellforgeai handoff --json` emits strict JSON only with `mode: "v2_handoff"`, `read_only: true`, `mutation_performed: false`, `artifact_written: false`, `handoff_id: null`, `handoff_path: null`, a compact `golden_path` (status/triage/propose/apply_preview/verify), a `summary`, `first_safe_command`, `safe_next_commands`, `limitations`, `warnings`, and a `safety` block with execution flags for apply, mission, plan, remediation, rollback, cleanup, Docker/Compose, container restart, `shell_true`, arbitrary command execution, natural-language execution, and model calls (all `false`).
@@ -1703,6 +1720,8 @@ shellforgeai handoff --json
 shellforgeai handoff --save
 shellforgeai handoff --from-verify
 shellforgeai handoff --target sfai-crashloop
+shellforgeai handoff --operator-solution
+shellforgeai handoff --operator-solution --json
 # Artifact lifecycle (read-only except ShellForgeAI-owned writes)
 shellforgeai handoff --save --json
 shellforgeai handoff validate <handoff_id> --json

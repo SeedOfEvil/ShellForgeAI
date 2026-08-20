@@ -1,11 +1,9 @@
 """``handoff`` command registration and rendering helpers.
 
 Behavior-preserving extraction of the read-only V2 operator handoff packet and
-ShellForgeAI-owned handoff artifact lifecycle from ``cli.py``. The command
-surface remains unchanged: ``handoff`` plus validate/export/export-validate/
-history/compare/compare-latest subcommands. This module only collects existing
-read-only deterministic posture and reads/writes ShellForgeAI-owned handoff
-artifacts; it does not add cleanup, remediation, rollback, recovery,
+ShellForgeAI-owned handoff artifact lifecycle from ``cli.py``, plus opt-in
+canonical ``OperatorSolution`` rendering. This module only orchestrates existing
+read-only authorities; it does not add cleanup, remediation, rollback, recovery,
 Docker/Compose mutation, restart, shell, arbitrary command, natural-language,
 or model execution behavior.
 """
@@ -18,12 +16,82 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+from pydantic import ValidationError
 
 from shellforgeai.core.config import load_settings
+from shellforgeai.core.diagnose import diagnose_target
+from shellforgeai.core.evidence import TargetType, classify_target
+from shellforgeai.core.operator_solution import (
+    canonical_operator_solution_json,
+    render_operator_solution_markdown,
+)
+from shellforgeai.core.operator_solution_builder import (
+    OperatorSolutionBuildError,
+    build_linux_operator_solution_from_diagnosis,
+)
+from shellforgeai.core.windows_evidence_context import build_windows_evidence_context
+from shellforgeai.core.windows_operator_solution_builder import (
+    WindowsOperatorSolutionBuildError,
+    build_windows_operator_solution_from_evidence,
+)
+from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_OPERATOR_INTENT_HANDOFF,
+    WindowsOperatorRoute,
+)
+from shellforgeai.platform_detection import detect_platform
+
+
+class CanonicalHandoffError(RuntimeError):
+    """Controlled canonical handoff orchestration failure."""
 
 
 def _cli() -> Any:
     return sys.modules["shellforgeai.cli"]
+
+
+def _canonical_operator_solution(ctx: typer.Context, target: str | None):
+    """Collect once, delegate once, and return the maintained canonical solution."""
+    platform_system = detect_platform().system.casefold()
+    if platform_system == "linux":
+        diagnosis = diagnose_target(_cli()._ctx(ctx), target or "host")
+        return build_linux_operator_solution_from_diagnosis(diagnosis)
+    if platform_system == "windows":
+        evidence = build_windows_evidence_context()
+        host = evidence.get("host") if isinstance(evidence.get("host"), dict) else {}
+        canonical_target = target or str(host.get("hostname") or "current-host")
+        target_type = classify_target(target) if target else TargetType.host
+        route = WindowsOperatorRoute(
+            intent=WINDOWS_OPERATOR_INTENT_HANDOFF,
+            host_is_windows=True,
+            explicit_windows=False,
+        )
+        return build_windows_operator_solution_from_evidence(
+            evidence,
+            route,
+            target=canonical_target,
+            target_type=target_type,
+            session_ref=_cli()._ctx(ctx).session.session_id,
+        )
+    raise CanonicalHandoffError(f"unsupported platform: {platform_system or 'unknown'}")
+
+
+def _render_canonical_handoff(ctx: typer.Context, *, target: str | None, json_output: bool) -> None:
+    try:
+        solution = _canonical_operator_solution(ctx, target)
+    except (
+        OperatorSolutionBuildError,
+        WindowsOperatorSolutionBuildError,
+        ValidationError,
+        CanonicalHandoffError,
+    ) as exc:
+        typer.echo(f"Canonical operator solution could not be produced: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    rendered = (
+        canonical_operator_solution_json(solution)
+        if json_output
+        else render_operator_solution_markdown(solution)
+    )
+    typer.echo(rendered, nl=not rendered.endswith("\n"))
 
 
 def _v2_handoff_safety() -> dict[str, Any]:
@@ -541,6 +609,13 @@ def register(handoff_app: typer.Typer) -> None:
     def handoff(
         ctx: typer.Context,
         json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+        operator_solution: Annotated[
+            bool,
+            typer.Option(
+                "--operator-solution",
+                help="Render the canonical advisory OperatorSolution (no persistence).",
+            ),
+        ] = False,
         brief: Annotated[
             bool, typer.Option("--brief", help="Emit bounded handoff output.")
         ] = False,
@@ -581,6 +656,35 @@ def register(handoff_app: typer.Typer) -> None:
         handoff artifact lifecycle.
         """
         if ctx.invoked_subcommand is not None:
+            if operator_solution:
+                typer.echo(
+                    "--operator-solution cannot be combined with handoff artifact subcommands.",
+                    err=True,
+                )
+                raise typer.Exit(2)
+            return
+        incompatible = [
+            name
+            for enabled, name in (
+                (save, "--save"),
+                (brief, "--brief"),
+                (from_status, "--from-status"),
+                (from_triage, "--from-triage"),
+                (from_propose, "--from-propose"),
+                (from_apply_preview, "--from-apply-preview"),
+                (from_verify, "--from-verify"),
+            )
+            if enabled
+        ]
+        if operator_solution and incompatible:
+            typer.echo(
+                "--operator-solution cannot be combined with legacy handoff option(s): "
+                + ", ".join(incompatible),
+                err=True,
+            )
+            raise typer.Exit(2)
+        if operator_solution:
+            _render_canonical_handoff(ctx, target=target, json_output=json_output)
             return
         payload = _build_v2_handoff_payload(
             target=target,
