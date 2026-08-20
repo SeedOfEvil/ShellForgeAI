@@ -114,3 +114,46 @@ artifact lifecycle remain supported unchanged for compatibility. Canonical
 solution persistence, report integration, and migration or replacement of the
 legacy V2 artifact lifecycle remain deferred. Neither producer or rendering
 mode adds an executor interface.
+
+## Optional canonical artifact persistence
+
+The core persistence authority can durably publish an **already-validated**
+canonical `OperatorSolution`; it is infrastructure and is not integrated into
+the CLI. `solution_id` remains the producer-owned semantic identity. The
+separate persisted identity is `osol_<64 lowercase hex>`, where the full
+SHA-256 is derived only from the exact UTF-8 bytes returned by
+`canonical_operator_solution_json()`. Time, randomness, paths, host data,
+publication state, and the artifact ID itself do not enter that identity.
+
+The only layout is
+`<data_dir>/operator_solutions/<artifact_id>/operator-solution.json` and
+`operator-solution.md`. The files are, respectively, the exact canonical JSON
+and exact `render_operator_solution_markdown()` output owned by this contract;
+there is no persistence envelope or decoration. Publication writes and flushes
+both files in a private sibling directory, validates the complete private
+representation, and uses one maintained atomic no-replace directory transition
+before validating the durable result. An existing identical artifact is a
+no-rewrite success. A partial, malformed, tampered, unsafe, or conflicting
+destination fails closed and is never overwritten, repaired, deleted, or
+normalized in place.
+
+Loading accepts only an exact canonical persisted ID and derives the fixed path
+and filenames internally. It refuses traversal, symlink/reparse indirection,
+unexpected entries or file types, and oversized files. It strictly decodes and
+validates the JSON as an `OperatorSolution`, regenerates and compares both
+canonical JSON and Markdown exactly, and recomputes the requested content
+identity. No partial or repaired object is returned.
+
+Persistence and loading perform no evidence collection, model/provider call,
+operational host inspection, network operation, shell/subprocess, Docker, or
+PowerShell operation. Persistence does not imply approval, authorization,
+freshness, preflight, execution, verification, remediation, or rollback or
+recovery permission. The persisted solution retains its advisory-only,
+read-only, non-executed operational safety ledger; storing bytes is not an
+operational mutation described by that ledger.
+
+The canonical contract and Linux/Docker and Windows producers remain unchanged,
+as do canonical handoff rendering and the legacy V2 lifecycle. In particular,
+`shellforgeai handoff --operator-solution --save` remains unsupported. A later
+thin CLI change may call this independently validated authority; that
+integration is not part of the persistence contract here.
