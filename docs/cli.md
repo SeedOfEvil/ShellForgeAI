@@ -1676,17 +1676,22 @@ An explicit cross-platform canonical rendering mode is also available:
 ```bash
 shellforgeai handoff --operator-solution
 shellforgeai handoff --operator-solution --json
+shellforgeai handoff --operator-solution --save
 ```
 
 The first command renders the maintained canonical `OperatorSolution` as
 Markdown; `--json` emits its canonical JSON directly. This mode collects bounded
 read-only Linux/Docker or native Windows evidence through maintained authorities
 and remains advisory: it does not call a model, execute its procedure, mutate a
-host, or write an artifact. `--target` is supported. Because canonical
-persistence is not provided, `--save`, `--brief`, and every legacy `--from-*`
-option are incompatible with `--operator-solution` and fail rather than being
-ignored. Default `shellforgeai handoff` and the complete legacy V2 artifact
-lifecycle remain supported unchanged.
+host. `--target` is supported. With `--save`, the one canonical solution built
+by the maintained Linux or Windows path is passed once to canonical persistence
+under `<data_dir>/operator_solutions/<artifact_id>/`. Human and JSON results are
+bounded and report `published` or `already_present` as success; `conflict` and
+`publication_blocked` are controlled failures. They include the artifact ID,
+fixed relative path, write/no-op state, `mutation_performed=false`, and
+`execution_status=not_executed`. `--brief` and every legacy `--from-*` option
+remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
+and the complete legacy V2 artifact lifecycle remain supported unchanged.
 
 - `shellforgeai handoff` reports the handoff status, the per-stage V2 path summary, one first safe command, what was not done, and read-only/no-action safety wording.
 - `shellforgeai handoff --brief` emits a bounded operator view: handoff state, risk, first safe command, and safety.
