@@ -1677,6 +1677,8 @@ An explicit cross-platform canonical rendering mode is also available:
 shellforgeai handoff --operator-solution
 shellforgeai handoff --operator-solution --json
 shellforgeai handoff --operator-solution --save
+shellforgeai handoff operator-solution-validate osol_<64-lowercase-hex>
+shellforgeai handoff operator-solution-validate osol_<64-lowercase-hex> --json
 ```
 
 The first command renders the maintained canonical `OperatorSolution` as
@@ -1692,6 +1694,19 @@ fixed relative path, write/no-op state, `mutation_performed=false`, and
 `execution_status=not_executed`. `--brief` and every legacy `--from-*` option
 remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
 and the complete legacy V2 artifact lifecycle remain supported unchanged.
+
+The separate `operator-solution-validate` subcommand passes one exact canonical
+artifact ID unchanged to the maintained canonical persistence loader. It accepts
+no path references or fallback forms, does not collect or produce a solution,
+and never displays loaded solution content. `loaded` exits successfully with
+`valid=true`; `not_found`, `invalid_id`, `invalid`, and `load_blocked` are
+controlled non-zero results with `valid=false`. Human and strict JSON output are
+bounded and include status, artifact ID, bytes read, whether the filesystem was
+accessed, and explicit read-only/non-executed safety metadata. This validates
+**persisted artifact integrity only**. It does not establish freshness, current
+host state, current-state validity, approval, authorization, execution
+eligibility, or successful execution. Legacy `handoff validate` behavior is
+unchanged.
 
 - `shellforgeai handoff` reports the handoff status, the per-stage V2 path summary, one first safe command, what was not done, and read-only/no-action safety wording.
 - `shellforgeai handoff --brief` emits a bounded operator view: handoff state, risk, first safe command, and safety.

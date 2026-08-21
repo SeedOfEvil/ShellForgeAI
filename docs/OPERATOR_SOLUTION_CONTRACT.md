@@ -146,6 +146,16 @@ validates the JSON as an `OperatorSolution`, regenerates and compares both
 canonical JSON and Markdown exactly, and recomputes the requested content
 identity. No partial or repaired object is returned.
 
+`shellforgeai handoff operator-solution-validate <osol_id> [--json]` is the
+bounded, read-only CLI projection of that loader. It accepts only the exact
+`osol_<64 lowercase hex>` identity; it does not accept a path or perform fallback
+interpretation. The command reports `loaded`, `not_found`, `invalid_id`,
+`invalid`, or `load_blocked`, along with bounded access and byte-count metadata,
+but never displays the loaded `OperatorSolution`. Only `loaded` is a successful,
+valid result. This validates **persisted artifact integrity only**. It does not
+establish freshness, current host state, current-state validity, approval,
+authorization, execution eligibility, or successful execution.
+
 Persistence and loading perform no evidence collection, model/provider call,
 operational host inspection, network operation, shell/subprocess, Docker, or
 PowerShell operation. Persistence does not imply approval, authorization,

@@ -28,6 +28,7 @@ from shellforgeai.core.operator_solution import (
 from shellforgeai.core.operator_solution_artifact_persistence import (
     OPERATOR_SOLUTIONS_DIRNAME,
     OperatorSolutionPublicationResult,
+    load_persisted_operator_solution_artifact,
     publish_operator_solution_artifact,
 )
 from shellforgeai.core.operator_solution_builder import (
@@ -147,6 +148,48 @@ def _save_canonical_handoff(ctx: typer.Context, *, target: str | None, json_outp
         )
     if result.status not in {"published", "already_present"}:
         raise typer.Exit(1)
+
+
+_OPERATOR_SOLUTION_VALIDATE_SCOPE = (
+    "Persisted artifact integrity only; this does not establish freshness, current host state, "
+    "current-state validity, approval, authorization, execution eligibility, or successful "
+    "execution."
+)
+
+
+def _operator_solution_validate_payload(osol_id: str) -> dict[str, Any]:
+    """Project one exact-ID canonical load result without exposing its solution."""
+    result = load_persisted_operator_solution_artifact(Path(load_settings().app.data_dir), osol_id)
+    return {
+        "mode": "canonical_operator_solution_validate",
+        "status": result.status,
+        "artifact_id": result.artifact_id,
+        "valid": result.status == "loaded",
+        "total_bytes_read": result.total_bytes_read,
+        "filesystem_accessed": result.filesystem_accessed,
+        "read_only": True,
+        "mutation_performed": False,
+        "execution_status": "not_executed",
+        "integrity_scope": _OPERATOR_SOLUTION_VALIDATE_SCOPE,
+    }
+
+
+def _render_operator_solution_validate_human(payload: dict[str, Any]) -> str:
+    """Render the bounded validation projection in a stable field order."""
+    return "\n".join(
+        (
+            "Canonical OperatorSolution persisted artifact integrity validation",
+            f"Status: {payload['status']}",
+            f"Artifact ID: {payload['artifact_id']}",
+            f"Valid: {str(payload['valid']).lower()}",
+            f"Total bytes read: {payload['total_bytes_read']}",
+            f"Filesystem accessed: {str(payload['filesystem_accessed']).lower()}",
+            "Read only: true",
+            "Mutation performed: false",
+            "Execution status: not_executed",
+            f"Scope: {payload['integrity_scope']}",
+        )
+    )
 
 
 def _v2_handoff_safety() -> dict[str, Any]:
@@ -784,6 +827,22 @@ def register(handoff_app: typer.Typer) -> None:
             raise typer.Exit(0 if payload.get("status") == "ok" else 1)
         typer.echo(_render_v2_handoff_validate_human(payload), nl=False)
         if payload.get("status") != "ok":
+            raise typer.Exit(1)
+
+    @handoff_app.command("operator-solution-validate")
+    def operator_solution_validate(
+        osol_id: Annotated[
+            str, typer.Argument(help="Exact osol_ plus 64 lowercase hexadecimal characters")
+        ],
+        json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    ) -> None:
+        """Validate persisted canonical OperatorSolution integrity by exact ID only."""
+        payload = _operator_solution_validate_payload(osol_id)
+        if json_output:
+            typer.echo(json.dumps(payload, sort_keys=True))
+        else:
+            typer.echo(_render_operator_solution_validate_human(payload))
+        if not payload["valid"]:
             raise typer.Exit(1)
 
     @handoff_app.command("export")
