@@ -58,6 +58,7 @@ from shellforgeai.core.latest_context import (
     render_latest_context_pending,
     valid_retained_context,
 )
+from shellforgeai.core.model_session import complete_for_session
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.platform_operator_contract import (
     PlatformOperatorContract,
@@ -855,13 +856,17 @@ def _summarize_facts(checks: list[dict[str, str]]) -> dict[str, Any]:
 
 def _run_model_synthesis(
     console: Console,
+    session,
     provider,
     request: ModelRequest,
     raw: bool,
     *,
     stream_to_console: bool = True,
 ) -> tuple[str, bool]:
-    streaming_enabled = os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
+    streaming_enabled = (
+        os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
+        and getattr(session, "provider_failure", None) is None
+    )
     final_text = ""
     if (
         stream_to_console
@@ -902,7 +907,7 @@ def _run_model_synthesis(
                     break
         return (final_text or "".join(chunks), False)
     with console.status("Asking model..."):
-        resp = provider.complete(request)
+        resp = complete_for_session(session, provider, request)
     if not getattr(resp, "ok", True):
         raw = getattr(resp, "raw", None) or {}
         failure = classify_model_failure(
@@ -1081,7 +1086,7 @@ def _render_retained_analytical_followup(
         )
         # Analytical continuity deliberately uses the established blocking
         # completion API. It never streams or starts background provider work.
-        provider_response = provider.complete(request)
+        provider_response = complete_for_session(runtime.session, provider, request)
     except Exception as exc:
         console.print(render_model_unavailable(type(exc).__name__))
         return
@@ -1176,14 +1181,16 @@ def _handle_windows_symptom_route(
     }
     try:
         provider = build_provider(runtime.settings)
-        response = provider.complete(
+        response = complete_for_session(
+            runtime.session,
+            provider,
             ModelRequest(
                 prompt=build_windows_evidence_model_prompt(question, model_context, mode="full"),
                 model=runtime.settings.model.model,
                 provider=runtime.settings.model.provider,
                 timeout_seconds=runtime.settings.model.timeout_seconds,
                 metadata={"command_kind": intent},
-            )
+            ),
         )
     except Exception as exc:
         console.print(render_model_unavailable(type(exc).__name__))
@@ -4074,6 +4081,7 @@ No command was executed.""")
                         output_file.flush()
                     mresp_text, mresp_streamed = _run_model_synthesis(
                         console,
+                        runtime.session,
                         provider,
                         ModelRequest(
                             prompt=prompt,
@@ -4638,6 +4646,7 @@ No command was executed.""")
         try:
             resp_text, resp_streamed = _run_model_synthesis(
                 console,
+                runtime.session,
                 provider,
                 ModelRequest(
                     prompt=prompt,

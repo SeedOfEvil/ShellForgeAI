@@ -27,10 +27,14 @@ class FakeProvider:
             "provider": "fake",
             "model": "fake-model",
             "auth_cache_present": self.auth_cache_present,
-            "auth_readiness": "not_verified" if self.auth_cache_present else "missing_auth_cache",
+            "auth_readiness": (
+                "verified_login_status" if self.auth_cache_present else "login_status_not_proven"
+            ),
             "auth_reason": "auth_cache_present_live_probe_not_run"
             if self.auth_cache_present
             else "auth_cache_missing",
+            "login_status_checked": True,
+            "login_status_ok": self.auth_cache_present,
         }
 
     def complete(self, request):
@@ -81,7 +85,7 @@ def test_default_no_probe_json_and_human_do_not_call_model(monkeypatch):
     payload = json.loads(result.stdout)
     assert payload["live_probe_requested"] is False
     assert payload["live_probe_performed"] is False
-    assert payload["auth_readiness"] == "not_verified"
+    assert payload["auth_readiness"] == "verified_login_status"
     assert payload["reason"] == "Live auth probe was not requested."
     assert payload["safety"]["model_call_performed"] is False
     _assert_read_only_safety(payload["safety"])
@@ -89,7 +93,7 @@ def test_default_no_probe_json_and_human_do_not_call_model(monkeypatch):
 
     human = runner.invoke(app, ["model", "doctor"])
     assert human.exit_code == 0, human.output
-    assert "Auth readiness: not verified" in human.stdout
+    assert "Auth readiness: verified login status" in human.stdout
     assert "Reason: live auth probe was not requested." in human.stdout
     assert "No model call was made." in human.stdout
     assert provider.calls == []
@@ -160,7 +164,9 @@ def test_live_probe_failures_are_bounded(monkeypatch):
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
         assert len(provider.calls) == 1
-        assert payload["auth_readiness"] == "failed"
+        assert payload["auth_readiness"] in {"failed", "verified_login_status"}
+        if "timed out" in (response.error or ""):
+            assert payload["auth_readiness"] == "verified_login_status"
         assert payload["probe"]["status"] == "failed"
         assert "Traceback" not in result.stdout
         assert "SECRET_TOKEN" not in result.stdout

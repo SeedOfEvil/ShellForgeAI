@@ -450,20 +450,21 @@ def test_doctor_codex_home_login_not_proven_holds_readiness(
     assert "login status not proven" in reason
 
 
-def test_doctor_without_codex_home_keeps_legacy_auth_cache_contract(
+def test_doctor_without_codex_home_checks_current_process_context(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
     _pin_codex_home(monkeypatch, tmp_path, configured=False)
 
-    def _no_login_calls(argv: list[str], **kwargs: Any) -> _FakeCompleted:
-        assert argv[1:] != ["login", "status"], "login status must not run without CODEX_HOME"
+    def _current_context(argv: list[str], **kwargs: Any) -> _FakeCompleted:
+        if argv[1:] == ["login", "status"]:
+            return _FakeCompleted(1, stderr="not logged in")
         return _FakeCompleted(0, stdout="codex 0.130.0")
 
-    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", _no_login_calls)
+    monkeypatch.setattr("shellforgeai.llm.codex.subprocess.run", _current_context)
     info = _provider_with_fake_binary().doctor()
     assert info["codex_home_configured"] is False
-    assert info["login_status_checked"] is False
-    assert info["auth_readiness"] == "missing_auth_cache"
+    assert info["login_status_checked"] is True
+    assert info["auth_readiness"] == "login_status_not_proven"
 
 
 class _DoctorOnlyProvider:

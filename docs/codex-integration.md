@@ -55,8 +55,11 @@ no arbitrary shell, no destructive execution, `apply` validation-only.
 
 ## Model doctor explicit probe
 
-Codex remains a synthesis provider, not a ShellForgeAI tool executor. Default
-`shellforgeai model doctor` does not call Codex or the network. The explicit
+Codex remains a synthesis provider, not a ShellForgeAI tool executor. When the
+configured binary resolves, default `shellforgeai model doctor` runs exactly
+one bounded `codex login status` in the inherited process environment and
+makes zero inference calls. Auth-cache presence is diagnostic only and never
+proves readiness; cache contents are not inspected. The explicit
 `--live-probe` flag performs one fixed, bounded readiness/auth probe through the
 existing provider path, with no operator-provided prompt text, no tool execution,
 and no mutation.
@@ -79,10 +82,30 @@ when proven and `login_status_not_proven` otherwise, never
 `--live-probe` lane treats proven login status as configured credentials.
 `CODEX_HOME` is only inherited by Codex CLI child processes — ShellForgeAI
 never hardcodes a user-specific value and never reads, copies, prints,
-archives, or parses auth-cache/token contents. Without `CODEX_HOME`, the
-existing default-profile behavior is unchanged. Codex model calls
+archives, or parses auth-cache/token contents. Without `CODEX_HOME`, the same
+check tests the current account/SYSTEM/container context; readiness from a
+different account is never borrowed. Codex model calls
 (`codex exec`) already inherit the process environment, so the same
 tester-scoped `CODEX_HOME` governs model-assisted synthesis.
+
+## Model identity, fallback, and session failure
+
+Each request distinguishes the configured provider/model/fallback, requested
+and invoked identity, and response-reported identity. An effective model is
+reported only when structured provider output explicitly supplies it;
+otherwise it is `null` with `effective_model_observed=false`. A fallback model
+is attempted at most once and only for a classified model-selection or
+model-unavailable failure. Auth, process context, binary, repository trust,
+argument, encoding, timeout, output capture, launch, and other terminal
+failures do not qualify.
+
+A terminal provider failure is remembered only in the current in-memory
+ShellForgeAI session. Later model-eligible turns still collect and render their
+normal deterministic read-only evidence, but make no known-failed provider
+call and identify model assistance as suppressed. Thin or missing evidence is
+reported as a limitation, never replaced with invented findings. A new CLI or
+interactive session naturally resets suppression; the state is not persisted
+in configuration, history, receipts, artifacts, or the environment.
 
 ## Windows Codex invocation (PR289)
 

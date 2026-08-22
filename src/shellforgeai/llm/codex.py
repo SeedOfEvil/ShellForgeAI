@@ -231,24 +231,10 @@ class CodexProvider:
     def available(self) -> tuple[bool, str]:
         if self._resolve_binary() is None:
             return False, self._provider_unavailable_error("codex executable not found")
-        if _codex_home_configured():
-            # Tester-scoped CODEX_HOME: readiness comes from safe command-level
-            # login status, never from a profile-default auth-cache path.
-            status = self.login_status()
-            if status.get("ok"):
-                return True, "ok"
-            return (
-                False,
-                "codex_login_not_verified: codex login status not proven for configured CODEX_HOME",
-            )
-        auth_cache = Path.home() / ".codex" / "auth.json"
-        if not auth_cache.exists():
-            return (
-                False,
-                "codex_context_not_configured_for_process: set CODEX_HOME for this "
-                "process context or run codex login status from the same account",
-            )
-        return True, "ok"
+        status = self.login_status()
+        if status.get("ok"):
+            return True, "ok"
+        return False, "codex_login_not_verified: codex login status not proven for this process"
 
     def doctor(self) -> dict[str, str | bool]:
         found = self._resolve_binary()
@@ -275,33 +261,31 @@ class CodexProvider:
             "ok": False,
             "reason": "login_status_not_checked",
         }
-        if found and codex_home_configured:
-            # PR289 — honor the tester-scoped CODEX_HOME context: readiness is
-            # proven by safe `codex login status` in the same process
-            # environment, not by a profile-default auth-cache path that the
-            # QGA/SYSTEM profile does not own.
+        if found:
+            # Always test the inherited process context. CODEX_HOME, when set,
+            # scopes that exact child without ShellForgeAI inspecting it.
             login_info = self.login_status()
         login_status_checked = bool(login_info.get("checked"))
         login_status_ok = bool(login_info.get("ok"))
         if not found:
             auth_readiness = "missing_binary"
             auth_reason = "codex_binary_missing"
-        elif codex_home_configured and login_status_ok:
+        elif login_status_ok:
             auth_readiness = "verified_login_status"
             auth_reason = "codex_login_status_ok"
-        elif auth_cache_present:
-            auth_readiness = "not_verified"
-            auth_reason = "auth_cache_present_live_probe_not_run"
-        elif codex_home_configured:
+        elif login_status_checked:
             auth_readiness = "login_status_not_proven"
             auth_reason = str(login_info.get("reason") or "login_status_not_proven")
         else:
-            auth_readiness = "missing_auth_cache"
-            auth_reason = "codex_context_not_configured_for_process"
+            auth_readiness = "not_verified"
+            auth_reason = "login_status_not_checked"
         return {
             "provider": self.name,
             "model": self.default_model,
             "fallback_model": self.fallback_model,
+            "configured_provider": self.name,
+            "configured_model": self.default_model,
+            "configured_fallback_model": self.fallback_model,
             "codex_binary": self.binary,
             "codex_resolved_binary": found or "",
             "codex_found": bool(found),
@@ -816,14 +800,22 @@ class CodexProvider:
                 },
             )
 
-        model_used = request.model or self.default_model
+        requested_model = request.model or self.default_model
+        model_used = requested_model
+        first_failure = (
+            classify_model_failure(stdout=out, stderr=err, returncode=rc) if rc != 0 else None
+        )
+        fallback_attempted = False
         if (
             rc != 0
             and self.allow_fallback
+            and not bool(request.metadata.get("disable_fallback"))
             and self.fallback_model
             and model_used != self.fallback_model
-            and "model" in (err + out).lower()
+            and first_failure is not None
+            and first_failure.get("fallback_eligible") is True
         ):
+            fallback_attempted = True
             try:
                 rc, out, err, last_message, cmd, runtime_meta = self._run(
                     request.prompt, self.fallback_model, request.timeout_seconds, lifecycle
@@ -851,6 +843,43 @@ class CodexProvider:
                         **lifecycle.timing_fields(),
                     },
                 )
+            except subprocess.TimeoutExpired as exc:
+                timeout_error = (
+                    f"codex timed out after {request.timeout_seconds}s "
+                    "(bounded timeout; no indefinite wait)"
+                )
+                return ModelResponse(
+                    provider=self.name,
+                    model=self.fallback_model,
+                    text="",
+                    ok=False,
+                    error=timeout_error,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    raw={"stderr": _redact(str(exc.stderr or ""))},
+                    metadata={
+                        **self._exec_diagnostics(
+                            attempted=True,
+                            timed_out=True,
+                            error_class="timeout",
+                            error_message=timeout_error,
+                            stderr=str(exc.stderr or ""),
+                            resolved=resolved,
+                            command_built=True,
+                            command_started=True,
+                            child_cleanup_performed=bool(
+                                getattr(exc, "child_cleanup_performed", True)
+                            ),
+                        ),
+                        "configured_model": self.default_model,
+                        "configured_fallback_model": self.fallback_model,
+                        "requested_model": requested_model,
+                        "invoked_model": self.fallback_model,
+                        "provider_attempt_count": 2,
+                        "fallback_attempted": True,
+                        "effective_model": None,
+                        "effective_model_observed": False,
+                    },
+                )
             model_used = self.fallback_model
             warnings.append(
                 f"{request.model or self.default_model} was unavailable through Codex; "
@@ -859,7 +888,21 @@ class CodexProvider:
 
         text = ""
         usage: dict[str, int | None] | None = None
-        metadata: dict[str, str] = {}
+        metadata: dict[str, object] = {
+            "configured_provider": self.name,
+            "configured_model": self.default_model,
+            "configured_fallback_model": self.fallback_model,
+            "requested_provider": request.provider,
+            "requested_model": requested_model,
+            "invoked_provider": self.name,
+            "invoked_model": model_used,
+            "response_reported_provider": self.name,
+            "response_reported_model": model_used,
+            "effective_model": None,
+            "effective_model_observed": False,
+            "provider_attempt_count": 2 if fallback_attempted else 1,
+            "fallback_attempted": fallback_attempted,
+        }
         if last_message:
             text = last_message
         if self.use_json and out.strip():
@@ -875,6 +918,9 @@ class CodexProvider:
             }
             if parsed.thread_id:
                 metadata["thread_id"] = parsed.thread_id
+            if parsed.effective_model:
+                metadata["effective_model"] = parsed.effective_model
+                metadata["effective_model_observed"] = True
         if not text:
             text = (out or err).strip()
 
@@ -976,6 +1022,36 @@ def classify_model_failure(
         event_blob += f"\n{ev.get('type', '')} {ev.get('message', '')}"
     if not reason and event_blob:
         reason = _auth_reason_blob(event_blob)
+    model_blob = "\n".join([blob, event_blob]).lower()
+    if (
+        not reason
+        and "unexpected argument" not in model_blob
+        and not _is_repo_trust_failure(model_blob)
+        and "timed out" not in model_blob
+        and "input is not valid utf-8" not in model_blob
+        and "failed to read prompt from stdin" not in model_blob
+        and any(
+            marker in model_blob
+            for marker in (
+                "model not found",
+                "model is not available",
+                "model unavailable",
+                "unsupported model",
+                "unknown model",
+                "invalid model",
+                "does not have access to model",
+            )
+        )
+    ):
+        return {
+            "status": "unavailable",
+            "category": "model_selection",
+            "reason": "model_unavailable",
+            "user_message": "The requested model is unavailable.",
+            "next_step": "Use the configured fallback model once.",
+            "raw_suppressed": True,
+            "fallback_eligible": True,
+        }
     if "unexpected argument" in blob.lower() or "unexpected argument" in event_blob.lower():
         # The Codex CLI rejected the command line before running anything —
         # typically a global option (--model/--sandbox/--ask-for-approval)

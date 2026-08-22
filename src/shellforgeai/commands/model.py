@@ -99,19 +99,10 @@ def _auth_readiness_after_probe_timeout(info: dict[str, Any]) -> str:
 
 
 def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[str, Any]:
-    # PR289 — a tester-scoped CODEX_HOME proven by safe `codex login status`
-    # configures the provider even when the profile-default auth cache is
-    # absent (QGA/SYSTEM lanes). Skip as not_configured only when neither
-    # signal indicates credentials.
+    # A live call is permitted only after login status proves this exact
+    # inherited process context. Cache presence is never readiness proof.
     login_status_ok = bool(info.get("login_status_ok"))
-    if (not bool(info.get("auth_cache_present")) and not login_status_ok) or str(
-        info.get("auth_readiness")
-    ) in {
-        "missing_auth_cache",
-        "missing_binary",
-        "not_configured",
-        "login_status_not_proven",
-    }:
+    if not login_status_ok:
         return {
             "auth_readiness": "not_configured",
             "probe": {
@@ -139,6 +130,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
             "purpose": "model_doctor_live_probe",
             "tools_allowed": False,
             "operator_prompt_included": False,
+            "disable_fallback": True,
         },
     )
     started = time.monotonic()
@@ -398,14 +390,7 @@ def register(model_app: typer.Typer) -> None:
         codex_home_configured = bool(info.get("codex_home_configured"))
         login_status_checked = bool(info.get("login_status_checked"))
         login_status_ok = bool(info.get("login_status_ok"))
-        ok = auth_readiness not in {
-            "failed",
-            "error",
-            "missing_binary",
-            "missing_auth_cache",
-            "unauthorized",
-            "login_status_not_proven",
-        }
+        ok = auth_readiness == "verified_login_status"
         live_probe_available = bool(info.get("live_probe_available", False))
         live_probe_performed = bool(info.get("live_probe_performed", False))
         safe_next_command = str(info.get("safe_next_command") or "shellforgeai model doctor --json")
@@ -462,6 +447,11 @@ def register(model_app: typer.Typer) -> None:
             "mutation_performed": False,
             "provider": info.get("provider"),
             "model": info.get("model"),
+            "configured_provider": info.get("configured_provider", info.get("provider")),
+            "configured_model": info.get("configured_model", info.get("model")),
+            "configured_fallback_model": info.get(
+                "configured_fallback_model", info.get("fallback_model")
+            ),
             "runtime_root_resolved": bool(
                 runtime.session.config_summary.get("runtime_root_resolved")
             ),

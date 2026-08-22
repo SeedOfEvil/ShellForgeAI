@@ -47,7 +47,7 @@ def test_default_json_cache_present_is_not_verified_not_broken(monkeypatch) -> N
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["status"] == "ok"
+    assert payload["status"] == "warning"
     assert payload["read_only"] is True
     assert payload["mutation_performed"] is False
     assert payload["model_called"] is False
@@ -116,13 +116,14 @@ def test_real_provider_local_semantics_without_network_or_model_call(
     monkeypatch.setattr("shutil.which", lambda _binary: "/usr/local/bin/codex")
 
     def fake_run(cmd, **kwargs):
-        assert cmd == ["codex", "--version"]
-        assert kwargs.get("timeout") == 10
-
         class Result:
+            returncode = 0
             stdout = "codex-cli 0.135.0\n"
             stderr = ""
 
+        if cmd[-2:] == ["login", "status"]:
+            Result.returncode = 1
+            Result.stdout = ""
         return Result()
 
     monkeypatch.setattr("subprocess.run", fake_run)
@@ -130,7 +131,7 @@ def test_real_provider_local_semantics_without_network_or_model_call(
     info = CodexProvider(default_model="gpt-5.5").doctor()
 
     assert info["auth_cache_present"] is True
-    assert info["auth_readiness"] == "not_verified"
-    assert info["auth_reason"] == "auth_cache_present_live_probe_not_run"
+    assert info["auth_readiness"] == "login_status_not_proven"
+    assert info["auth_reason"] == "login_status_not_proven"
     assert info["live_probe_performed"] is False
     assert info["model_called"] is False

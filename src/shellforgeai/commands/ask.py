@@ -95,6 +95,7 @@ def register(app: typer.Typer) -> None:
             render_model_assessment,
             render_model_unavailable,
         )
+        from shellforgeai.core.model_session import complete_for_session
         from shellforgeai.core.platform_operator_contract import (
             build_platform_operator_contract,
             render_unsupported_platform_operator_response,
@@ -637,20 +638,27 @@ def register(app: typer.Typer) -> None:
                 output_file.flush()
             timeline.mark_evidence_rendered()
             timeline.mark_model_start()
-        resp = provider.complete(
+        resp = complete_for_session(
+            runtime.session,
+            provider,
             ModelRequest(
                 prompt=prompt,
                 model=runtime.settings.model.model,
                 provider=runtime.settings.model.provider,
                 timeout_seconds=runtime.settings.model.timeout_seconds,
                 metadata={"raw": raw, "progress_callback": _model_progress_callback()},
-            )
+            ),
         )
         if evidence_stage is not None:
             timeline.mark_model_end()
         if not resp.ok:
             failure_meta = getattr(resp, "metadata", None) or {}
             failure_class = str(failure_meta.get("codex_exec_error_class") or "unknown")
+            if failure_meta.get("provider_call_suppressed"):
+                cli.console.print(
+                    "Model assistance is suppressed/unavailable for this session "
+                    f"({failure_class}); no provider call was made."
+                )
             if evidence_stage is not None:
                 cli.console.print("")
                 cli.console.print(render_model_unavailable(failure_class))
