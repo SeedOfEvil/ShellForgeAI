@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from shellforgeai.commands.model import _run_live_probe
 from shellforgeai.core.model_session import complete_for_session
 from shellforgeai.llm.codex import CodexProvider, classify_model_failure
 from shellforgeai.llm.codex_events import parse_codex_jsonl
@@ -42,6 +43,7 @@ def test_default_doctor_checks_login_once_without_inference(monkeypatch, tmp_pat
     assert info["auth_readiness"] == "verified_login_status"
     assert info["login_status_ok"] is True
     assert info["auth_cache_contents_inspected"] is False
+    assert info["auth_next_step"] is None
 
 
 def test_cache_presence_cannot_prove_readiness(monkeypatch, tmp_path):
@@ -171,6 +173,9 @@ def test_terminal_failure_suppresses_only_same_session():
     second = complete_for_session(first_session, provider, _request())
     assert first.ok is False and provider.calls == 1
     assert second.metadata["provider_call_suppressed"] is True
+    assert second.metadata["codex_exec_error_class"] == "session_provider_suppressed"
+    assert second.metadata["original_provider_failure_category"] == "timeout"
+    assert second.metadata["provider_attempt_count"] == 0
     assert "suppressed for this session" in second.error
     assert provider.calls == 1
     assert set(first_session.provider_failure) == {"category", "attempt_count", "suppressed"}
@@ -178,3 +183,92 @@ def test_terminal_failure_suppresses_only_same_session():
     new_session = SimpleNamespace(provider_failure=None)
     complete_for_session(new_session, provider, _request())
     assert provider.calls == 2
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        SimpleNamespace(text="legacy success"),
+        SimpleNamespace(text="legacy success", ok=True),
+        SimpleNamespace(text="legacy success", metadata={}),
+    ],
+)
+def test_legacy_success_response_does_not_suppress(response):
+    session = SimpleNamespace(provider_failure=None)
+    provider = SimpleNamespace(complete=lambda _request: response)
+    assert complete_for_session(session, provider, _request()) is response
+    assert session.provider_failure is None
+
+
+def test_failure_without_metadata_records_bounded_terminal_state():
+    session = SimpleNamespace(provider_failure=None)
+    response = SimpleNamespace(text="", ok=False)
+    provider = SimpleNamespace(complete=lambda _request: response)
+    assert complete_for_session(session, provider, _request()) is response
+    assert session.provider_failure == {
+        "category": "provider_failure",
+        "attempt_count": 1,
+        "suppressed": True,
+    }
+
+
+def test_live_probe_projects_truthful_identity():
+    response = ModelResponse(
+        provider="response-provider",
+        model="response-model",
+        text="ready",
+        metadata={
+            "requested_provider": "requested-provider",
+            "requested_model": "requested-model",
+            "invoked_provider": "invoked-provider",
+            "invoked_model": "invoked-model",
+            "response_reported_provider": "reported-provider",
+            "response_reported_model": "reported-model",
+            "effective_model": "explicit-backend-model",
+            "effective_model_observed": True,
+        },
+    )
+    provider = SimpleNamespace(complete=lambda _request: response)
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(
+            model=SimpleNamespace(provider="configured-provider", model="configured-model")
+        )
+    )
+    result = _run_live_probe(
+        provider,
+        {
+            "provider": "configured-provider",
+            "model": "configured-model",
+            "login_status_ok": True,
+        },
+        runtime,
+    )
+    probe = result["probe"]
+    assert probe["requested_model"] == "requested-model"
+    assert probe["invoked_model"] == "invoked-model"
+    assert probe["response_reported_model"] == "reported-model"
+    assert probe["effective_model"] == "explicit-backend-model"
+    assert probe["effective_model_observed"] is True
+
+
+def test_live_probe_does_not_infer_effective_identity():
+    response = ModelResponse(
+        provider="response-provider", model="response-model", text="ready", metadata={}
+    )
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(
+            model=SimpleNamespace(provider="configured-provider", model="configured-model")
+        )
+    )
+    result = _run_live_probe(
+        SimpleNamespace(complete=lambda _request: response),
+        {
+            "provider": "configured-provider",
+            "model": "configured-model",
+            "login_status_ok": True,
+        },
+        runtime,
+    )
+    assert result["probe"]["response_reported_model"] == "response-model"
+    assert result["probe"]["effective_model"] is None
+    assert result["probe"]["effective_model_observed"] is False

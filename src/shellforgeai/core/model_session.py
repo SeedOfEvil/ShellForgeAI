@@ -15,14 +15,16 @@ def complete_for_session(session, provider, request: ModelRequest) -> ModelRespo
             ok=False,
             error=f"model assistance suppressed for this session ({category})",
             metadata={
-                "codex_exec_error_class": category,
+                "codex_exec_error_class": "session_provider_suppressed",
+                "original_provider_failure_category": category,
                 "provider_call_suppressed": True,
                 "provider_attempt_count": 0,
             },
         )
     response = provider.complete(request)
-    if not response.ok:
-        metadata = response.metadata or {}
+    response_ok = getattr(response, "ok", True)
+    if response_ok is False:
+        metadata = getattr(response, "metadata", None) or {}
         session.provider_failure = {
             "category": str(metadata.get("codex_exec_error_class") or "provider_failure")[:64],
             "attempt_count": min(int(metadata.get("provider_attempt_count") or 1), 2),

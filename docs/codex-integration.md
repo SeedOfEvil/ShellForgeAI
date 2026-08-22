@@ -102,7 +102,8 @@ failures do not qualify.
 A terminal provider failure is remembered only in the current in-memory
 ShellForgeAI session. Later model-eligible turns still collect and render their
 normal deterministic read-only evidence, but make no known-failed provider
-call and identify model assistance as suppressed. Thin or missing evidence is
+call and report `session_provider_suppressed`, the original bounded failure
+category, and an attempt count of zero. Thin or missing evidence is
 reported as a limitation, never replaced with invented findings. A new CLI or
 interactive session naturally resets suppression; the state is not persisted
 in configuration, history, receipts, artifacts, or the environment.

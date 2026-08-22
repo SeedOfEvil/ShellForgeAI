@@ -651,13 +651,18 @@ def register(app: typer.Typer) -> None:
         )
         if evidence_stage is not None:
             timeline.mark_model_end()
-        if not resp.ok:
+        if getattr(resp, "ok", True) is False:
             failure_meta = getattr(resp, "metadata", None) or {}
             failure_class = str(failure_meta.get("codex_exec_error_class") or "unknown")
             if failure_meta.get("provider_call_suppressed"):
+                original = str(
+                    failure_meta.get("original_provider_failure_category") or "provider_failure"
+                )
                 cli.console.print(
                     "Model assistance is suppressed/unavailable for this session "
-                    f"({failure_class}); no provider call was made."
+                    f"after {original} ({failure_class}); no provider call occurred. "
+                    "Collected deterministic evidence remains authoritative; when "
+                    "evidence is unavailable or thin, that limitation remains explicit."
                 )
             if evidence_stage is not None:
                 cli.console.print("")

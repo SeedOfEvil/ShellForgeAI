@@ -909,6 +909,16 @@ def _run_model_synthesis(
     with console.status("Asking model..."):
         resp = complete_for_session(session, provider, request)
     if not getattr(resp, "ok", True):
+        metadata = getattr(resp, "metadata", None) or {}
+        if metadata.get("provider_call_suppressed"):
+            original = str(metadata.get("original_provider_failure_category") or "provider_failure")
+            return (
+                "Model assistance is suppressed/unavailable for this session "
+                f"after {original}; no provider call occurred. Deterministic "
+                "evidence above remains authoritative; if it is thin or absent, "
+                "that evidence limitation remains explicit.",
+                False,
+            )
         raw = getattr(resp, "raw", None) or {}
         failure = classify_model_failure(
             stdout=str(raw.get("stdout_jsonl") or raw.get("stdout") or getattr(resp, "text", "")),
@@ -1086,7 +1096,9 @@ def _render_retained_analytical_followup(
         )
         # Analytical continuity deliberately uses the established blocking
         # completion API. It never streams or starts background provider work.
-        provider_response = complete_for_session(runtime.session, provider, request)
+        provider_response = complete_for_session(
+            getattr(runtime, "session", runtime), provider, request
+        )
     except Exception as exc:
         console.print(render_model_unavailable(type(exc).__name__))
         return

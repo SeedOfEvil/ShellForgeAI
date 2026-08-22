@@ -307,7 +307,7 @@ class CodexProvider:
             "live_probe_performed": False,
             "model_called": False,
             "safe_next_command": "shellforgeai model doctor --json",
-            "auth_next_step": "codex login --device-auth",
+            "auth_next_step": None if login_status_ok else "codex login --device-auth",
             "sandbox": self.sandbox,
             "sandbox_mode": self.sandbox,
             "skip_git_repo_check_used": self.skip_git_repo_check_used(),
