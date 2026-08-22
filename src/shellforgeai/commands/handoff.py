@@ -63,7 +63,8 @@ def _canonical_operator_solution(ctx: typer.Context, target: str | None):
         return build_linux_operator_solution_from_diagnosis(diagnosis)
     if platform_system == "windows":
         evidence = build_windows_evidence_context()
-        host = evidence.get("host") if isinstance(evidence.get("host"), dict) else {}
+        host_value = evidence.get("host")
+        host: dict[str, Any] = host_value if isinstance(host_value, dict) else {}
         canonical_target = target or str(host.get("hostname") or "current-host")
         target_type = classify_target(target) if target else TargetType.host
         route = WindowsOperatorRoute(
@@ -102,7 +103,7 @@ def _render_canonical_handoff(ctx: typer.Context, *, target: str | None, json_ou
 
 def _canonical_save_payload(result: OperatorSolutionPublicationResult) -> dict[str, Any]:
     """Return the bounded CLI projection of one canonical publication result."""
-    return {
+    payload: dict[str, Any] = {
         "status": result.status,
         "artifact_id": result.artifact_id,
         "artifact_path": f"{OPERATOR_SOLUTIONS_DIRNAME}/{result.artifact_id}",
@@ -111,6 +112,30 @@ def _canonical_save_payload(result: OperatorSolutionPublicationResult) -> dict[s
         "mutation_performed": False,
         "execution_status": "not_executed",
     }
+    if result.status not in {"published", "already_present"}:
+        reason_code, reason = _canonical_save_failure_reason(result)
+        payload.update(reason_code=reason_code, reason=reason)
+    return payload
+
+
+def _canonical_save_failure_reason(
+    result: OperatorSolutionPublicationResult,
+) -> tuple[str, str]:
+    """Classify persistence detail without projecting exception or path text."""
+    if result.status == "conflict":
+        return ("publication_conflict", "The canonical artifact destination conflicts.")
+    normalized = " ".join(result.errors).casefold()
+    if any(
+        marker in normalized
+        for marker in ("absolute path", "non-empty path", "filesystem root", "drive root")
+    ):
+        return ("invalid_data_root", "The configured data root is not a safe absolute directory.")
+    if any(
+        marker in normalized
+        for marker in ("already exist", "must be a directory", "symlink", "reparse point")
+    ):
+        return ("unavailable_data_root", "The owned data root is unavailable or unsafe.")
+    return ("filesystem_publication_blocked", "The filesystem blocked canonical publication.")
 
 
 def _save_canonical_handoff(ctx: typer.Context, *, target: str | None, json_output: bool) -> None:
@@ -141,6 +166,11 @@ def _save_canonical_handoff(ctx: typer.Context, *, target: str | None, json_outp
                     f"Location: {payload['artifact_path']}",
                     f"Artifact written: {str(payload['artifact_written']).lower()}",
                     f"Existing identical no-op: {str(payload['existing_identical_no_op']).lower()}",
+                    *(
+                        (f"Reason: {payload['reason_code']} - {payload['reason']}",)
+                        if "reason_code" in payload
+                        else ()
+                    ),
                     "Mutation performed: false",
                     "Execution status: not_executed",
                 )

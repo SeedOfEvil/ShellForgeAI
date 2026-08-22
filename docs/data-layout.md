@@ -1,5 +1,15 @@
 # Data layout
 
+On an installed Windows runtime, the durable `sfai.cmd` wrapper pins
+`SHELLFORGEAI_DATA_DIR` to the absolute `<runtime-root>\data` directory (for
+the documented installation, `C:\Tools\ShellForgeAI\data`). The wrapper
+derives that location from its own installed `bin` directory, so caller working
+directory and a pre-existing environment override cannot redirect durable
+state. It creates only that owned data-root directory when absent; a blocked or
+unsafe root fails closed. Existing artifacts in other relative or configured
+locations are not migrated, rewritten, or deleted. This Windows launcher rule
+does not change configured Linux storage semantics.
+
 ShellForgeAI writes all artifacts under a single configurable data directory
 (`<data_dir>`, default `~/.shellforgeai/data` on the host or `/data` in a
 container deployment). Everything ShellForgeAI mutates lives there. Paths
