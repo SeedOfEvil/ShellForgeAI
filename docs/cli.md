@@ -1691,7 +1691,11 @@ under `<data_dir>/operator_solutions/<artifact_id>/`. Human and JSON results are
 bounded and report `published` or `already_present` as success; `conflict` and
 `publication_blocked` are controlled failures. They include the artifact ID,
 fixed relative path, write/no-op state, `mutation_performed=false`, and
-`execution_status=not_executed`. `--brief` and every legacy `--from-*` option
+`execution_status=not_executed`. Failures also include a bounded `reason_code`
+and fixed operator-safe reason; raw exception, environment, and absolute-path
+details are never projected. Installed Windows `sfai.cmd` pins `<data_dir>` to
+the absolute, CWD-independent `<runtime-root>\data`; canonical artifacts remain
+contained at its fixed `operator_solutions/<artifact_id>/` child. `--brief` and every legacy `--from-*` option
 remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
 and the complete legacy V2 artifact lifecycle remain supported unchanged.
 
