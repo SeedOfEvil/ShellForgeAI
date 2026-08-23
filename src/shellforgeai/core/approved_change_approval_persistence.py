@@ -34,16 +34,14 @@ is ever rewritten, repaired, republished, or timestamp-refreshed.
 
 from __future__ import annotations
 
-import ctypes
 import hashlib
 import hmac
 import json
 import os
-import platform
 import re
 import secrets
 import stat as stat_module
-import sys
+import sys as sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -68,6 +66,24 @@ from shellforgeai.core.approved_change_artifact_persistence import (
     load_persisted_approved_change_artifact_bundle,
 )
 from shellforgeai.core.approved_change_contract import canonical_subject_json
+from shellforgeai.core.persistence_primitives import (
+    PERSISTED_DIRECTORY_MODE,
+    PERSISTED_FILE_MODE,
+    _check_child_containment,
+    _fsync_directory,
+    _is_reparse_stat,
+    _is_symlink_or_reparse,
+    _open_regular_file_no_follow,
+    _path_exists_without_following,
+    _read_bounded,
+    _validate_data_dir,
+)
+from shellforgeai.core.persistence_primitives import (
+    AtomicNoReplaceOutcome as AtomicNoReplaceOutcome,
+)
+from shellforgeai.core.persistence_primitives import (
+    atomic_no_replace_directory_publish as _atomic_publish,
+)
 
 APPROVAL_PERSISTENCE_SCHEMA_VERSION = "1"
 
@@ -94,10 +110,6 @@ MAX_PUBLICATION_PATH_CHARS = 259 if os.name == "nt" else 4095
 #: Conservative read bounds enforced before any untrusted file is read.
 MAX_PERSISTED_APPROVAL_FILE_BYTES = 1_048_576
 MAX_PERSISTED_APPROVAL_TOTAL_BYTES = 1_048_576
-
-#: Restrictive modes requested where the platform supports them.
-PERSISTED_FILE_MODE = 0o600
-PERSISTED_DIRECTORY_MODE = 0o700
 
 #: The exact scope the explicit confirmation authorizes, and nothing more. It is
 #: never approval confirmation, authorization, capability confirmation,
@@ -198,6 +210,13 @@ def _temporary_nonce() -> str:
     persisted bytes, a result identity, or any durable identifier.
     """
     return secrets.token_hex(TEMPORARY_NONCE_BYTES)
+
+
+def atomic_no_replace_approval_directory_publish(
+    source: Path, destination: Path
+) -> AtomicNoReplaceOutcome:
+    """Compatibility entry point for the neutral no-replace primitive."""
+    return _atomic_publish(source, destination)
 
 
 # ---------------------------------------------------------------------------
@@ -320,225 +339,6 @@ class ApprovedChangeApprovalArtifactLoadResult(_FrozenModel):
     execution_status: Literal["not_executed"] = EXECUTION_STATUS_NOT_EXECUTED
 
 
-@dataclass(frozen=True)
-class AtomicNoReplaceOutcome:
-    """One atomic no-replace directory publication attempt."""
-
-    outcome: AtomicOutcome
-    platform_primitive: str
-    detail: str = ""
-
-
-# ---------------------------------------------------------------------------
-# Narrow platform-safe atomic no-replace directory primitive
-#
-# The only native platform API use in this module lives here. It receives
-# already-validated, invocation-owned temporary and final paths, uses fixed
-# platform API signatures, loads no caller-selected library, and exposes no
-# generic native invocation. It follows the proven PR317 behaviour exactly and
-# is owned by PR319, so PR317's publisher is never imported or reused as a
-# generic persistence engine.
-# ---------------------------------------------------------------------------
-
-#: ``linux/fs.h``: rename without ever replacing an existing destination.
-_RENAME_NOREPLACE = 1
-_AT_FDCWD = -100
-#: ``__NR_renameat2`` for the architectures ShellForgeAI is validated on. Used
-#: only when glibc is too old to export the ``renameat2`` wrapper directly.
-_RENAMEAT2_SYSCALL_NUMBERS: dict[str, int] = {
-    "x86_64": 316,
-    "aarch64": 276,
-    "armv7l": 382,
-    "armv8l": 382,
-    "i686": 353,
-    "i386": 353,
-    "ppc64le": 357,
-    "s390x": 347,
-}
-
-_ERROR_ALREADY_EXISTS = 183
-_ERROR_FILE_EXISTS = 80
-_ERROR_ACCESS_DENIED = 5
-_MOVEFILE_NO_FLAGS = 0
-
-
-def _linux_renameat2_no_replace(source: Path, destination: Path) -> AtomicNoReplaceOutcome:
-    """Publish ``source`` as ``destination`` with ``RENAME_NOREPLACE``."""
-    primitive = "linux_renameat2_no_replace"
-    try:
-        libc = ctypes.CDLL(None, use_errno=True)
-    except OSError as exc:  # pragma: no cover - defensive
-        return AtomicNoReplaceOutcome("unsupported", primitive, f"libc unavailable: {exc}")
-
-    encoded_source = os.fsencode(str(source))
-    encoded_destination = os.fsencode(str(destination))
-
-    wrapper = getattr(libc, "renameat2", None)
-    if wrapper is not None:
-        wrapper.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        wrapper.restype = ctypes.c_int
-        ctypes.set_errno(0)
-        code = wrapper(
-            _AT_FDCWD,
-            encoded_source,
-            _AT_FDCWD,
-            encoded_destination,
-            _RENAME_NOREPLACE,
-        )
-    else:
-        number = _RENAMEAT2_SYSCALL_NUMBERS.get(platform.machine())
-        if number is None:
-            return AtomicNoReplaceOutcome(
-                "unsupported",
-                primitive,
-                f"no renameat2 wrapper or known syscall number for {platform.machine()}",
-            )
-        syscall = libc.syscall
-        syscall.argtypes = [
-            ctypes.c_long,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        syscall.restype = ctypes.c_long
-        ctypes.set_errno(0)
-        code = syscall(
-            number,
-            _AT_FDCWD,
-            encoded_source,
-            _AT_FDCWD,
-            encoded_destination,
-            _RENAME_NOREPLACE,
-        )
-
-    if code == 0:
-        return AtomicNoReplaceOutcome("published", primitive)
-    errno_value = ctypes.get_errno()
-    if errno_value in {getattr(os, "EEXIST", 17), getattr(os, "ENOTEMPTY", 39)}:
-        return AtomicNoReplaceOutcome("destination_exists", primitive, os.strerror(errno_value))
-    if errno_value in {
-        getattr(os, "ENOSYS", 38),
-        getattr(os, "EINVAL", 22),
-        getattr(os, "EOPNOTSUPP", 95),
-    }:
-        # The kernel or filesystem offers no proven no-replace rename. Fail
-        # closed instead of silently downgrading to a replace-capable rename.
-        return AtomicNoReplaceOutcome("unsupported", primitive, os.strerror(errno_value))
-    return AtomicNoReplaceOutcome("failed", primitive, os.strerror(errno_value))
-
-
-def _windows_move_file_no_replace(source: Path, destination: Path) -> AtomicNoReplaceOutcome:
-    """Publish ``source`` as ``destination`` with ``MoveFileExW`` and no flags.
-
-    Without ``MOVEFILE_REPLACE_EXISTING`` the call fails when the destination
-    exists, and ``MOVEFILE_REPLACE_EXISTING`` cannot replace a directory at all.
-    """
-    primitive = "windows_movefileexw_no_replace"
-    windll = getattr(ctypes, "WinDLL", None)
-    if windll is None:  # pragma: no cover - non-Windows
-        return AtomicNoReplaceOutcome("unsupported", primitive, "ctypes.WinDLL unavailable")
-    try:
-        kernel32 = windll("kernel32", use_last_error=True)
-    except OSError as exc:  # pragma: no cover - defensive
-        return AtomicNoReplaceOutcome("unsupported", primitive, f"kernel32 unavailable: {exc}")
-    move = kernel32.MoveFileExW
-    move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
-    move.restype = ctypes.c_int
-    ctypes.set_last_error(0)
-    if move(str(source), str(destination), _MOVEFILE_NO_FLAGS):
-        return AtomicNoReplaceOutcome("published", primitive)
-    code = ctypes.get_last_error()
-    if code in {_ERROR_ALREADY_EXISTS, _ERROR_FILE_EXISTS}:
-        return AtomicNoReplaceOutcome("destination_exists", primitive, f"win32 error {code}")
-    if code == _ERROR_ACCESS_DENIED and _path_exists_without_following(destination):
-        # A destination that appeared in a race can surface as access denied.
-        return AtomicNoReplaceOutcome("destination_exists", primitive, f"win32 error {code}")
-    return AtomicNoReplaceOutcome("failed", primitive, f"win32 error {code}")
-
-
-def atomic_no_replace_approval_directory_publish(
-    source: Path, destination: Path
-) -> AtomicNoReplaceOutcome:
-    """Publish one prepared directory as ``destination``, never replacing it.
-
-    The transition is atomic, same-parent, same-filesystem, directory-level, and
-    no-replace. It is never a pre-check followed by a replace-capable rename and
-    it never uses ``os.replace``, ``os.rename``, ``shutil``, a shell, a
-    subprocess, or an external binary. When the platform offers no proven atomic
-    no-replace directory primitive the helper reports ``unsupported`` and the
-    caller fails closed.
-    """
-    if not isinstance(source, Path) or not isinstance(destination, Path):
-        return AtomicNoReplaceOutcome("rejected", "none", "paths must be Path objects")
-    if not source.is_absolute() or not destination.is_absolute():
-        return AtomicNoReplaceOutcome("rejected", "none", "paths must be absolute")
-    if source == destination:
-        return AtomicNoReplaceOutcome("rejected", "none", "source and destination are identical")
-    if source.parent != destination.parent:
-        return AtomicNoReplaceOutcome("rejected", "none", "paths must share one parent directory")
-    if not source.name or not destination.name:
-        return AtomicNoReplaceOutcome("rejected", "none", "paths must name a directory entry")
-    try:
-        source_stat = os.lstat(source)
-        parent_stat = os.lstat(source.parent)
-    except OSError as exc:
-        return AtomicNoReplaceOutcome("rejected", "none", f"source is not inspectable: {exc}")
-    if not stat_module.S_ISDIR(source_stat.st_mode) or _is_reparse_stat(source_stat, source):
-        return AtomicNoReplaceOutcome(
-            "rejected", "none", "source must be a real directory and not a symlink or reparse point"
-        )
-    if source_stat.st_dev != parent_stat.st_dev:
-        return AtomicNoReplaceOutcome(
-            "rejected", "none", "source and destination must share one filesystem"
-        )
-
-    if sys.platform.startswith("linux"):
-        return _linux_renameat2_no_replace(source, destination)
-    if os.name == "nt":
-        return _windows_move_file_no_replace(source, destination)
-    return AtomicNoReplaceOutcome(
-        "unsupported",
-        "none",
-        f"no proven atomic no-replace directory primitive for platform {sys.platform}",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Filesystem-safety helpers
-# ---------------------------------------------------------------------------
-
-
-def _is_reparse_stat(stat_result: os.stat_result, path: Path) -> bool:
-    if stat_module.S_ISLNK(stat_result.st_mode):
-        return True
-    if getattr(stat_result, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT:
-        return True
-    return path.is_symlink()
-
-
-def _is_symlink_or_reparse(path: Path) -> bool:
-    try:
-        return _is_reparse_stat(os.lstat(path), path)
-    except OSError:
-        return False
-
-
-def _path_exists_without_following(path: Path) -> bool:
-    try:
-        os.lstat(path)
-    except OSError:
-        return False
-    return True
-
-
 def _real(path: Path) -> Path:
     return Path(os.path.realpath(path))
 
@@ -549,49 +349,6 @@ def _is_filesystem_root(path: Path) -> bool:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-@dataclass(frozen=True)
-class _DataDirCheck:
-    """One explicit data-directory validation outcome."""
-
-    path: Path | None
-    errors: tuple[str, ...]
-    filesystem_accessed: bool
-
-
-def _validate_data_dir(data_dir: Path | str) -> _DataDirCheck:
-    """Validate the explicit ShellForgeAI data directory.
-
-    No arbitrary destination, publication root, final directory name, or
-    filename is ever accepted: only this already-resolved data root. Purely
-    structural rejections happen before any filesystem object is inspected, so
-    the reported ``filesystem_accessed`` flag stays truthful.
-    """
-    if isinstance(data_dir, str):
-        if not data_dir.strip():
-            return _DataDirCheck(None, ("data_dir must be a non-empty path",), False)
-        candidate = Path(data_dir)
-    elif isinstance(data_dir, Path):
-        candidate = data_dir
-    else:
-        return _DataDirCheck(None, ("data_dir must be a path or string",), False)
-
-    if not candidate.is_absolute():
-        return _DataDirCheck(None, ("data_dir must be an absolute path",), False)
-    if _is_filesystem_root(candidate):
-        return _DataDirCheck(
-            None, ("data_dir must not be the filesystem root or a drive root",), False
-        )
-    if _is_symlink_or_reparse(candidate):
-        return _DataDirCheck(None, ("data_dir must not be a symlink or reparse point",), True)
-    try:
-        info = os.lstat(candidate)
-    except OSError:
-        return _DataDirCheck(None, ("data_dir must already exist",), True)
-    if not stat_module.S_ISDIR(info.st_mode):
-        return _DataDirCheck(None, ("data_dir must be a directory",), True)
-    return _DataDirCheck(candidate, (), True)
 
 
 def _publication_root(data_dir: Path) -> Path:
@@ -641,97 +398,9 @@ def _projected_final_path_errors(final_directory: Path) -> list[str]:
     return []
 
 
-def _check_child_containment(root: Path, child: Path, label: str) -> list[str]:
-    """Require ``child`` to remain a direct contained child of the fixed root."""
-    errors: list[str] = []
-    if child.parent != root:
-        errors.append(f"{label} must be a direct child of the fixed approval publication root")
-        return errors
-    if _path_exists_without_following(child):
-        if _is_symlink_or_reparse(child):
-            errors.append(f"{label} must not be a symlink or reparse point")
-            return errors
-        if _real(child).parent != _real(root):
-            errors.append(f"{label} escapes the fixed approval publication root")
-    return errors
-
-
-def _fsync_directory(path: Path) -> tuple[FlushStatus, str]:
-    """Flush one directory where the platform supports it.
-
-    Windows offers no directory flush primitive, so the status is reported
-    truthfully as ``unsupported`` rather than as invented success.
-    """
-    if os.name == "nt":  # pragma: no cover - platform dependent
-        return "unsupported", "Windows offers no directory flush primitive"
-    try:
-        fd = os.open(path, os.O_RDONLY | _O_DIRECTORY)
-    except OSError as exc:
-        return "failed", f"directory could not be opened for flush: {exc}"
-    try:
-        os.fsync(fd)
-    except OSError as exc:
-        return "failed", f"directory flush failed: {exc}"
-    except AttributeError:  # pragma: no cover - platform dependent
-        return "unsupported", "os.fsync is unavailable"
-    finally:
-        os.close(fd)
-    return "passed", ""
-
-
 # ---------------------------------------------------------------------------
 # Bounded, no-follow reads
 # ---------------------------------------------------------------------------
-
-
-def _open_regular_file_no_follow(path: Path, *, access_flags: int = os.O_RDONLY) -> int:
-    """Open one existing regular file without ever following a link.
-
-    ``access_flags`` selects the access mode only; every other flag and every
-    safety check is fixed. Reads use the default ``O_RDONLY``; the durability
-    flush uses ``O_RDWR`` because a read-only descriptor cannot be flushed on
-    Windows. No caller-supplied path, filename, or flag beyond that access mode
-    reaches this helper.
-
-    Where ``O_NOFOLLOW`` is unavailable the pre-open ``lstat`` identity is
-    compared with the post-open descriptor metadata instead.
-    """
-    before = os.lstat(path)
-    if not stat_module.S_ISREG(before.st_mode) or _is_reparse_stat(before, path):
-        raise OSError(f"{path.name} is not a regular file")
-    fd = os.open(path, access_flags | _O_BINARY | _O_NOFOLLOW)
-    try:
-        after = os.fstat(fd)
-        if not stat_module.S_ISREG(after.st_mode):
-            raise OSError(f"{path.name} is not a regular file")
-        if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
-            raise OSError(f"{path.name} changed identity between inspection and open")
-    except Exception:
-        os.close(fd)
-        raise
-    return fd
-
-
-def _read_bounded(path: Path, expected_size: int) -> bytes:
-    """Read exactly ``expected_size`` bytes and fail closed on any drift."""
-    fd = _open_regular_file_no_follow(path)
-    try:
-        chunks: list[bytes] = []
-        remaining = expected_size
-        while remaining > 0:
-            chunk = os.read(fd, min(remaining, 65536))
-            if not chunk:
-                raise OSError(f"{path.name} was truncated during read")
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        if os.read(fd, 1):
-            raise OSError(f"{path.name} grew during read")
-        final = os.fstat(fd)
-        if final.st_size != expected_size:
-            raise OSError(f"{path.name} changed size between inspection and read")
-    finally:
-        os.close(fd)
-    return b"".join(chunks)
 
 
 # ---------------------------------------------------------------------------
