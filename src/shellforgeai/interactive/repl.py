@@ -58,7 +58,7 @@ from shellforgeai.core.latest_context import (
     render_latest_context_pending,
     valid_retained_context,
 )
-from shellforgeai.core.model_session import complete_for_session
+from shellforgeai.core.model_session import complete_for_session, record_response_for_session
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.platform_operator_contract import (
     PlatformOperatorContract,
@@ -863,6 +863,17 @@ def _run_model_synthesis(
     *,
     stream_to_console: bool = True,
 ) -> tuple[str, bool]:
+    if getattr(session, "provider_failure", None) is not None:
+        suppressed = complete_for_session(session, provider, request)
+        metadata = getattr(suppressed, "metadata", None) or {}
+        original = str(metadata.get("original_provider_failure_category") or "provider_failure")
+        return (
+            "Model assistance is suppressed/unavailable for this session "
+            f"(session_provider_suppressed after {original}); no provider call "
+            "occurred. Deterministic evidence above remains authoritative; if "
+            "it is thin or absent, that evidence limitation remains explicit.",
+            False,
+        )
     streaming_enabled = (
         os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
         and getattr(session, "provider_failure", None) is None
@@ -884,6 +895,7 @@ def _run_model_synthesis(
             elif etype == "final":
                 resp = event.get("response")
                 if resp is not None:
+                    record_response_for_session(session, resp)
                     final_text = resp.text
                 break
         console.print("")
@@ -903,6 +915,7 @@ def _run_model_synthesis(
                 elif etype == "final":
                     resp = event.get("response")
                     if resp is not None:
+                        record_response_for_session(session, resp)
                         final_text = getattr(resp, "text", "") or ""
                     break
         return (final_text or "".join(chunks), False)
@@ -914,7 +927,8 @@ def _run_model_synthesis(
             original = str(metadata.get("original_provider_failure_category") or "provider_failure")
             return (
                 "Model assistance is suppressed/unavailable for this session "
-                f"after {original}; no provider call occurred. Deterministic "
+                f"(session_provider_suppressed after {original}); no provider "
+                "call occurred. Deterministic "
                 "evidence above remains authoritative; if it is thin or absent, "
                 "that evidence limitation remains explicit.",
                 False,

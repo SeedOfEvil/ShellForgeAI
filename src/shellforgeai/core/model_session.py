@@ -1,6 +1,26 @@
 """In-memory, session-local terminal model failure suppression."""
 
+from typing import Any
+
 from shellforgeai.llm.schemas import ModelRequest, ModelResponse
+
+
+def record_response_for_session(session: Any, response: Any) -> Any:
+    """Record a terminal provider response without changing the response.
+
+    This is the single compatibility-safe authority for responses obtained by
+    either blocking or streaming provider APIs. Only bounded classification
+    metadata is retained in memory.
+    """
+    response_ok = getattr(response, "ok", True)
+    if response_ok is False:
+        metadata = getattr(response, "metadata", None) or {}
+        session.provider_failure = {
+            "category": str(metadata.get("codex_exec_error_class") or "provider_failure")[:64],
+            "attempt_count": min(int(metadata.get("provider_attempt_count") or 1), 2),
+            "suppressed": True,
+        }
+    return response
 
 
 def complete_for_session(session, provider, request: ModelRequest) -> ModelResponse:
@@ -22,12 +42,4 @@ def complete_for_session(session, provider, request: ModelRequest) -> ModelRespo
             },
         )
     response = provider.complete(request)
-    response_ok = getattr(response, "ok", True)
-    if response_ok is False:
-        metadata = getattr(response, "metadata", None) or {}
-        session.provider_failure = {
-            "category": str(metadata.get("codex_exec_error_class") or "provider_failure")[:64],
-            "attempt_count": min(int(metadata.get("provider_attempt_count") or 1), 2),
-            "suppressed": True,
-        }
-    return response
+    return record_response_for_session(session, response)

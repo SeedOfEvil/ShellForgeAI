@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
+from rich.console import Console
 
 from shellforgeai.commands.model import _run_live_probe
 from shellforgeai.core.model_session import complete_for_session
+from shellforgeai.interactive.repl import _run_model_synthesis
 from shellforgeai.llm.codex import CodexProvider, classify_model_failure
 from shellforgeai.llm.codex_events import parse_codex_jsonl
 from shellforgeai.llm.schemas import ModelRequest, ModelResponse
@@ -272,3 +275,111 @@ def test_live_probe_does_not_infer_effective_identity():
     assert result["probe"]["response_reported_model"] == "response-model"
     assert result["probe"]["effective_model"] is None
     assert result["probe"]["effective_model_observed"] is False
+
+
+def test_streaming_terminal_failure_suppresses_second_turn(monkeypatch):
+    monkeypatch.setenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "1")
+
+    class Provider:
+        def __init__(self):
+            self.stream_calls = 0
+            self.complete_calls = 0
+
+        def stream_complete(self, request):
+            self.stream_calls += 1
+            yield {
+                "type": "final",
+                "response": ModelResponse(
+                    provider=request.provider,
+                    model=request.model,
+                    text="",
+                    ok=False,
+                    error="bounded timeout",
+                    metadata={
+                        "codex_exec_error_class": "timeout",
+                        "provider_attempt_count": 1,
+                    },
+                ),
+            }
+
+        def complete(self, _request):
+            self.complete_calls += 1
+            raise AssertionError("blocking provider API must not be called")
+
+    provider = Provider()
+    session = SimpleNamespace(provider_failure=None)
+    console = Console(file=StringIO(), force_terminal=False)
+
+    _run_model_synthesis(console, session, provider, _request(), raw=False)
+    assert provider.stream_calls == 1
+    assert provider.complete_calls == 0
+    assert session.provider_failure == {
+        "category": "timeout",
+        "attempt_count": 1,
+        "suppressed": True,
+    }
+
+    second_text, second_streamed = _run_model_synthesis(
+        console, session, provider, _request(), raw=False
+    )
+    assert second_streamed is False
+    assert provider.stream_calls == 1
+    assert provider.complete_calls == 0
+    assert "session_provider_suppressed" in second_text
+    assert "after timeout" in second_text
+    assert "no provider call occurred" in second_text
+
+    suppressed = complete_for_session(session, provider, _request())
+    assert suppressed.metadata == {
+        "codex_exec_error_class": "session_provider_suppressed",
+        "original_provider_failure_category": "timeout",
+        "provider_call_suppressed": True,
+        "provider_attempt_count": 0,
+    }
+
+    new_session = SimpleNamespace(provider_failure=None)
+    _run_model_synthesis(console, new_session, provider, _request(), raw=False)
+    assert provider.stream_calls == 2
+    assert provider.complete_calls == 0
+
+
+def test_successful_stream_records_no_failure_or_duplicate_call(monkeypatch):
+    monkeypatch.setenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "1")
+
+    class Provider:
+        stream_calls = 0
+        complete_calls = 0
+
+        def stream_complete(self, request):
+            self.stream_calls += 1
+            yield {"type": "text", "text": "streamed success"}
+            yield {
+                "type": "final",
+                "response": ModelResponse(
+                    provider=request.provider,
+                    model=request.model,
+                    text="streamed success",
+                    ok=True,
+                ),
+            }
+
+        def complete(self, _request):
+            self.complete_calls += 1
+            raise AssertionError("successful stream must not call complete")
+
+    provider = Provider()
+    session = SimpleNamespace(provider_failure=None)
+    output = StringIO()
+    text, streamed = _run_model_synthesis(
+        Console(file=output, force_terminal=False),
+        session,
+        provider,
+        _request(),
+        raw=False,
+    )
+    assert streamed is True
+    assert text == "streamed success"
+    assert "streamed success" in output.getvalue()
+    assert provider.stream_calls == 1
+    assert provider.complete_calls == 0
+    assert session.provider_failure is None
