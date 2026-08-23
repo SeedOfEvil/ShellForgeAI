@@ -20,6 +20,7 @@ class CodexEventParseResult:
     final_text: str = ""
     usage: CodexUsage = field(default_factory=CodexUsage)
     warnings: list[str] = field(default_factory=list)
+    effective_model: str | None = None
     raw_events: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -38,6 +39,9 @@ def parse_codex_jsonl(raw_jsonl: str, keep_raw: bool = False) -> CodexEventParse
         if not isinstance(event, dict):
             continue
         etype = event.get("type")
+        explicit_model = event.get("effective_model")
+        if isinstance(explicit_model, str) and explicit_model.strip():
+            result.effective_model = explicit_model.strip()
         if etype == "thread.started":
             result.thread_id = event.get("thread_id")
         if etype == "item.completed":

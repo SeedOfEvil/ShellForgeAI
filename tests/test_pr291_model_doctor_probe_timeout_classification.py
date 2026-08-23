@@ -138,11 +138,9 @@ def test_probe_timeout_without_proven_login_still_reports_failed(monkeypatch) ->
         }
     )
     payload = _invoke(monkeypatch, FakeProvider(doctor=doctor, response=_timeout_response()))
-    # Without proven login a timeout proves nothing about auth either way;
-    # the pre-existing conservative classification is kept.
-    assert payload["auth_readiness"] == "failed"
-    assert payload["live_probe_timed_out"] is True
-    assert payload["live_probe_error_class"] == "model_probe_timeout"
+    assert payload["auth_readiness"] == "not_configured"
+    assert payload["live_probe_performed"] is False
+    assert payload["live_probe_error_class"] == "not_configured"
 
 
 def test_non_timeout_auth_failure_still_downgrades_readiness(monkeypatch) -> None:

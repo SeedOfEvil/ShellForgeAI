@@ -40,8 +40,8 @@ def test_model_doctor_json_is_accepted_and_strict_json(monkeypatch):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["mode"] == "model_doctor"
-    assert payload["status"] == "ok"
-    assert payload["ok"] is True
+    assert payload["status"] == "warning"
+    assert payload["ok"] is False
     assert payload["auth_readiness"] == "unknown"
     assert payload["read_only"] is True
     assert payload["mutation_performed"] is False
@@ -81,7 +81,8 @@ def test_model_doctor_json_handles_provider_doctor_exception(monkeypatch):
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["status"] == "ok"
+    assert payload["status"] == "warning"
+    assert payload["ok"] is False
     assert payload["auth_readiness"] == "unknown"
     assert payload["read_only"] is True
     assert payload["warnings"]

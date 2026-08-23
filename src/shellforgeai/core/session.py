@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from shellforgeai.core.config import Settings
 from shellforgeai.core.profiles import Profile
@@ -26,6 +26,7 @@ class SessionContext(BaseModel):
     shellforge_guidance_loaded: bool
     online_enabled: bool
     breakglass: bool
+    provider_failure: dict[str, str | bool | int | None] | None = Field(default=None, exclude=True)
 
 
 def build_session_context(

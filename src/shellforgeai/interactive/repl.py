@@ -58,6 +58,7 @@ from shellforgeai.core.latest_context import (
     render_latest_context_pending,
     valid_retained_context,
 )
+from shellforgeai.core.model_session import complete_for_session, record_response_for_session
 from shellforgeai.core.plans import Plan, PlanStep
 from shellforgeai.core.platform_operator_contract import (
     PlatformOperatorContract,
@@ -853,21 +854,50 @@ def _summarize_facts(checks: list[dict[str, str]]) -> dict[str, Any]:
     return facts
 
 
+def _render_model_failure_response(response) -> str:
+    """Render one bounded provider failure consistently for every call mode."""
+    metadata = getattr(response, "metadata", None) or {}
+    if metadata.get("provider_call_suppressed"):
+        original = str(metadata.get("original_provider_failure_category") or "provider_failure")
+        return (
+            "Model assistance is suppressed/unavailable for this session "
+            f"(session_provider_suppressed after {original}); no provider call "
+            "occurred. Deterministic evidence above remains authoritative; if "
+            "it is thin or absent, that evidence limitation remains explicit."
+        )
+    raw = getattr(response, "raw", None) or {}
+    failure = classify_model_failure(
+        stdout=str(raw.get("stdout_jsonl") or raw.get("stdout") or getattr(response, "text", "")),
+        stderr=str(raw.get("stderr") or getattr(response, "error", "") or ""),
+    )
+    clean = str(failure["user_message"])
+    next_step = str(failure.get("next_step") or "")
+    return f"{clean} Next step: {next_step}." if next_step else clean
+
+
 def _run_model_synthesis(
     console: Console,
+    session,
     provider,
     request: ModelRequest,
     raw: bool,
     *,
     stream_to_console: bool = True,
 ) -> tuple[str, bool]:
-    streaming_enabled = os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
+    if getattr(session, "provider_failure", None) is not None:
+        suppressed = complete_for_session(session, provider, request)
+        return _render_model_failure_response(suppressed), False
+    streaming_enabled = (
+        os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
+        and getattr(session, "provider_failure", None) is None
+    )
     final_text = ""
     if (
         stream_to_console
         and (streaming_enabled or not hasattr(provider, "complete"))
         and hasattr(provider, "stream_complete")
     ):
+        failure_text: str | None = None
         with console.status("Synthesizing operator summary..."):
             pass
         for event in provider.stream_complete(request):
@@ -879,9 +909,15 @@ def _run_model_synthesis(
             elif etype == "final":
                 resp = event.get("response")
                 if resp is not None:
-                    final_text = resp.text
+                    record_response_for_session(session, resp)
+                    if getattr(resp, "ok", True) is False:
+                        failure_text = _render_model_failure_response(resp)
+                    else:
+                        final_text = resp.text
                 break
         console.print("")
+        if failure_text is not None:
+            return failure_text, False
         return final_text, True
     if (
         not stream_to_console
@@ -890,6 +926,7 @@ def _run_model_synthesis(
     ):
         chunks: list[str] = []
         final_text = ""
+        failure_text: str | None = None
         with console.status("Asking model..."):
             for event in provider.stream_complete(request):
                 etype = event.get("type")
@@ -898,22 +935,19 @@ def _run_model_synthesis(
                 elif etype == "final":
                     resp = event.get("response")
                     if resp is not None:
-                        final_text = getattr(resp, "text", "") or ""
+                        record_response_for_session(session, resp)
+                        if getattr(resp, "ok", True) is False:
+                            failure_text = _render_model_failure_response(resp)
+                        else:
+                            final_text = getattr(resp, "text", "") or ""
                     break
+        if failure_text is not None:
+            return failure_text, False
         return (final_text or "".join(chunks), False)
     with console.status("Asking model..."):
-        resp = provider.complete(request)
+        resp = complete_for_session(session, provider, request)
     if not getattr(resp, "ok", True):
-        raw = getattr(resp, "raw", None) or {}
-        failure = classify_model_failure(
-            stdout=str(raw.get("stdout_jsonl") or raw.get("stdout") or getattr(resp, "text", "")),
-            stderr=str(raw.get("stderr") or getattr(resp, "error", "") or ""),
-        )
-        clean = str(failure["user_message"])
-        next_step = str(failure.get("next_step") or "")
-        if next_step:
-            clean = f"{clean} Next step: {next_step}."
-        return clean, False
+        return _render_model_failure_response(resp), False
     return resp.text, False
 
 
@@ -1081,7 +1115,9 @@ def _render_retained_analytical_followup(
         )
         # Analytical continuity deliberately uses the established blocking
         # completion API. It never streams or starts background provider work.
-        provider_response = provider.complete(request)
+        provider_response = complete_for_session(
+            getattr(runtime, "session", runtime), provider, request
+        )
     except Exception as exc:
         console.print(render_model_unavailable(type(exc).__name__))
         return
@@ -1176,14 +1212,16 @@ def _handle_windows_symptom_route(
     }
     try:
         provider = build_provider(runtime.settings)
-        response = provider.complete(
+        response = complete_for_session(
+            runtime.session,
+            provider,
             ModelRequest(
                 prompt=build_windows_evidence_model_prompt(question, model_context, mode="full"),
                 model=runtime.settings.model.model,
                 provider=runtime.settings.model.provider,
                 timeout_seconds=runtime.settings.model.timeout_seconds,
                 metadata={"command_kind": intent},
-            )
+            ),
         )
     except Exception as exc:
         console.print(render_model_unavailable(type(exc).__name__))
@@ -4074,6 +4112,7 @@ No command was executed.""")
                         output_file.flush()
                     mresp_text, mresp_streamed = _run_model_synthesis(
                         console,
+                        runtime.session,
                         provider,
                         ModelRequest(
                             prompt=prompt,
@@ -4638,6 +4677,7 @@ No command was executed.""")
         try:
             resp_text, resp_streamed = _run_model_synthesis(
                 console,
+                runtime.session,
                 provider,
                 ModelRequest(
                     prompt=prompt,

@@ -84,6 +84,24 @@ def _probe_invocation_diagnostics(info: dict[str, Any], resp: Any | None = None)
     }
 
 
+def _probe_identity(req: ModelRequest, resp: Any | None = None) -> dict[str, Any]:
+    """Truthful request/response identity projection for a live probe."""
+    meta = getattr(resp, "metadata", None) or {}
+    response_provider = getattr(resp, "provider", None) if resp is not None else None
+    response_model = getattr(resp, "model", None) if resp is not None else None
+    observed = meta.get("effective_model_observed") is True
+    return {
+        "requested_provider": meta.get("requested_provider") or req.provider,
+        "requested_model": meta.get("requested_model") or req.model,
+        "invoked_provider": meta.get("invoked_provider") or req.provider,
+        "invoked_model": meta.get("invoked_model") or req.model,
+        "response_reported_provider": meta.get("response_reported_provider") or response_provider,
+        "response_reported_model": meta.get("response_reported_model") or response_model,
+        "effective_model": meta.get("effective_model") if observed else None,
+        "effective_model_observed": observed,
+    }
+
+
 def _auth_readiness_after_probe_timeout(info: dict[str, Any]) -> str:
     """Auth readiness when the bounded live probe timed out.
 
@@ -99,19 +117,23 @@ def _auth_readiness_after_probe_timeout(info: dict[str, Any]) -> str:
 
 
 def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[str, Any]:
-    # PR289 — a tester-scoped CODEX_HOME proven by safe `codex login status`
-    # configures the provider even when the profile-default auth cache is
-    # absent (QGA/SYSTEM lanes). Skip as not_configured only when neither
-    # signal indicates credentials.
+    # A live call is permitted only after login status proves this exact
+    # inherited process context. Cache presence is never readiness proof.
+    req = ModelRequest(
+        prompt=MODEL_DOCTOR_PROBE_PROMPT,
+        model=str(info.get("model") or runtime.settings.model.model),
+        provider=str(info.get("provider") or runtime.settings.model.provider),
+        timeout_seconds=MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
+        max_output_tokens=8,
+        metadata={
+            "purpose": "model_doctor_live_probe",
+            "tools_allowed": False,
+            "operator_prompt_included": False,
+            "disable_fallback": True,
+        },
+    )
     login_status_ok = bool(info.get("login_status_ok"))
-    if (not bool(info.get("auth_cache_present")) and not login_status_ok) or str(
-        info.get("auth_readiness")
-    ) in {
-        "missing_auth_cache",
-        "missing_binary",
-        "not_configured",
-        "login_status_not_proven",
-    }:
+    if not login_status_ok:
         return {
             "auth_readiness": "not_configured",
             "probe": {
@@ -124,23 +146,12 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "error_class": "not_configured",
                 "error_message": "model credentials are not configured",
                 "model_response_captured": False,
+                **_probe_identity(req),
                 **_probe_invocation_diagnostics(info),
             },
             "model_call_performed": False,
             "timed_out": False,
         }
-    req = ModelRequest(
-        prompt=MODEL_DOCTOR_PROBE_PROMPT,
-        model=str(info.get("model") or runtime.settings.model.model),
-        provider=str(info.get("provider") or runtime.settings.model.provider),
-        timeout_seconds=MODEL_DOCTOR_PROBE_TIMEOUT_SECONDS,
-        max_output_tokens=8,
-        metadata={
-            "purpose": "model_doctor_live_probe",
-            "tools_allowed": False,
-            "operator_prompt_included": False,
-        },
-    )
     started = time.monotonic()
     try:
         resp: ModelResponse = provider.complete(req)
@@ -160,6 +171,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "error_class": "model_probe_timeout",
                 "error_message": _bounded_error(exc) or "probe timed out",
                 "model_response_captured": False,
+                **_probe_identity(req),
                 **_probe_invocation_diagnostics(info),
             },
         }
@@ -179,6 +191,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "error_class": exc.__class__.__name__,
                 "error_message": _bounded_error(exc),
                 "model_response_captured": False,
+                **_probe_identity(req),
                 **_probe_invocation_diagnostics(info),
             },
         }
@@ -207,6 +220,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
                 "model_response_captured": bool(
                     meta.get("model_response_captured", bool((resp.text or "").strip()))
                 ),
+                **_probe_identity(req, resp),
                 **_probe_invocation_diagnostics(info, resp),
             },
         }
@@ -242,6 +256,7 @@ def _run_live_probe(provider: Any, info: dict[str, Any], runtime: Any) -> dict[s
             "error_message": err,
             "codex_exec_stderr_excerpt": str(meta.get("codex_exec_stderr_excerpt") or ""),
             "model_response_captured": bool(meta.get("model_response_captured", False)),
+            **_probe_identity(req, resp),
             **_probe_invocation_diagnostics(info, resp),
         },
     }
@@ -398,14 +413,7 @@ def register(model_app: typer.Typer) -> None:
         codex_home_configured = bool(info.get("codex_home_configured"))
         login_status_checked = bool(info.get("login_status_checked"))
         login_status_ok = bool(info.get("login_status_ok"))
-        ok = auth_readiness not in {
-            "failed",
-            "error",
-            "missing_binary",
-            "missing_auth_cache",
-            "unauthorized",
-            "login_status_not_proven",
-        }
+        ok = auth_readiness == "verified_login_status"
         live_probe_available = bool(info.get("live_probe_available", False))
         live_probe_performed = bool(info.get("live_probe_performed", False))
         safe_next_command = str(info.get("safe_next_command") or "shellforgeai model doctor --json")
@@ -462,6 +470,11 @@ def register(model_app: typer.Typer) -> None:
             "mutation_performed": False,
             "provider": info.get("provider"),
             "model": info.get("model"),
+            "configured_provider": info.get("configured_provider", info.get("provider")),
+            "configured_model": info.get("configured_model", info.get("model")),
+            "configured_fallback_model": info.get(
+                "configured_fallback_model", info.get("fallback_model")
+            ),
             "runtime_root_resolved": bool(
                 runtime.session.config_summary.get("runtime_root_resolved")
             ),
