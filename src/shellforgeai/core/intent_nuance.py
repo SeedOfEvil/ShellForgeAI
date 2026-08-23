@@ -77,6 +77,24 @@ _EXPLICIT_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A PLAN_HELP frame may legitimately contain action vocabulary (for example,
+# "before restarting"). Only an action that starts a distinct sentence or an
+# explicit follow-on clause is a requested mutation. This remains intentionally
+# narrow; it is not a general natural-language parser.
+_PLAN_FOLLOW_ON_ACTION_RE = re.compile(
+    r"(?:[?!.;]\s*|\b(?:and(?:\s+then)?|then)\s+)"
+    r"(?:please\s+)?(?:go\s+ahead\s+and\s+)?"
+    r"(?:restart|reboot|start|stop|kill|delete|remove|fix|remediat\w*|"
+    r"clean\s*up|cleanup|prune|apply|execute|rollback|recover|install|uninstall)\b",
+    re.IGNORECASE,
+)
+
+
+def has_distinct_plan_action(text: str) -> bool:
+    """Return whether PLAN_HELP contains a separate requested action clause."""
+
+    return _PLAN_FOLLOW_ON_ACTION_RE.search(_normalize(text)) is not None
+
 
 def is_read_only_analytical_ranking(text: str) -> bool:
     """Return whether *text* asks only to rank observed running evidence.

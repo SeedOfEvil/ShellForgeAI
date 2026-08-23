@@ -447,7 +447,11 @@ def _mutation(text: str, explicit_windows: bool) -> bool:
 
 
 def classify_windows_operator_intent(text: str, *, host_system: str) -> WindowsOperatorRoute | None:
-    from shellforgeai.core.intent_nuance import PLAN_HELP, classify_intent_nuance
+    from shellforgeai.core.intent_nuance import (
+        PLAN_HELP,
+        classify_intent_nuance,
+        has_distinct_plan_action,
+    )
 
     normalized = normalize_windows_operator_text(text)
     host_is_windows = host_system.casefold() == "windows"
@@ -457,6 +461,10 @@ def classify_windows_operator_intent(text: str, *, host_system: str) -> WindowsO
     scoped = _scoped(normalized, host_is_windows, explicit)
     nuance = classify_intent_nuance(text)
     if nuance.category == PLAN_HELP and scoped:
+        if has_distinct_plan_action(text):
+            return WindowsOperatorRoute(
+                WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, host_is_windows, explicit
+            )
         return WindowsOperatorRoute(
             WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN, host_is_windows, explicit
         )
