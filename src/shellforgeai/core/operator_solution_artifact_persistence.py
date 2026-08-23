@@ -18,7 +18,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from shellforgeai.core.approved_change_approval_persistence import (
+from shellforgeai.core.operator_solution import (
+    OperatorSolution,
+    canonical_operator_solution_json,
+    render_operator_solution_markdown,
+    validate_operator_solution,
+)
+from shellforgeai.core.persistence_primitives import (
     PERSISTED_DIRECTORY_MODE,
     PERSISTED_FILE_MODE,
     _check_child_containment,
@@ -28,13 +34,9 @@ from shellforgeai.core.approved_change_approval_persistence import (
     _path_exists_without_following,
     _read_bounded,
     _validate_data_dir,
-    atomic_no_replace_approval_directory_publish,
 )
-from shellforgeai.core.operator_solution import (
-    OperatorSolution,
-    canonical_operator_solution_json,
-    render_operator_solution_markdown,
-    validate_operator_solution,
+from shellforgeai.core.persistence_primitives import (
+    atomic_no_replace_directory_publish as atomic_no_replace_approval_directory_publish,
 )
 
 OPERATOR_SOLUTIONS_DIRNAME = "operator_solutions"

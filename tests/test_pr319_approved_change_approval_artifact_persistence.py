@@ -2614,14 +2614,12 @@ def test_static_the_persistence_module_import_set_is_narrow():
             imported.update(alias.name for alias in node.names)
     assert imported == {
         "__future__",
-        "ctypes",
         "dataclasses",
         "hashlib",
         "hmac",
         "json",
         "os",
         "pathlib",
-        "platform",
         "pydantic",
         "re",
         "secrets",
@@ -2629,6 +2627,7 @@ def test_static_the_persistence_module_import_set_is_narrow():
         "shellforgeai.core.approved_change_artifact_bundle",
         "shellforgeai.core.approved_change_artifact_persistence",
         "shellforgeai.core.approved_change_contract",
+        "shellforgeai.core.persistence_primitives",
         "stat",
         "sys",
         "typing",
