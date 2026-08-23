@@ -854,6 +854,27 @@ def _summarize_facts(checks: list[dict[str, str]]) -> dict[str, Any]:
     return facts
 
 
+def _render_model_failure_response(response) -> str:
+    """Render one bounded provider failure consistently for every call mode."""
+    metadata = getattr(response, "metadata", None) or {}
+    if metadata.get("provider_call_suppressed"):
+        original = str(metadata.get("original_provider_failure_category") or "provider_failure")
+        return (
+            "Model assistance is suppressed/unavailable for this session "
+            f"(session_provider_suppressed after {original}); no provider call "
+            "occurred. Deterministic evidence above remains authoritative; if "
+            "it is thin or absent, that evidence limitation remains explicit."
+        )
+    raw = getattr(response, "raw", None) or {}
+    failure = classify_model_failure(
+        stdout=str(raw.get("stdout_jsonl") or raw.get("stdout") or getattr(response, "text", "")),
+        stderr=str(raw.get("stderr") or getattr(response, "error", "") or ""),
+    )
+    clean = str(failure["user_message"])
+    next_step = str(failure.get("next_step") or "")
+    return f"{clean} Next step: {next_step}." if next_step else clean
+
+
 def _run_model_synthesis(
     console: Console,
     session,
@@ -865,15 +886,7 @@ def _run_model_synthesis(
 ) -> tuple[str, bool]:
     if getattr(session, "provider_failure", None) is not None:
         suppressed = complete_for_session(session, provider, request)
-        metadata = getattr(suppressed, "metadata", None) or {}
-        original = str(metadata.get("original_provider_failure_category") or "provider_failure")
-        return (
-            "Model assistance is suppressed/unavailable for this session "
-            f"(session_provider_suppressed after {original}); no provider call "
-            "occurred. Deterministic evidence above remains authoritative; if "
-            "it is thin or absent, that evidence limitation remains explicit.",
-            False,
-        )
+        return _render_model_failure_response(suppressed), False
     streaming_enabled = (
         os.getenv("SHELLFORGEAI_EXPERIMENTAL_STREAMING", "0") == "1"
         and getattr(session, "provider_failure", None) is None
@@ -884,6 +897,7 @@ def _run_model_synthesis(
         and (streaming_enabled or not hasattr(provider, "complete"))
         and hasattr(provider, "stream_complete")
     ):
+        failure_text: str | None = None
         with console.status("Synthesizing operator summary..."):
             pass
         for event in provider.stream_complete(request):
@@ -896,9 +910,14 @@ def _run_model_synthesis(
                 resp = event.get("response")
                 if resp is not None:
                     record_response_for_session(session, resp)
-                    final_text = resp.text
+                    if getattr(resp, "ok", True) is False:
+                        failure_text = _render_model_failure_response(resp)
+                    else:
+                        final_text = resp.text
                 break
         console.print("")
+        if failure_text is not None:
+            return failure_text, False
         return final_text, True
     if (
         not stream_to_console
@@ -907,6 +926,7 @@ def _run_model_synthesis(
     ):
         chunks: list[str] = []
         final_text = ""
+        failure_text: str | None = None
         with console.status("Asking model..."):
             for event in provider.stream_complete(request):
                 etype = event.get("type")
@@ -916,33 +936,18 @@ def _run_model_synthesis(
                     resp = event.get("response")
                     if resp is not None:
                         record_response_for_session(session, resp)
-                        final_text = getattr(resp, "text", "") or ""
+                        if getattr(resp, "ok", True) is False:
+                            failure_text = _render_model_failure_response(resp)
+                        else:
+                            final_text = getattr(resp, "text", "") or ""
                     break
+        if failure_text is not None:
+            return failure_text, False
         return (final_text or "".join(chunks), False)
     with console.status("Asking model..."):
         resp = complete_for_session(session, provider, request)
     if not getattr(resp, "ok", True):
-        metadata = getattr(resp, "metadata", None) or {}
-        if metadata.get("provider_call_suppressed"):
-            original = str(metadata.get("original_provider_failure_category") or "provider_failure")
-            return (
-                "Model assistance is suppressed/unavailable for this session "
-                f"(session_provider_suppressed after {original}); no provider "
-                "call occurred. Deterministic "
-                "evidence above remains authoritative; if it is thin or absent, "
-                "that evidence limitation remains explicit.",
-                False,
-            )
-        raw = getattr(resp, "raw", None) or {}
-        failure = classify_model_failure(
-            stdout=str(raw.get("stdout_jsonl") or raw.get("stdout") or getattr(resp, "text", "")),
-            stderr=str(raw.get("stderr") or getattr(resp, "error", "") or ""),
-        )
-        clean = str(failure["user_message"])
-        next_step = str(failure.get("next_step") or "")
-        if next_step:
-            clean = f"{clean} Next step: {next_step}."
-        return clean, False
+        return _render_model_failure_response(resp), False
     return resp.text, False
 
 

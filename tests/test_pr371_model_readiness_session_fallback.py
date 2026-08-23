@@ -292,9 +292,9 @@ def test_streaming_terminal_failure_suppresses_second_turn(monkeypatch):
                 "response": ModelResponse(
                     provider=request.provider,
                     model=request.model,
-                    text="",
+                    text="failed response text must not be returned",
                     ok=False,
-                    error="bounded timeout",
+                    error="codex timed out after 1s",
                     metadata={
                         "codex_exec_error_class": "timeout",
                         "provider_attempt_count": 1,
@@ -310,7 +310,13 @@ def test_streaming_terminal_failure_suppresses_second_turn(monkeypatch):
     session = SimpleNamespace(provider_failure=None)
     console = Console(file=StringIO(), force_terminal=False)
 
-    _run_model_synthesis(console, session, provider, _request(), raw=False)
+    first_text, first_streamed = _run_model_synthesis(
+        console, session, provider, _request(), raw=False
+    )
+    assert first_streamed is False
+    assert "timed out" in first_text.lower()
+    assert "did not produce a response" not in first_text.lower()
+    assert "failed response text must not be returned" not in first_text
     assert provider.stream_calls == 1
     assert provider.complete_calls == 0
     assert session.provider_failure == {
@@ -383,3 +389,41 @@ def test_successful_stream_records_no_failure_or_duplicate_call(monkeypatch):
     assert provider.stream_calls == 1
     assert provider.complete_calls == 0
     assert session.provider_failure is None
+
+
+def test_stream_only_final_failure_uses_bounded_failure_rendering():
+    class StreamOnlyProvider:
+        stream_calls = 0
+
+        def stream_complete(self, request):
+            self.stream_calls += 1
+            yield {"type": "text", "text": "partial chunk must not be final"}
+            yield {
+                "type": "final",
+                "response": ModelResponse(
+                    provider=request.provider,
+                    model=request.model,
+                    text="failed final must not be returned",
+                    ok=False,
+                    error="codex timed out after 1s",
+                    metadata={"codex_exec_error_class": "timeout"},
+                ),
+            }
+
+    provider = StreamOnlyProvider()
+    session = SimpleNamespace(provider_failure=None)
+    text, streamed = _run_model_synthesis(
+        Console(file=StringIO(), force_terminal=False),
+        session,
+        provider,
+        _request(),
+        raw=False,
+        stream_to_console=False,
+    )
+    assert streamed is False
+    assert "timed out" in text.lower()
+    assert "did not produce a response" not in text.lower()
+    assert "partial chunk must not be final" not in text
+    assert "failed final must not be returned" not in text
+    assert provider.stream_calls == 1
+    assert session.provider_failure["category"] == "timeout"
