@@ -107,6 +107,14 @@ and `build_windows_operator_solution_from_evidence()`. Human output comes from
 the canonical Markdown renderer. Adding `--json` emits the canonical
 `OperatorSolution` JSON directly, without a handoff wrapper.
 
+Natural-language Windows planning/help in `ask` and interactive mode also uses
+one bounded native Windows evidence packet and this same producer, then renders
+the canonical `OperatorSolution` Markdown. The route is advisory and read-only:
+it does not call a model, execute a procedure, or authorize an action. Missing
+evidence remains visible as limitations and unresolved questions. Direct
+natural-language mutation continues to be refused, and the standalone V2
+`propose` contract is unchanged.
+
 This mode remains advisory-only and read-only. It does not call a model, execute
 procedure text, or mutate a host. Adding `--save` publishes the same solution
 once beneath `<data_dir>/operator_solutions/<artifact_id>/`; `--json` and

@@ -1699,6 +1699,15 @@ contained at its fixed `operator_solutions/<artifact_id>/` child. `--brief` and 
 remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
 and the complete legacy V2 artifact lifecycle remain supported unchanged.
 
+Windows-scoped natural-language planning/help sent through `shellforgeai ask`
+or interactive mode is resolved before generic Docker proposal guidance. On a
+Windows host it collects the existing bounded native read-only evidence packet
+once, builds the existing canonical `OperatorSolution`, and renders advisory
+Markdown without calling a model or executing any step. On a non-Windows host,
+an explicit Windows planning request reports the Windows-local visibility limit
+without substituting Linux or Docker evidence. Mutation requests remain
+deterministically refused. The standalone V2 `propose` command is unchanged.
+
 The separate `operator-solution-validate` subcommand passes one exact canonical
 artifact ID unchanged to the maintained canonical persistence loader. It accepts
 no path references or fallback forms, does not collect or produce a solution,

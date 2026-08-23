@@ -635,6 +635,7 @@ def test_pure_helper_has_no_execution_or_io_surface() -> None:
     assert imports == [
         "from __future__ import annotations",
         "from dataclasses import dataclass",
+        "from shellforgeai.core.intent_nuance import PLAN_HELP, classify_intent_nuance",
         "from typing import Final",
         "import re",
     ]

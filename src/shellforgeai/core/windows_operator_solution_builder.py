@@ -27,6 +27,7 @@ from shellforgeai.core.operator_solution import (
     VerificationCriterion,
 )
 from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN,
     WINDOWS_OPERATOR_INTENT_DISK_CAPACITY,
     WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
     WINDOWS_OPERATOR_INTENT_HANDOFF,
@@ -48,6 +49,10 @@ class WindowsOperatorSolutionBuildError(ValueError):
 
 
 _OUTCOMES = {
+    WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN: (
+        "Produce an evidence-backed Windows operator plan with bounded read-only "
+        "investigation steps and explicit limitations."
+    ),
     WINDOWS_OPERATOR_INTENT_STATUS: (
         "Assess the current Windows host status from fresh read-only evidence."
     ),

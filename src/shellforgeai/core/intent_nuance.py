@@ -112,6 +112,8 @@ NONE = "none"
 
 # Command-help "frames": phrasings that ask *how/what to run*, i.e. guidance.
 _HELP_FRAMES: tuple[str, ...] = (
+    "what plan should i",
+    "what plan should we",
     "what command",
     "which command",
     "what commands",
@@ -120,6 +122,7 @@ _HELP_FRAMES: tuple[str, ...] = (
     "whats the command",
     "what would i run",
     "what would you run",
+    "what would you",
     "what do i run",
     "what should i run",
     "show me the command",
@@ -352,6 +355,8 @@ def classify_intent_nuance(text: str) -> IntentNuance:
         if report_signal:
             return IntentNuance(category=COMMAND_HELP, target=target, signal=report_signal)
         if any(obj in low for obj in _PLAN_OBJECTS):
+            return IntentNuance(category=PLAN_HELP, target=target, signal=frame)
+        if frame == "how would you" and any(obj in low for obj in _INSPECT_OBJECTS):
             return IntentNuance(category=PLAN_HELP, target=target, signal=frame)
         if any(obj in low for obj in _INSPECT_OBJECTS) and (
             target or any(anchor in low for anchor in _INSPECT_DOMAIN_ANCHORS)

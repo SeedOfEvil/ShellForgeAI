@@ -1,5 +1,14 @@
 # Interactive mode
 
+Windows-scoped planning/help questions use the shared `PLAN_HELP` semantics and
+the native Windows advisory route. On Windows, interactive mode collects one
+bounded read-only Windows evidence packet and renders the existing canonical
+`OperatorSolution`; it does not call a model or execute the rendered procedure.
+Explicit Windows planning requested elsewhere reports that Windows-local
+evidence is unavailable rather than substituting Linux or Docker evidence.
+Natural-language mutation remains refused, and standalone V2 `propose` behavior
+is unchanged.
+
 Running `shellforgeai` (or `sfai`) with no subcommand launches the operator
 REPL. The same loop is available explicitly as `shellforgeai interactive`.
 
