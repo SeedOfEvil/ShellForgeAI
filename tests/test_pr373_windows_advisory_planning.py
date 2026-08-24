@@ -62,7 +62,7 @@ def test_mutation_precedence_remains_refusal(prompt: str) -> None:
 
 @pytest.mark.parametrize("prompt", MIXED_ACTION_PROMPTS)
 def test_mixed_plan_action_uses_shared_authority_and_refuses(prompt: str) -> None:
-    assert classify_intent_nuance(prompt).category == PLAN_HELP
+    assert classify_intent_nuance(prompt).category == MUTATION_REQUEST
     assert has_distinct_plan_action(prompt)
     route = classify_windows_operator_intent(prompt, host_system="Windows")
     assert route == WindowsOperatorRoute(WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, True, True)

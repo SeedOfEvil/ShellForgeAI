@@ -95,6 +95,10 @@ def register(app: typer.Typer) -> None:
             render_model_assessment,
             render_model_unavailable,
         )
+        from shellforgeai.core.intent_nuance import (
+            DISTINCT_PLAN_ACTION,
+            classify_intent_nuance,
+        )
         from shellforgeai.core.model_session import complete_for_session
         from shellforgeai.core.platform_operator_contract import (
             build_platform_operator_contract,
@@ -152,6 +156,15 @@ def register(app: typer.Typer) -> None:
                 "Refused: ShellForgeAI ask is not a shell.\n"
                 "No command was executed. No evidence was collected. No action was taken."
             )
+            return
+        # Reuse the established natural-language refusal before proposal,
+        # diagnosis, evidence, provider, or execution-adjacent routing.
+        nuance = classify_intent_nuance(question)
+        if (
+            input_route.name == "mutation_refused"
+            and nuance.signal == DISTINCT_PLAN_ACTION
+            and cli._handle_mutation_refusal_ask(question)
+        ):
             return
         windows_route = None
         if not no_evidence:

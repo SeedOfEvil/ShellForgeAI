@@ -35,6 +35,7 @@ COMMAND_HELP = "command_help"
 PLAN_HELP = "plan_help"
 CLEANUP_REVIEW_HELP = "cleanup_review_help"
 MUTATION_REQUEST = "mutation_request"
+DISTINCT_PLAN_ACTION = "distinct_plan_action"
 
 
 _ANALYTICAL_RANKING_CUES = (
@@ -373,8 +374,16 @@ def classify_intent_nuance(text: str) -> IntentNuance:
         if report_signal:
             return IntentNuance(category=COMMAND_HELP, target=target, signal=report_signal)
         if any(obj in low for obj in _PLAN_OBJECTS):
+            if has_distinct_plan_action(low):
+                return IntentNuance(
+                    category=MUTATION_REQUEST, target=target, signal=DISTINCT_PLAN_ACTION
+                )
             return IntentNuance(category=PLAN_HELP, target=target, signal=frame)
         if frame == "how would you" and any(obj in low for obj in _INSPECT_OBJECTS):
+            if has_distinct_plan_action(low):
+                return IntentNuance(
+                    category=MUTATION_REQUEST, target=target, signal=DISTINCT_PLAN_ACTION
+                )
             return IntentNuance(category=PLAN_HELP, target=target, signal=frame)
         if any(obj in low for obj in _INSPECT_OBJECTS) and (
             target or any(anchor in low for anchor in _INSPECT_DOMAIN_ANCHORS)
