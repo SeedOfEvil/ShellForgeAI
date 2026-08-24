@@ -77,6 +77,24 @@ _EXPLICIT_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A PLAN_HELP frame may legitimately contain action vocabulary (for example,
+# "before restarting"). Only an action that starts a distinct sentence or an
+# explicit follow-on clause is a requested mutation. This remains intentionally
+# narrow; it is not a general natural-language parser.
+_PLAN_FOLLOW_ON_ACTION_RE = re.compile(
+    r"(?:[?!.;]\s*|\b(?:and(?:\s+then)?|then)\s+)"
+    r"(?:please\s+)?(?:go\s+ahead\s+and\s+)?"
+    r"(?:restart|reboot|start|stop|kill|delete|remove|fix|remediat\w*|"
+    r"clean\s*up|cleanup|prune|apply|execute|rollback|recover|install|uninstall)\b",
+    re.IGNORECASE,
+)
+
+
+def has_distinct_plan_action(text: str) -> bool:
+    """Return whether PLAN_HELP contains a separate requested action clause."""
+
+    return _PLAN_FOLLOW_ON_ACTION_RE.search(_normalize(text)) is not None
+
 
 def is_read_only_analytical_ranking(text: str) -> bool:
     """Return whether *text* asks only to rank observed running evidence.
@@ -112,6 +130,8 @@ NONE = "none"
 
 # Command-help "frames": phrasings that ask *how/what to run*, i.e. guidance.
 _HELP_FRAMES: tuple[str, ...] = (
+    "what plan should i",
+    "what plan should we",
     "what command",
     "which command",
     "what commands",
@@ -120,6 +140,7 @@ _HELP_FRAMES: tuple[str, ...] = (
     "whats the command",
     "what would i run",
     "what would you run",
+    "what would you",
     "what do i run",
     "what should i run",
     "show me the command",
@@ -352,6 +373,8 @@ def classify_intent_nuance(text: str) -> IntentNuance:
         if report_signal:
             return IntentNuance(category=COMMAND_HELP, target=target, signal=report_signal)
         if any(obj in low for obj in _PLAN_OBJECTS):
+            return IntentNuance(category=PLAN_HELP, target=target, signal=frame)
+        if frame == "how would you" and any(obj in low for obj in _INSPECT_OBJECTS):
             return IntentNuance(category=PLAN_HELP, target=target, signal=frame)
         if any(obj in low for obj in _INSPECT_OBJECTS) and (
             target or any(anchor in low for anchor in _INSPECT_DOMAIN_ANCHORS)

@@ -17,6 +17,7 @@ WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH: Final = "windows_network_health"
 WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH: Final = "windows_failure_health"
 WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL: Final = "windows_mutation_refusal"
 WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY: Final = "windows_running_inventory"
+WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN: Final = "windows_advisory_plan"
 
 WINDOWS_INVENTORY_CONTAINER_LIMITATION: Final = (
     "Container inventory is not collected by the Windows evidence packet; container "
@@ -45,6 +46,7 @@ _WINDOWS_OPERATOR_COMMANDS: Final[tuple[str, ...]] = (
 )
 
 _COMMANDS_BY_INTENT: Final[dict[str, tuple[str, ...]]] = {
+    WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN: _WINDOWS_OPERATOR_COMMANDS,
     WINDOWS_OPERATOR_INTENT_STATUS: (
         WINDOWS_STANDARD_EVIDENCE_COMMAND,
         WINDOWS_STATUS_COMMAND,
@@ -445,16 +447,32 @@ def _mutation(text: str, explicit_windows: bool) -> bool:
 
 
 def classify_windows_operator_intent(text: str, *, host_system: str) -> WindowsOperatorRoute | None:
+    from shellforgeai.core.intent_nuance import (
+        PLAN_HELP,
+        classify_intent_nuance,
+        has_distinct_plan_action,
+    )
+
     normalized = normalize_windows_operator_text(text)
     host_is_windows = host_system.casefold() == "windows"
     explicit = _explicit_windows(normalized)
     if not normalized:
         return None
-    if _mutation(normalized, explicit) and _scoped(normalized, host_is_windows, explicit):
+    scoped = _scoped(normalized, host_is_windows, explicit)
+    nuance = classify_intent_nuance(text)
+    if nuance.category == PLAN_HELP and scoped:
+        if has_distinct_plan_action(text):
+            return WindowsOperatorRoute(
+                WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, host_is_windows, explicit
+            )
+        return WindowsOperatorRoute(
+            WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN, host_is_windows, explicit
+        )
+    if _mutation(normalized, explicit) and scoped:
         return WindowsOperatorRoute(
             WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL, host_is_windows, explicit
         )
-    if not _scoped(normalized, host_is_windows, explicit):
+    if not scoped:
         return None
     for intent, predicate in (
         (WINDOWS_OPERATOR_INTENT_STATUS, _status),

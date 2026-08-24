@@ -7,6 +7,7 @@ model, and leaves the shared ``ask`` classifier and mutation refusal unchanged.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -631,12 +632,27 @@ def test_pure_helper_has_no_execution_or_io_surface() -> None:
         "Restart-Service",
     )
     assert not any(term in helper for term in forbidden)
-    imports = sorted(line.strip() for line in helper.splitlines() if "import " in line)
-    assert imports == [
-        "from __future__ import annotations",
-        "from dataclasses import dataclass",
-        "from typing import Final",
-        "import re",
+    tree = ast.parse(helper)
+    direct_imports = sorted(
+        (name.name, name.asname)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for name in node.names
+    )
+    from_imports = sorted(
+        (node.level, node.module, name.name, name.asname)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for name in node.names
+    )
+    assert direct_imports == [("re", None)]
+    assert from_imports == [
+        (0, "__future__", "annotations", None),
+        (0, "dataclasses", "dataclass", None),
+        (0, "shellforgeai.core.intent_nuance", "PLAN_HELP", None),
+        (0, "shellforgeai.core.intent_nuance", "classify_intent_nuance", None),
+        (0, "shellforgeai.core.intent_nuance", "has_distinct_plan_action", None),
+        (0, "typing", "Final", None),
     ]
 
 

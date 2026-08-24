@@ -74,6 +74,7 @@ from shellforgeai.core.windows_evidence_context import (
 )
 from shellforgeai.core.windows_operator_ux import (
     WINDOWS_INVENTORY_CONTAINER_LIMITATION,
+    WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN,
     WINDOWS_OPERATOR_INTENT_DISK_CAPACITY,
     WINDOWS_OPERATOR_INTENT_FAILURE_HEALTH,
     WINDOWS_OPERATOR_INTENT_HANDOFF,
@@ -3232,6 +3233,11 @@ def start_interactive(
         if shared_windows_route is not None and not (
             is_shell_fragment_line(user_input) or looks_like_shell_command(user_input)
         ):
+            if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN:
+                from shellforgeai.core.windows_advisory_planning import render_windows_advisory_plan
+
+                console.print(render_windows_advisory_plan(shared_windows_route), end="")
+                continue
             if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL:
                 session_summary.note_refusal("windows mutation request refused")
                 limitation_lines = ()

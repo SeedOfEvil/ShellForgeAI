@@ -20,6 +20,7 @@ from shellforgeai.core.windows_operator_solution_builder import (
     build_windows_operator_solution_from_evidence,
 )
 from shellforgeai.core.windows_operator_ux import (
+    WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN,
     WINDOWS_OPERATOR_INTENT_DISK_CAPACITY,
     WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
     WINDOWS_OPERATOR_INTENT_NETWORK_HEALTH,
@@ -75,6 +76,7 @@ def _build(intent: str = WINDOWS_OPERATOR_INTENT_STATUS, packet: dict[str, objec
 @pytest.mark.parametrize(
     "intent",
     [
+        WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN,
         WINDOWS_OPERATOR_INTENT_STATUS,
         WINDOWS_OPERATOR_INTENT_PERFORMANCE,
         WINDOWS_OPERATOR_INTENT_SERVICES,

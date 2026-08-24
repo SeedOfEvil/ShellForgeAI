@@ -103,6 +103,7 @@ def register(app: typer.Typer) -> None:
         from shellforgeai.core.runbook import build_runbook, render_runbook_md
         from shellforgeai.core.windows_operator_ux import (
             WINDOWS_INVENTORY_CONTAINER_LIMITATION,
+            WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN,
             WINDOWS_OPERATOR_INTENT_HANDOFF,
             WINDOWS_OPERATOR_INTENT_MUTATION_REFUSAL,
             WINDOWS_OPERATOR_INTENT_NEXT_CHECK,
@@ -181,6 +182,14 @@ def register(app: typer.Typer) -> None:
                 )
                 return
         runtime = cli._ctx(ctx)
+        if (
+            windows_route is not None
+            and windows_route.intent == WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN
+        ):
+            from shellforgeai.core.windows_advisory_planning import render_windows_advisory_plan
+
+            cli.console.print(render_windows_advisory_plan(windows_route), end="")
+            return
         if windows_route is not None and windows_route.intent in {
             WINDOWS_OPERATOR_INTENT_PERFORMANCE,
             WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
