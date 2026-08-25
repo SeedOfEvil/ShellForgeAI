@@ -1263,6 +1263,20 @@ def route_input(text: str) -> RoutedCommand:
         head, _, tail = raw.partition(" ")
         return RoutedCommand(name=head.lower(), args=tail.strip())
 
+    # The shared nuance classifier owns the narrow distinction between a
+    # PLAN_HELP question and a separate follow-on mutation request. Route the
+    # latter through the established deterministic refusal before any
+    # platform-specific advisory or evidence path can claim it.
+    from shellforgeai.core.intent_nuance import (
+        DISTINCT_PLAN_ACTION,
+        MUTATION_REQUEST,
+        classify_intent_nuance,
+    )
+
+    nuance = classify_intent_nuance(raw)
+    if nuance.category == MUTATION_REQUEST and nuance.signal == DISTINCT_PLAN_ACTION:
+        return RoutedCommand(name="mutation_refused", args=raw)
+
     normalized_session_summary = _normalize_intent_text(raw)
     if normalized_session_summary in {
         "summary",

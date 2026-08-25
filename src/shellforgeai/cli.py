@@ -9986,7 +9986,7 @@ def _handle_mutation_refusal_ask(question: str) -> bool:
     console.print("First safe command: shellforgeai ops report")
     console.print("")
     console.print("To perform governed disposable remediation, use the explicit CLI workflow:")
-    console.print("plan → validate → preflight → execute with explicit confirmation.")
+    console.print("plan -> validate -> preflight -> execute with explicit confirmation.")
     console.print("Production targets remain blocked.")
     return True
 
