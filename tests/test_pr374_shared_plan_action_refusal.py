@@ -32,6 +32,27 @@ MIXED_ACTION = (
 )
 
 
+def test_shared_refusal_renderer_is_cp1252_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+    import shellforgeai.cli as cli_module
+
+    printed: list[str] = []
+
+    class Cp1252Console:
+        def print(self, *args: Any, **_kwargs: Any) -> None:
+            text = " ".join(str(arg) for arg in args)
+            text.encode("cp1252", errors="strict")
+            printed.append(text)
+
+    monkeypatch.setattr(cli_module, "console", Cp1252Console())
+
+    assert cli_module._handle_mutation_refusal_ask(MIXED_ACTION[0]) is True
+
+    output = "\n".join(printed)
+    assert "Refused: natural-language mutation is not allowed." in output
+    assert "plan -> validate -> preflight -> execute with explicit confirmation." in output
+    assert "→" not in output
+
+
 @pytest.mark.parametrize("prompt", PURE_ADVISORY)
 def test_shared_classifier_preserves_pure_plan_help(prompt: str) -> None:
     assert classify_intent_nuance(prompt).category == PLAN_HELP
