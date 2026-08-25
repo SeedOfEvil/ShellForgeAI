@@ -170,6 +170,28 @@ class AskRoute:
     fix_plan: bool = False
 
 
+def select_linux_plan_help_target(
+    *, nuance_signal: str, nuance_target: str, routed_name: str, routed_target: str
+) -> str | None:
+    """Select a PR375 target solely from maintained classifier/router output.
+
+    The nuance signal is itself maintained typed output. This adapter never
+    receives the original question and therefore cannot parse or resolve prose.
+    Existing command-help signals retain PR131 guidance, while an exact nuance
+    target takes precedence over the router's broader Docker scope.
+    """
+
+    if nuance_signal not in {"what plan should i", "what plan should we", "how would you"}:
+        return None
+    if routed_name != "diagnose":
+        return None
+    if nuance_target:
+        return nuance_target
+    if routed_target == "docker":
+        return routed_target
+    return None
+
+
 def is_mutation_request(text: str) -> bool:
     lowered = _normalize_intent_text(text or "")
     return any(p in lowered for p in _MUTATION_PHRASES)

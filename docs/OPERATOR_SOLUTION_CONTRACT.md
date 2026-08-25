@@ -115,6 +115,17 @@ evidence remains visible as limitations and unresolved questions. Direct
 natural-language mutation continues to be refused, and the standalone V2
 `propose` contract is unchanged.
 
+On Linux, evidence-aware pure planning/help uses the same canonical Markdown
+when maintained intent/routing output already supplies a concrete target or
+diagnostic scope. The adapter performs one read-only diagnosis, passes that
+completed result once to the Linux/Docker producer, and renders the resulting
+solution once. It does not classify prose or invent a host, container, or
+service identity. Unresolved prompts retain bounded plan-only guidance; mixed
+planning plus a distinct requested action remains refused. `ask --no-evidence`
+does not enter this route. Canonical natural-language rendering calls no model,
+persists nothing, authorizes nothing, and executes nothing; standalone V2
+`propose` behavior is unchanged.
+
 This mode remains advisory-only and read-only. It does not call a model, execute
 procedure text, or mutate a host. Adding `--save` publishes the same solution
 once beneath `<data_dir>/operator_solutions/<artifact_id>/`; `--json` and
