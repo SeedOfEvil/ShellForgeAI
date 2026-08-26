@@ -6,6 +6,15 @@ bounded read-only Windows evidence packet and renders the existing canonical
 `OperatorSolution`; it does not call a model or execute the rendered procedure.
 Explicit Windows planning requested elsewhere reports that Windows-local
 evidence is unavailable rather than substituting Linux or Docker evidence.
+
+On Linux, a pure `PLAN_HELP` question whose maintained router already supplies
+a target or diagnostic scope uses one read-only diagnosis and the canonical
+Linux/Docker `OperatorSolution` producer and renderer. The interactive adapter
+does not resolve prose or fabricate an identity; unresolved questions retain
+the existing safe plan-only guidance. Mixed planning plus a distinct action is
+still refused before diagnosis. This route calls no model, persists nothing,
+and executes nothing.
+
 Natural-language mutation remains refused, and standalone V2 `propose` behavior
 is unchanged.
 

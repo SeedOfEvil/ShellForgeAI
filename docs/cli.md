@@ -1699,6 +1699,15 @@ contained at its fixed `operator_solutions/<artifact_id>/` child. `--brief` and 
 remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
 and the complete legacy V2 artifact lifecycle remain supported unchanged.
 
+Evidence-aware Linux/Docker pure planning/help sent through `shellforgeai ask`
+renders canonical `OperatorSolution` Markdown when maintained routing already
+resolves a target or diagnostic scope. It performs one read-only diagnosis and
+does not call a model, persist or authorize work, or execute the procedure.
+Ambiguous prompts remain on safe plan-only guidance rather than being treated
+as the current host, mixed planning plus a distinct action remains refused, and
+`--no-evidence` bypasses this canonical route. Standalone V2 `propose` behavior
+is unchanged.
+
 Windows-scoped natural-language planning/help sent through `shellforgeai ask`
 or interactive mode is resolved before generic Docker proposal guidance. On a
 Windows host it collects the existing bounded native read-only evidence packet

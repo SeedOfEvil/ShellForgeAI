@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from shellforgeai.audit.storage import AuditStorage
+from shellforgeai.core.ask_routing import select_linux_plan_help_target
 from shellforgeai.core.collectors import (
     LINUX_ONLY_COLLECTOR_SKIP_STATUS,
     WINDOWS_METRIC_UNAVAILABLE_STATUS,
@@ -3476,6 +3477,18 @@ def start_interactive(
             "shell_refused",
         }:
             nuance = classify_intent_nuance(user_input)
+            if nuance.category == PLAN_HELP and platform.system().casefold() == "linux":
+                from shellforgeai.core.linux_advisory_planning import render_linux_advisory_plan
+
+                linux_target = select_linux_plan_help_target(
+                    nuance_signal=nuance.signal,
+                    nuance_target=nuance.target,
+                    routed_name=routed.name,
+                    routed_target=routed.args,
+                )
+                if linux_target is not None:
+                    console.print(render_linux_advisory_plan(runtime, linux_target), end="")
+                    continue
             if nuance.category in (COMMAND_HELP, PLAN_HELP, CLEANUP_REVIEW_HELP):
                 console.print(render_intent_nuance(nuance, text=user_input))
                 continue

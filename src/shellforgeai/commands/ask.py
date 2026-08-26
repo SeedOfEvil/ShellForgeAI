@@ -84,6 +84,7 @@ def register(app: typer.Typer) -> None:
             is_ops_report_ask,
             network_reachability_brief,
             route_ask_intent,
+            select_linux_plan_help_target,
             target_container_status,
         )
         from shellforgeai.core.command_suggestions import filter_unsupported_command_suggestions
@@ -97,6 +98,7 @@ def register(app: typer.Typer) -> None:
         )
         from shellforgeai.core.intent_nuance import (
             DISTINCT_PLAN_ACTION,
+            PLAN_HELP,
             classify_intent_nuance,
         )
         from shellforgeai.core.model_session import complete_for_session
@@ -213,6 +215,20 @@ def register(app: typer.Typer) -> None:
             rendered, _latest_context = _render_windows_parity_prompt(runtime, question)
             cli.console.print(rendered)
             return
+        if not no_evidence and platform.system().casefold() == "linux":
+            from shellforgeai.core.linux_advisory_planning import render_linux_advisory_plan
+
+            linux_target = select_linux_plan_help_target(
+                nuance_signal=nuance.signal,
+                nuance_target=nuance.target,
+                routed_name=input_route.name,
+                routed_target=input_route.args,
+            )
+            if nuance.category == PLAN_HELP and linux_target is not None:
+                cli.console.print(
+                    render_linux_advisory_plan(runtime, linux_target, since=since), end=""
+                )
+                return
         if not no_evidence:
             if cli._handle_receipt_recovery_ask(question):
                 return
