@@ -135,6 +135,10 @@ def _pin_windows_memory_unavailable(monkeypatch: Any) -> None:
         "shellforgeai.interactive.repl.windows_memory_payload",
         _fake_windows_memory_payload_unavailable,
     )
+    monkeypatch.setattr(
+        "shellforgeai.core.windows_evidence_context.windows_memory_payload",
+        _fake_windows_memory_payload_unavailable,
+    )
 
 
 @pytest.fixture
@@ -142,11 +146,22 @@ def windows_platform(monkeypatch: Any) -> list[str]:
     monkeypatch.setattr("shellforgeai.core.diagnose.detect_platform", lambda: WINDOWS_INFO)
     monkeypatch.setattr("shellforgeai.core.collectors.detect_platform", lambda: WINDOWS_INFO)
     monkeypatch.setattr(
+        "shellforgeai.core.windows_evidence_context.detect_platform", lambda: WINDOWS_INFO
+    )
+    monkeypatch.setattr(
         "shellforgeai.core.collectors.windows_status_payload",
         _fake_windows_status_payload,
     )
     monkeypatch.setattr(
         "shellforgeai.core.collectors.windows_disks_payload",
+        _fake_windows_disks_payload,
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.windows_evidence_context.windows_status_payload",
+        _fake_windows_status_payload,
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.windows_evidence_context.windows_disks_payload",
         _fake_windows_disks_payload,
     )
     _pin_windows_memory_unavailable(monkeypatch)
@@ -629,7 +644,8 @@ def test_ask_windows_handoff_prompt_avoids_docker(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows host handoff" in out
+    assert "# ShellForgeAI Operator Solution" in out
+    assert "platform_system: windows" in out
     assert "WIN2025-SFAI01" in out
     assert "Docker suspects" not in out
     assert "container-visible evidence" not in out
@@ -685,10 +701,9 @@ def test_windows_handoff_prompt_is_windows_native(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows host handoff" in out
-    assert "windows-local-read-only" in out
+    assert "# ShellForgeAI Operator Solution" in out
+    assert "platform_system: windows" in out
     assert "WIN2025-SFAI01" in out
-    assert "shellforgeai windows evidence --profile standard --json" in out
     assert "Docker/container" not in out
     assert "container evidence" not in out
 

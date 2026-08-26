@@ -185,7 +185,14 @@ Debug
   handoff packet. Natural handoff prompts such as "give me a handoff", "give me
   the operator handoff", "handoff summary", "what should I tell the next
   operator?", "what do I hand over?", and "make a shift handoff" produce the
-  same read-only handoff. `handoff --save` writes only a ShellForgeAI-owned
+  canonical `OperatorSolution` Markdown for the current supported Linux/Docker
+  or native Windows host. This pure, unsaved route collects, builds, and renders
+  once without a model, persistence, authorization, or execution; a bounded
+  canonical failure does not fall back to the legacy handoff or a model.
+  Explicit handoff commands retain their existing contracts, and natural
+  `save handoff` remains the legacy V2 save route. Existing support, history,
+  compare, export, and validate routes also retain their more-specific handling.
+  `handoff --save` writes only a ShellForgeAI-owned
   artifact under `<data_dir>/v2_handoffs/`. Mixed mutation phrasing such as
   "handoff and restart", "handoff then apply", "summarize and fix it", or "give
   me a handoff and restart compose" is refused with no action taken; the handoff

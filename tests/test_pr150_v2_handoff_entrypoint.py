@@ -351,9 +351,9 @@ def test_ask_give_me_a_handoff_routes(monkeypatch, tmp_path):  # 30
     _patch_triage(monkeypatch, tmp_path, empty=True)
     result = runner.invoke(app, ["ask", "give me a handoff"])
     assert result.exit_code == 0
-    assert "Read-only operator handoff (deterministic ask routing):" in result.stdout
-    assert "Handoff: OK" in result.stdout
-    assert "No action was taken." in result.stdout
+    assert "# ShellForgeAI Operator Solution" in result.stdout
+    assert "- advisory_only: true" in result.stdout
+    assert "- execution_status: not_executed" in result.stdout
     assert "Provider:" not in result.stdout
 
 
@@ -361,15 +361,16 @@ def test_ask_what_should_i_tell_next_operator_routes(monkeypatch, tmp_path):  # 
     _patch_triage(monkeypatch, tmp_path, empty=True)
     result = runner.invoke(app, ["ask", "what should I tell the next operator?"])
     assert result.exit_code == 0
-    assert "Read-only operator handoff (deterministic ask routing):" in result.stdout
-    assert "V2 path:" in result.stdout
+    assert "# ShellForgeAI Operator Solution" in result.stdout
+    assert "artifact_type: operator_solution" in result.stdout
 
 
 def test_ask_handoff_summary_routes(monkeypatch, tmp_path):  # 32
     _patch_triage(monkeypatch, tmp_path, empty=True)
     result = runner.invoke(app, ["ask", "handoff summary"])
     assert result.exit_code == 0
-    assert "Read-only operator handoff (deterministic ask routing):" in result.stdout
+    assert "# ShellForgeAI Operator Solution" in result.stdout
+    assert "- advisory_only: true" in result.stdout
 
 
 def test_ask_handoff_with_mutation_refuses_and_no_action(monkeypatch, tmp_path):  # 33
