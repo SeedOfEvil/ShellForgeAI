@@ -117,6 +117,45 @@ def test_root_symlink_and_malformed_root_fail_closed(tmp_path: Path) -> None:
     )
 
 
+def test_uninspectable_root_is_blocked_without_loader_write_or_path_leakage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "operator_solutions"
+    root.mkdir()
+    before = tuple(tmp_path.rglob("*"))
+    maintained_lstat = inventory.os.lstat
+    injected_path = str(root / "private-injected-name")
+    loader_calls = 0
+
+    def blocked_root_probe(path: Path | str):
+        if Path(path) == root:
+            raise PermissionError(13, "permission denied", injected_path)
+        return maintained_lstat(path)
+
+    def observed_loader(*_args):
+        nonlocal loader_calls
+        loader_calls += 1
+        pytest.fail("candidate loader called after blocked root probe")
+
+    monkeypatch.setattr(inventory.os, "lstat", blocked_root_probe)
+    monkeypatch.setattr(inventory, "load_persisted_operator_solution_artifact", observed_loader)
+
+    result = inventory.inventory_persisted_operator_solution_artifacts(tmp_path)
+    public = result.model_dump_json()
+
+    assert result.status == "operator_solution_inventory_blocked"
+    assert result.inventory_complete is False
+    assert result.valid_entry_count == 0 and result.entries == ()
+    assert result.anomaly_count == 0 and result.anomalies == ()
+    assert loader_calls == 0
+    assert tuple(tmp_path.rglob("*")) == before
+    assert result.read_only is True and result.mutation_performed is False
+    assert result.execution_status == "not_executed"
+    assert "traceback" not in public.casefold()
+    assert str(tmp_path) not in public
+    assert injected_path not in public
+
+
 def test_human_and_json_cli_are_bounded_and_path_free(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

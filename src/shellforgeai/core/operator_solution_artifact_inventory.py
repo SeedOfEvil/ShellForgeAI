@@ -16,7 +16,6 @@ from shellforgeai.core.operator_solution_artifact_persistence import (
 )
 from shellforgeai.core.persistence_primitives import (
     _is_reparse_stat,
-    _path_exists_without_following,
     _validate_data_dir,
 )
 
@@ -122,15 +121,22 @@ def inventory_persisted_operator_solution_artifacts(
             filesystem_accessed=checked.filesystem_accessed,
         )
     root = checked.path / OPERATOR_SOLUTIONS_DIRNAME
-    if not _path_exists_without_following(root):
+    try:
+        root_info = os.lstat(root)
+    except FileNotFoundError:
         return _result(
             "operator_solution_inventory_empty",
             complete=True,
             filesystem_accessed=True,
             inventory_performed=True,
         )
+    except OSError:
+        return _result(
+            "operator_solution_inventory_blocked",
+            reason="inventory root is not inspectable",
+            filesystem_accessed=True,
+        )
     try:
-        root_info = os.lstat(root)
         if not stat.S_ISDIR(root_info.st_mode) or _is_reparse_stat(root_info, root):
             return _result(
                 "operator_solution_inventory_blocked",
