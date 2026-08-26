@@ -190,7 +190,9 @@ Debug
   once without a model, persistence, authorization, or execution; a bounded
   canonical failure does not fall back to the legacy handoff or a model.
   Explicit handoff commands retain their existing contracts, and natural
-  `save handoff` remains the legacy V2 save route. `handoff --save` writes only a ShellForgeAI-owned
+  `save handoff` remains the legacy V2 save route. Existing support, history,
+  compare, export, and validate routes also retain their more-specific handling.
+  `handoff --save` writes only a ShellForgeAI-owned
   artifact under `<data_dir>/v2_handoffs/`. Mixed mutation phrasing such as
   "handoff and restart", "handoff then apply", "summarize and fix it", or "give
   me a handoff and restart compose" is refused with no action taken; the handoff

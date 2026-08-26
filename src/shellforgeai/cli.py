@@ -11079,6 +11079,20 @@ def _handle_v2_handoff_history_ask(question: str) -> bool:
     return True
 
 
+def _handle_v2_specialized_handoff_ask(question: str) -> bool:
+    """Preserve maintained lifecycle/history/compare routes before generic handoff."""
+    if not _is_handoff_ask(question):
+        return False
+    normalized = _normalize_handoff_ask(question)
+    if any(cue in normalized for cue in _HANDOFF_COMPARE_CUES):
+        return _handle_v2_handoff_compare_ask(question)
+    if any(cue in normalized for cue in _HANDOFF_HISTORY_CUES):
+        return _handle_v2_handoff_history_ask(question)
+    if _handoff_lifecycle_intent(question):
+        return _handle_v2_handoff_ask(question)
+    return False
+
+
 def _handle_v2_handoff_ask(question: str) -> bool:
     if not _is_handoff_ask(question):
         return False

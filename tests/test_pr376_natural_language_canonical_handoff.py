@@ -127,6 +127,33 @@ def test_save_and_no_evidence_do_not_use_canonical_helpers(monkeypatch: pytest.M
     assert no_evidence.exit_code == 1
 
 
+@pytest.mark.parametrize(
+    ("prompt", "marker"),
+    (
+        ("show handoff history", "Read-only handoff history"),
+        ("what changed since last handoff", "Read-only handoff compare-latest"),
+        ("compare latest handoffs", "Read-only handoff compare-latest"),
+        ("export handoff", "Handoff artifact lifecycle"),
+        ("validate handoff", "Handoff artifact lifecycle"),
+        ("create receipt audit bundle for support handoff", "receipt audit bundle guidance"),
+        ("make a support packet for receipt audit", "receipt audit bundle guidance"),
+    ),
+)
+def test_specialized_handoff_authorities_precede_canonical_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prompt: str, marker: str
+) -> None:
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("generic canonical handoff must not steal a specialized route")
+
+    monkeypatch.setenv("SHELLFORGEAI_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(linux_advisory_planning, "render_linux_advisory_plan", forbidden)
+    monkeypatch.setattr(windows_advisory_planning, "render_windows_advisory_plan", forbidden)
+    result = CliRunner().invoke(app, ["ask", prompt])
+    assert result.exit_code == 0
+    assert marker in result.stdout
+    assert "# ShellForgeAI Operator Solution" not in result.stdout
+
+
 def test_windows_orchestration_failure_is_bounded_for_handoff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

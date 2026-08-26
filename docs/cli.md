@@ -1700,14 +1700,16 @@ remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
 and the complete legacy V2 artifact lifecycle remain supported unchanged.
 
 Evidence-aware `ask` requests whose maintained final route is the pure,
-unsaved `handoff` route also render canonical `OperatorSolution` Markdown for
+unsaved, genuinely generic `handoff` route also render canonical `OperatorSolution` Markdown for
 the current Linux/Docker or native Windows host. This route performs one
 read-only collection/build/render pipeline and never calls a model, saves an
 artifact, authorizes work, or executes anything. `save handoff` remains on the
 legacy V2 save route, `--no-evidence` preserves the prior ask behavior, and a
 mixed handoff/action request is refused before canonical evidence collection.
 Canonical failures do not downgrade to legacy V2 or model output. The explicit
-`shellforgeai handoff` contracts above are unchanged.
+`shellforgeai handoff` contracts above are unchanged. Existing receipt/support,
+history, compare, export, and validate requests keep their more-specific
+deterministic handling.
 
 Evidence-aware Linux/Docker pure planning/help sent through `shellforgeai ask`
 renders canonical `OperatorSolution` Markdown when maintained routing already

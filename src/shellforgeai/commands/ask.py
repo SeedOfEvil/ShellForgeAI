@@ -199,26 +199,6 @@ def register(app: typer.Typer) -> None:
                 return
         runtime = cli._ctx(ctx)
         if (
-            not no_evidence
-            and input_route.name == "cli_dispatch"
-            and input_route.argv == ("handoff",)
-        ):
-            if platform.system().casefold() == "windows":
-                from shellforgeai.core.windows_advisory_planning import (
-                    render_windows_advisory_plan,
-                )
-
-                handoff_route = windows_route or WindowsOperatorRoute(
-                    WINDOWS_OPERATOR_INTENT_HANDOFF, True, False
-                )
-                cli.console.print(render_windows_advisory_plan(handoff_route), end="")
-                return
-            if platform.system().casefold() == "linux":
-                from shellforgeai.core.linux_advisory_planning import render_linux_advisory_plan
-
-                cli.console.print(render_linux_advisory_plan(runtime, "host", since=since), end="")
-                return
-        if (
             windows_route is not None
             and windows_route.intent == WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN
         ):
@@ -258,6 +238,28 @@ def register(app: typer.Typer) -> None:
                 return
             if cli._handle_recipe_registry_ask(question):
                 return
+            if cli._handle_v2_specialized_handoff_ask(question):
+                return
+            if input_route.name == "cli_dispatch" and input_route.argv == ("handoff",):
+                if platform.system().casefold() == "windows":
+                    from shellforgeai.core.windows_advisory_planning import (
+                        render_windows_advisory_plan,
+                    )
+
+                    handoff_route = windows_route or WindowsOperatorRoute(
+                        WINDOWS_OPERATOR_INTENT_HANDOFF, True, False
+                    )
+                    cli.console.print(render_windows_advisory_plan(handoff_route), end="")
+                    return
+                if platform.system().casefold() == "linux":
+                    from shellforgeai.core.linux_advisory_planning import (
+                        render_linux_advisory_plan,
+                    )
+
+                    cli.console.print(
+                        render_linux_advisory_plan(runtime, "host", since=since), end=""
+                    )
+                    return
             if cli._handle_v2_handoff_ask(question):
                 return
             if cli._handle_v2_verify_ask(question):

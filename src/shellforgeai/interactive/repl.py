@@ -3350,6 +3350,15 @@ def start_interactive(
                 pending_followup = None
                 continue
         routed = route_input(user_input)
+        if (
+            shared_windows_route is not None
+            and shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_HANDOFF
+            and routed.name not in {"mutation_refused", "shell_refused"}
+        ):
+            from shellforgeai.core.windows_advisory_planning import render_windows_advisory_plan
+
+            console.print(render_windows_advisory_plan(shared_windows_route), end="")
+            continue
         if routed.name == "noop":
             continue
         if routed.name == "unknown_command":

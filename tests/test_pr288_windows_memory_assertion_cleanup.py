@@ -129,6 +129,7 @@ def _pin_windows_memory(monkeypatch: Any, *, available: bool) -> None:
     )
     monkeypatch.setattr("shellforgeai.core.collectors.windows_memory_payload", fake)
     monkeypatch.setattr("shellforgeai.interactive.repl.windows_memory_payload", fake)
+    monkeypatch.setattr("shellforgeai.core.windows_evidence_context.windows_memory_payload", fake)
 
 
 @pytest.fixture
@@ -142,11 +143,22 @@ def windows_platform(monkeypatch: Any) -> list[str]:
     monkeypatch.setattr("shellforgeai.core.diagnose.detect_platform", lambda: WINDOWS_INFO)
     monkeypatch.setattr("shellforgeai.core.collectors.detect_platform", lambda: WINDOWS_INFO)
     monkeypatch.setattr(
+        "shellforgeai.core.windows_evidence_context.detect_platform", lambda: WINDOWS_INFO
+    )
+    monkeypatch.setattr(
         "shellforgeai.core.collectors.windows_status_payload",
         _fake_windows_status_payload,
     )
     monkeypatch.setattr(
         "shellforgeai.core.collectors.windows_disks_payload",
+        _fake_windows_disks_payload,
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.windows_evidence_context.windows_status_payload",
+        _fake_windows_status_payload,
+    )
+    monkeypatch.setattr(
+        "shellforgeai.core.windows_evidence_context.windows_disks_payload",
         _fake_windows_disks_payload,
     )
     attempted: list[str] = []
@@ -308,8 +320,11 @@ def test_handoff_does_not_claim_memory_unavailable_when_available(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows host handoff" in out
+    assert "# ShellForgeAI Operator Solution" in out
+    assert "platform_system: windows" in out
     assert "WIN2025-SFAI01" in out
+    assert "memory used_percent=20.0" in out
+    assert "memory evidence is unavailable" not in out
 
 
 def test_handoff_keeps_unavailable_wording_when_memory_unavailable(
@@ -320,8 +335,11 @@ def test_handoff_keeps_unavailable_wording_when_memory_unavailable(
     out = res.stdout
     assert res.exit_code == 0
     assert windows_platform == []
-    assert "Windows host handoff" in out
+    assert "# ShellForgeAI Operator Solution" in out
+    assert "platform_system: windows" in out
+    assert "memory evidence is unavailable" in out
     assert "memory used=" not in out
+    assert "0.0GiB/0.0GiB" not in out
 
 
 def test_status_intent_uses_memory_when_available(monkeypatch: Any, tmp_path: Path) -> None:
