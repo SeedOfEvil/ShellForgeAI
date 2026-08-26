@@ -194,3 +194,11 @@ Optional canonical OperatorSolution artifacts use the fixed subtree
 only `operator-solution.json` and `operator-solution.md`; callers cannot select
 alternate paths or filenames. See `OPERATOR_SOLUTION_CONTRACT.md` for identity,
 atomic publication, validation, and non-authority semantics.
+
+The explicit OperatorSolution discovery command reads only direct children of
+this fixed subtree. It never creates the subtree when absent, follows no
+symlink/reparse entry, and stops with an incomplete limit-exceeded result and
+no partial valid entries above the fixed 1024-child bound. Exact-ID candidates
+are validated by the canonical loader, then summarized in lexical artifact-ID
+order. No index, cache, pointer, chronology, selection, cleanup, or retention
+state exists in this layout.

@@ -1679,6 +1679,8 @@ shellforgeai handoff --operator-solution --json
 shellforgeai handoff --operator-solution --save
 shellforgeai handoff operator-solution-validate osol_<64-lowercase-hex>
 shellforgeai handoff operator-solution-validate osol_<64-lowercase-hex> --json
+shellforgeai handoff operator-solution-inventory
+shellforgeai handoff operator-solution-inventory --json
 ```
 
 The first command renders the maintained canonical `OperatorSolution` as
@@ -1698,6 +1700,16 @@ the absolute, CWD-independent `<runtime-root>\data`; canonical artifacts remain
 contained at its fixed `operator_solutions/<artifact_id>/` child. `--brief` and every legacy `--from-*` option
 remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
 and the complete legacy V2 artifact lifecycle remain supported unchanged.
+
+The explicit inventory command performs a read-only, direct-child-only scan of
+the fixed `<data_dir>/operator_solutions` root. It uses a non-configurable 1024
+entry bound, offers exact-ID candidates only to the maintained canonical
+loader, orders valid summaries lexicographically by artifact ID, and reports
+unexpected or invalid direct children as path-free anomalies. An absent root is
+a successful empty result and is not created. Inventory emits no full solution
+content and provides no chronology, latest/current/preferred selection,
+natural-language route, report integration, cleanup, retention, approval,
+preflight, or execution authority.
 
 Evidence-aware `ask` requests whose maintained final route is the pure,
 unsaved, genuinely generic `handoff` route also render canonical `OperatorSolution` Markdown for

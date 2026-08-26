@@ -33,6 +33,7 @@ shellforgeai triage --brief
 shellforgeai ask "what should I inspect first?" --explain-evidence
 shellforgeai ops report --save
 shellforgeai handoff --save
+shellforgeai handoff operator-solution-inventory --json
 ```
 
 Useful focused views include:

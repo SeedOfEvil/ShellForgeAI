@@ -25,6 +25,10 @@ from shellforgeai.core.operator_solution import (
     canonical_operator_solution_json,
     render_operator_solution_markdown,
 )
+from shellforgeai.core.operator_solution_artifact_inventory import (
+    OperatorSolutionInventoryResult,
+    inventory_persisted_operator_solution_artifacts,
+)
 from shellforgeai.core.operator_solution_artifact_persistence import (
     OPERATOR_SOLUTIONS_DIRNAME,
     OperatorSolutionPublicationResult,
@@ -220,6 +224,31 @@ def _render_operator_solution_validate_human(payload: dict[str, Any]) -> str:
             f"Scope: {payload['integrity_scope']}",
         )
     )
+
+
+def _render_operator_solution_inventory_human(result: OperatorSolutionInventoryResult) -> str:
+    lines = [
+        "Canonical OperatorSolution artifact inventory",
+        f"Status: {result.status}",
+        f"Complete: {str(result.inventory_complete).lower()}",
+        f"Valid artifacts: {result.valid_entry_count}",
+        f"Anomalies: {result.anomaly_count}",
+    ]
+    for entry in result.entries:
+        lines.append(
+            f"- {entry.artifact_id}: {entry.platform_system} {entry.target_type} {entry.target} "
+            f"(solution {entry.solution_id}, {entry.total_bytes_read} bytes read)"
+        )
+    for anomaly in result.anomalies:
+        lines.append(f"! {anomaly.entry_name}: {anomaly.category}")
+    lines.extend(
+        (
+            "Read only: true; no artifact was written or changed.",
+            "Selection: none; ordering is lexical by exact artifact ID, not chronological.",
+            "Execution status: not_executed",
+        )
+    )
+    return "\n".join(lines)
 
 
 def _v2_handoff_safety() -> dict[str, Any]:
@@ -873,6 +902,22 @@ def register(handoff_app: typer.Typer) -> None:
         else:
             typer.echo(_render_operator_solution_validate_human(payload))
         if not payload["valid"]:
+            raise typer.Exit(1)
+
+    @handoff_app.command("operator-solution-inventory")
+    def operator_solution_inventory(
+        json_output: Annotated[bool, typer.Option("--json", help="Emit strict JSON only.")] = False,
+    ) -> None:
+        """Inventory canonical OperatorSolution artifacts without selecting one."""
+        result = inventory_persisted_operator_solution_artifacts(Path(load_settings().app.data_dir))
+        if json_output:
+            typer.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True))
+        else:
+            typer.echo(_render_operator_solution_inventory_human(result))
+        if result.status in {
+            "operator_solution_inventory_blocked",
+            "operator_solution_inventory_limit_exceeded",
+        }:
             raise typer.Exit(1)
 
     @handoff_app.command("export")
