@@ -117,6 +117,7 @@ def register(app: typer.Typer) -> None:
             WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY,
             WINDOWS_OPERATOR_INTENT_STATUS,
             WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
+            WindowsOperatorRoute,
             classify_windows_operator_intent,
             render_windows_operator_guidance,
         )
@@ -198,6 +199,26 @@ def register(app: typer.Typer) -> None:
                 return
         runtime = cli._ctx(ctx)
         if (
+            not no_evidence
+            and input_route.name == "cli_dispatch"
+            and input_route.argv == ("handoff",)
+        ):
+            if platform.system().casefold() == "windows":
+                from shellforgeai.core.windows_advisory_planning import (
+                    render_windows_advisory_plan,
+                )
+
+                handoff_route = windows_route or WindowsOperatorRoute(
+                    WINDOWS_OPERATOR_INTENT_HANDOFF, True, False
+                )
+                cli.console.print(render_windows_advisory_plan(handoff_route), end="")
+                return
+            if platform.system().casefold() == "linux":
+                from shellforgeai.core.linux_advisory_planning import render_linux_advisory_plan
+
+                cli.console.print(render_linux_advisory_plan(runtime, "host", since=since), end="")
+                return
+        if (
             windows_route is not None
             and windows_route.intent == WINDOWS_OPERATOR_INTENT_ADVISORY_PLAN
         ):
@@ -208,7 +229,6 @@ def register(app: typer.Typer) -> None:
         if windows_route is not None and windows_route.intent in {
             WINDOWS_OPERATOR_INTENT_PERFORMANCE,
             WINDOWS_OPERATOR_INTENT_STRONGEST_SIGNAL,
-            WINDOWS_OPERATOR_INTENT_HANDOFF,
         }:
             from shellforgeai.interactive.repl import _render_windows_parity_prompt
 

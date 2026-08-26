@@ -3349,12 +3349,6 @@ def start_interactive(
                 _record_latest_context_in_session_summary(session_summary, latest_context)
                 pending_followup = None
                 continue
-            if shared_windows_route.intent == WINDOWS_OPERATOR_INTENT_HANDOFF:
-                with console.status("Collecting Windows read-only evidence..."):
-                    rendered, latest_context = _render_windows_parity_prompt(runtime, user_input)
-                pending_followup = None
-                console.print(rendered)
-                continue
         routed = route_input(user_input)
         if routed.name == "noop":
             continue
@@ -3776,6 +3770,24 @@ Commands:
             )
             continue
         if routed.name == "cli_dispatch":
+            if routed.argv == ("handoff",):
+                if platform.system().casefold() == "windows":
+                    from shellforgeai.core.windows_advisory_planning import (
+                        render_windows_advisory_plan,
+                    )
+
+                    handoff_route = shared_windows_route or WindowsOperatorRoute(
+                        WINDOWS_OPERATOR_INTENT_HANDOFF, True, False
+                    )
+                    console.print(render_windows_advisory_plan(handoff_route), end="")
+                    continue
+                if platform.system().casefold() == "linux":
+                    from shellforgeai.core.linux_advisory_planning import (
+                        render_linux_advisory_plan,
+                    )
+
+                    console.print(render_linux_advisory_plan(runtime, "host"), end="")
+                    continue
             unsupported = _unsupported_local_evidence_response_if_needed(
                 operator_contract,
                 routed_name=routed.name,

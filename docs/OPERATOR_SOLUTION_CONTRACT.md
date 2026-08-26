@@ -107,6 +107,15 @@ and `build_windows_operator_solution_from_evidence()`. Human output comes from
 the canonical Markdown renderer. Adding `--json` emits the canonical
 `OperatorSolution` JSON directly, without a handoff wrapper.
 
+Pure, unsaved natural-language handoff requests in evidence-aware `ask` and
+interactive mode render that same canonical Markdown on supported Linux/Docker
+and native Windows hosts. They consume the maintained final handoff route,
+collect once, build once, and render once; they do not reclassify prose, call a
+model, persist an artifact, authorize work, or execute procedure text. Save
+handoff requests retain the legacy V2 lifecycle, and mixed handoff/action
+requests remain refused. A canonical production failure is bounded and does
+not fall back to the legacy handoff or a model.
+
 Natural-language Windows planning/help in `ask` and interactive mode also uses
 one bounded native Windows evidence packet and this same producer, then renders
 the canonical `OperatorSolution` Markdown. The route is advisory and read-only:

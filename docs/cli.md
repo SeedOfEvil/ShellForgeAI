@@ -1699,6 +1699,16 @@ contained at its fixed `operator_solutions/<artifact_id>/` child. `--brief` and 
 remain incompatible with `--operator-solution`. Default `shellforgeai handoff`
 and the complete legacy V2 artifact lifecycle remain supported unchanged.
 
+Evidence-aware `ask` requests whose maintained final route is the pure,
+unsaved `handoff` route also render canonical `OperatorSolution` Markdown for
+the current Linux/Docker or native Windows host. This route performs one
+read-only collection/build/render pipeline and never calls a model, saves an
+artifact, authorizes work, or executes anything. `save handoff` remains on the
+legacy V2 save route, `--no-evidence` preserves the prior ask behavior, and a
+mixed handoff/action request is refused before canonical evidence collection.
+Canonical failures do not downgrade to legacy V2 or model output. The explicit
+`shellforgeai handoff` contracts above are unchanged.
+
 Evidence-aware Linux/Docker pure planning/help sent through `shellforgeai ask`
 renders canonical `OperatorSolution` Markdown when maintained routing already
 resolves a target or diagnostic scope. It performs one read-only diagnosis and
