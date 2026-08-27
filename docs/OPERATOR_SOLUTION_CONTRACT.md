@@ -186,6 +186,22 @@ valid result. This validates **persisted artifact integrity only**. It does not
 establish freshness, current host state, current-state validity, approval,
 authorization, execution eligibility, or successful execution.
 
+`shellforgeai handoff operator-solution-inventory [--json]` provides bounded
+discovery beneath the fixed `<data_dir>/operator_solutions` root. It inspects
+direct children only, never follows symlinks or reparse points, and fails
+closed with no partial entries when more than 1024 direct children are found.
+Only exact `osol_<64 lowercase hex>` names are candidates, and every candidate
+is validated exclusively by the maintained exact-ID loader. Valid summaries
+are ordered lexicographically by artifact ID; unexpected or invalid children
+are reported as deterministic anomalies. The output contains bounded identity,
+platform, target, and byte-count metadata, never full solution content.
+
+Inventory is explicit CLI-only discovery. It has no natural-language or report
+integration and creates no index, cache, pointer, file, or directory. It does
+not use chronology, resolve a latest/current/preferred artifact, select or
+recommend an artifact, enforce retention, delete or repair content, approve or
+authorize work, run preflight, or execute anything.
+
 Persistence and loading perform no evidence collection, model/provider call,
 operational host inspection, network operation, shell/subprocess, Docker, or
 PowerShell operation. Persistence does not imply approval, authorization,

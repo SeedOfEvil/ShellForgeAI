@@ -151,6 +151,13 @@
       "required_substrings": ["export", "read-only"]
     },
     {
+      "name": "handoff_operator_solution_inventory_help",
+      "group": "v2_spine",
+      "argv": ["handoff", "operator-solution-inventory", "--help"],
+      "expect_exit_code": 0,
+      "required_substrings": ["--json", "inventory"]
+    },
+    {
       "name": "ops_report_help",
       "group": "ops",
       "argv": ["ops", "report", "--help"],
