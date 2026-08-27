@@ -342,11 +342,12 @@ def register(app: typer.Typer) -> None:
         # Generic Windows inventory uses the already-bounded native Windows
         # packet below, not the Linux-oriented diagnose target selected by the
         # cross-platform fallback router.
-        if (
+        windows_running_inventory_won = (
             windows_route is not None
             and windows_route.host_is_windows
             and windows_route.intent == WINDOWS_OPERATOR_INTENT_RUNNING_INVENTORY
-        ):
+        )
+        if windows_running_inventory_won:
             route = AskRoute(mode=PLAIN, intent_label="Windows running-system inventory")
         if not no_evidence and route.mode == EVIDENCE_BACKED:
             operator_contract = build_platform_operator_contract()
@@ -418,7 +419,11 @@ def register(app: typer.Typer) -> None:
         # triage evidence before formatting model assistance. Read-only: this
         # only reads the current Docker scene; it never mutates anything.
         docker_grounding: dict[str, Any] | None = None
-        if not no_evidence and is_docker_operator_ask(question):
+        if (
+            not no_evidence
+            and not windows_running_inventory_won
+            and is_docker_operator_ask(question)
+        ):
             docker_grounding = build_docker_evidence_context()
         evidence_result = None
         evidence_error: str | None = None
