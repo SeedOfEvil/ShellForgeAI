@@ -364,6 +364,9 @@ def _failure_health(text: str) -> bool:
 
 def _running_inventory(text: str) -> bool:
     """Recognize bounded, host-wide running-component inventory questions."""
+    attention_question = re.fullmatch(
+        r"which running (?:system )?(?:items|components) deserve attention and why", text
+    )
     inventory_terms = (
         "inventory",
         "what is running",
@@ -384,7 +387,7 @@ def _running_inventory(text: str) -> bool:
         or any(term in text for term in component_terms)
     )
     has_grounding = any(term in text for term in evidence_terms)
-    return (
+    return attention_question is not None or (
         has_inventory_shape
         and has_scope
         and (
@@ -442,6 +445,7 @@ def _mutation(text: str, explicit_windows: bool) -> bool:
         "network",
         "unhealthy",
         "anything",
+        "running items",
     )
     return any(a in text for a in actions) and (explicit_windows or any(t in text for t in targets))
 
