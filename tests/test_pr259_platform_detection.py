@@ -56,7 +56,7 @@ def test_linux_support_status_reports_linux_docker_lane_available() -> None:
     }
 
 
-def test_windows_support_status_reports_limited_read_only_doctor_available(monkeypatch) -> None:
+def test_windows_support_status_reports_bounded_read_only_v1_available(monkeypatch) -> None:
     monkeypatch.setattr(
         "shellforgeai.platform_detection.platform.win32_ver",
         lambda: ("2025", "26100", "", ""),
@@ -65,14 +65,15 @@ def test_windows_support_status_reports_limited_read_only_doctor_available(monke
     payload = platform_doctor_payload(
         PlatformInfo("windows", "Windows-test", "nt", "2025", "AMD64")
     )
-    assert payload["status"] == "limited"
+    assert payload["status"] == "ok"
     assert payload["platform"]["system"] == "windows"
     assert payload["support"]["lane"] == "windows_read_only_doctor_v1"
+    assert payload["support"]["supported"] is True
     assert payload["support"]["windows_v1_available"] is True
     assert payload["support"]["windows_read_only_doctor_available"] is True
     assert payload["support"]["linux_docker_available"] is False
     assert payload["windows_evidence"]["windows_build"]["value"] == "26100"
-    assert "read-only doctor evidence" in payload["message"].lower()
+    assert "bounded windows read-only v1 lane" in payload["message"].lower()
 
 
 def test_windows_output_is_read_only_and_no_mutation(monkeypatch) -> None:
@@ -187,7 +188,7 @@ def test_platform_doctor_human_output_is_concise(monkeypatch) -> None:
     result = CliRunner().invoke(app, ["platform", "doctor"])
     assert result.exit_code == 0
     assert "ShellForgeAI platform doctor" in result.stdout
-    assert "Limited Windows read-only doctor evidence is available" in result.stdout
+    assert "bounded Windows read-only V1 lane is available" in result.stdout
     assert len(result.stdout.splitlines()) <= 8
 
 

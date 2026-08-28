@@ -37,7 +37,11 @@ Generic presentation is pinned as follows:
 
 Specialized Docker triage and Windows status, service, performance, handoff,
 prompt, and evidence-fallback renderers retain their maintained vocabulary.
-Windows remains preview/early read-only support; it is not promoted to
+Windows remains preview/early read-only support. The maintained bounded
+`windows_read_only_doctor_v1` lane is supported on native Windows; this does not
+imply Linux/Docker parity, mutation support, or availability of evidence that
+was not observed. Windows evidence continues to report limitations and
+unavailable categories truthfully. Windows is not promoted to
 Linux/Docker V1 parity.
 
 ## Integration and precedence

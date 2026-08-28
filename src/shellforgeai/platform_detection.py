@@ -72,7 +72,7 @@ def support_status(info: PlatformInfo | None = None) -> dict[str, Any]:
         }
     if info.system == "windows":
         return {
-            "supported": False,
+            "supported": True,
             "lane": "windows_read_only_doctor_v1",
             "windows_v1_available": True,
             "windows_read_only_doctor_available": True,
@@ -154,8 +154,8 @@ def platform_doctor_payload(info: PlatformInfo | None = None) -> dict[str, Any]:
         message = "Linux detected. ShellForgeAI Linux/Docker V1 operational lane is available."
         next_safe_command = "shellforgeai doctor"
     elif info.system == "windows":
-        status = "limited"
-        message = "Windows detected. Limited Windows read-only doctor evidence is available."
+        status = "ok"
+        message = "Windows detected. The bounded Windows read-only V1 lane is available."
         next_safe_command = "shellforgeai platform doctor --json"
     elif info.system == "darwin":
         status = "unsupported"
