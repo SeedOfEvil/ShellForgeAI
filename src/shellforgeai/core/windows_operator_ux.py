@@ -364,6 +364,30 @@ def _failure_health(text: str) -> bool:
 
 def _running_inventory(text: str) -> bool:
     """Recognize bounded, host-wide running-component inventory questions."""
+    # Explicit Windows process analysis is still an inventory question: the
+    # model is being asked to interpret the bounded process observations, not
+    # to run a different collector or make a deterministic health diagnosis.
+    # Keep this family deliberately narrow so generic analytical ranking and
+    # explicit Docker/Linux questions retain their established routes.
+    explicit_windows_process_analysis = (
+        _has_word(text, "windows")
+        and (_has_word(text, "process") or _has_word(text, "processes"))
+        and not any(
+            _has_word(text, term)
+            for term in ("docker", "container", "containers", "linux", "systemd")
+        )
+        and (
+            "working set" in text
+            or "memory footprint" in text
+            or (
+                any(term in text for term in ("resource", "evidence"))
+                and any(
+                    term in text
+                    for term in ("attention", "stand out", "largest", "inspect first", "rank")
+                )
+            )
+        )
+    )
     attention_question = re.fullmatch(
         r"which running (?:system )?(?:items|components) deserve attention and why", text
     )
@@ -387,7 +411,7 @@ def _running_inventory(text: str) -> bool:
         or any(term in text for term in component_terms)
     )
     has_grounding = any(term in text for term in evidence_terms)
-    return attention_question is not None or (
+    return explicit_windows_process_analysis or attention_question is not None or (
         has_inventory_shape
         and has_scope
         and (
