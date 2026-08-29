@@ -33,12 +33,18 @@ def fake_processes():
     return list(FAKE_PROCESSES)
 
 
+def fake_working_set(_pid: int) -> int:
+    return 0
+
+
 def test_pr_specific_test_file_exists() -> None:
     assert Path("tests/test_pr274_windows_read_only_processes.py").exists()
 
 
 def test_mocked_windows_processes_contract() -> None:
-    payload = windows_processes_payload(WINDOWS_INFO, process_enumerator=fake_processes)
+    payload = windows_processes_payload(
+        WINDOWS_INFO, process_enumerator=fake_processes, working_set_observer=fake_working_set
+    )
     assert payload["status"] == "ok"
     assert payload["mode"] == "windows_processes"
     assert payload["platform"] == {"system": "windows"}
@@ -84,7 +90,14 @@ def test_cli_invalid_limits_fail_cleanly(invalid: str) -> None:
 def test_process_items_include_only_allowed_fields_and_basename() -> None:
     payload = windows_processes_payload(WINDOWS_INFO, process_enumerator=fake_processes)
     for item in payload["processes"]:
-        assert set(item) == {"pid", "parent_pid", "name", "thread_count"}
+        assert set(item) == {
+            "pid",
+            "parent_pid",
+            "name",
+            "thread_count",
+            "working_set_bytes",
+            "working_set_available",
+        }
         forbidden = json.dumps(item).lower()
         for word in ("command", "environment", "memory", "handles", "modules", "owner", "token"):
             assert word not in forbidden
@@ -204,7 +217,6 @@ def test_source_safety_has_no_forbidden_execution_or_writes() -> None:
         "write_bytes",
         "shell=true",
         "terminateprocess",
-        "openprocess",
         "readprocessmemory",
     ):
         assert forbidden not in lower

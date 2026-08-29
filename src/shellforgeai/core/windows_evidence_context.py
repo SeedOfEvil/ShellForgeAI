@@ -166,8 +166,12 @@ def _processes_context(processes_payload: dict[str, Any], limit: int) -> dict[st
     entries = [
         {
             "pid": item.get("pid"),
+            "parent_pid": item.get("parent_pid"),
             "name": item.get("name"),
             "thread_count": item.get("thread_count"),
+            "working_set_bytes": (
+                item.get("working_set_bytes") if item.get("working_set_available") is True else None
+            ),
         }
         for item in entries_raw[:limit]
         if isinstance(item, dict)
@@ -300,6 +304,8 @@ def build_windows_evidence_context(
     limitations.extend(
         [
             "Native CPU utilization and per-process CPU attribution are not collected.",
+            "Working set is point-in-time; unavailable means unknown, not zero; size alone does "
+            "not prove unhealthy; no automatic threshold, ranking, or diagnosis is applied.",
             "Disk I/O latency, queue depth, and IOPS are not collected.",
             "Network interface/address metadata does not prove end-to-end health; "
             "active connections, route-table detail, packet loss, and end-to-end DNS "

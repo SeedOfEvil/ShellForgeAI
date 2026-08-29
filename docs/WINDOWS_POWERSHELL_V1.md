@@ -159,6 +159,17 @@ The Windows QA lane supplies the tester-scoped `CODEX_HOME` externally; `codex l
 
 Fallthrough model-backed prompts on a Windows host (for example `What is running on this system?`) now carry a bounded read-only Windows evidence packet into the model context instead of being answered by phrase-keyed canned handlers. The shared builder (`shellforgeai.core.windows_evidence_context`) reuses only the existing read-only payloads — status, memory (PR287), disks, processes, services — plus explicit limitations (load average unavailable, inodes unavailable, Linux-only collectors skipped), `read_only: true`, and `mutation_performed: false`; each component fails soft into an explicit limitation. Model output for these prompts is captured before stdout and gated: project/policy preamble, AGENTS.md leakage, provider-metadata-primary answers, and Docker/container-first framing are replaced by a deterministic evidence-grounded Windows answer, with the raw rejected text kept only in the existing `model-response.md` audit artifact. Thin packets are stated honestly ("I do not have process/service detail in this evidence packet") with the safe read-only commands that fill the gap. The builder and gate add no new collection surface and execute no shell, PowerShell, WinRM/remoting, subprocess, service control, process termination, or mutation.
 
+The bounded process preview also reports each selected row's current
+`working_set_bytes`, with `working_set_available=false` and a null value when
+the counter cannot be observed. This is a point-in-time working-set counter,
+not private bytes, commit charge, peak working set, total memory consumption,
+or proof of a leak or unhealthy process; no threshold, ranking, or diagnosis
+is applied. ShellForgeAI opens only a short-lived
+`PROCESS_QUERY_LIMITED_INFORMATION` handle for each already-selected row,
+queries `GetProcessMemoryInfo`, and closes every owned handle immediately.
+Process memory contents, command lines, environments, tokens, handle tables,
+modules, credentials, and authentication caches are not read.
+
 ## Codex UTF-8 subprocess I/O
 
 Windows model-assisted ask and interactive paths do not rely on PowerShell console encoding, `PYTHONUTF8`, `PYTHONIOENCODING`, or a UTF-8 system locale. ShellForgeAI explicitly uses UTF-8 at the Codex subprocess boundary for stdin, stdout, stderr, and the deterministic final-message capture file. If Codex reports invalid UTF-8 input, ShellForgeAI classifies that as a provider stdin encoding failure rather than authentication, runtime-profile, or repository-trust failure. No PowerShell, WinRM/PSRemoting, shell execution, or mutation behavior is added.
