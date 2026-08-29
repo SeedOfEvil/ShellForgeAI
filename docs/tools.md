@@ -55,6 +55,23 @@ Linux-only collectors above are skipped as structured
 are marked `windows_metric_unavailable`, and the bundle reuses only the
 existing stdlib-only `windows status`/`windows disks` read-only payloads.
 
+### Windows processes
+
+`shellforgeai windows processes [--json] [--limit N]` returns the existing
+bounded process identity/thread preview plus a point-in-time
+`working_set_bytes` observation for only the selected rows. A failed or raced
+per-process query is represented by `working_set_available=false` and null,
+never a fabricated zero. This counter is not private bytes, commit charge,
+peak working set, total memory consumption, leak evidence, or a health
+diagnosis, and no threshold or ranking is applied. The collector uses a
+short-lived `PROCESS_QUERY_LIMITED_INFORMATION` handle with
+`GetProcessMemoryInfo` and closes every owned handle immediately. It does not
+read process memory contents, command lines, environments, tokens, handle
+tables, modules, credentials, or authentication caches, and it performs no
+process control or mutation. The bounded Windows model evidence projection
+preserves the same observation and limitations; non-Windows paths perform no
+native query.
+
 ## Adaptive follow-ups
 
 Natural-language diagnostics may queue an evidence-driven deeper read-only

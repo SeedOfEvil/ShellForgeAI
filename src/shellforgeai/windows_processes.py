@@ -1,9 +1,9 @@
 """Local read-only Windows process preview.
 
-PR274 intentionally collects only bounded, local, safe process metadata from
-Windows Toolhelp snapshots: PID, parent PID, image basename, and thread count.
+The collector returns bounded, local, safe process metadata from Windows
+Toolhelp snapshots and a point-in-time working-set counter for selected rows.
 It never uses subprocesses, shells, PowerShell, WinRM/remoting, process control,
-process handles, command lines, environments, memory reads, modules, owners,
+retained process handles, command lines, environments, memory-content reads, modules, owners,
 network mapping, file writes, model calls, or secrets/auth-cache reads.
 """
 
@@ -24,13 +24,20 @@ METHOD = "ctypes_toolhelp32_snapshot"
 WINDOWS_PROCESSES_NEXT_SAFE_COMMAND = "shellforgeai windows processes --json --limit 10"
 UNSUPPORTED_NEXT_SAFE_COMMAND = "shellforgeai platform doctor --json"
 
-_ALLOWED_PROCESS_KEYS = {"pid", "parent_pid", "name", "thread_count"}
+_ALLOWED_PROCESS_KEYS = {
+    "pid",
+    "parent_pid",
+    "name",
+    "thread_count",
+    "working_set_bytes",
+    "working_set_available",
+}
 
 _NOT_COLLECTED_PR274 = {
     "command_line": "not collected because PR274 does not inspect process command lines",
     "environment": "not collected because PR274 does not inspect process environments",
-    "memory": "not collected because PR274 does not inspect process memory",
-    "handles": "not collected because PR274 does not inspect process handles",
+    "memory": "process memory contents are not read; only a working-set counter is queried",
+    "handles": "process handle tables are not inspected; short-lived query handles are used",
     "modules": "not collected because PR274 does not enumerate modules",
     "owner_user": "not collected because PR274 does not inspect process tokens/users",
     "network_connections": "not collected because PR274 does not map network connections",
@@ -46,6 +53,8 @@ _WINDOWS_PROCESSES_SAFETY = {
     "process_control_executed": False,
     "process_config_modified": False,
     "process_memory_read": False,
+    "process_working_set_queried": True,
+    "process_query_handles_opened": True,
     "process_command_line_read": False,
     "process_environment_read": False,
     "process_handles_read": False,
@@ -91,6 +100,7 @@ _UNSUPPORTED_SAFETY_KEYS = (
 )
 
 ProcessEnumerator = Callable[[], Sequence[dict[str, Any]]]
+WorkingSetObserver = Callable[[int], int]
 
 
 def validate_processes_limit(value: int) -> int:
@@ -170,10 +180,58 @@ def _enumerate_toolhelp_processes() -> list[dict[str, Any]]:
         kernel32.CloseHandle(snapshot)
 
 
+def _query_process_working_set_bytes(pid: int) -> int:
+    """Return one current working-set counter using a short-lived query handle."""
+
+    process_query_limited_information = 0x1000
+
+    class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.c_ulong),
+            ("PageFaultCount", ctypes.c_ulong),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    psapi.GetProcessMemoryInfo.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+        ctypes.c_ulong,
+    ]
+    psapi.GetProcessMemoryInfo.restype = ctypes.c_int
+
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        raise OSError(getattr(ctypes, "get_last_error", lambda: 0)(), "OpenProcess failed")
+    try:
+        counters = PROCESS_MEMORY_COUNTERS()
+        counters.cb = ctypes.sizeof(counters)
+        if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            raise OSError(
+                getattr(ctypes, "get_last_error", lambda: 0)(), "GetProcessMemoryInfo failed"
+            )
+        return int(counters.WorkingSetSize)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def windows_processes_payload(
     info: PlatformInfo | None = None,
     *,
     process_enumerator: ProcessEnumerator | None = None,
+    working_set_observer: WorkingSetObserver | None = None,
     limit: int = DEFAULT_PROCESSES_LIMIT,
 ) -> dict[str, Any]:
     """Build the PR274 Windows processes JSON-compatible payload."""
@@ -193,6 +251,17 @@ def windows_processes_payload(
 
     total_count = len(all_processes)
     processes = all_processes[:bounded_limit]
+    observer = working_set_observer or _query_process_working_set_bytes
+    for process in processes:
+        try:
+            working_set_bytes = observer(process["pid"])
+            if isinstance(working_set_bytes, bool) or working_set_bytes < 0:
+                raise ValueError("working set must be a non-negative integer")
+            process["working_set_bytes"] = int(working_set_bytes)
+            process["working_set_available"] = True
+        except Exception:
+            process["working_set_bytes"] = None
+            process["working_set_available"] = False
     return {
         "schema_version": 1,
         "mode": "windows_processes",
@@ -269,11 +338,20 @@ def render_windows_processes_text(payload: dict[str, Any]) -> str:
             safe_item = {key: item.get(key) for key in sorted(_ALLOWED_PROCESS_KEYS)}
             lines.append(
                 (
-                    "- pid={pid} parent_pid={parent_pid} name={name} thread_count={thread_count}"
-                ).format(**safe_item)
+                    "- pid={pid} parent_pid={parent_pid} name={name} thread_count={thread_count} "
+                    "working_set_bytes={working_set}"
+                ).format(
+                    **safe_item,
+                    working_set=(
+                        safe_item["working_set_bytes"]
+                        if safe_item["working_set_available"]
+                        else "unavailable"
+                    ),
+                )
             )
     lines.append(
-        "Not collected: command lines, environments, memory, handles, modules, "
+        "Not collected: command lines, environments, process memory contents, "
+        "handle tables, modules, "
         "owners/tokens, network connections."
     )
     lines.append(

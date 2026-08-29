@@ -208,7 +208,16 @@ MEMORY_SAFETY_FALSE_KEYS = (
 PROCESSES_MIN_LIMIT = 1
 PROCESSES_MAX_LIMIT = 200
 PROCESSES_METHOD = "ctypes_toolhelp32_snapshot"
-_ALLOWED_PROCESS_ITEM_KEYS = frozenset({"pid", "parent_pid", "name", "thread_count"})
+_ALLOWED_PROCESS_ITEM_KEYS = frozenset(
+    {
+        "pid",
+        "parent_pid",
+        "name",
+        "thread_count",
+        "working_set_bytes",
+        "working_set_available",
+    }
+)
 PROCESSES_NOT_COLLECTED_PR274_KEYS = (
     "command_line",
     "environment",
@@ -1694,8 +1703,9 @@ def _process_item_checks(item: Any, label: str) -> list[Check]:
         _check(
             f"{label}.allowed_fields_only",
             not extra_keys,
-            "process item must carry only pid/parent_pid/name/thread_count, never "
-            "command lines, environments, memory, handles, modules, owners/users, "
+            "process item must carry only identity/thread fields and working-set "
+            "observation, never "
+            "command lines, environments, memory contents, handle tables, modules, owners/users, "
             "network connections, or executable paths: "
             f"{', '.join(sorted(extra_keys))}",
         )
@@ -1715,6 +1725,26 @@ def _process_item_checks(item: Any, label: str) -> list[Check]:
             "expected string process image basename",
         )
     )
+    if "working_set_available" in item or "working_set_bytes" in item:
+        working_set_available = item.get("working_set_available")
+        checks.append(
+            _check(
+                f"{label}.working_set_available",
+                isinstance(working_set_available, bool),
+                "expected boolean working-set availability",
+            )
+        )
+        checks.append(
+            _check(
+                f"{label}.working_set_bytes",
+                (
+                    _non_negative_int(item.get("working_set_bytes"))
+                    if working_set_available is True
+                    else item.get("working_set_bytes") is None
+                ),
+                "expected non-negative bytes when available and null when unavailable",
+            )
+        )
     return checks
 
 

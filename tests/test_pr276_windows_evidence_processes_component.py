@@ -37,7 +37,14 @@ PACKET_SCRIPT = Path("scripts/windows_smoke_packet.py")
 WINDOWS_INFO = PlatformInfo("windows", "Windows-test", "nt", "2025", "AMD64")
 LINUX_INFO = PlatformInfo("linux", "Linux-test", "posix", "6.8", "x86_64")
 
-ALLOWED_PROCESS_ITEM_KEYS = {"pid", "parent_pid", "name", "thread_count"}
+ALLOWED_PROCESS_ITEM_KEYS = {
+    "pid",
+    "parent_pid",
+    "name",
+    "thread_count",
+    "working_set_bytes",
+    "working_set_available",
+}
 
 FAKE_PROCESSES = tuple(
     {"pid": 100 + index, "parent_pid": 4, "name": f"proc{index:02d}.exe", "thread_count": 2 + index}
@@ -1012,7 +1019,6 @@ def test_pr276_source_has_no_forbidden_execution_paths() -> None:
             "winrm ",
             "taskkill",
             "terminateprocess",
-            "openprocess",
             "readprocessmemory",
             "ntqueryinformationprocess",
             "docker",
