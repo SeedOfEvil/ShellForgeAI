@@ -69,16 +69,48 @@ def test_enrichment_is_after_selection_and_bounded_by_returned_limit() -> None:
     assert len(calls) == payload["returned_count"] == payload["limit"] == 4
 
 
-def test_enumeration_failure_and_non_windows_never_query_resource_counter() -> None:
-    def forbidden(_pid: int) -> int:
-        pytest.fail("no row exists to enrich")
+def _assert_capability_safety(safety: dict[str, object]) -> None:
+    assert safety["process_working_set_collection_enabled"] is True
+    assert safety["process_query_handles_may_open"] is True
+    assert "process_working_set_queried" not in safety
+    assert "process_query_handles_opened" not in safety
+    assert safety["read_only"] is True
+    assert safety["mutation_performed"] is False
+    assert safety["process_memory_read"] is False
+
+
+def test_enumeration_failure_never_queries_and_reports_capability_not_events() -> None:
+    calls: list[int] = []
 
     failed = windows_processes_payload(
         WINDOWS,
         process_enumerator=lambda: (_ for _ in ()).throw(OSError("snapshot failed")),
-        working_set_observer=forbidden,
+        working_set_observer=lambda pid: calls.append(pid) or 1,
     )
-    assert failed["state"]["enumeration_failed"] and failed["processes"] == []
+    assert failed["status"] == "ok"
+    assert failed["state"]["enumeration_failed"] is True
+    assert failed["processes"] == [] and failed["returned_count"] == 0
+    assert calls == []
+    _assert_capability_safety(failed["safety"])
+
+
+def test_zero_rows_never_query_and_report_capability_not_events() -> None:
+    calls: list[int] = []
+    payload = windows_processes_payload(
+        WINDOWS,
+        process_enumerator=lambda: [],
+        working_set_observer=lambda pid: calls.append(pid) or 1,
+    )
+    assert payload["state"]["enumeration_failed"] is False
+    assert payload["processes"] == [] and payload["returned_count"] == 0
+    assert calls == []
+    _assert_capability_safety(payload["safety"])
+
+
+def test_non_windows_never_enumerates_or_queries_resource_counter() -> None:
+    def forbidden(_pid: int) -> int:
+        pytest.fail("unsupported platforms must not collect process resources")
+
     unsupported = windows_processes_payload(
         LINUX,
         process_enumerator=lambda: pytest.fail("no enumeration"),
@@ -149,13 +181,12 @@ def test_human_and_evidence_projection_preserve_identity_zero_and_unknown() -> N
 
 
 def test_safety_metadata_distinguishes_counter_query_from_memory_content_reads() -> None:
-    safety = windows_processes_payload(
+    payload = windows_processes_payload(
         WINDOWS, process_enumerator=lambda: rows(1), working_set_observer=lambda _pid: 1
-    )["safety"]
-    assert safety["read_only"] is True and safety["mutation_performed"] is False
-    assert safety["process_working_set_queried"] is True
-    assert safety["process_query_handles_opened"] is True
-    assert safety["process_memory_read"] is False
+    )
+    assert payload["processes"][0]["working_set_bytes"] == 1
+    assert payload["processes"][0]["working_set_available"] is True
+    _assert_capability_safety(payload["safety"])
 
 
 def test_packet_states_point_in_time_cpu_and_no_diagnosis_limitations(
