@@ -108,7 +108,7 @@ from shellforgeai.version import get_build_info
 from shellforgeai.windows_memory import windows_memory_payload, windows_memory_summary
 from shellforgeai.windows_services import render_windows_services_text, windows_services_payload
 
-from .commands import route_input
+from .commands import _has_natural_language_command_suffix, route_input
 from .guards import is_multiline_shell_fragment, is_shell_fragment_line, looks_like_shell_command
 from .streaming import StreamRenderer
 from .workspace import WorkspaceTrustStore
@@ -3219,6 +3219,12 @@ def start_interactive(
         except KeyboardInterrupt:
             CodexProvider.cleanup_active_processes()
             console.print("\nInterrupted safely. REPL is still healthy.")
+            continue
+        # Enforce the shared natural-language-to-shell boundary before retained
+        # context or platform-specific routing can collect evidence.
+        if _has_natural_language_command_suffix(user_input):
+            session_summary.note_refusal("not-a-shell command refused")
+            console.print(_interactive_not_a_shell_refusal(user_input))
             continue
         analytical_kind = _analytical_followup_kind(user_input)
         if analytical_kind and valid_retained_context(

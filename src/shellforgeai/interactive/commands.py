@@ -1174,6 +1174,28 @@ def _analytical_semicolon_suffixes_are_prose(raw: str) -> bool:
     return True
 
 
+_FOLLOW_ON_COMMAND_EXECUTION_RE = re.compile(
+    r"(?:[?!.]\s*|\b(?:and\s+then|then)\s+)"
+    r"(?:please\s+)?run\s+(?P<command>.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _has_natural_language_command_suffix(raw: str) -> bool:
+    """Return whether prose ends with a distinct imperative ``run`` clause.
+
+    The clause boundary owns only the conversational distinction.  The
+    maintained command tokenizer validates that a non-empty command tail is
+    present; this helper does not classify command names or platforms.
+    """
+
+    match = _FOLLOW_ON_COMMAND_EXECUTION_RE.search(raw)
+    if match is None:
+        return False
+    command_tail = match.group("command").rstrip(".!?").strip()
+    return bool(_split_command_style(command_tail))
+
+
 def _dispatch_shell_shaped_command(raw: str) -> RoutedCommand | None:
     """Refuse not-a-shell input: shell command invocations and metacharacters.
 
@@ -1276,6 +1298,13 @@ def route_input(text: str) -> RoutedCommand:
     nuance = classify_intent_nuance(raw)
     if nuance.category == MUTATION_REQUEST and nuance.signal == DISTINCT_PLAN_ACTION:
         return RoutedCommand(name="mutation_refused", args=raw)
+
+    # A distinct follow-on imperative cannot turn conversational input into a
+    # command-execution authority surface. Refuse before platform, evidence,
+    # diagnostic, provider, or execution routing. Mutation/action nuance above
+    # retains precedence for governed state-changing follow-on requests.
+    if _has_natural_language_command_suffix(raw):
+        return RoutedCommand(name="shell_refused", args=raw)
 
     normalized_session_summary = _normalize_intent_text(raw)
     if normalized_session_summary in {
